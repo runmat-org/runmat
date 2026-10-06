@@ -21,8 +21,8 @@ pub use array::{
     ExactHostAllocationReservation, ExactHostNumericAllocation, ExactHostNumericAllocationError,
     ExactHostTensor2dAllocation, HostAllocationProvenance, HostAllocationRelease,
     HostComplexBuffer, HostCopyMetrics, HostCopyReason, HostIndexBuffer, HostLogicalBuffer,
-    HostNumericBuffer, IntegerComplexStorage, LogicalArray, SparseTensor, StringArray,
-    SymbolicArray, Tensor,
+    HostNumericBuffer, IntegerComplexStorage, LogicalArray, SparseCscValidation, SparseTensor,
+    StringArray, SymbolicArray, Tensor, ValidatedSparseCscParts,
 };
 pub use callable::{
     BoundFunctionAuthority, BoundFunctionBinding, Closure, FunctionDefinitionLease,

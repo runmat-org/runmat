@@ -1,5 +1,9 @@
 use super::*;
 
+#[path = "sparse/validation.rs"]
+mod validation;
+pub use validation::{SparseCscValidation, ValidatedSparseCscParts};
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SparseTensor {
     pub rows: usize,
@@ -88,18 +92,13 @@ impl SparseTensor {
         row_indices: impl Into<HostIndexBuffer>,
         values: Vec<f64>,
     ) -> Result<Self, String> {
-        let col_ptrs = col_ptrs.into();
-        let row_indices = row_indices.into();
-        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, values.len())?;
-        Ok(Self {
+        Self::from_numeric_storage(
             rows,
             cols,
-            col_ptrs,
-            row_indices,
-            storage: SparseValueStorage::Numeric(HostNumericBuffer::from_numeric_storage(
-                NumericStorage::F64(values),
-            )),
-        })
+            col_ptrs.into(),
+            row_indices.into(),
+            NumericStorage::F64(values),
+        )
     }
 
     /// Constructs a sparse matrix backed by native single-precision values.
@@ -110,18 +109,13 @@ impl SparseTensor {
         row_indices: impl Into<HostIndexBuffer>,
         values: Vec<f32>,
     ) -> Result<Self, String> {
-        let col_ptrs = col_ptrs.into();
-        let row_indices = row_indices.into();
-        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, values.len())?;
-        Ok(Self {
+        Self::from_numeric_storage(
             rows,
             cols,
-            col_ptrs,
-            row_indices,
-            storage: SparseValueStorage::Numeric(HostNumericBuffer::from_numeric_storage(
-                NumericStorage::F32(values),
-            )),
-        })
+            col_ptrs.into(),
+            row_indices.into(),
+            NumericStorage::F32(values),
+        )
     }
 
     /// Constructs a sparse matrix backed by an exact integer value buffer.
@@ -132,18 +126,13 @@ impl SparseTensor {
         row_indices: impl Into<HostIndexBuffer>,
         integer_data: IntegerStorage,
     ) -> Result<Self, String> {
-        let col_ptrs = col_ptrs.into();
-        let row_indices = row_indices.into();
-        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, integer_data.len())?;
-        Ok(Self {
+        Self::from_numeric_storage(
             rows,
             cols,
-            col_ptrs,
-            row_indices,
-            storage: SparseValueStorage::Numeric(HostNumericBuffer::from_numeric_storage(
-                NumericStorage::from_integer_storage(integer_data),
-            )),
-        })
+            col_ptrs.into(),
+            row_indices.into(),
+            NumericStorage::from_integer_storage(integer_data),
+        )
     }
 
     /// Constructs a double-precision complex sparse matrix using the canonical
@@ -174,14 +163,8 @@ impl SparseTensor {
     ) -> Result<Self, String> {
         let col_ptrs = col_ptrs.into();
         let row_indices = row_indices.into();
-        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, row_indices.len())?;
-        Ok(Self {
-            rows,
-            cols,
-            col_ptrs,
-            row_indices,
-            storage: SparseValueStorage::Logical,
-        })
+        let parts = Self::validate_csc(rows, cols, col_ptrs, row_indices, None)?;
+        Self::from_validated_logical(parts)
     }
 
     pub fn from_host_numeric_buffers(
@@ -191,14 +174,8 @@ impl SparseTensor {
         row_indices: HostIndexBuffer,
         values: HostNumericBuffer,
     ) -> Result<Self, String> {
-        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, values.len())?;
-        Ok(Self {
-            rows,
-            cols,
-            col_ptrs,
-            row_indices,
-            storage: SparseValueStorage::Numeric(values),
-        })
+        let parts = Self::validate_csc(rows, cols, col_ptrs, row_indices, Some(values.len()))?;
+        Self::from_validated_numeric(parts, values)
     }
 
     /// Constructs a complex sparse matrix while retaining the supplied
@@ -210,14 +187,8 @@ impl SparseTensor {
         row_indices: HostIndexBuffer,
         values: HostComplexBuffer<f64>,
     ) -> Result<Self, String> {
-        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, values.len())?;
-        Ok(Self {
-            rows,
-            cols,
-            col_ptrs,
-            row_indices,
-            storage: SparseValueStorage::ComplexF64(values),
-        })
+        let parts = Self::validate_csc(rows, cols, col_ptrs, row_indices, Some(values.len()))?;
+        Self::from_validated_complex_f64(parts, values)
     }
 
     /// Constructs a single-precision complex sparse matrix while retaining
@@ -245,14 +216,8 @@ impl SparseTensor {
         row_indices: HostIndexBuffer,
         values: HostComplexBuffer<f32>,
     ) -> Result<Self, String> {
-        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, values.len())?;
-        Ok(Self {
-            rows,
-            cols,
-            col_ptrs,
-            row_indices,
-            storage: SparseValueStorage::ComplexF32(values),
-        })
+        let parts = Self::validate_csc(rows, cols, col_ptrs, row_indices, Some(values.len()))?;
+        Self::from_validated_complex_f32(parts, values)
     }
 
     /// Constructs a complex sparse matrix with this matrix's component class.
@@ -292,14 +257,8 @@ impl SparseTensor {
         col_ptrs: HostIndexBuffer,
         row_indices: HostIndexBuffer,
     ) -> Result<Self, String> {
-        Self::validate_structure(rows, cols, &col_ptrs, &row_indices, row_indices.len())?;
-        Ok(Self {
-            rows,
-            cols,
-            col_ptrs,
-            row_indices,
-            storage: SparseValueStorage::Logical,
-        })
+        let parts = Self::validate_csc(rows, cols, col_ptrs, row_indices, None)?;
+        Self::from_validated_logical(parts)
     }
 
     pub fn numeric_host_buffer(&self) -> Option<&HostNumericBuffer> {
@@ -350,53 +309,88 @@ impl SparseTensor {
         )
     }
 
-    fn validate_structure(
+    fn from_numeric_storage(
         rows: usize,
         cols: usize,
-        col_ptrs: &[usize],
-        row_indices: &[usize],
-        values_len: usize,
-    ) -> Result<(), String> {
-        if col_ptrs.len() != cols.saturating_add(1) {
-            return Err(format!(
-                "SparseTensor col_ptrs length {} doesn't match cols {}",
-                col_ptrs.len(),
-                cols
-            ));
+        col_ptrs: HostIndexBuffer,
+        row_indices: HostIndexBuffer,
+        storage: NumericStorage,
+    ) -> Result<Self, String> {
+        let parts = Self::validate_csc(rows, cols, col_ptrs, row_indices, Some(storage.len()))?;
+        Self::from_validated_numeric(parts, HostNumericBuffer::from_numeric_storage(storage))
+    }
+
+    fn validate_csc(
+        rows: usize,
+        cols: usize,
+        col_ptrs: HostIndexBuffer,
+        row_indices: HostIndexBuffer,
+        values_len: Option<usize>,
+    ) -> Result<ValidatedSparseCscParts, String> {
+        let values_len = values_len.unwrap_or(row_indices.len());
+        SparseCscValidation::new(rows, cols, col_ptrs, row_indices, values_len)?
+            .finish_synchronously()
+    }
+
+    pub fn from_validated_numeric(
+        parts: ValidatedSparseCscParts,
+        values: HostNumericBuffer,
+    ) -> Result<Self, String> {
+        if parts.values_len != values.len() {
+            return Err("SparseTensor row index length doesn't match value length".to_string());
         }
-        if row_indices.len() != values_len {
-            return Err(format!(
-                "SparseTensor row index length {} doesn't match value length {}",
-                row_indices.len(),
-                values_len
-            ));
+        Ok(Self {
+            rows: parts.rows,
+            cols: parts.cols,
+            col_ptrs: parts.col_ptrs,
+            row_indices: parts.row_indices,
+            storage: SparseValueStorage::Numeric(values),
+        })
+    }
+
+    pub fn from_validated_complex_f64(
+        parts: ValidatedSparseCscParts,
+        values: HostComplexBuffer<f64>,
+    ) -> Result<Self, String> {
+        if parts.values_len != values.len() {
+            return Err("SparseTensor row index length doesn't match value length".to_string());
         }
-        if col_ptrs.first().copied().unwrap_or(usize::MAX) != 0 {
-            return Err("SparseTensor col_ptrs must start at 0".to_string());
+        Ok(Self {
+            rows: parts.rows,
+            cols: parts.cols,
+            col_ptrs: parts.col_ptrs,
+            row_indices: parts.row_indices,
+            storage: SparseValueStorage::ComplexF64(values),
+        })
+    }
+
+    pub fn from_validated_complex_f32(
+        parts: ValidatedSparseCscParts,
+        values: HostComplexBuffer<f32>,
+    ) -> Result<Self, String> {
+        if parts.values_len != values.len() {
+            return Err("SparseTensor row index length doesn't match value length".to_string());
         }
-        if col_ptrs.last().copied().unwrap_or(usize::MAX) != values_len {
-            return Err("SparseTensor final col_ptr must equal nnz".to_string());
+        Ok(Self {
+            rows: parts.rows,
+            cols: parts.cols,
+            col_ptrs: parts.col_ptrs,
+            row_indices: parts.row_indices,
+            storage: SparseValueStorage::ComplexF32(values),
+        })
+    }
+
+    pub fn from_validated_logical(parts: ValidatedSparseCscParts) -> Result<Self, String> {
+        if parts.values_len != parts.row_indices.len() {
+            return Err("SparseTensor row index length doesn't match value length".to_string());
         }
-        for window in col_ptrs.windows(2) {
-            if window[0] > window[1] {
-                return Err("SparseTensor col_ptrs must be nondecreasing".to_string());
-            }
-        }
-        for col in 0..cols {
-            let start = col_ptrs[col];
-            let end = col_ptrs[col + 1];
-            let mut prev: Option<usize> = None;
-            for &row in &row_indices[start..end] {
-                if row >= rows {
-                    return Err(format!("SparseTensor row index {row} exceeds rows {rows}"));
-                }
-                if prev.is_some_and(|p| p >= row) {
-                    return Err("SparseTensor row indices must be sorted and unique".to_string());
-                }
-                prev = Some(row);
-            }
-        }
-        Ok(())
+        Ok(Self {
+            rows: parts.rows,
+            cols: parts.cols,
+            col_ptrs: parts.col_ptrs,
+            row_indices: parts.row_indices,
+            storage: SparseValueStorage::Logical,
+        })
     }
 
     pub fn zeros(rows: usize, cols: usize) -> Self {
