@@ -24,6 +24,23 @@ impl ExecutableSourceMap {
         &self.entries
     }
 
+    pub(crate) fn portable_v2(&self) -> Result<runmat_execution::ExecutableSourceMapV2, String> {
+        runmat_execution::ExecutableSourceMapV2::new(
+            self.entries
+                .iter()
+                .map(|entry| runmat_execution::ExecutableSourceRecordV2 {
+                    source_id: entry.source_id,
+                    owner_identity: entry.owner_identity.clone(),
+                    relative_path: entry.relative_path.clone(),
+                    content_revision: entry.content_revision,
+                    display_name: entry.display_name.clone(),
+                    text: entry.text.clone(),
+                })
+                .collect(),
+        )
+        .map_err(|error| error.to_string())
+    }
+
     pub(crate) fn validate_content_revisions(&self) -> Result<(), String> {
         for (ordinal, entry) in self.entries.iter().enumerate() {
             if u32::try_from(ordinal)

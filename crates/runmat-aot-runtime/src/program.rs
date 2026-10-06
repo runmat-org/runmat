@@ -16,7 +16,7 @@ pub async fn invoke(
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<NativeExecution, runmat_runtime::RuntimeError> {
     let runtime = install_acceleration_services(runtime);
-    let guards = ProgramInvocationGuards::install(Rc::clone(&executor), program, &runtime);
+    let guards = ProgramInvocationGuards::install(Rc::clone(&executor), program, &runtime)?;
     let active = runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
     let execution = executor
         .invoke_async(function, arguments, requested_outputs, runtime)
@@ -36,7 +36,7 @@ pub async fn invoke_workspace(
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<NativeExecution, runmat_runtime::RuntimeError> {
     let runtime = install_acceleration_services(runtime);
-    let guards = ProgramInvocationGuards::install(Rc::clone(&executor), program, &runtime);
+    let guards = ProgramInvocationGuards::install(Rc::clone(&executor), program, &runtime)?;
     let active = runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
     let execution = executor
         .invoke_workspace_async(function, workspace, requested_outputs, runtime)
@@ -60,7 +60,41 @@ impl ProgramInvocationGuards {
         executor: Rc<runmat_native_executor::NativeExecutor>,
         program: &runmat_native_codegen::aot::AotProgramManifest,
         runtime: &runmat_runtime::context::RuntimeContext,
-    ) -> Self {
+    ) -> Result<Self, runmat_runtime::RuntimeError> {
+        let mut functions = program
+            .functions
+            .iter()
+            .map(|function| {
+                let source_ordinal = usize::try_from(function.source.0)
+                    .map_err(|_| native_error("program source ordinal exceeds host indexing"))?;
+                let function_id = usize::try_from(function.function.0)
+                    .map_err(|_| native_error("program function ordinal exceeds host indexing"))?;
+                let source_id = runtime.program_source_id(function.source).ok_or_else(|| {
+                    native_error(format!(
+                        "native function {} refers to an unbound program source {}",
+                        function.function.0, function.source.0
+                    ))
+                })?;
+                Ok(runmat_runtime::user_functions::SourceFunctionInfo {
+                    source_id,
+                    name: function.name.clone(),
+                    function: function_id,
+                    role: function.role,
+                    source_file: program
+                        .source_map
+                        .entries
+                        .get(source_ordinal)
+                        .map(|source| source.relative_path.clone()),
+                    binding_origin: runmat_execution::FunctionBindingOrigin::from_revision(
+                        &program.executable.program,
+                        function.function,
+                    )
+                    .ok(),
+                    definition_owners: None,
+                })
+            })
+            .collect::<Result<Vec<_>, runmat_runtime::RuntimeError>>()?;
+        functions.sort_by_key(|function| function.function);
         // Installation is synchronous, but it must target this program's
         // context state rather than the ambient compatibility slot. Native
         // invocation activates the same context around every callback.
@@ -168,40 +202,18 @@ impl ProgramInvocationGuards {
                     })
             }),
         ));
-        let mut functions = program
-            .functions
-            .iter()
-            .map(
-                |function| runmat_runtime::user_functions::SourceFunctionInfo {
-                    source_id: runmat_types::SourceId(function.source.0 as usize),
-                    name: function.name.clone(),
-                    function: function.function.0 as usize,
-                    role: function.role,
-                    // AOT callable inventory has a source ordinal but no
-                    // file path. Never invent a path from that ordinal.
-                    source_file: None,
-                    binding_origin: runmat_execution::FunctionBindingOrigin::from_revision(
-                        &program.executable.program,
-                        function.function,
-                    )
-                    .ok(),
-                    definition_owners: None,
-                },
-            )
-            .collect::<Vec<_>>();
-        functions.sort_by_key(|function| function.function);
         let catalog = runmat_runtime::user_functions::install_source_function_catalog(Some(
             Arc::new(functions),
         ));
         let execution_source =
             runmat_runtime::user_functions::install_execution_source_resolver(None);
-        Self {
+        Ok(Self {
             _semantic: semantic,
             _lexical: lexical,
             _resolver: resolver,
             _catalog: catalog,
             _execution_source: execution_source,
-        }
+        })
     }
 }
 

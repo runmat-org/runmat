@@ -21,6 +21,32 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     {
         return Err("standalone program manifest does not match its Native IR".into());
     }
+    let mut native_sources = assembly
+        .functions
+        .iter()
+        .map(|function| {
+            (
+                function.id,
+                function.source,
+                function.name.as_str(),
+                function.source_role,
+            )
+        })
+        .collect::<Vec<_>>();
+    native_sources.sort_by_key(|function| function.0);
+    if native_sources.len() != program.functions.len()
+        || native_sources
+            .iter()
+            .zip(&program.functions)
+            .any(|(native, manifest)| {
+                native.0 != manifest.function
+                    || native.1 != manifest.source
+                    || native.2 != manifest.name
+                    || native.3 != manifest.role
+            })
+    {
+        return Err("standalone source/function inventory does not match its Native IR".into());
+    }
     let ordered_resume_points: Vec<(ProgramPointId, u64)> =
         serde_json::from_slice(&input.resume_points)
             .map_err(|error| format!("standalone resume-point map is invalid: {error}"))?;
@@ -41,7 +67,11 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
         return Err("standalone entrypoint requires unsupported command-line inputs".into());
     }
     let requested_outputs = function.abi.fixed_outputs.len();
-    let mut runtime = standalone_runtime(&assembly.program);
+    let mut runtime = runmat_runtime::source_context::bind_portable_source_map_v2(
+        standalone_runtime(&assembly.program),
+        &program.source_map,
+    )
+    .map_err(|error| format!("standalone source binding failed: {error}"))?;
     let local_tasks = runmat_runtime::context::RuntimeLocalTaskSupervisor::new();
     let ports = runtime
         .service_ports()
