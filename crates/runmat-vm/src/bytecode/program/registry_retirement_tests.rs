@@ -20,6 +20,40 @@ fn registry() -> FunctionRegistry {
 }
 
 #[test]
+fn source_projection_preserves_aliases_and_rebuilds_current_membership_atomically() {
+    let mut registry = registry();
+    registry.names.insert("alias".into(), FunctionId(1));
+    let unchanged = registry.clone();
+    assert_eq!(
+        registry.project_current_source_ids(|source| {
+            (source == SourceId(5)).then_some(SourceId(1))
+        }),
+        Err(SourceId(6))
+    );
+    assert_eq!(registry.source_functions, unchanged.source_functions);
+    assert_eq!(registry.names, unchanged.names);
+    assert_eq!(
+        registry.get(FunctionId(3)).unwrap().source_id,
+        Some(SourceId(6))
+    );
+
+    registry
+        .project_current_source_ids(|source| match source {
+            SourceId(5) => Some(SourceId(1)),
+            SourceId(6) => Some(SourceId(2)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(registry.resolve_name("alias"), Some(FunctionId(1)));
+    assert_eq!(
+        registry.functions_for_source(SourceId(1)),
+        &[FunctionId(1), FunctionId(2)]
+    );
+    assert_eq!(registry.functions_for_source(SourceId(2)), &[FunctionId(3)]);
+    assert!(registry.functions_for_source(SourceId(5)).is_empty());
+}
+
+#[test]
 fn retained_source_group_keeps_original_path_and_locals_after_id_reuse() {
     let mut registry = registry();
     registry

@@ -186,7 +186,7 @@ fn publishing_function_captures_original_fullpath_before_source_retirement() {
         None,
         crate::program_environment(session.compat_mode),
     );
-    let source_map = session.executable_source_map(&source);
+    let source_map = session.executable_source_map(&source).expect("source map");
     prepared
         .attach_function_origins(&revision.program_revision, &source_map)
         .expect("publish source facts");

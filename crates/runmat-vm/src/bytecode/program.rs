@@ -323,6 +323,44 @@ impl<'de> Deserialize<'de> for FunctionRegistry {
 }
 
 impl FunctionRegistry {
+    /// Project current definitions into a different source-ID domain without
+    /// changing names, definition owners, or retained old bodies. Validation
+    /// completes before any mutation, so a missing mapping leaves the registry
+    /// and its source index untouched.
+    pub fn project_current_source_ids(
+        &mut self,
+        mut project: impl FnMut(runmat_hir::SourceId) -> Option<runmat_hir::SourceId>,
+    ) -> Result<(), runmat_hir::SourceId> {
+        let projected = self
+            .functions
+            .iter()
+            .map(|(function, body)| {
+                body.source_id
+                    .map(|source| project(source).ok_or(source))
+                    .transpose()
+                    .map(|source| (*function, source))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let data = &mut **self;
+        for (function, source) in projected {
+            if let Some(body) = data.functions.get_mut(&function) {
+                body.source_id = source;
+            }
+        }
+        data.source_functions.clear();
+        let mut functions = data.functions.keys().copied().collect::<Vec<_>>();
+        functions.sort_by_key(|function| function.0);
+        for function in functions {
+            if let Some(source) = data.functions[&function].source_id {
+                data.source_functions
+                    .entry(source)
+                    .or_default()
+                    .push(function);
+            }
+        }
+        Ok(())
+    }
+
     /// Consume the authoring registry at publication boundaries. Executing
     /// snapshots retain their own immutable Arc; only shared publication
     /// inputs require a copy of the map here.

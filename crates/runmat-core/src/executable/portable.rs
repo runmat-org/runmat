@@ -2,7 +2,7 @@ use serde::Serialize;
 
 use super::ExecutableUnit;
 
-const SOURCE_MAP_SCHEMA_VERSION: u16 = 1;
+const SOURCE_MAP_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Serialize)]
 struct PortableSourceMap<'a> {
@@ -14,6 +14,7 @@ struct PortableSourceEntry<'a> {
     source_id: usize,
     owner_identity: &'a str,
     relative_path: &'a str,
+    content_revision: &'a runmat_execution::Digest,
     display_name: &'a str,
     text: &'a str,
 }
@@ -216,6 +217,8 @@ impl ExecutableUnit {
     ) -> Result<Vec<runmat_execution::ExecutableComponentPayload>, String> {
         use runmat_execution::{ExecutableComponentKind as Kind, ExecutableComponentPayload};
 
+        self.source_map().validate_content_revisions()?;
+
         let source_map = PortableSourceMap {
             entries: self
                 .source_map()
@@ -225,6 +228,7 @@ impl ExecutableUnit {
                     source_id: entry.source_id,
                     owner_identity: &entry.owner_identity,
                     relative_path: &entry.relative_path,
+                    content_revision: &entry.content_revision,
                     display_name: &entry.display_name,
                     text: &entry.text,
                 })
