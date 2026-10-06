@@ -66,6 +66,11 @@ try {
     assert.notEqual(failure.status, 0, "standalone source error must not become success");
     assert.match(failure.stderr, /RunMat:test:AotSource/u);
     assert.match(failure.stderr, /aot source failure/u);
+    assert.match(
+        failure.stderr,
+        /aot_source_failure\.m:\d+:\d+/u,
+        "standalone error must render the admitted source file and position before its lease retires"
+    );
     console.log("linked AOT source, callback, re-invocation, and error witnesses passed");
 } finally {
     rmSync(directory, { recursive: true, force: true });
