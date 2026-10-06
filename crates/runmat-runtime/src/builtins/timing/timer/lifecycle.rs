@@ -26,7 +26,7 @@ impl TimerRunConfig {
         override_delay: Option<Duration>,
     ) -> BuiltinResult<Self> {
         ensure_valid_timer(handle)?;
-        if callback_is_empty(&property(handle, "TimerFcn")?) {
+        if callback_is_empty(&property(handle, TimerCallback::Timer.property().name())?) {
             return Err(timer_error(
                 &TIMER_ERROR_INVALID_PROPERTY,
                 "timer: TimerFcn must be set before starting a timer",
