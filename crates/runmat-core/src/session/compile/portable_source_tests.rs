@@ -110,3 +110,86 @@ fn pending_source_lease_coexists_with_interpreted_and_native_unit_invocations() 
     )
     .is_none());
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn dropped_pending_public_eval_retires_only_its_source() {
+    use futures::channel::oneshot;
+    use std::future::Future;
+    use std::sync::{Arc, Mutex};
+    use std::task::{Context, Poll};
+
+    let mut session = crate::RunMatSession::with_options(false, false).expect("session");
+    let runtime = session.runtime_context.clone();
+    let sibling = runmat_runtime::source_context::lease_source_context_in_context(
+        &runtime,
+        "<sibling>",
+        None,
+        "sibling = 7;",
+    )
+    .expect("sibling source");
+    let observed = Arc::new(Mutex::new(None));
+    let observed_by_handler = Arc::clone(&observed);
+    let (release, gate) = oneshot::channel::<()>();
+    let gate = Arc::new(Mutex::new(Some(gate)));
+    session.install_async_input_handler(move |_| {
+        *observed_by_handler.lock().expect("observed source") =
+            runmat_runtime::source_context::current_source_info();
+        let gate = gate
+            .lock()
+            .expect("input gate")
+            .take()
+            .expect("no input replay");
+        async move {
+            gate.await.map_err(|_| "input abandoned".to_string())?;
+            Ok(crate::execution::InputResponse::Line("1".into()))
+        }
+    });
+    let request = crate::abi::ExecutionRequest::for_source(
+        crate::abi::SourceInput::Text {
+            name: "pending_eval.m".into(),
+            text: "result = eval(\"input('wait: '); 41 + 1\");".into(),
+        },
+        session.compat_mode(),
+        crate::abi::HostExecutionPolicy::default(),
+        session.workspace_handle(),
+    );
+    let mut future = Box::pin(session.execute_request(request));
+    for _ in 0..16 {
+        let mut task = Context::from_waker(futures::task::noop_waker_ref());
+        assert!(matches!(
+            Future::poll(future.as_mut(), &mut task),
+            Poll::Pending
+        ));
+        if observed.lock().expect("observed source").is_some() {
+            break;
+        }
+    }
+    let eval_source = observed
+        .lock()
+        .expect("observed source")
+        .clone()
+        .expect("public eval reached pending input");
+    assert_eq!(eval_source.name.as_ref(), "<eval>");
+    let eval_id = eval_source.source_id.expect("eval source identity");
+    assert_eq!(eval_source.text.as_ref(), "input('wait: '); 41 + 1");
+    assert_eq!(
+        runmat_runtime::source_context::source_info_in_context(&runtime, eval_id)
+            .expect("pending eval source still live")
+            .text,
+        eval_source.text
+    );
+    drop(future);
+    assert!(runmat_runtime::source_context::source_info_in_context(&runtime, eval_id).is_none());
+    assert_eq!(
+        runmat_runtime::source_context::source_info_in_context(&runtime, sibling.source_id())
+            .expect("unrelated source remains live")
+            .text
+            .as_ref(),
+        "sibling = 7;"
+    );
+    assert!(
+        release.send(()).is_err(),
+        "dropped input future released gate"
+    );
+}
