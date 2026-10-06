@@ -23,6 +23,7 @@ mod r#box;
 mod set;
 mod shading;
 mod view;
+mod drawnow;
 
 pub use self::animatedline::*;
 pub use self::annotations::*;
@@ -32,6 +33,7 @@ pub use self::cla::*;
 pub use self::colorbar::*;
 pub use self::colormap::*;
 pub use self::daspect::*;
+pub use self::drawnow::*;
 pub use self::figure_persistence::*;
 pub use self::findobj::*;
 pub use self::gcf::*;
@@ -70,4 +72,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(palette_generators::ENTRIES.iter().copied());
     values.extend(annotations::ENTRIES.iter().copied());
     values.extend(print::ENTRIES.iter().copied());
+    values.extend(drawnow::ENTRIES.iter().copied());
 }

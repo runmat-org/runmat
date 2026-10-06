@@ -16,8 +16,7 @@ pub async fn hgload_builtin_registered(
     requested_outputs: Option<usize>,
     args: Vec<Value>,
 ) -> BuiltinResult<runmat_value::ValueSequence> {
-    super::execute_hgload(runtime, requested_outputs, args)
-        .await
+    super::execute_hgload(runtime, requested_outputs, args).await
 }
 
 #[cfg(test)]
