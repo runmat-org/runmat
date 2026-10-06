@@ -56,6 +56,21 @@ try {
     assert.equal(callbackResult.status, 0, `standalone callback failed:\n${callbackResult.stderr}`);
     assert.equal(callbackResult.stdout.trim(), "'aot_source_callback'", "local callback lost its owning file source");
 
+    const frame = compile("aot_native_frame", [
+        "function name = aot_native_frame()",
+        "  f = @local_frame;",
+        "  name = f();",
+        "end",
+        "function name = local_frame()",
+        "  info = getcallinfo();",
+        "  name = info.name;",
+        "end",
+        ""
+    ].join("\n"));
+    const frameResult = invoke(frame);
+    assert.equal(frameResult.status, 0, `standalone native frame failed:\n${frameResult.stderr}`);
+    assert.equal(frameResult.stdout.trim(), "'local_frame'", "linked AOT callback inherited the caller frame");
+
     const failed = compile("aot_source_failure", [
         "function aot_source_failure()",
         "  error('RunMat:test:AotSource', 'aot source failure');",

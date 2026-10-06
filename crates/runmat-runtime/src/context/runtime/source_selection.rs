@@ -29,6 +29,27 @@ pub(super) enum InvocationSourceSelection {
 }
 
 impl RuntimeContext {
+    /// Resolve an ordinal only through the selected issuer and its still-live
+    /// immutable source record. A context-free embedding has no program
+    /// binding and returns `None`; an admitted binding missing this ordinal is
+    /// a typed failure, never permission to inherit the caller's file.
+    pub fn admitted_program_source_id(
+        &self,
+        ordinal: runmat_types::ProgramSourceId,
+    ) -> Result<Option<runmat_types::SourceId>, ProgramSourceSelectionError> {
+        let Some(binding) = &self.program_sources else {
+            return Ok(None);
+        };
+        let source = binding
+            .source_ref(ordinal)
+            .ok_or(ProgramSourceSelectionError::Missing(ordinal))?
+            .resolve_in(self)
+            .ok_or(ProgramSourceSelectionError::Retired(ordinal))?;
+        crate::source_context::source_info_in_context(self, source)
+            .ok_or(ProgramSourceSelectionError::Retired(ordinal))?;
+        Ok(Some(source))
+    }
+
     /// Select one admitted program source for this invocation. A native
     /// function must not inherit its caller's current file merely because it
     /// executes inside that caller's session. An unbound embedding has no
@@ -37,19 +58,9 @@ impl RuntimeContext {
         mut self,
         ordinal: runmat_types::ProgramSourceId,
     ) -> Result<Self, ProgramSourceSelectionError> {
-        let current = if let Some(binding) = &self.program_sources {
-            let source = binding
-                .source_ref(ordinal)
-                .ok_or(ProgramSourceSelectionError::Missing(ordinal))?
-                .resolve_in(&self)
-                .ok_or(ProgramSourceSelectionError::Retired(ordinal))?;
-            Some(
-                crate::source_context::source_info_in_context(&self, source)
-                    .ok_or(ProgramSourceSelectionError::Retired(ordinal))?,
-            )
-        } else {
-            None
-        };
+        let current = self
+            .admitted_program_source_id(ordinal)?
+            .and_then(|source| crate::source_context::source_info_in_context(&self, source));
         self.source_current = Some(Rc::new(RefCell::new(
             crate::source_context::SourceCurrentProjection::new(current),
         )));

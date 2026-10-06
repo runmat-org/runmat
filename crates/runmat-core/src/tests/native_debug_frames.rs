@@ -80,7 +80,7 @@ fn forced_native_companion_uses_its_admitted_file_not_primary() {
             .expect("write primary source");
         std::fs::write(
             directory.path().join("nativeFrameCompanion.m"),
-            "function [name, file] = nativeFrameCompanion()\ninfo = getcallinfo();\nname = info.name;\nfile = mfilename();\nend\n",
+            "function [name, file, frames] = nativeFrameCompanion()\ninfo = getcallinfo();\nname = info.name;\nfile = mfilename();\nframes = dbstack();\nend\n",
         )
         .expect("write companion source");
         let _cwd = super::push_cwd(directory.path());
@@ -99,16 +99,28 @@ fn forced_native_companion_uses_its_admitted_file_not_primary() {
         );
         let values = block_on(session.invoke_executable(
             &unit,
-            invocation("nativeFrameCompanion", 2),
+            invocation("nativeFrameCompanion", 3),
             &InvocationControl::default().force_generic_native(),
         ))
         .expect("native companion call");
         assert_eq!(
-            values.as_slice(),
-            &[
-                Value::String("nativeFrameCompanion".into()),
-                Value::String("nativeFrameCompanion".into()),
-            ]
+            values.as_slice()[0],
+            Value::String("nativeFrameCompanion".into())
+        );
+        assert_eq!(
+            values.as_slice()[1],
+            Value::String("nativeFrameCompanion".into())
+        );
+        let Value::StructArray(frames) = &values.as_slice()[2] else {
+            panic!("companion dbstack must return structured frames");
+        };
+        assert_eq!(
+            frames.field_values("file").and_then(|files| files.first()),
+            Some(&Value::String("nativeFrameCompanion.m".into()))
+        );
+        assert!(
+            matches!(frames.field_values("line").and_then(|lines| lines.first()),
+            Some(Value::Num(line)) if *line >= 1.0)
         );
     });
 }

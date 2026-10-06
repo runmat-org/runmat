@@ -30,12 +30,40 @@ pub(super) fn from_native_executor_error(
             stage("NativeUnsupportedSite", message)
         }
         runmat_native_executor::NativeExecutorError::SourceAdmission(error) => {
-            stage("NativeSourceAdmission", error)
+            runmat_runtime::build_runtime_error(error.to_string())
+                .with_identifier("RunMat:NativeSourceAdmission")
+                .with_phase("native")
+                .with_source(error)
+                .build()
         }
         runmat_native_executor::NativeExecutorError::Unavailable => stage(
             "NativeUnavailable",
             "native execution is unavailable on this platform",
         ),
         other => stage("NativeExecution", other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error as _;
+
+    #[test]
+    fn missing_native_source_keeps_typed_admission_cause() {
+        let missing = runmat_runtime::context::ProgramSourceSelectionError::Missing(
+            runmat_types::ProgramSourceId(7),
+        );
+        let error = from_native_executor_error(
+            runmat_native_executor::NativeExecutorError::SourceAdmission(missing),
+        );
+        assert_eq!(error.identifier(), Some("RunMat:NativeSourceAdmission"));
+        assert_eq!(
+            error
+                .source()
+                .unwrap()
+                .downcast_ref::<runmat_runtime::context::ProgramSourceSelectionError>(),
+            Some(&missing)
+        );
     }
 }

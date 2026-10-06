@@ -4,6 +4,8 @@ mod deopt;
 mod dependencies;
 mod error;
 mod invoke;
+#[cfg(test)]
+mod native_frame_tests;
 
 pub(crate) use cache::GenericNativeCache;
 pub(crate) use invoke::{invoke, NativeExecution, NativeInvocation};

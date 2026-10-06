@@ -69,12 +69,16 @@ impl ProgramInvocationGuards {
                     .map_err(|_| native_error("program source ordinal exceeds host indexing"))?;
                 let function_id = usize::try_from(function.function.0)
                     .map_err(|_| native_error("program function ordinal exceeds host indexing"))?;
-                let source_id = runtime.program_source_id(function.source).ok_or_else(|| {
-                    native_error(format!(
-                        "native function {} refers to an unbound program source {}",
-                        function.function.0, function.source.0
-                    ))
-                })?;
+                let source_id = runtime
+                    .admitted_program_source_id(function.source)
+                    .map_err(source_admission_error)?
+                    .ok_or_else(|| {
+                        source_admission_error(
+                            runmat_runtime::context::ProgramSourceSelectionError::Missing(
+                                function.source,
+                            ),
+                        )
+                    })?;
                 Ok(runmat_runtime::user_functions::SourceFunctionInfo {
                     source_id,
                     name: function.name.clone(),
@@ -275,10 +279,17 @@ fn native_executor_error(
     match error {
         runmat_native_executor::NativeExecutorError::Runtime(original) => *original,
         runmat_native_executor::NativeExecutorError::SourceAdmission(error) => {
-            runmat_runtime::build_runtime_error(error.to_string())
-                .with_identifier("RunMat:AotSourceAdmission")
-                .build()
+            source_admission_error(error)
         }
         other => native_error(other),
     }
+}
+
+fn source_admission_error(
+    error: runmat_runtime::context::ProgramSourceSelectionError,
+) -> runmat_runtime::RuntimeError {
+    runmat_runtime::build_runtime_error(error.to_string())
+        .with_identifier("RunMat:AotSourceAdmission")
+        .with_source(error)
+        .build()
 }

@@ -61,6 +61,32 @@ fn native_runtime_failure_keeps_original_source_and_frames() {
 }
 
 #[test]
+fn standalone_source_admission_keeps_missing_and_retired_causes() {
+    use std::error::Error as _;
+
+    for cause in [
+        runmat_runtime::context::ProgramSourceSelectionError::Missing(
+            runmat_types::ProgramSourceId(1),
+        ),
+        runmat_runtime::context::ProgramSourceSelectionError::Retired(
+            runmat_types::ProgramSourceId(1),
+        ),
+    ] {
+        let error = native_executor_error(
+            runmat_native_executor::NativeExecutorError::SourceAdmission(cause),
+        );
+        assert_eq!(error.identifier(), Some("RunMat:AotSourceAdmission"));
+        assert_eq!(
+            error
+                .source()
+                .unwrap()
+                .downcast_ref::<runmat_runtime::context::ProgramSourceSelectionError>(),
+            Some(&cause)
+        );
+    }
+}
+
+#[test]
 fn installation_preserves_supplied_services_across_nested_program_contexts() {
     let events = Events::default();
     let placement: Rc<dyn RuntimePlacementService> = Rc::new(PlacementProbe(events));
