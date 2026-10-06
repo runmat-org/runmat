@@ -119,7 +119,7 @@ fn frame_access(
     }
 }
 
-struct SubscriptPathReadContext<'a> {
+struct SubscriptPathReadContext {
     selection: runmat_types::SequenceUse,
     indexing: runmat_types::ObjectIndexingContext,
     access: runmat_runtime::object::protocol::ObjectAccessContext,
@@ -130,7 +130,7 @@ async fn execute_subscript_path(
     runtime: &runmat_runtime::context::RuntimeContext,
     stack: &mut Vec<Value>,
     steps: &[crate::bytecode::BytecodeSubscriptStep],
-    read: SubscriptPathReadContext<'_>,
+    read: SubscriptPathReadContext,
     state: &mut super::SequenceState,
 ) -> Result<Vec<Value>, RuntimeError> {
     let mut argument_roots = Vec::new();
