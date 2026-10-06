@@ -7,6 +7,8 @@ use super::MatCodecCooperation;
 use crate::BuiltinResult;
 use std::io::Read;
 
+const READ_CHUNK_BYTES: usize = 64 * 1024;
+
 pub(super) fn bytes_to_string(bytes: &[u8]) -> String {
     let trimmed = bytes
         .iter()
@@ -136,7 +138,7 @@ fn append_checked(data: &mut Vec<u8>, chunk: &[u8]) -> BuiltinResult<()> {
 
 fn read_body<R: Read + ?Sized>(reader: &mut R, length: usize) -> BuiltinResult<Vec<u8>> {
     let mut data = Vec::new();
-    let mut chunk = [0u8; 64 * 1024];
+    let mut chunk = vec![0u8; length.min(READ_CHUNK_BYTES)];
     while data.len() < length {
         let next = (length - data.len()).min(chunk.len());
         reader.read_exact(&mut chunk[..next]).map_err(|err| {
@@ -207,7 +209,10 @@ pub(super) async fn read_tagged_cooperative<R: Read + ?Sized>(
             padding,
         } => {
             let mut data = Vec::new();
-            let mut chunk = [0u8; 64 * 1024];
+            // Keep bulk I/O scratch storage off the executor stack. This
+            // future is polled beneath the VM and runtime dispatch chain, so a
+            // fixed 64-KiB local array consumes stack even for tiny elements.
+            let mut chunk = vec![0u8; length.min(READ_CHUNK_BYTES)];
             while data.len() < length {
                 let next = (length - data.len()).min(chunk.len());
                 reader.read_exact(&mut chunk[..next]).map_err(|err| {

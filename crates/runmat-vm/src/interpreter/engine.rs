@@ -25,11 +25,11 @@ pub fn prepare_workspace_guard(
             .into_iter()
             .filter(|name| names.contains_key(name))
             .collect();
-        crate::runtime::workspace::set_workspace_state_with_publication(
+        crate::runtime::workspace::set_workspace_state_with_policy(
             names,
             filtered_assigned,
             vars,
-            pending.publish_to_current_service,
+            pending.policy,
             global_aliases.clone(),
         )
     });
