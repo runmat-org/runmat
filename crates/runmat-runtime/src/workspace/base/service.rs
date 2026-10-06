@@ -113,6 +113,39 @@ impl RuntimeWorkspaceService for BaseWorkspaceService {
             .map_err(base_workspace_error_to_runtime)
     }
 
+    fn base_global_binding_names(&self) -> Result<Vec<String>, RuntimeError> {
+        self.owner
+            .global_names()
+            .map_err(base_workspace_error_to_runtime)
+    }
+
+    fn is_base_global_binding(&self, name: &str) -> Result<bool, RuntimeError> {
+        self.owner
+            .is_global(name)
+            .map_err(base_workspace_error_to_runtime)
+    }
+
+    fn bind_base_global(&self, name: &str) -> Result<(), RuntimeError> {
+        let mut delta = WorkspaceDelta::new();
+        delta.bind_global(name);
+        self.apply(delta)
+    }
+
+    fn unbind_base_global(&self, name: &str) -> Result<(), RuntimeError> {
+        let mut delta = WorkspaceDelta::new();
+        delta.unbind_global(name);
+        self.apply(delta)
+    }
+
+    fn assign_base_local(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
+        let mut delta = WorkspaceDelta::new();
+        delta.unbind_global(name);
+        delta
+            .assign(name, value)
+            .map_err(base_workspace_error_to_runtime)?;
+        self.apply(delta)
+    }
+
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
         let mut delta = WorkspaceDelta::new();
         delta

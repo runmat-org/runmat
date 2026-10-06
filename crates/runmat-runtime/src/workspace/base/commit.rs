@@ -42,7 +42,7 @@ impl BaseWorkspaceState {
     ) -> BaseWorkspaceCommit {
         let previous_revision = self.revision;
         if !delta.is_empty() {
-            apply_delta(&mut self.entries, &delta);
+            apply_delta(&mut self.entries, &mut self.global_bindings, &delta);
             self.revision = revision;
             self.journal.record(revision, &delta);
         }
@@ -59,7 +59,10 @@ fn canonical_effect(delta: &WorkspaceDelta, entries: &RootedWorkspaceEntries) ->
     let mut names = BTreeSet::new();
     for change in delta.changes() {
         match change.data() {
-            WorkspaceChangeData::Assign { name, .. } | WorkspaceChangeData::Remove { name } => {
+            WorkspaceChangeData::Assign { name, .. }
+            | WorkspaceChangeData::Remove { name }
+            | WorkspaceChangeData::BindGlobal { name }
+            | WorkspaceChangeData::UnbindGlobal { name } => {
                 names.insert(name.clone());
             }
             WorkspaceChangeData::Clear => {
@@ -82,16 +85,33 @@ fn canonical_effect(delta: &WorkspaceDelta, entries: &RootedWorkspaceEntries) ->
     effect
 }
 
-fn apply_delta(entries: &mut super::values::RootedWorkspaceEntries, delta: &WorkspaceDelta) {
+fn apply_delta(
+    entries: &mut super::values::RootedWorkspaceEntries,
+    global_bindings: &mut std::collections::HashSet<String>,
+    delta: &WorkspaceDelta,
+) {
     for change in delta.changes() {
         match change.data() {
             WorkspaceChangeData::Assign { name, entry } => {
-                entries.insert(name.clone(), entry.clone());
+                if !global_bindings.contains(name) {
+                    entries.insert(name.clone(), entry.clone());
+                }
             }
             WorkspaceChangeData::Remove { name } => {
                 entries.remove(name);
             }
-            WorkspaceChangeData::Clear => entries.clear(),
+            WorkspaceChangeData::BindGlobal { name } => {
+                entries.remove(name);
+                global_bindings.insert(name.clone());
+            }
+            WorkspaceChangeData::UnbindGlobal { name } => {
+                entries.remove(name);
+                global_bindings.remove(name);
+            }
+            WorkspaceChangeData::Clear => {
+                entries.clear();
+                global_bindings.clear();
+            }
         }
     }
 }

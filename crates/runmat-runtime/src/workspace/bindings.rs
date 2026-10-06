@@ -26,6 +26,24 @@ impl FrameGlobalBindings {
         self.0.borrow().clone()
     }
 
+    pub fn replace_with_snapshot(&self, bindings: HashMap<usize, FrameGlobalBinding>) {
+        *self.0.borrow_mut() = bindings;
+    }
+
+    pub fn named_bindings(&self) -> Vec<(usize, String)> {
+        let mut bindings = self
+            .0
+            .borrow()
+            .iter()
+            .filter_map(|(slot, binding)| match binding {
+                FrameGlobalBinding::Named(name) => Some((*slot, name.clone())),
+                FrameGlobalBinding::LegacySlot => None,
+            })
+            .collect::<Vec<_>>();
+        bindings.sort_by_key(|(slot, _)| *slot);
+        bindings
+    }
+
     pub fn declare_named(&self, slot: usize, name: String) {
         self.0
             .borrow_mut()

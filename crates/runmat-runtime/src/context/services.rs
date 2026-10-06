@@ -181,6 +181,31 @@ pub trait RuntimeWorkspaceService {
         Ok(None)
     }
 
+    /// Names whose base-workspace identity resolves through the separate
+    /// session-global value store. Canonical base services override this with
+    /// their revisioned namespace authority; procedure-local services inherit
+    /// it only through their captured delegate.
+    fn base_global_binding_names(&self) -> Result<Vec<String>, RuntimeError> {
+        Ok(Vec::new())
+    }
+
+    fn is_base_global_binding(&self, _name: &str) -> Result<bool, RuntimeError> {
+        Ok(false)
+    }
+
+    fn bind_base_global(&self, _name: &str) -> Result<(), RuntimeError> {
+        self.ensure_mutation_authority()
+    }
+
+    fn unbind_base_global(&self, _name: &str) -> Result<(), RuntimeError> {
+        self.ensure_mutation_authority()
+    }
+
+    fn assign_base_local(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
+        self.unbind_base_global(name)?;
+        self.assign(name, value)
+    }
+
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError>;
 
     /// Publish an executor register write whose register file is updated by
@@ -193,6 +218,13 @@ pub trait RuntimeWorkspaceService {
         value: Value,
     ) -> Result<(), RuntimeError> {
         self.assign(name, value)
+    }
+
+    /// Establish a named session-global alias for one executor slot. The
+    /// service owns frame scope and decides whether the declaration also
+    /// removes a shadowed base-workspace value.
+    fn declare_global_binding(&self, _slot: usize, _name: &str) -> Result<(), RuntimeError> {
+        self.ensure_mutation_authority()
     }
     fn clear(&self) -> Result<(), RuntimeError>;
     fn remove(&self, name: &str) -> Result<(), RuntimeError>;

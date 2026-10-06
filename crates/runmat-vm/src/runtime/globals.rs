@@ -77,22 +77,28 @@ pub fn declare_global_named(
     names: Vec<String>,
     vars: &mut Vec<Value>,
     global_aliases: &FrameGlobalBindings,
-) {
+) -> Result<(), runmat_runtime::RuntimeError> {
     for (pos, i) in indices.into_iter().enumerate() {
         let name = names
             .get(pos)
             .cloned()
             .unwrap_or_else(|| format!("var_{i}"));
-        let val_opt = runmat_runtime::workspace::session::global_value(&name);
-        if let Some(v) = val_opt {
-            if i >= vars.len() {
-                vars.resize(i + 1, Value::Num(0.0));
+        let value = if let Some(runtime) = runmat_runtime::context::legacy::active() {
+            if let Some(workspace) = runtime.service_ports().workspace() {
+                workspace.declare_global_binding(i, &name)?;
             }
-            vars[i] = v;
-            refresh_workspace_slot(i, &vars[i]);
+            runtime.session_variable_authority().declare_global(&name)?
+        } else {
+            runmat_runtime::workspace::session::declare_global_named(&name)
+        };
+        if i >= vars.len() {
+            vars.resize(i + 1, Value::Num(0.0));
         }
+        vars[i] = value;
+        refresh_workspace_slot(i, &vars[i]);
         global_aliases.declare_named(i, name);
     }
+    Ok(())
 }
 
 pub fn declare_persistent(func_name: &str, indices: Vec<usize>, vars: &mut Vec<Value>) {

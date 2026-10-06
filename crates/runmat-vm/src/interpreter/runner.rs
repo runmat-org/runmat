@@ -383,18 +383,45 @@ pub async fn interpret_with_vars_in_context(
     current_function_name: Option<&str>,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> VmResult<InterpreterOutcome> {
-    let runtime = crate::runtime::workspace_service::VmWorkspaceService::install(runtime);
+    interpret_with_workspace_in_context(
+        bytecode,
+        initial_vars,
+        current_function_name,
+        runtime,
+        None,
+    )
+    .await
+    .outcome
+}
+
+pub struct WorkspaceInterpreterOutcome {
+    pub outcome: VmResult<InterpreterOutcome>,
+    pub workspace: Option<crate::runtime::workspace::WorkspaceExecutionCompletion>,
+}
+
+pub async fn interpret_with_workspace_in_context(
+    bytecode: &Bytecode,
+    initial_vars: &mut Vec<Value>,
+    current_function_name: Option<&str>,
+    runtime: runmat_runtime::context::RuntimeContext,
+    admission: Option<crate::runtime::workspace::PendingWorkspaceAdmission>,
+) -> WorkspaceInterpreterOutcome {
+    let (runtime, workspace_activation) =
+        crate::runtime::workspace_service::VmWorkspaceService::install(runtime, admission);
+    let frame = workspace_activation.frame();
     let runtime = with_default_acceleration_service(runtime);
-    runtime
-        .scope(runmat_runtime::data::with_tx_registry_scope(
+    let outcome = workspace_activation
+        .scope(runtime.scope(runmat_runtime::data::with_tx_registry_scope(
             interpret_with_vars_inner(
                 bytecode,
                 initial_vars,
                 current_function_name,
                 runtime.clone(),
             ),
-        ))
-        .await
+        )))
+        .await;
+    let workspace = crate::runtime::workspace::take_workspace_completion(frame);
+    WorkspaceInterpreterOutcome { outcome, workspace }
 }
 
 pub async fn interpret_resume_in_context(
@@ -403,12 +430,13 @@ pub async fn interpret_resume_in_context(
     current_function_name: Option<&str>,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> VmResult<InterpreterOutcome> {
-    let runtime = crate::runtime::workspace_service::VmWorkspaceService::install(runtime);
+    let (runtime, workspace_activation) =
+        crate::runtime::workspace_service::VmWorkspaceService::install(runtime, None);
     let runtime = with_default_acceleration_service(runtime);
-    runtime
-        .scope(runmat_runtime::data::with_tx_registry_scope(
+    workspace_activation
+        .scope(runtime.scope(runmat_runtime::data::with_tx_registry_scope(
             interpret_resume_inner(bytecode, resume, current_function_name, runtime.clone()),
-        ))
+        )))
         .await
 }
 

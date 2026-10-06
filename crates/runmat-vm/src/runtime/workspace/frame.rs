@@ -1,4 +1,5 @@
 use super::*;
+use std::rc::Weak;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct WorkspaceFrameId(pub(crate) usize);
@@ -15,10 +16,18 @@ pub(crate) struct PendingServiceFrame {
     pub(in crate::runtime) lifecycle: Rc<Cell<WorkspaceFrameLifecycle>>,
     pub(in crate::runtime) delegate:
         Rc<RefCell<Option<Rc<dyn runmat_runtime::context::RuntimeWorkspaceService>>>>,
+    pub(in crate::runtime) service:
+        Rc<RefCell<Option<Weak<dyn runmat_runtime::context::RuntimeWorkspaceService>>>>,
+    pub(in crate::runtime) parent: Rc<Cell<Option<WorkspaceFrameId>>>,
+    pub(in crate::runtime) base: Rc<Cell<Option<WorkspaceFrameId>>>,
+    pub(in crate::runtime) admission: Rc<RefCell<Option<PendingWorkspace>>>,
+    pub(in crate::runtime) session_variables:
+        Rc<RefCell<Option<runmat_runtime::workspace::session::SessionVariableAuthority>>>,
 }
 
 pub(crate) fn reserve_workspace_service_frame(
     runtime: runmat_runtime::context::RuntimeContextLocalId,
+    admission: Option<PendingWorkspace>,
 ) -> PendingServiceFrame {
     let id = NEXT_WORKSPACE_FRAME_ID.with(|next| {
         let id = next.get();
@@ -30,6 +39,11 @@ pub(crate) fn reserve_workspace_service_frame(
     });
     let lifecycle = Rc::new(Cell::new(WorkspaceFrameLifecycle::Pending));
     let delegate = Rc::new(RefCell::new(None));
+    let service = Rc::new(RefCell::new(None));
+    let parent = Rc::new(Cell::new(None));
+    let base = Rc::new(Cell::new(None));
+    let admission = Rc::new(RefCell::new(admission));
+    let session_variables = Rc::new(RefCell::new(None));
     PENDING_SERVICE_FRAMES.with(|frames| {
         frames
             .borrow_mut()
@@ -39,12 +53,22 @@ pub(crate) fn reserve_workspace_service_frame(
                 id,
                 lifecycle: lifecycle.clone(),
                 delegate: delegate.clone(),
+                service: service.clone(),
+                parent: parent.clone(),
+                base: base.clone(),
+                admission: admission.clone(),
+                session_variables: session_variables.clone(),
             });
     });
     PendingServiceFrame {
         id,
         lifecycle,
         delegate,
+        service,
+        parent,
+        base,
+        admission,
+        session_variables,
     }
 }
 
@@ -56,10 +80,16 @@ pub(crate) fn release_pending_workspace_service_frame(
 }
 
 pub(super) fn take_service_frame(owner: WorkspaceOwner) -> PendingServiceFrame {
+    let active = active_frame(owner);
     PENDING_SERVICE_FRAMES
         .with(|frames| {
             let mut frames = frames.borrow_mut();
-            let pending = frames.get_mut(&owner).and_then(Vec::pop);
+            let pending = frames.get_mut(&owner).and_then(|pending| {
+                let index = active
+                    .and_then(|active| pending.iter().position(|frame| frame.id == active))
+                    .or_else(|| (pending.len() == 1).then_some(0))?;
+                Some(pending.remove(index))
+            });
             if frames.get(&owner).is_some_and(Vec::is_empty) {
                 frames.remove(&owner);
             }
@@ -67,9 +97,8 @@ pub(super) fn take_service_frame(owner: WorkspaceOwner) -> PendingServiceFrame {
         })
         .unwrap_or_else(|| {
             let (id, lifecycle) = match owner {
-                WorkspaceOwner::Runtime(runtime) => {
-                    let pending = reserve_workspace_service_frame(runtime);
-                    (pending.id, pending.lifecycle)
+                WorkspaceOwner::Runtime(_) => {
+                    panic!("VM workspace entered without its exact reserved service frame")
                 }
                 WorkspaceOwner::Ambient => {
                     let id = NEXT_WORKSPACE_FRAME_ID.with(|next| {
@@ -88,8 +117,42 @@ pub(super) fn take_service_frame(owner: WorkspaceOwner) -> PendingServiceFrame {
                 id,
                 lifecycle,
                 delegate: Rc::new(RefCell::new(None)),
+                service: Rc::new(RefCell::new(None)),
+                parent: Rc::new(Cell::new(None)),
+                base: Rc::new(Cell::new(None)),
+                admission: Rc::new(RefCell::new(None)),
+                session_variables: Rc::new(RefCell::new(None)),
             }
         })
+}
+
+pub(super) fn take_service_frame_admission(owner: WorkspaceOwner) -> Option<PendingWorkspace> {
+    let active = active_frame(owner)?;
+    PENDING_SERVICE_FRAMES.with(|frames| {
+        let frames = frames.borrow();
+        let frame = frames
+            .get(&owner)?
+            .iter()
+            .find(|frame| frame.id == active)?;
+        let admission = frame.admission.borrow_mut().take();
+        admission
+    })
+}
+
+pub(crate) fn workspace_frame_for_service(
+    runtime: runmat_runtime::context::RuntimeContextLocalId,
+    service: &Rc<dyn runmat_runtime::context::RuntimeWorkspaceService>,
+) -> Option<(WorkspaceFrameId, WorkspaceFrameId)> {
+    WORKSPACE_STACKS.with(|stacks| {
+        stacks
+            .borrow()
+            .get(&WorkspaceOwner::Runtime(runtime))?
+            .iter()
+            .find_map(|frame| {
+                let candidate = frame.service.as_ref()?.upgrade()?;
+                Rc::ptr_eq(&candidate, service).then_some((frame.id, frame.base))
+            })
+    })
 }
 
 fn release_pending_workspace_service_frame_for_owner(owner: WorkspaceOwner, id: WorkspaceFrameId) {
@@ -174,13 +237,23 @@ pub(crate) fn workspace_frame_name_is_global(id: WorkspaceFrameId, name: &str) -
     })
 }
 
+pub(crate) fn workspace_frame_declare_global(
+    id: WorkspaceFrameId,
+    slot: usize,
+    name: String,
+) -> Option<()> {
+    with_frame_mut(id, |frame| {
+        frame.global_aliases.declare_named(slot, name);
+    })
+}
+
 pub(crate) fn workspace_frame_assign(
     id: WorkspaceFrameId,
     name: &str,
     value: Value,
 ) -> Result<(), String> {
     with_frame_mut(id, |frame| {
-        set_workspace_variable_in_frame(frame, name, value)
+        set_workspace_variable_in_frame_with_reconciliation(frame, name, value, true, false)
     })
     .ok_or_else(|| "workspace frame is closed".to_string())?
 }
@@ -191,7 +264,7 @@ pub(crate) fn workspace_frame_assign_from_executor(
     value: Value,
 ) -> Result<(), String> {
     with_frame_mut(id, |frame| {
-        set_workspace_variable_in_frame_with_reconciliation(frame, name, value, false)
+        set_workspace_variable_in_frame_with_reconciliation(frame, name, value, false, false)
     })
     .ok_or_else(|| "workspace frame is closed".to_string())?
 }

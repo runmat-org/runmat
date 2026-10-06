@@ -1117,7 +1117,7 @@ pub async fn dispatch_instruction(
                 names.clone(),
                 vars,
                 global_aliases,
-            );
+            )?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

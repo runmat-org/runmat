@@ -8,6 +8,21 @@ use std::{rc::Rc, sync::Arc};
 mod sync_completion;
 
 #[test]
+fn first_global_declaration_replaces_a_stale_local_with_canonical_empty() {
+    runmat_gc::gc_test_context(|| {
+        let mut state = omitted_input_state();
+        let runtime = state.runtime.clone();
+        let _scope = runtime.enter();
+        let stale = state.arena.insert(Value::Num(42.0));
+        state.set_local(0, stale).unwrap();
+
+        state.declare_global(0, "fresh_global".into()).unwrap();
+        let declared = state.local_reference(0).unwrap();
+        assert_eq!(state.arena.get(declared).unwrap(), &empty_workspace_value());
+    });
+}
+
+#[test]
 fn declared_global_reads_follow_nested_session_writes() {
     runmat_gc::gc_test_context(|| {
         let mut state = omitted_input_state();

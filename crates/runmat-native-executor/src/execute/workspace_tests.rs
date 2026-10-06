@@ -10,7 +10,8 @@ use std::collections::BTreeMap;
 #[test]
 fn only_external_workspace_mutation_requests_reconciliation() {
     let (function, input) = fixture(Value::Num(1.0));
-    let state = NativeWorkspaceState::new(&function, input, Default::default(), None).unwrap();
+    let state =
+        NativeWorkspaceState::new(&function, input, Default::default(), None, None).unwrap();
     assert!(!state.needs_reconciliation());
     state.synchronize_local(0, Value::Num(2.0)).unwrap();
     assert!(!state.needs_reconciliation());
@@ -60,12 +61,13 @@ fn fixture(value: Value) -> (NativeFunction, NativeWorkspaceInput) {
             binding,
             name: "missing".into(),
         }],
+        global_bindings: Vec::new(),
     };
     (function, input)
 }
 
 fn error(function: &NativeFunction, input: NativeWorkspaceInput) -> String {
-    match NativeWorkspaceState::new(function, input, Default::default(), None) {
+    match NativeWorkspaceState::new(function, input, Default::default(), None, None) {
         Ok(_) => panic!("invalid binding accepted"),
         Err(error) => error.to_string(),
     }
@@ -76,7 +78,8 @@ fn caller_snapshot_nan_payload_is_retained_without_copying_storage() {
     let bits = 0xfff8_0000_0000_0042;
     let tensor = Tensor::new(vec![f64::from_bits(bits), -0.0], vec![1, 2]).unwrap();
     let (function, input) = fixture(Value::Tensor(tensor.clone()));
-    let state = NativeWorkspaceState::new(&function, input, Default::default(), None).unwrap();
+    let state =
+        NativeWorkspaceState::new(&function, input, Default::default(), None, None).unwrap();
     let Value::Tensor(actual) = state.initial_value(0).unwrap() else {
         panic!("tensor value");
     };
@@ -112,6 +115,34 @@ fn duplicate_bindings_remain_rejected() {
 }
 
 #[test]
+fn semantic_global_input_becomes_typed_frame_alias_and_completion_metadata() {
+    let (function, mut input) = fixture(Value::Num(9.0));
+    input.global_bindings.push(input.bindings[0].clone());
+    let aliases = input.frame_global_bindings(&function).unwrap();
+    let state = NativeWorkspaceState::new(&function, input, aliases, None, None).unwrap();
+    let snapshot = state.snapshot().unwrap();
+    assert_eq!(snapshot.values["missing"], Value::Num(9.0));
+    assert_eq!(
+        snapshot.global_bindings,
+        std::collections::BTreeSet::from(["missing".to_string()])
+    );
+}
+
+#[test]
+fn malformed_semantic_global_input_is_rejected_before_execution() {
+    let (function, mut input) = fixture(Value::Num(9.0));
+    input.global_bindings.push(NativeWorkspaceBinding {
+        binding: BindingId(99),
+        name: "missing".into(),
+    });
+    assert!(input
+        .frame_global_bindings(&function)
+        .unwrap_err()
+        .to_string()
+        .contains("is unavailable"));
+}
+
+#[test]
 fn missing_or_mismatched_local_identity_remains_rejected() {
     let (function, mut input) = fixture(Value::Num(1.0));
     input.local_names.clear();
@@ -133,7 +164,8 @@ fn unassigned_local_may_be_absent_and_unreferenced_caller_values_are_retained() 
     input.bindings.clear();
     input.values.clear();
     input.values.insert("ambient".into(), Value::Num(2.0));
-    let state = NativeWorkspaceState::new(&function, input, Default::default(), None).unwrap();
+    let state =
+        NativeWorkspaceState::new(&function, input, Default::default(), None, None).unwrap();
     assert!(state.initial_value(0).is_none());
     assert_eq!(state.snapshot().unwrap().values["ambient"], Value::Num(2.0));
 }
@@ -148,7 +180,8 @@ fn dynamic_assignment_publishes_active_global_and_clear_unbinds_only_the_frame()
         let aliases = runmat_runtime::workspace::bindings::FrameGlobalBindings::default();
         aliases.declare_named(0, "missing".into());
         runmat_runtime::workspace::session::store_global_named("missing", Value::Num(7.0));
-        let state = NativeWorkspaceState::new(&function, input, aliases.clone(), None).unwrap();
+        let state =
+            NativeWorkspaceState::new(&function, input, aliases.clone(), None, None).unwrap();
         let service = state.service();
         service.assign("missing", Value::Num(8.0)).unwrap();
         assert_eq!(
@@ -186,7 +219,8 @@ fn admitted_native_write_remains_publishable_after_execution_state_drops() {
         projection.clone();
     let (function, input) = fixture(Value::Num(1.0));
     let state =
-        NativeWorkspaceState::new(&function, input, Default::default(), Some(canonical)).unwrap();
+        NativeWorkspaceState::new(&function, input, Default::default(), Some(canonical), None)
+            .unwrap();
     assert!(!projection.has_pending_changes().unwrap());
     state.synchronize_local(0, Value::Num(42.0)).unwrap();
     drop(state);
@@ -199,7 +233,8 @@ fn admitted_native_write_remains_publishable_after_execution_state_drops() {
 #[test]
 fn retained_native_workspace_service_rejects_effects_after_executor_drop() {
     let (function, input) = fixture(Value::Num(1.0));
-    let state = NativeWorkspaceState::new(&function, input, Default::default(), None).unwrap();
+    let state =
+        NativeWorkspaceState::new(&function, input, Default::default(), None, None).unwrap();
     let service = state.service();
     drop(state);
 
@@ -223,7 +258,8 @@ fn active_native_checked_reads_preserve_authority_and_borrow_failures() {
         ));
     let (function, input) = fixture(Value::Num(1.0));
     let state =
-        NativeWorkspaceState::new(&function, input, Default::default(), Some(canonical)).unwrap();
+        NativeWorkspaceState::new(&function, input, Default::default(), Some(canonical), None)
+            .unwrap();
     let service = state.service();
 
     {
@@ -254,10 +290,10 @@ fn internal_native_stores_check_authority_for_global_and_function_frames() {
     let (function, input) = fixture(Value::Num(1.0));
     let aliases = runmat_runtime::workspace::bindings::FrameGlobalBindings::default();
     aliases.declare_named(0, "missing".into());
-    let state =
-        NativeWorkspaceState::new(&function, input, aliases, Some(canonical.clone())).unwrap();
+    let state = NativeWorkspaceState::new(&function, input, aliases, Some(canonical.clone()), None)
+        .unwrap();
     let function_state =
-        NativeWorkspaceState::function_frame(&function, Default::default(), Some(canonical));
+        NativeWorkspaceState::function_frame(&function, Default::default(), Some(canonical), None);
     owner.close().unwrap();
 
     for error in [
@@ -287,7 +323,7 @@ fn procedure_workspace_isolated_from_live_parent_but_inherits_revocation() {
         ));
     let (function, _) = fixture(Value::Num(0.0));
     let state =
-        NativeWorkspaceState::function_frame(&function, Default::default(), Some(canonical));
+        NativeWorkspaceState::function_frame(&function, Default::default(), Some(canonical), None);
     state.initialize_local(0, Value::Num(2.0)).unwrap();
     let service = state.service();
 

@@ -466,12 +466,19 @@ impl RunMatSession {
             )
         })?;
         self.pending_companion_source_discovery = Some(companion);
-        let previous_workspace_names = self
-            .base_workspace_snapshot()
+        let previous_workspace_bindings = self
+            .logical_workspace_values()
             .map_err(RunError::Runtime)?
-            .iter()
-            .map(|(name, _)| name.to_string())
-            .collect::<HashSet<_>>();
+            .into_keys()
+            .map(|name| {
+                let key = self
+                    .workspace_bindings
+                    .get(&name)
+                    .map(|binding| binding.key.clone())
+                    .unwrap_or_else(|| self.workspace_binding_key(&name));
+                (name, key)
+            })
+            .collect::<HashMap<_, _>>();
         let mut execution = self.execute_internal(input, true).await?;
         let workspace_names = execution
             .workspace_snapshot
@@ -482,10 +489,11 @@ impl RunMatSession {
         let workspace_full = execution.workspace_snapshot.full;
         let outcome = &mut execution.outcome;
         outcome.workspace_delta.upserts = self.abi_workspace_upserts(workspace_names)?;
+        let (binding_removals, removed_names) =
+            self.abi_workspace_removals(previous_workspace_bindings, workspace_full)?;
+        outcome.workspace_delta.removals = binding_removals;
         if workspace_full {
-            outcome.workspace_delta.removals =
-                self.abi_workspace_removals(previous_workspace_names)?;
-            if !outcome.workspace_delta.removals.is_empty() {
+            if removed_names {
                 outcome.effects.push(crate::abi::ObservedEffect::Workspace(
                     crate::abi::WorkspaceEffectKind::Clear,
                 ));
@@ -882,23 +890,38 @@ impl RunMatSession {
             .iter()
             .map(|(name, var_id)| (*var_id, name.clone()))
             .collect();
-        let assigned_snapshot: HashSet<String> = execution_vars
-            .keys()
-            .map(|name| {
-                workspace_projection
-                    .lookup(name.as_str())
-                    .map(|value| value.map(|_| name.clone()))
-            })
-            .collect::<std::result::Result<Vec<_>, RuntimeError>>()
-            .map_err(RunError::Runtime)?
-            .into_iter()
-            .flatten()
-            .collect();
+        let global_aliases = runmat_runtime::workspace::bindings::FrameGlobalBindings::default();
+        let inherited_global_names = self
+            .session_global_binding_names()
+            .map_err(RunError::Runtime)?;
+        let mut assigned_snapshot = HashSet::new();
+        for (name, slot) in &execution_vars {
+            if inherited_global_names.contains(name) {
+                global_aliases.declare_named(*slot, name.clone());
+                if self
+                    .runtime_context
+                    .session_global_value(name)
+                    .map_err(RunError::Runtime)?
+                    .is_some()
+                {
+                    assigned_snapshot.insert(name.clone());
+                }
+            } else if workspace_projection
+                .lookup(name)
+                .map_err(RunError::Runtime)?
+                .is_some()
+            {
+                assigned_snapshot.insert(name.clone());
+            }
+        }
         if debug_trace {
             debug!(?assigned_snapshot, "[repl] assigned snapshot");
         }
-        let _pending_workspace_guard =
-            runmat_vm::push_pending_workspace(execution_vars.clone(), assigned_snapshot.clone());
+        let mut workspace_admission = Some(runmat_vm::workspace_admission_with_global_bindings(
+            execution_vars.clone(),
+            assigned_snapshot.clone(),
+            global_aliases,
+        ));
         if self.verbose {
             debug!("HIR generated successfully");
         }
@@ -982,6 +1005,8 @@ impl RunMatSession {
         let mut error = None;
         let mut workspace_updates: Vec<WorkspaceEntry> = Vec::new();
         let mut workspace_snapshot_force_full = false;
+        let mut completed_global_names = HashSet::new();
+        let mut vm_workspace_completion = None;
         let mut ans_update: Option<(usize, Value)> = None;
         #[cfg(not(target_arch = "wasm32"))]
         let tiered_interactive = self
@@ -1044,7 +1069,7 @@ impl RunMatSession {
                 )
                 .await
             {
-                Ok(Some(native)) => {
+                Ok(super::executable::TieredInteractiveInvocation::Native(Ok(native))) => {
                     native_loop_backedges = native.loop_backedges.clone();
                     if is_expression_stmt {
                         if let Some(expression) = native.expression.clone() {
@@ -1064,6 +1089,7 @@ impl RunMatSession {
                             .build(),
                         )
                     })?;
+                    completed_global_names = snapshot.global_bindings.into_iter().collect();
                     execution_vars.retain(|name, _| snapshot.values.contains_key(name));
                     for (name, value) in snapshot.values {
                         let slot = execution_vars.get(&name).copied().unwrap_or_else(|| {
@@ -1090,10 +1116,15 @@ impl RunMatSession {
                         }
                     }
                 }
-                Ok(None) => {}
-                Err(native_error) => {
+                Ok(super::executable::TieredInteractiveInvocation::Cold) => {}
+                Ok(super::executable::TieredInteractiveInvocation::Native(Err(native_error))) => {
+                    used_jit = true;
                     execution_completed = true;
                     error = Some(native_error);
+                }
+                Err(admission_error) => {
+                    execution_completed = true;
+                    error = Some(admission_error);
                 }
             }
         }
@@ -1136,10 +1167,16 @@ impl RunMatSession {
                 }
             }
 
-            match self
-                .interpret_with_context(&execution_bytecode, &mut variable_array, execution_runtime)
-                .await
-            {
+            let execution = self
+                .interpret_with_context(
+                    &execution_bytecode,
+                    &mut variable_array,
+                    execution_runtime,
+                    workspace_admission.take(),
+                )
+                .await;
+            vm_workspace_completion = execution.workspace;
+            match execution.outcome {
                 Ok(runmat_vm::InterpreterOutcome::Completed(completion)) => {
                     let results = completion.values;
                     self.stats.interpreter_fallback += 1;
@@ -1324,9 +1361,19 @@ impl RunMatSession {
             self.stats.total_execution_time_ms as f64 / self.stats.total_executions as f64;
 
         let vm_workspace_state = (!used_jit)
-            .then(runmat_vm::take_updated_workspace_state)
+            .then(|| vm_workspace_completion.map(|completion| completion.state))
             .flatten();
         let mut completed_workspace = if let Some(workspace_state) = vm_workspace_state {
+            completed_global_names = workspace_state
+                .global_aliases
+                .values()
+                .filter_map(|binding| match binding {
+                    runmat_runtime::workspace::bindings::FrameGlobalBinding::Named(name) => {
+                        Some(name.clone())
+                    }
+                    runmat_runtime::workspace::bindings::FrameGlobalBinding::LegacySlot => None,
+                })
+                .collect();
             let mutated_names = workspace_state.names;
             let assigned = workspace_state.assigned;
             if debug_trace {
@@ -1392,8 +1439,13 @@ impl RunMatSession {
             // mutation in source order. The completed register file now only
             // refreshes VM slot metadata; it is never a second workspace
             // authority and must not overwrite a newer canonical value.
-            self.refresh_workspace_binding_slots(&completed_workspace);
+            self.refresh_workspace_binding_slots(&completed_workspace, &completed_global_names);
         }
+        let durable_global_names = self
+            .session_global_binding_names()
+            .map_err(RunError::Runtime)?;
+        self.reconcile_workspace_global_binding_keys(&execution_vars, &durable_global_names)
+            .map_err(RunError::Runtime)?;
 
         // Function-definition publication remains transactional with a
         // successful language execution; value assignments above deliberately
@@ -1491,7 +1543,7 @@ impl RunMatSession {
                 timestamp_ms: entry.timestamp_ms,
             })
             .collect();
-        let canonical_workspace = self.base_workspace_snapshot().map_err(RunError::Runtime)?;
+        let canonical_workspace = self.logical_workspace_values().map_err(RunError::Runtime)?;
         let (workspace_entries, snapshot_full) = if workspace_snapshot_force_full {
             let mut entries = canonical_workspace
                 .iter()
@@ -1634,13 +1686,15 @@ impl RunMatSession {
         bytecode: &runmat_vm::Bytecode,
         variable_array: &mut Vec<Value>,
         runtime: runmat_runtime::context::RuntimeContext,
-    ) -> Result<runmat_vm::InterpreterOutcome, RuntimeError> {
+        admission: Option<runmat_vm::PendingWorkspaceAdmission>,
+    ) -> runmat_vm::WorkspaceInterpreterOutcome {
         let source_name = self.current_source_name().to_string();
-        runmat_vm::interpret_with_vars_in_context(
+        runmat_vm::interpret_with_workspace_in_context(
             bytecode,
             variable_array,
             Some(source_name.as_str()),
             runtime,
+            admission,
         )
         .await
     }
@@ -1649,7 +1703,7 @@ impl RunMatSession {
         &self,
         workspace_names: Vec<String>,
     ) -> std::result::Result<Vec<crate::abi::WorkspaceBindingValue>, RunError> {
-        let workspace = self.base_workspace_snapshot().map_err(RunError::Runtime)?;
+        let workspace = self.logical_workspace_values().map_err(RunError::Runtime)?;
         let mut workspace_names = workspace_names;
         workspace_names.sort();
         workspace_names.dedup();
@@ -1670,18 +1724,29 @@ impl RunMatSession {
 
     fn abi_workspace_removals(
         &self,
-        previous_workspace_names: HashSet<String>,
-    ) -> std::result::Result<Vec<crate::abi::WorkspaceBindingKey>, RunError> {
-        let workspace = self.base_workspace_snapshot().map_err(RunError::Runtime)?;
-        let mut removed_names = previous_workspace_names
+        previous_workspace_bindings: HashMap<String, crate::abi::WorkspaceBindingKey>,
+        include_missing_names: bool,
+    ) -> std::result::Result<(Vec<crate::abi::WorkspaceBindingKey>, bool), RunError> {
+        let workspace = self.logical_workspace_values().map_err(RunError::Runtime)?;
+        let mut removed_names = false;
+        let mut removed = previous_workspace_bindings
             .into_iter()
-            .filter(|name| workspace.get(name).is_none())
+            .filter(|(name, previous_key)| {
+                if workspace.get(name).is_none() {
+                    removed_names |= include_missing_names;
+                    return include_missing_names;
+                }
+                self.workspace_bindings
+                    .get(name)
+                    .map(|binding| &binding.key)
+                    .is_some_and(|current_key| current_key != previous_key)
+            })
             .collect::<Vec<_>>();
-        removed_names.sort();
-        Ok(removed_names
-            .into_iter()
-            .map(|name| self.workspace_binding_key(&name))
-            .collect())
+        removed.sort_by(|left, right| left.0.cmp(&right.0));
+        Ok((
+            removed.into_iter().map(|(_, key)| key).collect(),
+            removed_names,
+        ))
     }
 }
 

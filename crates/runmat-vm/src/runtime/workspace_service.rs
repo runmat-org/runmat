@@ -5,12 +5,13 @@ use runmat_runtime::context::RuntimeWorkspaceService;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
+use super::workspace::workspace_frame_for_service;
 use super::workspace::{
     reconcile_workspace_frame, release_pending_workspace_service_frame,
     reserve_workspace_service_frame, workspace_frame_assign, workspace_frame_assign_from_executor,
-    workspace_frame_clear, workspace_frame_lookup, workspace_frame_name_is_global,
-    workspace_frame_publishes, workspace_frame_remove, workspace_frame_snapshot,
-    workspace_global_names, WorkspaceFrameId, WorkspaceFrameLifecycle,
+    workspace_frame_clear, workspace_frame_declare_global, workspace_frame_lookup,
+    workspace_frame_name_is_global, workspace_frame_publishes, workspace_frame_remove,
+    workspace_frame_snapshot, PendingWorkspaceAdmission, WorkspaceFrameId, WorkspaceFrameLifecycle,
 };
 
 /// Exact current-frame service installed around one interpreter invocation.
@@ -22,33 +23,54 @@ pub(crate) struct VmWorkspaceService {
     frame: WorkspaceFrameId,
     lifecycle: Rc<Cell<WorkspaceFrameLifecycle>>,
     delegate_revision: Cell<Option<runmat_runtime::workspace::WorkspaceRevision>>,
+    session_variables: runmat_runtime::workspace::session::SessionVariableAuthority,
 }
 
 impl VmWorkspaceService {
     pub(crate) fn install(
         runtime: runmat_runtime::context::RuntimeContext,
-    ) -> runmat_runtime::context::RuntimeContext {
-        Self::prepare(runtime).0
+        admission: Option<PendingWorkspaceAdmission>,
+    ) -> (
+        runmat_runtime::context::RuntimeContext,
+        super::workspace::WorkspaceFrameActivation,
+    ) {
+        let runtime_id = runtime.local_identity();
+        let (runtime, service) = Self::prepare(runtime, admission);
+        (
+            runtime,
+            super::workspace::frame_activation(runtime_id, service.frame),
+        )
     }
 
     fn prepare(
         runtime: runmat_runtime::context::RuntimeContext,
+        admission: Option<PendingWorkspaceAdmission>,
     ) -> (
         runmat_runtime::context::RuntimeContext,
         Rc<VmWorkspaceService>,
     ) {
         let delegate = runtime.service_ports().workspace().cloned();
         let runtime_id = runtime.local_identity();
-        let pending = reserve_workspace_service_frame(runtime_id);
-        *pending.delegate.borrow_mut() = delegate;
+        let pending =
+            reserve_workspace_service_frame(runtime_id, admission.map(|item| item.into_state()));
+        *pending.delegate.borrow_mut() = delegate.clone();
+        let session_variables = runtime.session_variable_authority();
+        *pending.session_variables.borrow_mut() = Some(session_variables.clone());
+        let lineage = delegate
+            .as_ref()
+            .and_then(|delegate| workspace_frame_for_service(runtime_id, delegate));
+        pending.parent.set(lineage.map(|(parent, _)| parent));
+        pending.base.set(lineage.map(|(_, base)| base));
         let service = Rc::new(Self {
             delegate: pending.delegate,
             runtime: runtime_id,
             frame: pending.id,
             lifecycle: pending.lifecycle,
             delegate_revision: Cell::new(None),
+            session_variables,
         });
         let port: Rc<dyn RuntimeWorkspaceService> = service.clone();
+        *pending.service.borrow_mut() = Some(Rc::downgrade(&port));
         let ports = runtime.service_ports().clone().with_workspace(port);
         (runtime.with_service_ports(ports), service)
     }
@@ -132,7 +154,9 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
                 .delegate()
                 .map(|delegate| delegate.global_names())
                 .unwrap_or_default(),
-            WorkspaceFrameLifecycle::Active => workspace_global_names(),
+            WorkspaceFrameLifecycle::Active => {
+                self.session_variables.global_names().unwrap_or_default()
+            }
             WorkspaceFrameLifecycle::Closed => Vec::new(),
         }
     }
@@ -165,9 +189,7 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
         if !self.is_pending() {
             self.ensure_effect_authority()?;
         }
-        self.delegate()
-            .map(|delegate| delegate.try_global_names())
-            .unwrap_or_else(|| Ok(workspace_global_names()))
+        self.session_variables.global_names()
     }
 
     fn ensure_effect_authority(&self) -> Result<(), RuntimeError> {
@@ -206,12 +228,18 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
         self.ensure_effect_authority()?;
         runmat_runtime::execution::validate_storable_value(&value)?;
-        if self.should_publish()
-            && !workspace_frame_name_is_global(self.frame, name).unwrap_or(false)
-        {
+        let global = workspace_frame_name_is_global(self.frame, name).unwrap_or(false);
+        if self.should_publish() {
             if let Some(delegate) = self.delegate() {
-                delegate.assign(name, value.clone())?;
+                if global {
+                    delegate.remove(name)?;
+                } else {
+                    delegate.assign(name, value.clone())?;
+                }
             }
+        }
+        if global {
+            self.session_variables.store_global(name, value.clone())?;
         }
         workspace_frame_assign(self.frame, name, value).map_err(workspace_operation_error)
     }
@@ -224,12 +252,18 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
     ) -> Result<(), RuntimeError> {
         self.ensure_mutation_authority()?;
         runmat_runtime::execution::validate_storable_value(&value)?;
-        if self.should_publish()
-            && !workspace_frame_name_is_global(self.frame, name).unwrap_or(false)
-        {
+        let global = workspace_frame_name_is_global(self.frame, name).unwrap_or(false);
+        if self.should_publish() {
             if let Some(delegate) = self.delegate() {
-                delegate.assign(name, value.clone())?;
+                if global {
+                    delegate.remove(name)?;
+                } else {
+                    delegate.assign(name, value.clone())?;
+                }
             }
+        }
+        if global {
+            self.session_variables.store_global(name, value.clone())?;
         }
         workspace_frame_assign_from_executor(self.frame, name, value)
             .map_err(workspace_operation_error)
@@ -245,13 +279,26 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
         workspace_frame_clear(self.frame).map_err(workspace_operation_error)
     }
 
+    fn declare_global_binding(&self, slot: usize, name: &str) -> Result<(), RuntimeError> {
+        self.ensure_mutation_authority()?;
+        if self.should_publish() {
+            if let Some(delegate) = self.delegate() {
+                delegate.bind_base_global(name)?;
+            }
+        }
+        workspace_frame_declare_global(self.frame, slot, name.to_string()).ok_or_else(|| {
+            frame_error("RunMat:Workspace:FrameClosed", "workspace frame is closed")
+        })?;
+        let value = self.session_variables.declare_global(name)?;
+        workspace_frame_assign_from_executor(self.frame, name, value)
+            .map_err(workspace_operation_error)
+    }
+
     fn remove(&self, name: &str) -> Result<(), RuntimeError> {
         self.ensure_effect_authority()?;
-        if self.should_publish()
-            && !workspace_frame_name_is_global(self.frame, name).unwrap_or(false)
-        {
+        if self.should_publish() {
             if let Some(delegate) = self.delegate() {
-                delegate.remove(name)?;
+                delegate.unbind_base_global(name)?;
             }
         }
         workspace_frame_remove(self.frame, name).map_err(workspace_operation_error)
@@ -273,13 +320,105 @@ mod tests {
 
     use runmat_runtime::context::RuntimeWorkspaceService;
     use runmat_runtime::workspace::bindings::FrameGlobalBindings;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::Arc;
+    use std::task::{Context, Poll, Wake};
 
     use super::*;
+
+    struct NoopWake;
+
+    impl Wake for NoopWake {
+        fn wake(self: Arc<Self>) {}
+    }
+
+    fn poll<T>(future: Pin<&mut impl Future<Output = T>>) -> Poll<T> {
+        let waker = std::task::Waker::from(Arc::new(NoopWake));
+        future.poll(&mut Context::from_waker(&waker))
+    }
 
     struct CountingWorkspaceService {
         inner: Rc<dyn RuntimeWorkspaceService>,
         snapshots: Cell<usize>,
         mutation_admissions: Cell<usize>,
+    }
+
+    #[test]
+    fn sibling_futures_share_a_runtime_without_crossing_frames_or_receipts() {
+        fn sibling(
+            runtime: runmat_runtime::context::RuntimeContext,
+            service: Rc<VmWorkspaceService>,
+            value: f64,
+        ) -> Pin<Box<impl Future<Output = ()>>> {
+            let activation =
+                super::super::workspace::frame_activation(runtime.local_identity(), service.frame);
+            Box::pin(activation.scope(runtime.scope(async move {
+                let mut values = vec![Value::Num(value)];
+                let _guard = super::super::workspace::set_workspace_state(
+                    HashMap::from([("x".to_string(), 0)]),
+                    HashSet::from(["x".to_string()]),
+                    &mut values,
+                    FrameGlobalBindings::default(),
+                );
+                let mut yielded = false;
+                std::future::poll_fn(move |_| {
+                    if yielded {
+                        Poll::Ready(())
+                    } else {
+                        yielded = true;
+                        Poll::Pending
+                    }
+                })
+                .await;
+                assert_eq!(
+                    workspace_frame_lookup(service.frame, "x"),
+                    Some(Value::Num(value))
+                );
+                for target in [
+                    super::super::workspace::WorkspaceTarget::Current,
+                    super::super::workspace::WorkspaceTarget::Caller,
+                    super::super::workspace::WorkspaceTarget::Base,
+                ] {
+                    assert_eq!(
+                        super::super::workspace::workspace_target_snapshot(target)
+                            .unwrap()
+                            .vars[0],
+                        Value::Num(value)
+                    );
+                }
+            })))
+        }
+
+        let base = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let (first_runtime, first_service) = VmWorkspaceService::prepare(base.clone(), None);
+        let (second_runtime, second_service) = VmWorkspaceService::prepare(base, None);
+        assert_eq!(
+            first_runtime.local_identity(),
+            second_runtime.local_identity()
+        );
+
+        let mut first = sibling(first_runtime, first_service.clone(), 1.0);
+        let mut second = sibling(second_runtime, second_service.clone(), 2.0);
+        assert!(poll(first.as_mut()).is_pending());
+        assert!(poll(second.as_mut()).is_pending());
+        assert!(poll(first.as_mut()).is_ready());
+        let first_completion =
+            super::super::workspace::take_workspace_completion(first_service.frame).unwrap();
+        assert_eq!(first_completion.state.vars[0], Value::Num(1.0));
+        assert_eq!(
+            second_service.try_lookup("x").unwrap(),
+            Some(Value::Num(2.0))
+        );
+
+        drop(second);
+        let second_completion =
+            super::super::workspace::take_workspace_completion(second_service.frame).unwrap();
+        assert_eq!(second_completion.state.vars[0], Value::Num(2.0));
+        assert!(first_service.try_lookup("x").is_err());
+        assert!(second_service.try_lookup("x").is_err());
     }
 
     impl RuntimeWorkspaceService for CountingWorkspaceService {
@@ -338,7 +477,7 @@ mod tests {
         let base = runmat_runtime::context::RuntimeContext::new(Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
-        let (outer_runtime, outer_service) = VmWorkspaceService::prepare(base);
+        let (outer_runtime, outer_service) = VmWorkspaceService::prepare(base, None);
 
         futures::executor::block_on(outer_runtime.scope(async {
             let mut outer_values = vec![Value::Num(1.0)];
@@ -353,7 +492,8 @@ mod tests {
                 Some(Value::Num(1.0))
             );
 
-            let (inner_runtime, inner_service) = VmWorkspaceService::prepare(outer_runtime.clone());
+            let (inner_runtime, inner_service) =
+                VmWorkspaceService::prepare(outer_runtime.clone(), None);
             inner_runtime
                 .scope(async {
                     let mut inner_values = vec![Value::Num(2.0)];
@@ -407,7 +547,7 @@ mod tests {
             .clone()
             .with_workspace(delegate.clone());
         let runtime = runtime.with_service_ports(ports);
-        let (runtime, service) = VmWorkspaceService::prepare(runtime);
+        let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
 
         futures::executor::block_on(runtime.scope(async {
             let mut values = vec![Value::Num(1.0)];
@@ -429,6 +569,51 @@ mod tests {
     }
 
     #[test]
+    fn top_level_global_declaration_removes_shadowed_base_and_is_captured_typed() {
+        let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+        let base_service = Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(
+            owner.clone(),
+        ));
+        base_service.assign("g", Value::Num(1.0)).unwrap();
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let ports = runtime.service_ports().clone().with_workspace(base_service);
+        let runtime = runtime.with_service_ports(ports);
+        let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
+
+        let completed = futures::executor::block_on(runtime.scope(async {
+            let mut values = vec![Value::Num(1.0)];
+            let guard = super::super::workspace::set_workspace_state(
+                HashMap::from([("g".to_string(), 0)]),
+                HashSet::from(["g".to_string()]),
+                &mut values,
+                FrameGlobalBindings::default(),
+            );
+            service.declare_global_binding(0, "g").unwrap();
+            assert_eq!(
+                service.try_lookup("g").unwrap(),
+                Some(Value::Tensor(
+                    runmat_value::Tensor::new(Vec::new(), vec![0, 0]).unwrap()
+                )),
+                "a first global declaration must not expose the shadowed local"
+            );
+            service
+                .assign_executor_slot(0, "g", Value::Num(9.0))
+                .unwrap();
+            drop(guard);
+            super::super::workspace::take_updated_workspace_state().unwrap()
+        }));
+
+        let projection = owner.snapshot().unwrap();
+        assert_eq!(projection.get("g"), None);
+        assert_eq!(
+            completed.global_aliases.get(&0),
+            Some(&runmat_runtime::workspace::bindings::FrameGlobalBinding::Named("g".into()))
+        );
+    }
+
+    #[test]
     fn transient_frame_rejects_effects_after_session_workspace_closes() {
         let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
         let base_service = Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(
@@ -439,7 +624,7 @@ mod tests {
         ));
         let ports = runtime.service_ports().clone().with_workspace(base_service);
         let runtime = runtime.with_service_ports(ports);
-        let (runtime, service) = VmWorkspaceService::prepare(runtime);
+        let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
 
         futures::executor::block_on(runtime.scope(async {
             let mut values = vec![Value::Num(1.0)];
@@ -494,7 +679,7 @@ mod tests {
             .clone()
             .with_workspace(delegate.clone());
         let runtime = runtime.with_service_ports(ports);
-        let (runtime, service) = VmWorkspaceService::prepare(runtime);
+        let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
 
         futures::executor::block_on(runtime.scope(async {
             let mut values = vec![Value::Num(0.0)];
@@ -536,7 +721,7 @@ mod tests {
             .clone()
             .with_workspace(delegate.clone());
         let runtime = runtime.with_service_ports(ports);
-        let (runtime, service) = VmWorkspaceService::prepare(runtime);
+        let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
 
         futures::executor::block_on(runtime.scope(async {
             let aliases = FrameGlobalBindings::default();
@@ -596,7 +781,7 @@ mod tests {
                 .clone()
                 .with_workspace(canonical.clone());
             let runtime = runtime.with_service_ports(ports);
-            let (runtime, service) = VmWorkspaceService::prepare(runtime);
+            let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
             drop(canonical);
             drop(projection);
             drop(owner);

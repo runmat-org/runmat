@@ -33,6 +33,7 @@ fn workspace(values: BTreeMap<String, Value>) -> NativeWorkspaceState {
         },
         FrameGlobalBindings::default(),
         None,
+        None,
     )
     .unwrap()
 }
@@ -134,6 +135,7 @@ fn stale_service_does_not_retain_the_canonical_projection_after_state_drop() {
             NativeWorkspaceInput::default(),
             FrameGlobalBindings::default(),
             Some(canonical.clone()),
+            None,
         )
         .unwrap();
         let service = state.service();

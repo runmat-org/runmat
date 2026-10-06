@@ -1,4 +1,5 @@
 use crate::{execute_text_request_for_testing, RunMatSession};
+use futures::executor::block_on;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -11,16 +12,163 @@ fn completed_register_metadata_cannot_overwrite_newer_canonical_state() {
         let outcome = execute_text_request_for_testing(&mut session, "x = 99;").unwrap();
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
 
-        session.refresh_workspace_binding_slots(&HashMap::from([(
-            "x".to_string(),
-            (0, runmat_value::Value::Num(1.0)),
-        )]));
+        session.refresh_workspace_binding_slots(
+            &HashMap::from([("x".to_string(), (0, runmat_value::Value::Num(1.0)))]),
+            &Default::default(),
+        );
 
         assert_eq!(
             session.get_variables().unwrap().get("x"),
             Some(&runmat_value::Value::Num(99.0))
         );
         assert_eq!(session.lowering_workspace_bindings().get("x"), Some(&0));
+    });
+}
+
+#[test]
+fn top_level_global_binding_survives_requests_without_copying_its_value_into_base() {
+    runmat_gc::gc_test_context(|| {
+        for jit in [false, true] {
+            let mut session = RunMatSession::with_options(jit, false).unwrap();
+            if jit {
+                session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+                    generic_hot_threshold: 1,
+                    specialized_hot_threshold: 100,
+                    deterministic: true,
+                    ..Default::default()
+                });
+            }
+
+            let initial = execute_text_request_for_testing(&mut session, "g = 1;").unwrap();
+            assert!(initial.error.is_none(), "jit={jit}: {:?}", initial.error);
+            let local_key = initial
+                .workspace_delta
+                .upserts
+                .iter()
+                .find(|entry| workspace_key_name(&entry.key) == "g")
+                .expect("local g upsert")
+                .key
+                .clone();
+            assert!(!matches!(
+                local_key,
+                crate::abi::WorkspaceBindingKey::Global { .. }
+            ));
+            let binding =
+                execute_text_request_for_testing(&mut session, "global g; g = 9; observed = g;")
+                    .unwrap();
+            assert!(binding.error.is_none(), "jit={jit}: {:?}", binding.error);
+            assert!(binding.workspace_delta.upserts.iter().any(|entry| {
+                matches!(
+                    &entry.key,
+                    crate::abi::WorkspaceBindingKey::Global { name, .. }
+                        if name.0 == "g" && entry.value == runmat_value::Value::Num(9.0)
+                )
+            }));
+            assert!(binding.workspace_delta.removals.contains(&local_key));
+            assert_eq!(session.base_workspace_snapshot().unwrap().get("g"), None);
+
+            let read =
+                execute_text_request_for_testing(&mut session, "observed_again = g;").unwrap();
+            assert!(read.error.is_none(), "jit={jit}: {:?}", read.error);
+            assert_eq!(
+                session.get_variables().unwrap().get("observed_again"),
+                Some(&runmat_value::Value::Num(9.0))
+            );
+            assert_eq!(
+                session
+                    .workspace_snapshot()
+                    .unwrap()
+                    .values
+                    .iter()
+                    .find(|entry| entry.name == "g")
+                    .map(|entry| &entry.value),
+                Some(&runmat_value::Value::Num(9.0))
+            );
+
+            let bytes = block_on(session.export_workspace_state(crate::WorkspaceExportMode::Force))
+                .unwrap()
+                .expect("forced export");
+            let mut restored = RunMatSession::with_options(false, false).unwrap();
+            restored.import_workspace_state(&bytes).unwrap();
+            assert_eq!(
+                restored.get_variables().unwrap().get("g"),
+                Some(&runmat_value::Value::Num(9.0))
+            );
+        }
+    });
+}
+
+#[test]
+fn clearing_a_durable_global_binding_restores_local_then_redeclare_reads_global_store() {
+    runmat_gc::gc_test_context(|| {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        let bind = execute_text_request_for_testing(&mut session, "global g; g = 9;").unwrap();
+        assert!(bind.error.is_none(), "{:?}", bind.error);
+        let global_key = bind
+            .workspace_delta
+            .upserts
+            .iter()
+            .find(|entry| workspace_key_name(&entry.key) == "g")
+            .expect("global g upsert")
+            .key
+            .clone();
+
+        let local = execute_text_request_for_testing(&mut session, "clear g; g = 3;").unwrap();
+        assert!(local.error.is_none(), "{:?}", local.error);
+        assert!(local.workspace_delta.removals.contains(&global_key));
+        assert_eq!(
+            session.get_variables().unwrap().get("g"),
+            Some(&runmat_value::Value::Num(3.0))
+        );
+
+        let rebound =
+            execute_text_request_for_testing(&mut session, "global g; retained_global = g;")
+                .unwrap();
+        assert!(rebound.error.is_none(), "{:?}", rebound.error);
+        let values = session.get_variables().unwrap();
+        assert_eq!(values.get("g"), Some(&runmat_value::Value::Num(9.0)));
+        assert_eq!(
+            values.get("retained_global"),
+            Some(&runmat_value::Value::Num(9.0))
+        );
+    });
+}
+
+fn workspace_key_name(key: &crate::abi::WorkspaceBindingKey) -> &str {
+    match key {
+        crate::abi::WorkspaceBindingKey::SourceBinding { binding, .. } => &binding.0,
+        crate::abi::WorkspaceBindingKey::SessionSlot { name, .. }
+        | crate::abi::WorkspaceBindingKey::Global { name, .. }
+        | crate::abi::WorkspaceBindingKey::Persistent { name, .. } => &name.0,
+    }
+}
+
+#[test]
+fn procedure_global_binding_does_not_reclassify_the_top_level_binding() {
+    runmat_gc::gc_test_context(|| {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        let definition = execute_text_request_for_testing(
+            &mut session,
+            "g = 4; result = updateGlobal();\nfunction out = updateGlobal()\nglobal g; g = 11; out = g;\nend",
+        )
+        .unwrap();
+        assert!(definition.error.is_none(), "{:?}", definition.error);
+
+        let local = execute_text_request_for_testing(&mut session, "top_level_seen = g;").unwrap();
+        assert!(local.error.is_none(), "{:?}", local.error);
+        assert_eq!(
+            session.get_variables().unwrap().get("top_level_seen"),
+            Some(&runmat_value::Value::Num(4.0))
+        );
+
+        let global =
+            execute_text_request_for_testing(&mut session, "global g; session_global_seen = g;")
+                .unwrap();
+        assert!(global.error.is_none(), "{:?}", global.error);
+        assert_eq!(
+            session.get_variables().unwrap().get("session_global_seen"),
+            Some(&runmat_value::Value::Num(11.0))
+        );
     });
 }
 

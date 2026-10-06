@@ -26,6 +26,11 @@ impl RunMatSession {
     }
 
     pub(crate) fn workspace_binding_key(&self, name: &str) -> crate::abi::WorkspaceBindingKey {
+        if self.workspace_bindings.get(name).is_some_and(|binding| {
+            matches!(&binding.key, crate::abi::WorkspaceBindingKey::Global { .. })
+        }) {
+            return self.global_workspace_binding_key(name);
+        }
         let binding = runmat_hir::BindingName(name.to_string());
         if let Some(source) = self.active_source_identity.clone() {
             crate::abi::WorkspaceBindingKey::SourceBinding {
@@ -41,6 +46,27 @@ impl RunMatSession {
         }
     }
 
+    pub(crate) fn global_workspace_binding_key(
+        &self,
+        name: &str,
+    ) -> crate::abi::WorkspaceBindingKey {
+        crate::abi::WorkspaceBindingKey::Global {
+            scope: crate::abi::GlobalScopeKey::Session(self.abi_workspace_handle.0),
+            name: runmat_hir::BindingName(name.to_string()),
+        }
+    }
+
+    pub(crate) fn session_global_binding_names(
+        &self,
+    ) -> std::result::Result<std::collections::HashSet<String>, RuntimeError> {
+        Ok(self
+            .base_workspace
+            .global_names()
+            .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)?
+            .into_iter()
+            .collect())
+    }
+
     pub(crate) fn bind_workspace_slot(&mut self, name: String, slot: usize) {
         let key = self.workspace_binding_key(&name);
         self.workspace_bindings
@@ -52,11 +78,95 @@ impl RunMatSession {
     pub(crate) fn refresh_workspace_binding_slots(
         &mut self,
         completed: &HashMap<String, (usize, Value)>,
+        global_names: &std::collections::HashSet<String>,
     ) {
         self.workspace_bindings.clear();
         for (name, (slot, _)) in completed {
-            self.bind_workspace_slot(name.clone(), *slot);
+            let key = if global_names.contains(name) {
+                self.global_workspace_binding_key(name)
+            } else {
+                self.workspace_binding_key(name)
+            };
+            self.workspace_bindings
+                .insert(name.clone(), SessionWorkspaceBinding { key, slot: *slot });
         }
+    }
+
+    pub(crate) fn reconcile_workspace_global_binding_keys(
+        &mut self,
+        execution_slots: &HashMap<String, usize>,
+        global_names: &std::collections::HashSet<String>,
+    ) -> std::result::Result<(), RuntimeError> {
+        for name in global_names {
+            let Some(slot) = execution_slots.get(name).copied().or_else(|| {
+                self.workspace_bindings
+                    .get(name)
+                    .map(|binding| binding.slot)
+            }) else {
+                continue;
+            };
+            let key = self.global_workspace_binding_key(name);
+            self.workspace_bindings
+                .insert(name.clone(), SessionWorkspaceBinding { key, slot });
+        }
+
+        let retired = self
+            .workspace_bindings
+            .iter()
+            .filter_map(|(name, binding)| {
+                (matches!(&binding.key, crate::abi::WorkspaceBindingKey::Global { .. })
+                    && !global_names.contains(name))
+                .then(|| (name.clone(), binding.slot))
+            })
+            .collect::<Vec<_>>();
+        for (name, slot) in retired {
+            if self
+                .base_workspace
+                .lookup(&name)
+                .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)?
+                .is_some()
+            {
+                self.workspace_bindings.remove(&name);
+                self.bind_workspace_slot(name, slot);
+            } else {
+                self.workspace_bindings.remove(&name);
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn logical_workspace_values(
+        &self,
+    ) -> std::result::Result<std::collections::BTreeMap<String, Value>, RuntimeError> {
+        let base = self.base_workspace_snapshot()?;
+        let global_names = self.session_global_binding_names()?;
+        let mut values = base
+            .iter()
+            .filter(|(name, _)| !global_names.contains(name))
+            .map(|(name, value)| (name.to_string(), value.clone()))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        for name in global_names {
+            if let Some(value) = self.runtime_context.session_global_value(&name)? {
+                values.insert(name, value);
+            }
+        }
+        Ok(values)
+    }
+
+    pub(crate) fn logical_workspace_value(
+        &self,
+        name: &str,
+    ) -> std::result::Result<Option<Value>, RuntimeError> {
+        if self
+            .base_workspace
+            .is_global(name)
+            .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)?
+        {
+            return self.runtime_context.session_global_value(name);
+        }
+        self.base_workspace
+            .lookup(name)
+            .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)
     }
 
     pub(crate) fn lowering_workspace_bindings(&self) -> HashMap<String, usize> {
@@ -85,15 +195,15 @@ impl RunMatSession {
             return Ok(None);
         }
 
-        let snapshot = self
-            .base_workspace_snapshot()
+        let values = self
+            .logical_workspace_values()
             .map_err(workspace_runtime_error)?;
-        let mut entries = Vec::with_capacity(snapshot.len());
-        for (name, value) in snapshot.iter() {
-            let gathered = gather_if_needed_async(value)
+        let mut entries = Vec::with_capacity(values.len());
+        for (name, value) in values {
+            let gathered = gather_if_needed_async(&value)
                 .await
                 .map_err(workspace_runtime_error)?;
-            entries.push((name.to_string(), gathered));
+            entries.push((name, gathered));
         }
 
         if entries.is_empty() && matches!(mode, WorkspaceExportMode::Auto) {
@@ -127,7 +237,6 @@ impl RunMatSession {
         self.base_workspace
             .apply(delta)
             .map_err(base_workspace_error)?;
-
         self.workspace_bindings.clear();
         for (index, (name, _)) in entries.into_iter().enumerate() {
             self.bind_workspace_slot(name.clone(), index);
@@ -138,16 +247,19 @@ impl RunMatSession {
     }
 
     pub fn workspace_snapshot(&mut self) -> std::result::Result<WorkspaceSnapshot, RuntimeError> {
-        let snapshot = self.base_workspace_snapshot()?;
-        let mut entries: Vec<WorkspaceEntry> = snapshot
+        let values = self.logical_workspace_values()?;
+        let entries: Vec<WorkspaceEntry> = values
             .iter()
             .map(|(name, value)| workspace_entry(name, value))
             .collect();
-        entries.sort_by(|a, b| a.name.cmp(&b.name));
 
         Ok(WorkspaceSnapshot {
             full: true,
-            version: snapshot.revision().get(),
+            version: self
+                .base_workspace
+                .revision()
+                .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)?
+                .get(),
             values: self.attach_workspace_preview_tokens(entries),
         })
     }
@@ -167,9 +279,8 @@ impl RunMatSession {
                 .ok_or_else(|| anyhow::anyhow!("Unknown workspace preview token"))?,
         };
         let value = self
-            .base_workspace
-            .lookup(&name)
-            .map_err(base_workspace_error)?
+            .logical_workspace_value(&name)
+            .map_err(workspace_runtime_error)?
             .ok_or_else(|| anyhow::anyhow!("Variable '{name}' not found in workspace"))?;
 
         let is_gpu = matches!(value, Value::GpuTensor(_));
@@ -239,11 +350,7 @@ impl RunMatSession {
 
     /// Get the current persistent workspace values keyed by source name.
     pub fn get_variables(&self) -> std::result::Result<HashMap<String, Value>, RuntimeError> {
-        let snapshot = self.base_workspace_snapshot()?;
-        Ok(snapshot
-            .iter()
-            .map(|(name, value)| (name.to_string(), value.clone()))
-            .collect())
+        Ok(self.logical_workspace_values()?.into_iter().collect())
     }
 
     pub(crate) fn build_workspace_snapshot(

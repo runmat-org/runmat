@@ -1,3 +1,4 @@
+use crate::context::RuntimeWorkspaceService;
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_value::HandleRef;
 use runmat_value::{CellArray, Tensor, TransientValueError, Value};
@@ -37,6 +38,54 @@ fn ordered_delta_applies_clear_and_later_assignment_in_order() {
     let snapshot = workspace.snapshot().unwrap();
     assert_eq!(snapshot.len(), 1);
     assert_eq!(snapshot.get("after"), Some(&Value::Num(3.0)));
+}
+
+#[test]
+fn global_binding_and_shadow_removal_share_one_canonical_revision() {
+    let workspace = BaseWorkspaceOwner::new();
+    workspace.apply(assigned("g", Value::Num(1.0))).unwrap();
+    let revision = workspace.revision().unwrap();
+    let mut delta = WorkspaceDelta::new();
+    delta.bind_global("g");
+    workspace.commit(revision, delta).unwrap();
+
+    let snapshot = workspace.snapshot().unwrap();
+    assert!(snapshot.is_global("g"));
+    assert_eq!(snapshot.get("g"), None);
+}
+
+#[test]
+fn stale_assignment_cannot_resurface_after_global_binding_is_cleared() {
+    let workspace = BaseWorkspaceOwner::new();
+    workspace.apply(assigned("g", Value::Num(1.0))).unwrap();
+    let mut stale = workspace.begin_projection().unwrap();
+
+    let mut bind = WorkspaceDelta::new();
+    bind.bind_global("g");
+    workspace.apply(bind).unwrap();
+    stale.assign("g", Value::Num(99.0)).unwrap();
+    stale.publish().unwrap();
+
+    let mut unbind = WorkspaceDelta::new();
+    unbind.unbind_global("g");
+    workspace.apply(unbind).unwrap();
+    let snapshot = workspace.snapshot().unwrap();
+    assert!(!snapshot.is_global("g"));
+    assert_eq!(snapshot.get("g"), None);
+}
+
+#[test]
+fn explicit_local_assignment_atomically_reclassifies_a_global_name() {
+    let workspace = BaseWorkspaceOwner::new();
+    let service = BaseWorkspaceService::new(workspace.clone());
+    let mut bind = WorkspaceDelta::new();
+    bind.bind_global("g");
+    workspace.apply(bind).unwrap();
+
+    service.assign_base_local("g", Value::Num(7.0)).unwrap();
+    let snapshot = workspace.snapshot().unwrap();
+    assert!(!snapshot.is_global("g"));
+    assert_eq!(snapshot.get("g"), Some(&Value::Num(7.0)));
 }
 
 #[test]

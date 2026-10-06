@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use runmat_value::Value;
@@ -11,11 +12,20 @@ use super::{BaseWorkspaceError, BaseWorkspaceProjection, WorkspaceDelta, Workspa
 pub struct BaseWorkspaceSnapshot {
     revision: WorkspaceRevision,
     pub(super) entries: RootedWorkspaceEntries,
+    pub(super) global_bindings: HashSet<String>,
 }
 
 impl BaseWorkspaceSnapshot {
-    pub(super) fn new(revision: WorkspaceRevision, entries: RootedWorkspaceEntries) -> Self {
-        Self { revision, entries }
+    pub(super) fn new(
+        revision: WorkspaceRevision,
+        entries: RootedWorkspaceEntries,
+        global_bindings: HashSet<String>,
+    ) -> Self {
+        Self {
+            revision,
+            entries,
+            global_bindings,
+        }
     }
 
     pub fn revision(&self) -> WorkspaceRevision {
@@ -38,6 +48,14 @@ impl BaseWorkspaceSnapshot {
         self.entries
             .iter()
             .map(|(name, entry)| (name.as_str(), entry.value()))
+    }
+
+    pub fn is_global(&self, name: &str) -> bool {
+        self.global_bindings.contains(name)
+    }
+
+    pub fn global_names(&self) -> impl Iterator<Item = &str> {
+        self.global_bindings.iter().map(String::as_str)
     }
 
     /// Materialize independent language values for an explicit host/export
@@ -124,6 +142,7 @@ pub(super) struct BaseWorkspaceState {
     pub(super) closed: bool,
     pub(super) revision: WorkspaceRevision,
     pub(super) entries: RootedWorkspaceEntries,
+    pub(super) global_bindings: HashSet<String>,
     pub(super) journal: WorkspaceJournal,
 }
 
@@ -153,7 +172,29 @@ impl BaseWorkspaceOwner {
             .try_borrow()
             .map_err(|_| BaseWorkspaceError::BorrowConflict)?;
         state.ensure_open()?;
-        Ok(state.entries.get(name).map(|entry| entry.clone_value()))
+        Ok((!state.global_bindings.contains(name))
+            .then(|| state.entries.get(name).map(|entry| entry.clone_value()))
+            .flatten())
+    }
+
+    pub fn is_global(&self, name: &str) -> Result<bool, BaseWorkspaceError> {
+        let state = self
+            .state
+            .try_borrow()
+            .map_err(|_| BaseWorkspaceError::BorrowConflict)?;
+        state.ensure_open()?;
+        Ok(state.global_bindings.contains(name))
+    }
+
+    pub fn global_names(&self) -> Result<Vec<String>, BaseWorkspaceError> {
+        let state = self
+            .state
+            .try_borrow()
+            .map_err(|_| BaseWorkspaceError::BorrowConflict)?;
+        state.ensure_open()?;
+        let mut names = state.global_bindings.iter().cloned().collect::<Vec<_>>();
+        names.sort();
+        Ok(names)
     }
 
     /// Visit canonical retained values without materializing a workspace
@@ -241,6 +282,7 @@ impl BaseWorkspaceOwner {
         }
         state.closed = true;
         state.entries.clear();
+        state.global_bindings.clear();
         let revision = state.revision;
         state.journal.clear_at(revision);
         Ok(true)
@@ -259,6 +301,7 @@ impl BaseWorkspaceOwner {
                 closed: false,
                 revision: WorkspaceRevision::INITIAL,
                 entries: RootedWorkspaceEntries::new(),
+                global_bindings: HashSet::new(),
                 journal: WorkspaceJournal::new(history_change_limit),
             })),
         }
@@ -287,7 +330,11 @@ impl BaseWorkspaceState {
     }
 
     pub(super) fn snapshot(&self) -> BaseWorkspaceSnapshot {
-        BaseWorkspaceSnapshot::new(self.revision, self.entries.clone())
+        BaseWorkspaceSnapshot::new(
+            self.revision,
+            self.entries.clone(),
+            self.global_bindings.clone(),
+        )
     }
 
     pub(super) fn reconcile(
@@ -295,7 +342,11 @@ impl BaseWorkspaceState {
         revision: WorkspaceRevision,
     ) -> Result<BaseWorkspaceReconciliation, BaseWorkspaceError> {
         self.ensure_open()?;
-        self.journal
-            .reconcile(revision, self.revision, &self.entries)
+        self.journal.reconcile(
+            revision,
+            self.revision,
+            &self.entries,
+            &self.global_bindings,
+        )
     }
 }
