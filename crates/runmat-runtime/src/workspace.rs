@@ -8,8 +8,8 @@ pub mod bindings;
 pub(crate) use base::base_workspace_error_to_runtime;
 pub use base::{
     BaseWorkspaceCommit, BaseWorkspaceError, BaseWorkspaceOwner, BaseWorkspaceProjection,
-    BaseWorkspaceReconciliation, BaseWorkspaceService, BaseWorkspaceSnapshot, WorkspaceChange,
-    WorkspaceChangeKind, WorkspaceDelta, WorkspaceRevision,
+    BaseWorkspaceProjectionService, BaseWorkspaceReconciliation, BaseWorkspaceService,
+    BaseWorkspaceSnapshot, WorkspaceChange, WorkspaceChangeKind, WorkspaceDelta, WorkspaceRevision,
 };
 pub use checked::{
     base_workspace_owner, begin_base_workspace_projection, try_assign, try_clear, try_global_names,

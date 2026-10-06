@@ -7,7 +7,9 @@ use crate::context::{
 };
 use crate::execution::RuntimeExecutionService;
 
-use super::{BaseWorkspaceOwner, BaseWorkspaceService, WorkspaceRevision};
+use super::{
+    BaseWorkspaceOwner, BaseWorkspaceProjectionService, BaseWorkspaceService, WorkspaceRevision,
+};
 
 #[derive(Debug, Default)]
 struct CallerWorkspace;
@@ -115,4 +117,50 @@ fn current_base_service_admits_projection_without_owner_exposure() {
     projection.publish().unwrap();
 
     assert_eq!(owner.lookup("projected").unwrap(), Some(Value::Num(2.0)));
+}
+
+#[test]
+fn projection_service_stages_ordered_changes_until_a_safepoint() {
+    let owner = BaseWorkspaceOwner::new();
+    let service = BaseWorkspaceProjectionService::new(owner.begin_projection().unwrap());
+
+    service.assign("discarded", Value::Num(1.0)).unwrap();
+    service.clear().unwrap();
+    service.assign("kept", Value::Num(2.0)).unwrap();
+
+    assert!(owner.snapshot().unwrap().is_empty());
+    assert!(service.has_pending_changes().unwrap());
+    let receipt = service.publish().unwrap();
+    assert_eq!(receipt.change_count(), 2);
+    assert_eq!(owner.lookup("discarded").unwrap(), None);
+    assert_eq!(owner.lookup("kept").unwrap(), Some(Value::Num(2.0)));
+}
+
+#[test]
+fn projection_service_preserves_typed_close_failures_before_mutation() {
+    let owner = BaseWorkspaceOwner::new();
+    let service = BaseWorkspaceProjectionService::new(owner.begin_projection().unwrap());
+    owner.close().unwrap();
+
+    for error in [
+        service.assign("late", Value::Num(1.0)).unwrap_err(),
+        service.remove("late").unwrap_err(),
+        service.clear().unwrap_err(),
+        service.try_lookup("late").unwrap_err(),
+    ] {
+        assert_eq!(error.identifier(), Some("RunMat:Workspace:Closed"));
+    }
+    assert!(!service.has_pending_changes().unwrap());
+}
+
+#[test]
+fn projection_service_clones_share_one_exact_invocation_view() {
+    let owner = BaseWorkspaceOwner::new();
+    let writer = BaseWorkspaceProjectionService::new(owner.begin_projection().unwrap());
+    let reader = writer.clone();
+
+    writer.assign("shared", Value::Num(3.0)).unwrap();
+    assert_eq!(reader.try_lookup("shared").unwrap(), Some(Value::Num(3.0)));
+    reader.publish().unwrap();
+    assert_eq!(owner.lookup("shared").unwrap(), Some(Value::Num(3.0)));
 }
