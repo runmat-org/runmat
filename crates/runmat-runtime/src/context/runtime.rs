@@ -661,7 +661,10 @@ impl RuntimeContext {
         // A lab is an isolated mutable-language-state owner. Caller-provided
         // ports cannot confer either its current frame or session base
         // workspace; a lab workspace must be installed explicitly afterward.
-        let services = services.without_workspace().without_base_workspace();
+        let services = services
+            .without_workspace()
+            .without_base_workspace()
+            .without_graphics_presentation();
         let child = Self::with_cancellation(self.execution.clone(), self.cancellation())
             .with_program_revision(self.program_revision.clone())
             .with_service_ports(services);

@@ -1,7 +1,7 @@
 use super::{
-    RuntimeCapability, RuntimeCapabilityError, RuntimePreferenceService,
-    RuntimeSourceEvaluationService, RuntimeTcpService, RuntimeTimingService,
-    RuntimeUserPathService,
+    RuntimeCapability, RuntimeCapabilityError, RuntimeGraphicsPresentationService,
+    RuntimePreferenceService, RuntimeSourceEvaluationService, RuntimeTcpService,
+    RuntimeTimingService, RuntimeUserPathService,
 };
 use crate::builtin::RuntimeBuiltinBinding;
 use crate::class_registry::RuntimeClass;
@@ -1049,6 +1049,7 @@ pub struct RuntimeServicePorts {
     base_workspace: Option<Rc<dyn RuntimeBaseWorkspaceService>>,
     object: Option<Rc<dyn RuntimeObjectService>>,
     host: Option<Rc<dyn RuntimeHostService>>,
+    graphics_presentation: Option<Rc<dyn RuntimeGraphicsPresentationService>>,
     http: Option<Rc<dyn RuntimeHttpService>>,
     preferences: Option<Rc<dyn RuntimePreferenceService>>,
     user_path: Option<Rc<dyn RuntimeUserPathService>>,
@@ -1079,6 +1080,7 @@ impl Default for RuntimeServicePorts {
             base_workspace: None,
             object: None,
             host: None,
+            graphics_presentation: None,
             http: None,
             preferences: None,
             user_path: None,
@@ -1112,6 +1114,10 @@ impl std::fmt::Debug for RuntimeServicePorts {
             .field("base_workspace", &self.base_workspace.is_some())
             .field("object", &self.object.is_some())
             .field("host", &self.host.is_some())
+            .field(
+                "graphics_presentation",
+                &self.graphics_presentation.is_some(),
+            )
             .field("http", &self.http.is_some())
             .field("preferences", &self.preferences.is_some())
             .field("user_path", &self.user_path.is_some())
@@ -1258,6 +1264,13 @@ impl RuntimeServicePorts {
         self.base_workspace = None;
         self
     }
+
+    /// Parallel labs cannot borrow their parent's window, surface, or event
+    /// queue authority merely because their service ports were cloned.
+    pub fn without_graphics_presentation(mut self) -> Self {
+        self.graphics_presentation = None;
+        self
+    }
     port_accessors!(
         with_object,
         object,
@@ -1273,6 +1286,14 @@ impl RuntimeServicePorts {
         host,
         RuntimeHostService,
         Host
+    );
+    port_accessors!(
+        with_graphics_presentation,
+        graphics_presentation,
+        require_graphics_presentation,
+        graphics_presentation,
+        RuntimeGraphicsPresentationService,
+        GraphicsPresentation
     );
     port_accessors!(
         with_http,
@@ -1527,6 +1548,7 @@ mod tests {
             missing(ports.require_collective("SPMD barrier")),
             missing(ports.require_local_tasks("schedule callback")),
             missing(ports.require_source_evaluation("evaluate session source")),
+            missing(ports.require_graphics_presentation("flush graphics")),
         ];
         assert_eq!(
             failures
@@ -1553,11 +1575,44 @@ mod tests {
                 RuntimeCapability::Collective,
                 RuntimeCapability::LocalTasks,
                 RuntimeCapability::SourceEvaluation,
+                RuntimeCapability::GraphicsPresentation,
             ]
         );
         assert!(failures.iter().all(|failure| {
             failure.clone().into_runtime_error().identifier()
                 == Some(RuntimeCapabilityError::IDENTIFIER)
         }));
+    }
+
+    #[test]
+    fn parallel_lab_does_not_inherit_cloned_parent_graphics_authority() {
+        struct ParentGraphics;
+        impl RuntimeGraphicsPresentationService for ParentGraphics {
+            fn flush(
+                &self,
+                _: super::super::GraphicsFlushRequest,
+            ) -> std::pin::Pin<Box<dyn super::super::RuntimeGraphicsFlushOperation>> {
+                panic!("a cloned lab must never submit the parent's graphics request")
+            }
+        }
+
+        let parent = super::super::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_graphics_presentation(std::rc::Rc::new(ParentGraphics)),
+        );
+        assert!(parent.service_ports().graphics_presentation().is_some());
+        let lab = parent.fork_parallel_lab(parent.service_ports().clone());
+        assert!(lab.service_ports().graphics_presentation().is_none());
+        assert_eq!(
+            lab.service_ports()
+                .require_graphics_presentation("drawnow")
+                .err()
+                .map(|error| error.capability),
+            Some(RuntimeCapability::GraphicsPresentation)
+        );
+        assert!(parent.service_ports().graphics_presentation().is_some());
     }
 }

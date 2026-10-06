@@ -5,6 +5,7 @@
 //! migrated through [`legacy`] and must not become new semantic dependencies.
 
 mod capability;
+mod graphics_presentation;
 mod arity;
 mod catch;
 mod local_tasks;
@@ -39,6 +40,11 @@ pub mod preparation;
 pub use arity::RuntimeInvocationArity;
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use catch::{ActiveCatchFuture, ActiveCatchGuard, UnboxedActiveCatchFuture};
+pub use graphics_presentation::{
+    GraphicsCallbackPolicy, GraphicsCallbackReceipt, GraphicsFlushDisposition, GraphicsFlushRate,
+    GraphicsFlushReceipt, GraphicsFlushRequest, GraphicsPresentation,
+    RuntimeGraphicsFlushOperation, RuntimeGraphicsPresentationService,
+};
 pub use host_document::{HostDocumentRequest, HostTextLocation, HostTextSelection};
 #[cfg(target_arch = "wasm32")]
 pub use local_tasks::BrowserLocalTaskSupervisor;
