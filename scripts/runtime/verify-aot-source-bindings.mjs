@@ -138,7 +138,43 @@ try {
     assert.equal(structResult.status, 0, `linked legacy struct form failed:\n${structResult.stderr}`);
     assert.match(structResult.stdout, /MATLAB:nargoutchk:tooManyOutputs/u);
 
-    console.log("linked AOT source, callback, re-invocation, error, and arity witnesses passed");
+    const dealWide = compile("aot_deal_wide", [
+        "function result = aot_deal_wide()",
+        "  u = uint64(9007199254740992) + uint64(1);",
+        "  [a, b, c] = deal(u);",
+        "  assert(isa(a, 'uint64') && a == u && b == u && c == u);",
+        "  result = 17;",
+        "end",
+        ""
+    ].join("\n"));
+    const dealWideResult = invoke(dealWide);
+    assert.equal(dealWideResult.status, 0, `linked wide-integer deal failed:\n${dealWideResult.stderr}`);
+    assert.equal(dealWideResult.stdout.trim(), "17", "linked deal changed wide-integer class or value");
+
+    const dealZero = compile("aot_deal_zero_outputs", [
+        "function result = aot_deal_zero_outputs()",
+        "  deal(uint32(7));",
+        "  result = 11;",
+        "end",
+        ""
+    ].join("\n"));
+    const dealZeroResult = invoke(dealZero);
+    assert.equal(dealZeroResult.status, 0, `linked zero-output deal failed:\n${dealZeroResult.stderr}`);
+    assert.equal(dealZeroResult.stdout.trim(), "11", "zero-output deal changed the function result");
+
+    const dealBadCount = compile("aot_deal_bad_count", [
+        "function result = aot_deal_bad_count()",
+        "  f = @deal;",
+        "  [a, b, c] = f(uint64(1), uint64(2));",
+        "  result = 0;",
+        "end",
+        ""
+    ].join("\n"));
+    const dealBadCountResult = invoke(dealBadCount);
+    assert.notEqual(dealBadCountResult.status, 0, "linked deal must reject mismatched input/output counts");
+    assert.match(dealBadCountResult.stderr, /RunMat:deal:InputOutputCountMismatch/u);
+
+    console.log("linked AOT source, callback, re-invocation, error, arity, and deal witnesses passed");
 } finally {
     rmSync(directory, { recursive: true, force: true });
 }

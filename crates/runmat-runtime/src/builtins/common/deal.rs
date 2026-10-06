@@ -39,6 +39,10 @@ pub async fn deal_builtin_registered(rest: Vec<Value>) -> crate::BuiltinResult<V
     Ok(Value::OutputList(rest))
 }
 
+#[cfg(all(test, feature = "wgpu"))]
+#[path = "deal/wgpu_tests.rs"]
+mod wgpu_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,6 +83,40 @@ mod tests {
             );
             runmat_gc::gc_collect_major().unwrap();
             assert_eq!(allocation.probe.retirements(), 1);
+        });
+    }
+
+    #[test]
+    fn replicated_managed_aliases_survive_gc_until_output_roots_retire() {
+        runmat_gc::gc_test_context(|| {
+            let allocation = runmat_gc::gc_allocate_rooted(Value::String("deal payload".into()))
+                .expect("managed payload");
+            let target = allocation.handle();
+            let nested = Value::Cell(
+                runmat_value::CellArray::new(
+                    vec![Value::HandleObject(runmat_value::HandleRef {
+                        class_name: "DealPayload".into(),
+                        target,
+                        valid: true,
+                    })],
+                    1,
+                    1,
+                )
+                .expect("nested managed input"),
+            );
+            let result = call(vec![nested.clone()], 3).expect("replicate managed input");
+            assert_eq!(result, Value::OutputList(vec![nested.clone(); 3]));
+            let output_roots =
+                crate::execution::RootedValueHandles::for_values(std::iter::once(&result))
+                    .expect("root returned aliases");
+            allocation.unroot().expect("release input allocation root");
+            drop(nested);
+            runmat_gc::gc_collect_major().expect("collect while outputs are retained");
+            assert!(runmat_gc::gc_with_value(&target, |_| ()).is_ok());
+            drop(output_roots);
+            drop(result);
+            runmat_gc::gc_collect_major().expect("collect after output retirement");
+            assert!(runmat_gc::gc_with_value(&target, |_| ()).is_err());
         });
     }
 
