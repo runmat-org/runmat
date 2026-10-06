@@ -269,6 +269,24 @@ impl RuntimeContext {
         Ok(self)
     }
 
+    pub fn portable_program_source_map(&self) -> Option<&runmat_execution::ExecutableSourceMapV2> {
+        self.program_sources
+            .as_ref()
+            .and_then(|binding| binding.portable_map())
+            .map(|map| map.as_ref())
+    }
+
+    pub(crate) fn retain_portable_program_source_map(
+        &mut self,
+        map: std::sync::Arc<runmat_execution::ExecutableSourceMapV2>,
+    ) {
+        let binding =
+            self.program_sources.as_mut().and_then(Rc::get_mut).expect(
+                "newly issued program binding is not shared before portable map attachment",
+            );
+        binding.retain_portable_map(map);
+    }
+
     pub(crate) fn source_catalog_view(
         &self,
     ) -> Option<&Rc<RefCell<crate::source_context::SourceCatalogProjection>>> {

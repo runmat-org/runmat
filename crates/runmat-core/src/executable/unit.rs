@@ -39,9 +39,11 @@ impl ExecutableUnit {
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
-        let runtime = runtime
-            .with_program_sources(records)
-            .map_err(|error| error.to_string())?;
+        let portable = self.source_map.portable_v2()?;
+        let runtime = runmat_runtime::source_context::bind_portable_source_map_v2_with_records(
+            runtime, &portable, records,
+        )
+        .map_err(|error| error.to_string())?;
         for metadata in self.mir.functions.values() {
             if runtime.program_source_id(metadata.source).is_none() {
                 return Err(format!(
