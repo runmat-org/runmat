@@ -6,7 +6,7 @@ use crate::runtime::workspace::{
     replace_workspace_target_vars_and_state, workspace_assign_target, workspace_target_snapshot,
     WorkspaceAssignedReport, WorkspaceTarget, WorkspaceValueSnapshot,
 };
-use runmat_hir::{CallableIdentity, FunctionId, QualifiedName, SymbolName};
+use runmat_hir::{FunctionId, QualifiedName, SymbolName};
 use runmat_parser::{parse_with_options, CompatMode, ParserOptions};
 use runmat_runtime::RuntimeError;
 use runmat_thread_local::runmat_thread_local;
@@ -890,17 +890,15 @@ fn merge_eval_function_registry(bytecode: &mut Bytecode, parent_registry: &Funct
     ids.sort_by_key(|id| id.0);
     let remap = eval_function_id_remap(&ids, parent_registry);
     for instr in &mut bytecode.instructions {
-        remap_eval_local_function_instr(instr, &remap);
+        crate::bytecode::program::function_remap::remap_eval_local_instruction(instr, &remap);
     }
     for id in ids {
         if let Some(function) = eval_registry.functions.get(&id) {
             let mut function = function.clone();
-            if let Some(new_id) = remap.get(&id).copied() {
-                function.function = new_id;
-                for instr in &mut function.instructions {
-                    remap_eval_local_function_instr(instr, &remap);
-                }
-            }
+            crate::bytecode::program::function_remap::remap_eval_local_function(
+                &mut function,
+                &remap,
+            );
             merged.insert_replacing_name(function);
         }
     }
@@ -929,53 +927,6 @@ fn eval_function_id_remap(
         remap.insert(*old_id, new_id);
     }
     remap
-}
-
-fn remap_eval_local_function_instr(instr: &mut Instr, remap: &HashMap<FunctionId, FunctionId>) {
-    match instr {
-        Instr::CreateSemanticClosure(function, _, _, _)
-        | Instr::CreateBoundFunctionHandle(function, _, _)
-        | Instr::CreateSemanticFuture(function, _, _)
-        | Instr::CreateSemanticFutureExpandMultiOutput(function, _, _)
-        | Instr::CallSemanticFunctionMulti(function, _, _)
-        | Instr::CallSemanticFunctionMultiUsingOutputSlot(function, _, _)
-        | Instr::CallSemanticFunctionExpandMultiOutput(function, _, _) => {
-            remap_function_id(function, remap);
-        }
-        Instr::CallSemanticNestedFunctionMulti { function, .. }
-        | Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { function, .. }
-        | Instr::CallSemanticNestedFunctionExpandMultiOutput { function, .. } => {
-            remap_function_id(function, remap);
-        }
-        Instr::CallFunctionMulti { identity, .. }
-        | Instr::CallFunctionMultiUsingOutputSlot { identity, .. }
-        | Instr::CallFunctionExpandMultiOutput { identity, .. } => {
-            remap_eval_local_callable_identity(identity, remap);
-        }
-        _ => {}
-    }
-}
-
-fn remap_function_id(function: &mut FunctionId, remap: &HashMap<FunctionId, FunctionId>) {
-    if let Some(new_id) = remap.get(function).copied() {
-        *function = new_id;
-    }
-}
-
-fn remap_eval_local_callable_identity(
-    identity: &mut CallableIdentity,
-    remap: &HashMap<FunctionId, FunctionId>,
-) {
-    match identity {
-        CallableIdentity::BoundFunction(function)
-        | CallableIdentity::AnonymousFunction(function) => remap_function_id(function, remap),
-        CallableIdentity::ExternalFunction { .. }
-        | CallableIdentity::Builtin(_)
-        | CallableIdentity::Imported(_)
-        | CallableIdentity::Method(_)
-        | CallableIdentity::DynamicName(_)
-        | CallableIdentity::ExternalName(_) => {}
-    }
 }
 
 pub enum ImportedBuiltinResolution {
@@ -1078,10 +1029,80 @@ pub async fn resolve_imported_builtin(
 mod tests {
     use super::{
         current_dynamic_eval_options, dynamic_source_context, imported_builtin_qualified_name,
-        parse_finite_arity_bound, push_dynamic_eval_options,
+        merge_eval_function_registry, parse_finite_arity_bound, push_dynamic_eval_options,
     };
+    use crate::bytecode::{FunctionBytecode, FunctionRegistry, Instr};
+    use runmat_hir::FunctionId;
     use runmat_parser::CompatMode;
+    use runmat_types::{CallableFallbackPolicy, CallableIdentity};
     use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
+    use std::collections::HashMap;
+
+    fn compile_test_source(source: &str) -> crate::Bytecode {
+        let ast = runmat_parser::parse(source).expect("parse test source");
+        let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty())
+            .expect("lower test source");
+        let mir = runmat_mir::lowering::lower_assembly(&hir.assembly).expect("lower test MIR");
+        crate::bytecode::compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id)
+            .expect("compile test source")
+    }
+
+    #[test]
+    fn eval_merge_preserves_parent_external_identity_when_local_id_collides() {
+        let overlapping = FunctionId(7);
+        let parent = FunctionRegistry::new(HashMap::from([(
+            overlapping,
+            FunctionBytecode {
+                function: overlapping,
+                display_name: "parent_helper".into(),
+                ..Default::default()
+            },
+        )]));
+        let mut bytecode = compile_test_source("value = 1;");
+        bytecode.instructions = vec![Instr::CallFunctionMulti {
+            identity: CallableIdentity::ExternalFunction {
+                function: overlapping,
+                display_name: "parent_helper".into(),
+            },
+            fallback_policy: CallableFallbackPolicy::ExternalBoundary,
+            arg_count: 0,
+            out_count: 1,
+        }];
+        bytecode.function_registry = FunctionRegistry::new(HashMap::from([(
+            overlapping,
+            FunctionBytecode {
+                function: overlapping,
+                display_name: "eval_local".into(),
+                ..Default::default()
+            },
+        )]));
+
+        merge_eval_function_registry(&mut bytecode, &parent);
+
+        let Instr::CallFunctionMulti { identity, .. } = &bytecode.instructions[0] else {
+            panic!("expected compiler-bound parent call");
+        };
+        assert_eq!(
+            identity,
+            &CallableIdentity::ExternalFunction {
+                function: overlapping,
+                display_name: "parent_helper".into(),
+            }
+        );
+        assert_eq!(
+            bytecode.function_registry.resolve_name("parent_helper"),
+            Some(overlapping)
+        );
+        let eval_local = bytecode
+            .function_registry
+            .resolve_name("eval_local")
+            .expect("eval-local body remains published");
+        assert_ne!(eval_local, overlapping);
+        assert_eq!(
+            bytecode.function_registry.get(eval_local).unwrap().function,
+            eval_local
+        );
+    }
 
     #[test]
     fn dynamic_eval_guard_restores_runtime_extension_policy() {

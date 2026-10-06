@@ -24,8 +24,16 @@ use super::{
 
 #[path = "program/definition_dependencies.rs"]
 mod definition_dependencies;
+#[path = "program/function_remap.rs"]
+pub(crate) mod function_remap;
+#[path = "program/retained_artifacts.rs"]
+pub(crate) mod retained_artifacts;
+#[path = "program/semantic_fingerprint.rs"]
+mod semantic_fingerprint;
 #[path = "program/source_facts.rs"]
 mod source_facts;
+
+pub use semantic_fingerprint::semantic_definition_fingerprint;
 
 #[derive(Debug, Clone)]
 pub struct CallFrame {

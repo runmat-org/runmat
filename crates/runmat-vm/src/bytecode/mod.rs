@@ -29,7 +29,8 @@ pub use instr::{
 };
 pub use parallel::{BytecodeParallelVariable, BytecodeParforRegion, BytecodeSpmdRegion};
 pub use program::{
-    AsyncMetadata, AwaitSite, Bytecode, FunctionBytecode, FunctionRegistry, SpawnSite,
+    semantic_definition_fingerprint, AsyncMetadata, AwaitSite, Bytecode, FunctionBytecode,
+    FunctionRegistry, SpawnSite,
 };
 #[cfg(feature = "native-accel")]
 pub use program::{

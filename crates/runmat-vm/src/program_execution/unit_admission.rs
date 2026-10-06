@@ -50,6 +50,20 @@ impl AdmittedExecutableUnit {
 }
 
 impl RuntimeBoundExecutableUnit {
+    /// Confirm that this unit's fresh source leases were issued into the
+    /// selected destination session. Matching serialized or numeric source
+    /// identities are not sufficient authority.
+    pub fn validate_runtime_owner(
+        &self,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<(), &'static str> {
+        if self.runtime.local_identity() != runtime.local_identity() {
+            return Err("executable unit is bound to a different runtime owner");
+        }
+        self.bytecode.validate_selected_source_owners(runtime)?;
+        self.registry.validate_selected_source_owners(runtime)
+    }
+
     pub fn bytecode(&self) -> &Bytecode {
         &self.bytecode
     }
@@ -75,6 +89,23 @@ impl RuntimeBoundExecutableUnit {
         runmat_runtime::context::RuntimeContext,
     ) {
         (self.bytecode, self.registry, self.layout, self.runtime)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        registry: FunctionRegistry,
+        runtime: runmat_runtime::context::RuntimeContext,
+    ) -> Self {
+        Self {
+            bytecode: Bytecode::with_instructions(Vec::new(), 0),
+            registry,
+            layout: VmAssemblyLayout {
+                functions: Default::default(),
+                entrypoints: Default::default(),
+                storage_bindings: Default::default(),
+            },
+            runtime,
+        }
     }
 }
 

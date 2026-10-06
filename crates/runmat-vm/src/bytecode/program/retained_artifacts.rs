@@ -1,0 +1,208 @@
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+use runmat_execution::FunctionBindingOrigin;
+use runmat_hir::FunctionId;
+use runmat_runtime::user_functions::{DefinitionOwnerGraph, SourceFunctionInfo};
+use runmat_value::FunctionDefinitionOwner;
+
+use super::{function_remap, FunctionBytecode, FunctionRegistry};
+use crate::program_execution::RuntimeBoundExecutableUnit;
+
+#[path = "retained_artifacts/ids.rs"]
+mod ids;
+use ids::DestinationFunctionIds;
+#[path = "retained_artifacts/fingerprints.rs"]
+mod fingerprints;
+#[path = "retained_artifacts/types.rs"]
+mod types;
+pub use types::{
+    PreparedRetainedCallableUnits, RetainedCallableStageError, RetainedCallableStageLimits,
+};
+#[path = "retained_artifacts/work_limits.rs"]
+mod work_limits;
+
+/// Prepare imported executable definitions as retained-only bodies. The
+/// destination registry is cloned and changed only after every unit, origin,
+/// source owner, graph, and remap has validated. Every unit must already be
+/// bound into `destination_runtime`; its retained runtime then owns those
+/// target-session leases. Numeric IDs from the artifact are never reused as
+/// destination authority.
+pub fn prepare_retained_callable_units(
+    destination_runtime: &runmat_runtime::context::RuntimeContext,
+    destination: &FunctionRegistry,
+    units: Vec<RuntimeBoundExecutableUnit>,
+    limits: RetainedCallableStageLimits,
+) -> Result<PreparedRetainedCallableUnits, RetainedCallableStageError> {
+    work_limits::validate(&units, limits)?;
+    for unit in &units {
+        unit.validate_runtime_owner(destination_runtime)
+            .map_err(|_| RetainedCallableStageError::ForeignSourceOwner)?;
+        let mut source_roots = HashMap::new();
+        for (function, body) in &unit.registry().functions {
+            let source = body
+                .source_id
+                .ok_or(RetainedCallableStageError::MissingRuntimeSource)?;
+            source_roots.entry(source).or_insert(*function);
+        }
+        for function in source_roots.into_values() {
+            if unit
+                .registry()
+                .definition_dependency_owners(function)
+                .is_none()
+            {
+                return Err(RetainedCallableStageError::IncompleteDefinitionGraph);
+            }
+        }
+    }
+
+    let mut allocator = DestinationFunctionIds::new(destination);
+    let mut origin_destinations = HashMap::<FunctionBindingOrigin, (FunctionId, String)>::new();
+    let mut imported = HashMap::<FunctionId, FunctionBytecode>::new();
+
+    for unit in &units {
+        let fingerprints = fingerprints::normalized(unit.registry())?;
+        let mut source_ids = unit
+            .registry()
+            .functions
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+        source_ids.sort_by_key(|function| function.0);
+        let mut local_origins = HashSet::new();
+        let mut remap = HashMap::with_capacity(source_ids.len());
+        for source_id in &source_ids {
+            let body = &unit.registry().functions[source_id];
+            let origin = body
+                .binding_origin
+                .ok_or(RetainedCallableStageError::MissingOrigin {
+                    function: *source_id,
+                })?;
+            if !local_origins.insert(origin) {
+                return Err(RetainedCallableStageError::DuplicateOrigin);
+            }
+            let destination_id = match origin_destinations.get(&origin) {
+                Some((destination_id, fingerprint)) => {
+                    if fingerprint != &fingerprints[&origin] {
+                        return Err(RetainedCallableStageError::ConflictingOrigin);
+                    }
+                    *destination_id
+                }
+                None => {
+                    let destination_id = allocator.allocate()?;
+                    origin_destinations
+                        .insert(origin, (destination_id, fingerprints[&origin].clone()));
+                    destination_id
+                }
+            };
+            remap.insert(*source_id, destination_id);
+        }
+        for source_id in source_ids {
+            let body = &unit.registry().functions[&source_id];
+            let origin = body
+                .binding_origin
+                .ok_or(RetainedCallableStageError::MissingOrigin {
+                    function: source_id,
+                })?;
+            let destination_id = remap[&source_id];
+            if imported.contains_key(&destination_id) {
+                debug_assert_eq!(
+                    origin_destinations
+                        .get(&origin)
+                        .map(|(function, _)| *function),
+                    Some(destination_id)
+                );
+                continue;
+            }
+            let mut body = body.clone();
+            function_remap::remap_closed_function(&mut body, &remap);
+            imported.insert(destination_id, body);
+        }
+    }
+
+    // Build complete owner graphs in a private registry. It is never exposed
+    // for name or source lookup; it exists only to reuse the canonical static
+    // dependency census against the fully remapped graph.
+    let graph_registry = FunctionRegistry::new(imported.clone());
+    let mut destination_ids = imported.keys().copied().collect::<Vec<_>>();
+    destination_ids.sort_by_key(|function| function.0);
+    let mut origin_facts = Vec::with_capacity(destination_ids.len());
+    let mut owner_graphs = HashMap::new();
+    for destination_id in &destination_ids {
+        let body = &imported[destination_id];
+        let source = body
+            .source_id
+            .ok_or(RetainedCallableStageError::MissingRuntimeSource)?;
+        let definition_owners = match owner_graphs.get(&source) {
+            Some(owners) => Arc::clone(owners),
+            None => {
+                let owners = graph_registry
+                    .definition_dependency_owners(*destination_id)
+                    .ok_or(RetainedCallableStageError::IncompleteDefinitionGraph)?;
+                let owners = owners_graph(&owners);
+                owner_graphs.insert(source, Arc::clone(&owners));
+                owners
+            }
+        };
+        let source_id = source
+            .resolve_in(destination_runtime)
+            .ok_or(RetainedCallableStageError::MissingRuntimeSource)?;
+        origin_facts.push(SourceFunctionInfo {
+            source_id,
+            name: body.display_name.clone(),
+            function: destination_id.0,
+            role: body.source_role,
+            binding_origin: body.binding_origin,
+            source_file: body.source_file.clone(),
+            definition_owners: Some(definition_owners),
+        });
+    }
+    // One temporary lease per staged body is sufficient. Per-root owner
+    // graphs above share these owners and must not turn a wide source group
+    // into a quadratic number of live lease records.
+    let staging_leases = destination_ids
+        .iter()
+        .map(|function| {
+            let body = &imported[function];
+            FunctionDefinitionOwner::issue(&body.definition_owner, function.0)
+        })
+        .collect();
+
+    let mut registry = destination.clone();
+    registry.insert_retained_definitions(imported.into_values());
+    Ok(PreparedRetainedCallableUnits::new(
+        registry,
+        Arc::new(origin_facts),
+        staging_leases,
+        units,
+    ))
+}
+
+fn owners_graph(owners: &[(FunctionId, Arc<FunctionDefinitionOwner>)]) -> DefinitionOwnerGraph {
+    Arc::new(
+        owners
+            .iter()
+            .map(|(function, owner)| (function.0, Arc::clone(owner)))
+            .collect(),
+    )
+}
+
+impl FunctionRegistry {
+    fn insert_retained_definitions(
+        &mut self,
+        definitions: impl IntoIterator<Item = FunctionBytecode>,
+    ) {
+        self.execution_stacks.take();
+        self.prune_retired();
+        for definition in definitions {
+            self.retired
+                .entry(definition.function)
+                .or_default()
+                .push(definition);
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "retained_artifacts_tests.rs"]
+mod tests;
