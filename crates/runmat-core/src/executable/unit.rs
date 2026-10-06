@@ -59,7 +59,7 @@ impl ExecutableUnit {
     ) -> Option<runmat_vm::BytecodeSourceRef> {
         let ordinal = source.program()?;
         runtime
-            .program_source_id(ordinal)
+            .program_source_ref(ordinal)
             .map(runmat_vm::BytecodeSourceRef::Runtime)
     }
 

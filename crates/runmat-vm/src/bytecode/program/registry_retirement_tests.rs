@@ -2,11 +2,43 @@ use super::{BytecodeSourceRef, FunctionBytecode, FunctionRegistry};
 use runmat_hir::{FunctionId, SourceId};
 use std::collections::HashMap;
 
+thread_local! {
+    static ISSUED: (runmat_runtime::context::RuntimeContext, std::cell::RefCell<Vec<runmat_runtime::source_context::RuntimeSourceLease>>) = (
+        runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        )),
+        std::cell::RefCell::new(Vec::new()),
+    );
+}
+
+fn source_ref(source: usize) -> runmat_runtime::source_context::RuntimeSourceRef {
+    ISSUED.with(|(runtime, leases)| {
+        let mut leases = leases.borrow_mut();
+        while leases.len() <= source {
+            let ordinal = leases.len();
+            leases.push(
+                runmat_runtime::source_context::lease_source_context_in_context(
+                    runtime,
+                    format!("source-{ordinal}.m"),
+                    None,
+                    format!("source {ordinal}"),
+                )
+                .expect("test source owner"),
+            );
+        }
+        leases[source].source_ref()
+    })
+}
+
+fn runtime_ref(source: usize) -> BytecodeSourceRef {
+    BytecodeSourceRef::Runtime(source_ref(source))
+}
+
 fn function(id: usize, name: &str, source: usize) -> FunctionBytecode {
     FunctionBytecode {
         function: FunctionId(id),
         display_name: name.into(),
-        source_id: Some(BytecodeSourceRef::Runtime(SourceId(source))),
+        source_id: Some(runtime_ref(source)),
         ..Default::default()
     }
 }
@@ -26,36 +58,38 @@ fn source_projection_preserves_aliases_and_rebuilds_current_membership_atomicall
     let unchanged = registry.clone();
     assert_eq!(
         registry.project_current_source_ids(|source| {
-            (source == BytecodeSourceRef::Runtime(SourceId(5)))
-                .then_some(BytecodeSourceRef::Runtime(SourceId(1)))
+            (source == runtime_ref(5)).then_some(runtime_ref(1))
         }),
-        Err(BytecodeSourceRef::Runtime(SourceId(6)))
+        Err(runtime_ref(6))
     );
     assert_eq!(registry.source_functions, unchanged.source_functions);
     assert_eq!(registry.names, unchanged.names);
     assert_eq!(
         registry.get(FunctionId(3)).unwrap().source_id,
-        Some(BytecodeSourceRef::Runtime(SourceId(6)))
+        Some(runtime_ref(6))
     );
 
     registry
-        .project_current_source_ids(|source| match source {
-            BytecodeSourceRef::Runtime(SourceId(5)) => {
-                Some(BytecodeSourceRef::Runtime(SourceId(1)))
+        .project_current_source_ids(|source| {
+            if source == runtime_ref(5) {
+                Some(runtime_ref(1))
+            } else if source == runtime_ref(6) {
+                Some(runtime_ref(2))
+            } else {
+                None
             }
-            BytecodeSourceRef::Runtime(SourceId(6)) => {
-                Some(BytecodeSourceRef::Runtime(SourceId(2)))
-            }
-            _ => None,
         })
         .unwrap();
     assert_eq!(registry.resolve_name("alias"), Some(FunctionId(1)));
     assert_eq!(
-        registry.functions_for_source(SourceId(1)),
+        registry.functions_for_source(source_ref(1)),
         &[FunctionId(1), FunctionId(2)]
     );
-    assert_eq!(registry.functions_for_source(SourceId(2)), &[FunctionId(3)]);
-    assert!(registry.functions_for_source(SourceId(5)).is_empty());
+    assert_eq!(
+        registry.functions_for_source(source_ref(2)),
+        &[FunctionId(3)]
+    );
+    assert!(registry.functions_for_source(source_ref(5)).is_empty());
 }
 
 #[test]
@@ -78,17 +112,18 @@ fn mixed_retained_runtime_and_program_sources_project_without_losing_old_owner()
     assert_eq!(registry.source_functions, before);
     registry
         .project_current_source_ids(|source| match source {
-            BytecodeSourceRef::Program(runmat_types::ProgramSourceId(0)) => {
-                Some(BytecodeSourceRef::Runtime(SourceId(11)))
-            }
+            BytecodeSourceRef::Program(runmat_types::ProgramSourceId(0)) => Some(runtime_ref(11)),
             runtime => Some(runtime),
         })
         .expect("selected program binding");
     assert_eq!(
-        registry.functions_for_source(SourceId(11)),
+        registry.functions_for_source(source_ref(11)),
         &[FunctionId(1)]
     );
-    assert_eq!(registry.functions_for_source(SourceId(7)), &[FunctionId(2)]);
+    assert_eq!(
+        registry.functions_for_source(source_ref(7)),
+        &[FunctionId(2)]
+    );
 }
 
 #[test]
@@ -123,12 +158,13 @@ fn retained_source_group_keeps_original_path_and_locals_after_id_reuse() {
         dependencies,
         runmat_value::LocalExport::Ephemeral,
     );
-    registry.remove_source(SourceId(5));
+    registry.remove_source(source_ref(5));
     registry.insert_replacing_name(function(1, "replacement", 7));
     let old = registry
         .owned_view(FunctionId(1), &authority)
         .expect("retained old source view");
-    let group = old.execution_source_group_facts(SourceId(5));
+    let group = old
+        .execution_source_group_facts_in(&ISSUED.with(|(runtime, _)| runtime.clone()), SourceId(5));
     assert_eq!(group.len(), 2);
     assert_eq!(group[0].role, runmat_types::FunctionSourceRole::Primary);
     assert_eq!(group[1].role, runmat_types::FunctionSourceRole::Local);
@@ -139,9 +175,11 @@ fn retained_source_group_keeps_original_path_and_locals_after_id_reuse() {
     assert!(group
         .iter()
         .all(|info| info.source_file.as_deref() == Some("/old/first.m")));
-    assert!(old.execution_source_fact(FunctionId(1)).is_some());
+    assert!(old
+        .execution_source_fact_in(&ISSUED.with(|(runtime, _)| runtime.clone()), FunctionId(1))
+        .is_some());
     assert!(registry
-        .execution_source_group_facts(SourceId(5))
+        .execution_source_group_facts_in(&ISSUED.with(|(runtime, _)| runtime.clone()), SourceId(5))
         .is_empty());
     assert_eq!(registry.resolve_name("replacement"), Some(FunctionId(1)));
 }
@@ -181,7 +219,7 @@ fn source_retirement_removes_all_target_aliases_and_preserves_rebound_names() {
     registry.names.insert("rebound_alias".into(), FunctionId(1));
     registry.names.insert("rebound_alias".into(), FunctionId(3));
     registry.names.insert("first".into(), FunctionId(3));
-    let removed = registry.remove_source(SourceId(5));
+    let removed = registry.remove_source(source_ref(5));
     assert_eq!(removed.len(), 2);
     for name in ["first_alias", "second_alias", "second"] {
         assert_eq!(registry.resolve_name(name), None);
@@ -190,8 +228,11 @@ fn source_retirement_removes_all_target_aliases_and_preserves_rebound_names() {
         assert_eq!(registry.resolve_name(name), Some(FunctionId(3)));
     }
     assert_eq!(registry.functions.len(), 1);
-    assert!(registry.functions_for_source(SourceId(5)).is_empty());
-    assert_eq!(registry.functions_for_source(SourceId(6)), &[FunctionId(3)]);
+    assert!(registry.functions_for_source(source_ref(5)).is_empty());
+    assert_eq!(
+        registry.functions_for_source(source_ref(6)),
+        &[FunctionId(3)]
+    );
 }
 
 #[test]
@@ -204,8 +245,14 @@ fn replacement_retires_old_aliases_without_removing_new_name() {
     assert_eq!(registry.resolve_name("old_alias"), None);
     assert_eq!(registry.resolve_name("rebound_alias"), Some(FunctionId(3)));
     assert!(registry.get(FunctionId(1)).is_none());
-    assert_eq!(registry.functions_for_source(SourceId(5)), &[FunctionId(2)]);
-    assert_eq!(registry.functions_for_source(SourceId(7)), &[FunctionId(4)]);
+    assert_eq!(
+        registry.functions_for_source(source_ref(5)),
+        &[FunctionId(2)]
+    );
+    assert_eq!(
+        registry.functions_for_source(source_ref(7)),
+        &[FunctionId(4)]
+    );
 }
 
 #[test]
@@ -215,12 +262,18 @@ fn same_identity_refresh_preserves_aliases_and_updates_source_membership() {
     registry.insert_replacing_name(function(1, "first", 7));
     assert_eq!(registry.resolve_name("first"), Some(FunctionId(1)));
     assert_eq!(registry.resolve_name("live_alias"), Some(FunctionId(1)));
-    assert_eq!(registry.functions_for_source(SourceId(5)), &[FunctionId(2)]);
-    assert_eq!(registry.functions_for_source(SourceId(7)), &[FunctionId(1)]);
+    assert_eq!(
+        registry.functions_for_source(source_ref(5)),
+        &[FunctionId(2)]
+    );
+    assert_eq!(
+        registry.functions_for_source(source_ref(7)),
+        &[FunctionId(1)]
+    );
     registry.remove(FunctionId(1)).unwrap();
     assert_eq!(registry.resolve_name("first"), None);
     assert_eq!(registry.resolve_name("live_alias"), None);
-    assert!(registry.functions_for_source(SourceId(7)).is_empty());
+    assert!(registry.functions_for_source(source_ref(7)).is_empty());
     assert!(registry.get(FunctionId(3)).is_some());
 }
 
@@ -267,14 +320,8 @@ fn reused_numeric_id_keeps_old_lease_on_old_body() {
         &new_body.definition_owner,
         &old_body.definition_owner
     ));
-    assert_eq!(
-        old_body.source_id,
-        Some(BytecodeSourceRef::Runtime(SourceId(5)))
-    );
-    assert_eq!(
-        new_body.source_id,
-        Some(BytecodeSourceRef::Runtime(SourceId(7)))
-    );
+    assert_eq!(old_body.source_id, Some(runtime_ref(5)));
+    assert_eq!(new_body.source_id, Some(runtime_ref(7)));
 }
 
 #[test]
@@ -320,7 +367,7 @@ fn old_caller_view_retains_old_helper_without_name_fallback() {
             .collect(),
         runmat_value::LocalExport::Ephemeral,
     );
-    registry.remove_source(SourceId(5));
+    registry.remove_source(source_ref(5));
     registry.insert_replacing_name(function(4, "first", 7));
     registry.insert_replacing_name(function(5, "second", 7));
     let old = registry
@@ -393,11 +440,11 @@ fn reused_id_static_edge_and_dynamic_name_have_distinct_owners() {
     assert_eq!(view.resolve_name("second"), Some(FunctionId(2)));
     assert_eq!(
         view.get(FunctionId(2)).unwrap().source_id,
-        Some(BytecodeSourceRef::Runtime(SourceId(5)))
+        Some(runtime_ref(5))
     );
     assert_eq!(
         view.current_view().get(FunctionId(2)).unwrap().source_id,
-        Some(BytecodeSourceRef::Runtime(SourceId(7)))
+        Some(runtime_ref(7))
     );
     assert_eq!(
         view.get(FunctionId(1)).unwrap().private_owner_scope,

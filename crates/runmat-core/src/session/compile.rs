@@ -1154,7 +1154,7 @@ impl RunMatSession {
         }
         bytecode.bound_functions = bytecode.function_registry.functions.clone();
         let source_projection = source_table
-            .intern_runtime_projection(&mut self.source_pool)
+            .intern_runtime_projection(&mut self.source_pool, &self.runtime_context)
             .map_err(|error| {
                 RunError::Runtime(
                     build_runtime_error(error)

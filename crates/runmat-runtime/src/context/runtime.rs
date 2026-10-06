@@ -335,6 +335,13 @@ impl RuntimeContext {
         self.program_sources.as_ref()?.get(ordinal)
     }
 
+    pub fn program_source_ref(
+        &self,
+        ordinal: runmat_types::ProgramSourceId,
+    ) -> Option<crate::source_context::RuntimeSourceRef> {
+        self.program_sources.as_ref()?.source_ref(ordinal)
+    }
+
     pub fn with_program_revision(
         mut self,
         revision: Option<runmat_execution::ProgramRevision>,

@@ -1,20 +1,19 @@
 use std::sync::Arc;
 
-use runmat_hir::FunctionId;
-use runmat_types::SourceId;
-
 use super::{FunctionBytecode, FunctionRegistry};
+use runmat_hir::FunctionId;
 
 impl FunctionRegistry {
     /// Facts from the selected executable body, never from a same-numbered
     /// later publication. The dependency graph is issued on demand only when
     /// a callable value is created.
-    pub fn execution_source_fact(
+    pub fn execution_source_fact_in(
         &self,
+        runtime: &runmat_runtime::context::RuntimeContext,
         function: FunctionId,
     ) -> Option<runmat_runtime::user_functions::SourceFunctionInfo> {
         let body = self.get(function)?;
-        source_fact(body, None)
+        source_fact(runtime, body, None)
     }
 
     pub fn execution_definition_owners(
@@ -26,10 +25,16 @@ impl FunctionRegistry {
 
     /// Source members share one immutable owner graph. A retained view only
     /// enumerates definitions captured by that view, never published replacements.
-    pub fn execution_source_group_facts(
+    pub fn execution_source_group_facts_in(
         &self,
-        source: SourceId,
+        runtime: &runmat_runtime::context::RuntimeContext,
+        source: runmat_types::SourceId,
     ) -> Vec<runmat_runtime::user_functions::SourceFunctionInfo> {
+        let Some(source) =
+            runmat_runtime::source_context::issued_source_ref_in_context(runtime, source)
+        else {
+            return Vec::new();
+        };
         let bodies = self.execution_source_group(source);
         let owners = bodies
             .first()
@@ -37,7 +42,7 @@ impl FunctionRegistry {
             .map(owners_arc);
         bodies
             .into_iter()
-            .filter_map(|body| source_fact(body, owners.clone()))
+            .filter_map(|body| source_fact(runtime, body, owners.clone()))
             .collect()
     }
 }
@@ -54,11 +59,12 @@ fn owners_arc(
 }
 
 fn source_fact(
+    runtime: &runmat_runtime::context::RuntimeContext,
     body: &FunctionBytecode,
     definition_owners: Option<runmat_runtime::user_functions::DefinitionOwnerGraph>,
 ) -> Option<runmat_runtime::user_functions::SourceFunctionInfo> {
     Some(runmat_runtime::user_functions::SourceFunctionInfo {
-        source_id: body.source_id?.runtime()?,
+        source_id: body.source_id?.resolve_in(runtime)?,
         name: body.display_name.clone(),
         function: body.function.0,
         role: body.source_role,

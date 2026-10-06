@@ -71,29 +71,55 @@ fn current_script_and_program_envelopes_round_trip() {
 #[test]
 fn portable_artifacts_reject_session_source_references_on_encode_and_import() {
     use crate::BytecodeSourceRef;
-    use runmat_types::SourceId;
+    let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ));
+    let lease = runmat_runtime::source_context::lease_source_context_in_context(
+        &runtime,
+        "forged.m",
+        None,
+        "answer = 1;",
+    )
+    .expect("source owner");
 
     let mut bytecode = Bytecode::with_instructions(vec![Instr::Return], 0);
-    bytecode.source_id = Some(BytecodeSourceRef::Runtime(SourceId(usize::MAX - 1)));
+    bytecode.source_id = Some(BytecodeSourceRef::Runtime(lease.source_ref()));
     assert!(encode_interpreter_script_v2(&bytecode).is_err());
+    let mut forged_bytecode = Bytecode::with_instructions(vec![Instr::Return], 0);
+    forged_bytecode.source_id = Some(BytecodeSourceRef::Program(runmat_types::ProgramSourceId(0)));
+    let mut forged_value = serde_json::to_value(forged_bytecode).expect("portable template");
+    forged_value["source_id"] = serde_json::json!({"domain": "runtime", "id": usize::MAX - 1});
     let forged = super::envelope::encode_payload(
         InterpreterPayloadForm::ScriptV2,
         SCRIPT_V2_PREAMBLE,
         &[("bytecode", BYTECODE_SCHEMA_VERSION)],
-        &bytecode,
+        &forged_value,
     )
     .expect("canonical forged transport");
     assert!(decode_interpreter_script_v2(&forged).is_err());
 
-    let registry = FunctionRegistry::new(HashMap::from([(
+    let mut registry = FunctionRegistry::new(HashMap::from([(
         FunctionId(1),
         FunctionBytecode {
             function: FunctionId(1),
-            source_id: bytecode.source_id,
+            source_id: Some(BytecodeSourceRef::Program(runmat_types::ProgramSourceId(0))),
             ..Default::default()
         },
     )]));
+    let mut forged_value = serde_json::to_value(&registry).expect("portable template");
+    registry
+        .functions
+        .get_mut(&FunctionId(1))
+        .expect("one function")
+        .source_id = Some(BytecodeSourceRef::Runtime(lease.source_ref()));
     assert!(encode_interpreter_program_v2(&registry).is_err());
+    let function = forged_value["functions"]
+        .as_object_mut()
+        .expect("registry functions")
+        .values_mut()
+        .next()
+        .expect("one function");
+    function["source_id"] = serde_json::json!({"domain": "runtime", "id": usize::MAX - 1});
     let forged = super::envelope::encode_payload(
         InterpreterPayloadForm::ProgramV2,
         b"runmat-interpreter-program-v2\n",
@@ -101,7 +127,7 @@ fn portable_artifacts_reject_session_source_references_on_encode_and_import() {
             ("bytecode", BYTECODE_SCHEMA_VERSION),
             ("function_registry", FUNCTION_REGISTRY_SCHEMA_VERSION),
         ],
-        &registry,
+        &forged_value,
     )
     .expect("canonical forged registry transport");
     assert!(decode_interpreter_program_v2(&forged).is_err());

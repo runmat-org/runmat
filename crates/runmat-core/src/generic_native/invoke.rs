@@ -47,6 +47,9 @@ pub(crate) async fn invoke(
         runtime_functions,
         workspace,
     } = invocation;
+    runtime_functions
+        .validate_selected_source_owners(&runtime)
+        .map_err(|message| super::error::stage("NativeSourceOwner", message))?;
     runmat_vm::prepare_native_execution_metadata(unit.bytecode())?;
     let function = preferred_function
         .map(|name| {
@@ -335,12 +338,17 @@ pub(crate) async fn invoke(
     let execution_registry = Arc::clone(&registry);
     let execution_group_registry = Arc::clone(&registry);
     let execution_owner_registry = Arc::clone(&registry);
+    let source_runtime = runtime.clone();
+    let group_runtime = runtime.clone();
     let execution_source = user_functions::install_execution_source_resolver(Some(Rc::new(
         user_functions::ExecutionSourceFacts::new(
             Rc::new(move |function| {
-                execution_registry.execution_source_fact(runmat_hir::FunctionId(function))
+                execution_registry
+                    .execution_source_fact_in(&source_runtime, runmat_hir::FunctionId(function))
             }),
-            Rc::new(move |source| execution_group_registry.execution_source_group_facts(source)),
+            Rc::new(move |source| {
+                execution_group_registry.execution_source_group_facts_in(&group_runtime, source)
+            }),
             Rc::new(move |function| {
                 execution_owner_registry
                     .execution_definition_owners(runmat_hir::FunctionId(function))
@@ -353,7 +361,7 @@ pub(crate) async fn invoke(
         .filter_map(|function| {
             function
                 .source_id
-                .and_then(runmat_vm::BytecodeSourceRef::runtime)
+                .and_then(|source| source.resolve_in(&runtime))
                 .map(|source_id| user_functions::SourceFunctionInfo {
                     source_id,
                     name: function.display_name.clone(),

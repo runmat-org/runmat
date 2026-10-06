@@ -1,5 +1,5 @@
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
@@ -129,6 +129,8 @@ pub(crate) struct SourceState {
     pub(crate) active_imports: HashMap<SourceId, usize>,
     pub(crate) imported_identities: HashMap<SourceId, runmat_execution::identity::Digest>,
     pub(crate) leased_catalog: HashMap<SourceId, crate::source_context::LeasedSource>,
+    pub(crate) issued_authorities: HashMap<SourceId, crate::source_context::RuntimeSourceAuthority>,
+    pub(crate) inherited_authorities: HashSet<SourceId>,
     pub(crate) next_issued_id: Option<usize>,
 }
 
@@ -140,6 +142,8 @@ impl Default for SourceState {
             active_imports: HashMap::new(),
             imported_identities: HashMap::new(),
             leased_catalog: HashMap::new(),
+            issued_authorities: HashMap::new(),
+            inherited_authorities: HashSet::new(),
             next_issued_id: Some(0),
         }
     }

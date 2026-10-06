@@ -46,8 +46,10 @@ pub(super) struct ProgramSourceTable {
 }
 
 pub(super) struct SourceCompileProjection {
-    pub runtime_to_program: HashMap<runmat_hir::SourceId, ProgramSourceId>,
-    pub program_to_runtime: HashMap<ProgramSourceId, runmat_hir::SourceId>,
+    pub runtime_to_program:
+        HashMap<runmat_runtime::source_context::RuntimeSourceRef, ProgramSourceId>,
+    pub program_to_runtime:
+        HashMap<ProgramSourceId, runmat_runtime::source_context::RuntimeSourceRef>,
 }
 
 impl SourceCompileProjection {
@@ -84,6 +86,7 @@ impl ProgramSourceTable {
     pub fn intern_runtime_projection(
         &self,
         pool: &mut crate::source_pool::SourcePool,
+        runtime_context: &runmat_runtime::context::RuntimeContext,
     ) -> Result<SourceCompileProjection, String> {
         let mut program_to_runtime = HashMap::new();
         let mut runtime_to_program = HashMap::new();
@@ -94,16 +97,22 @@ impl ProgramSourceTable {
                 entry.full_path.as_deref(),
                 &entry.text,
             );
-            if let Some(previous) = runtime_to_program.insert(runtime, program) {
+            let issued = pool
+                .issued_source_ref(runtime, runtime_context)
+                .map_err(|error| error.to_string())?;
+            if let Some(previous) = runtime_to_program.insert(issued, program) {
                 if previous != program {
                     return Err("distinct program sources share one session source identity".into());
                 }
             }
-            program_to_runtime.insert(program, runtime);
+            program_to_runtime.insert(program, issued);
         }
         for (runtime, program) in &self.retained_runtime_sources {
             let program = *program;
-            if let Some(previous) = runtime_to_program.insert(*runtime, program) {
+            let issued = pool
+                .issued_source_ref(*runtime, runtime_context)
+                .map_err(|error| error.to_string())?;
+            if let Some(previous) = runtime_to_program.insert(issued, program) {
                 if previous != program {
                     return Err("retained source identity disagrees with the source table".into());
                 }
@@ -255,6 +264,51 @@ impl ProgramSourceTable {
             function_sources,
             retained_runtime_sources,
         })
+    }
+}
+
+#[cfg(test)]
+mod authority_tests {
+    use super::*;
+
+    #[test]
+    fn reverse_projection_uses_issued_authority_not_pool_integer() {
+        let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let _unrelated = runmat_runtime::source_context::lease_source_context_in_context(
+            &runtime,
+            "unrelated.m",
+            None,
+            "unrelated = 1;",
+        )
+        .expect("advance the selected source issuer");
+        let text = "function y = main(); y = 2; end";
+        let table = ProgramSourceTable {
+            source_map: crate::ExecutableSourceMap::new(vec![crate::SourceMapEntry {
+                source_id: ProgramSourceId(0),
+                owner_identity: "fixture".into(),
+                relative_path: "main.m".into(),
+                content_revision: runmat_execution::Digest::sha256(text.as_bytes()),
+                display_name: "main.m".into(),
+                full_path: None,
+                text: text.into(),
+            }]),
+            statement_sources: Vec::new(),
+            function_sources: HashMap::new(),
+            retained_runtime_sources: HashMap::new(),
+        };
+        let mut pool = crate::source_pool::SourcePool::default();
+        let projection = table
+            .intern_runtime_projection(&mut pool, &runtime)
+            .expect("issued projection");
+        let issued = projection.program_to_runtime[&ProgramSourceId(0)];
+        assert_eq!(pool.entries().next().map(|(id, _)| id.0), Some(0));
+        assert_eq!(issued.source_id().0, 1);
+        assert_eq!(
+            projection.program_ref_for_runtime_ref(runmat_vm::BytecodeSourceRef::Runtime(issued)),
+            Some(runmat_vm::BytecodeSourceRef::Program(ProgramSourceId(0)))
+        );
     }
 }
 

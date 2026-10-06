@@ -1,7 +1,7 @@
 use crate::bytecode::{Bytecode, FunctionRegistry, Instr};
 use crate::interpreter::api::InterpreterOutcome;
 use crate::interpreter::errors::mex;
-use crate::interpreter::runner::interpret_with_vars;
+use crate::interpreter::runner::interpret_with_vars_in_context;
 use crate::interpreter::stack::pop_args;
 use crate::runtime::workspace::{
     replace_workspace_target_vars_and_state, workspace_assign_target, workspace_target_snapshot,
@@ -415,8 +415,9 @@ pub async fn vm_dynamic_workspace_builtin(
                     source,
                     source_label: "<eval>".to_string(),
                     requested_outputs,
-                    source_id: Some(source_lease.source_id()),
+                    source_ref: Some(source_lease.source_ref()),
                     source_lease: Some(source_lease),
+                    runtime: runtime.clone(),
                     commit_workspace_on_error: false,
                     capture_display_output: false,
                     empty_value_when_no_result: false,
@@ -442,8 +443,9 @@ pub async fn vm_dynamic_workspace_builtin(
                     source,
                     source_label: "<evalc>".to_string(),
                     requested_outputs: eval_requested_outputs,
-                    source_id: Some(source_lease.source_id()),
+                    source_ref: Some(source_lease.source_ref()),
                     source_lease: Some(source_lease),
+                    runtime: runtime.clone(),
                     commit_workspace_on_error: false,
                     capture_display_output: requested_outputs == 1,
                     empty_value_when_no_result: requested_outputs > 1,
@@ -467,8 +469,9 @@ pub async fn vm_dynamic_workspace_builtin(
                     source,
                     source_label: "<eval>".to_string(),
                     requested_outputs,
-                    source_id: Some(source_lease.source_id()),
+                    source_ref: Some(source_lease.source_ref()),
                     source_lease: Some(source_lease),
+                    runtime: runtime.clone(),
                     commit_workspace_on_error: false,
                     capture_display_output: false,
                     empty_value_when_no_result: false,
@@ -524,8 +527,9 @@ pub async fn vm_dynamic_workspace_builtin(
                     source: source.text,
                     source_label: source.display_name,
                     requested_outputs: 0,
-                    source_id: Some(source_lease.source_id()),
+                    source_ref: Some(source_lease.source_ref()),
                     source_lease: Some(source_lease),
+                    runtime: runtime.clone(),
                     commit_workspace_on_error: true,
                     capture_display_output: false,
                     empty_value_when_no_result: false,
@@ -604,8 +608,9 @@ struct WorkspaceEvalRequest {
     source: String,
     source_label: String,
     requested_outputs: usize,
-    source_id: Option<runmat_hir::SourceId>,
+    source_ref: Option<runmat_runtime::source_context::RuntimeSourceRef>,
     source_lease: Option<runmat_runtime::source_context::RuntimeSourceLease>,
+    runtime: runmat_runtime::context::RuntimeContext,
     commit_workspace_on_error: bool,
     capture_display_output: bool,
     empty_value_when_no_result: bool,
@@ -621,8 +626,9 @@ async fn eval_workspace_source(
         source,
         source_label,
         requested_outputs,
-        source_id,
+        source_ref,
         source_lease: _source_lease,
+        runtime,
         commit_workspace_on_error,
         capture_display_output,
         empty_value_when_no_result,
@@ -640,7 +646,7 @@ async fn eval_workspace_source(
         &source,
         &frame.names,
         function_registry,
-        source_id,
+        source_ref,
         requested_outputs,
     )?
     else {
@@ -654,6 +660,7 @@ async fn eval_workspace_source(
         frame.assigned,
         builtin,
         source_label,
+        runtime,
     )
     .await?;
     let vars = match outcome {
@@ -764,6 +771,7 @@ async fn interpret_dynamic_workspace_eval(
     assigned: HashSet<String>,
     _builtin: &'static str,
     source_label: String,
+    runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<
     (
         Result<InterpreterOutcome, RuntimeError>,
@@ -773,7 +781,9 @@ async fn interpret_dynamic_workspace_eval(
     RuntimeError,
 > {
     let _pending_workspace = crate::runtime::workspace::push_pending_workspace(names, assigned);
-    let outcome = interpret_with_vars(&bytecode, &mut target_vars, Some(&source_label)).await;
+    let outcome =
+        interpret_with_vars_in_context(&bytecode, &mut target_vars, Some(&source_label), runtime)
+            .await;
     let updated_workspace = crate::runtime::workspace::take_updated_workspace_state();
     let _ = crate::runtime::workspace::take_updated_workspace_assigned_report();
     Ok((outcome, updated_workspace, DynamicThreadEffects::default()))
@@ -784,7 +794,7 @@ fn compile_dynamic_workspace_eval(
     source: &str,
     workspace_bindings: &HashMap<String, usize>,
     function_registry: &FunctionRegistry,
-    source_id: Option<runmat_hir::SourceId>,
+    source_ref: Option<runmat_runtime::source_context::RuntimeSourceRef>,
     requested_outputs: usize,
 ) -> Result<Option<(Bytecode, Option<usize>)>, RuntimeError> {
     let options = current_dynamic_eval_options();
@@ -838,8 +848,8 @@ fn compile_dynamic_workspace_eval(
                 &format!("{builtin}: compile error: {err}"),
             )
         })?;
-    if source_id.is_some() {
-        bytecode.source_id = source_id.map(crate::BytecodeSourceRef::Runtime);
+    if source_ref.is_some() {
+        bytecode.source_id = source_ref.map(crate::BytecodeSourceRef::Runtime);
     }
     merge_eval_function_registry(&mut bytecode, function_registry);
     remap_dynamic_workspace_slots(&mut bytecode, workspace_bindings);

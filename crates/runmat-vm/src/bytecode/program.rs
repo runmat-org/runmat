@@ -341,6 +341,18 @@ fn source_index(
 }
 
 impl FunctionRegistry {
+    pub fn validate_selected_source_owners(
+        &self,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<(), &'static str> {
+        if self.functions.values().any(|body| {
+            matches!(body.source_id, Some(BytecodeSourceRef::Runtime(reference)) if reference.resolve_in(runtime).is_none())
+        }) {
+            return Err("function registry carries a source issued by another runtime owner");
+        }
+        Ok(())
+    }
+
     pub fn validate_portable_source_origins(&self) -> Result<(), &'static str> {
         if self.functions.values().any(|body| {
             body.source_id
@@ -562,7 +574,10 @@ impl FunctionRegistry {
 
     /// Enumerate only definitions selected by the current execution owner.
     /// A retained overlay never falls back to later published source members.
-    pub fn execution_source_group(&self, source: runmat_hir::SourceId) -> Vec<&FunctionBytecode> {
+    pub fn execution_source_group(
+        &self,
+        source: runmat_runtime::source_context::RuntimeSourceRef,
+    ) -> Vec<&FunctionBytecode> {
         let source = BytecodeSourceRef::Runtime(source);
         let mut bodies = Vec::new();
         if let Some(overlay) = &self.static_overlay {
@@ -682,7 +697,10 @@ impl FunctionRegistry {
         Some(removed)
     }
 
-    pub fn remove_source(&mut self, source: runmat_hir::SourceId) -> Vec<FunctionBytecode> {
+    pub fn remove_source(
+        &mut self,
+        source: runmat_runtime::source_context::RuntimeSourceRef,
+    ) -> Vec<FunctionBytecode> {
         let source = BytecodeSourceRef::Runtime(source);
         self.execution_stacks.take();
         let ids = self.source_functions.remove(&source).unwrap_or_default();
@@ -695,7 +713,10 @@ impl FunctionRegistry {
         removed
     }
 
-    pub fn functions_for_source(&self, source: runmat_hir::SourceId) -> &[FunctionId] {
+    pub fn functions_for_source(
+        &self,
+        source: runmat_runtime::source_context::RuntimeSourceRef,
+    ) -> &[FunctionId] {
         self.functions_for_source_ref(BytecodeSourceRef::Runtime(source))
     }
 
@@ -1270,6 +1291,21 @@ impl RuntimeAccelGraphSource {
 }
 
 impl Bytecode {
+    pub fn validate_selected_source_owners(
+        &self,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<(), &'static str> {
+        if matches!(self.source_id, Some(BytecodeSourceRef::Runtime(reference)) if reference.resolve_in(runtime).is_none())
+            || self.bound_functions.values().any(|body| {
+                matches!(body.source_id, Some(BytecodeSourceRef::Runtime(reference)) if reference.resolve_in(runtime).is_none())
+            })
+        {
+            return Err("bytecode carries a source issued by another runtime owner");
+        }
+        self.function_registry
+            .validate_selected_source_owners(runtime)
+    }
+
     pub fn validate_portable_source_origins(&self) -> Result<(), &'static str> {
         if self
             .source_id

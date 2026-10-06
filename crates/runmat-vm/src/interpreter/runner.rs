@@ -521,6 +521,9 @@ async fn interpret_with_vars_inner(
     current_function_name: Option<&str>,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> VmResult<InterpreterOutcome> {
+    bytecode
+        .validate_selected_source_owners(&runtime)
+        .map_err(RuntimeError::new)?;
     crate::bytecode::validate_sequence_register_flow(&bytecode.instructions)
         .map_err(RuntimeError::new)?;
     let source_id = bytecode
@@ -565,6 +568,10 @@ async fn run_interpreter(
     state
         .bytecode
         .validate_catch_scope_metadata()
+        .map_err(RuntimeError::new)?;
+    state
+        .bytecode
+        .validate_selected_source_owners(&state.context.runtime)
         .map_err(RuntimeError::new)?;
     let catch_runtime = state.context.runtime.clone();
     let inherited_catch = catch_runtime.active_catch_exception_shared();
@@ -747,14 +754,16 @@ async fn run_interpreter_inner(
     let registry_for_execution_source = Arc::clone(&function_registry);
     let registry_for_execution_group = Arc::clone(&function_registry);
     let registry_for_execution_owners = Arc::clone(&function_registry);
+    let source_runtime = context.runtime.clone();
+    let group_runtime = context.runtime.clone();
     let _execution_source_guard = user_functions::install_execution_source_resolver(Some(
         std::rc::Rc::new(user_functions::ExecutionSourceFacts::new(
             std::rc::Rc::new(move |function| {
                 registry_for_execution_source
-                    .execution_source_fact(runmat_hir::FunctionId(function))
+                    .execution_source_fact_in(&source_runtime, runmat_hir::FunctionId(function))
             }),
             std::rc::Rc::new(move |source| {
-                registry_for_execution_group.execution_source_group_facts(source)
+                registry_for_execution_group.execution_source_group_facts_in(&group_runtime, source)
             }),
             std::rc::Rc::new(move |function| {
                 registry_for_execution_owners

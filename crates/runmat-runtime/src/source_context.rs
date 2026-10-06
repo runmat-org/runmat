@@ -116,6 +116,80 @@ fn imported_identity(info: &SourceInfo) -> Digest {
     digest.finish()
 }
 
+/// Provenance issued by the source owner, never reconstructed from a numeric
+/// `SourceId` or carried in a portable artifact. Forks retain this exact
+/// authority only for source records present in their captured snapshot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct RuntimeSourceAuthority {
+    issuer: crate::context::RuntimeContextLocalId,
+    content: Digest,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct RuntimeSourceRef {
+    id: SourceId,
+    issuer: crate::context::RuntimeContextLocalId,
+    content: Digest,
+}
+
+impl RuntimeSourceRef {
+    pub fn resolve_in(self, runtime: &crate::context::RuntimeContext) -> Option<SourceId> {
+        let sources = runtime.state().source.borrow();
+        let authority = sources.issued_authorities.get(&self.id).copied()?;
+        if authority.issuer != self.issuer || authority.content != self.content {
+            return None;
+        }
+        // The lease is immutable and its content digest was checked when
+        // issued. A fork retains that verified digest in its admitted catalog.
+        // Overlay imports are checked against it once at admission, not on
+        // every bytecode/source lookup (which may occur for every call).
+        let active = crate::context::legacy::active()
+            .filter(|active| active.same_source_projection_owner(runtime));
+        let catalog = active
+            .as_ref()
+            .and_then(crate::context::RuntimeContext::source_catalog_view)
+            .or_else(|| runtime.source_catalog_view());
+        let catalog = catalog.as_ref().map(|catalog| catalog.borrow());
+        let catalog = catalog
+            .as_ref()
+            .map_or(&sources.catalog, |view| view.current());
+        if sources
+            .leased_catalog
+            .get(&self.id)
+            .and_then(LeasedSource::live_info)
+            .is_some()
+        {
+            return (!catalog.contains_key(&self.id)).then_some(self.id);
+        }
+        (sources.inherited_authorities.contains(&self.id)
+            && sources.imported_identities.get(&self.id) == Some(&self.content)
+            && catalog.contains_key(&self.id))
+        .then_some(self.id)
+    }
+
+    pub fn source_id(self) -> SourceId {
+        self.id
+    }
+}
+
+pub fn issued_source_ref_in_context(
+    runtime: &crate::context::RuntimeContext,
+    id: SourceId,
+) -> Option<RuntimeSourceRef> {
+    let authority = *runtime
+        .state()
+        .source
+        .borrow()
+        .issued_authorities
+        .get(&id)?;
+    let reference = RuntimeSourceRef {
+        id,
+        issuer: authority.issuer,
+        content: authority.content,
+    };
+    reference.resolve_in(runtime).map(|_| reference)
+}
+
 #[derive(Debug)]
 pub(crate) struct LeasedSource {
     owner: Weak<LeaseInner>,
@@ -148,6 +222,7 @@ fn resolved_source_info(
 #[derive(Debug)]
 struct LeaseInner {
     info: SourceInfo,
+    authority: RuntimeSourceAuthority,
     state: Weak<crate::context::RuntimeContextState>,
 }
 
@@ -172,6 +247,9 @@ impl Drop for LeaseInner {
             .is_some_and(|entry| entry.owner.as_ptr() == self as *const LeaseInner)
         {
             sources.leased_catalog.remove(&id);
+            if sources.issued_authorities.get(&id) == Some(&self.authority) {
+                sources.issued_authorities.remove(&id);
+            }
         }
     }
 }
@@ -185,12 +263,19 @@ pub struct RuntimeSourceLease(Rc<LeaseInner>);
 /// Keeping the leases here prevents a pending call from losing its source text.
 #[derive(Debug)]
 pub(crate) struct ProgramSourceBinding {
-    sources: HashMap<runmat_types::ProgramSourceId, SourceId>,
+    sources: HashMap<runmat_types::ProgramSourceId, RuntimeSourceRef>,
     _leases: Vec<RuntimeSourceLease>,
 }
 
 impl ProgramSourceBinding {
     pub(crate) fn get(&self, ordinal: runmat_types::ProgramSourceId) -> Option<SourceId> {
+        self.sources.get(&ordinal).map(|source| source.source_id())
+    }
+
+    pub(crate) fn source_ref(
+        &self,
+        ordinal: runmat_types::ProgramSourceId,
+    ) -> Option<RuntimeSourceRef> {
         self.sources.get(&ordinal).copied()
     }
 
@@ -214,6 +299,9 @@ pub struct ProgramSourceRecord {
 #[path = "source_context/portable.rs"]
 mod portable;
 pub use portable::{bind_portable_source_map_v2, PortableSourceBindingError};
+#[cfg(test)]
+#[path = "source_context/authority_tests.rs"]
+mod authority_tests;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProgramSourceBindingError {
@@ -258,7 +346,7 @@ pub(crate) fn bind_program_sources(
             record.text,
         )
         .map_err(|_| ProgramSourceBindingError::Exhausted)?;
-        sources.insert(record.ordinal, lease.source_id());
+        sources.insert(record.ordinal, lease.source_ref());
         leases.push(lease);
     }
     Ok(ProgramSourceBinding {
@@ -277,6 +365,14 @@ impl RuntimeSourceLease {
 
     pub fn source_info(&self) -> SourceInfo {
         self.0.info.clone()
+    }
+
+    pub fn source_ref(&self) -> RuntimeSourceRef {
+        RuntimeSourceRef {
+            id: self.source_id(),
+            issuer: self.0.authority.issuer,
+            content: self.0.authority.content,
+        }
     }
 }
 
@@ -301,6 +397,10 @@ impl crate::context::SourceState {
     fn issue_id(&mut self) -> Result<SourceId, SourceIdExhausted> {
         self.leased_catalog
             .retain(|_, entry| entry.owner.upgrade().is_some());
+        let inherited = &self.inherited_authorities;
+        let leased = &self.leased_catalog;
+        self.issued_authorities
+            .retain(|id, _| inherited.contains(id) || leased.contains_key(id));
         loop {
             let next = self.next_issued_id.ok_or(SourceIdExhausted)?;
             self.next_issued_id = next.checked_add(1);
@@ -308,6 +408,7 @@ impl crate::context::SourceState {
             if !self.catalog.contains_key(&id)
                 && !self.imported_identities.contains_key(&id)
                 && !self.leased_catalog.contains_key(&id)
+                && !self.issued_authorities.contains_key(&id)
             {
                 return Ok(id);
             }
@@ -328,6 +429,16 @@ impl crate::context::SourceState {
                 }
             }
         }
+        snapshot.issued_authorities = self
+            .issued_authorities
+            .iter()
+            .filter(|(id, _)| snapshot.catalog.contains_key(id))
+            .map(|(id, authority)| (*id, *authority))
+            .collect();
+        snapshot.inherited_authorities = snapshot.issued_authorities.keys().copied().collect();
+        for (id, authority) in &snapshot.issued_authorities {
+            snapshot.imported_identities.insert(*id, authority.content);
+        }
         snapshot
     }
 }
@@ -341,21 +452,31 @@ pub fn lease_source_context_in_context(
     text: impl Into<Arc<str>>,
 ) -> Result<RuntimeSourceLease, SourceIdExhausted> {
     let id = runtime.state().source.borrow_mut().issue_id()?;
+    let info = SourceInfo {
+        source_id: Some(id),
+        name: name.into(),
+        fullpath_name,
+        text: text.into(),
+    };
+    let authority = RuntimeSourceAuthority {
+        issuer: runtime.local_identity(),
+        content: imported_identity(&info),
+    };
     let inner = Rc::new(LeaseInner {
-        info: SourceInfo {
-            source_id: Some(id),
-            name: name.into(),
-            fullpath_name,
-            text: text.into(),
-        },
+        info,
+        authority,
         state: Rc::downgrade(runtime.state()),
     });
-    runtime.state().source.borrow_mut().leased_catalog.insert(
-        id,
-        LeasedSource {
-            owner: Rc::downgrade(&inner),
-        },
-    );
+    {
+        let mut source = runtime.state().source.borrow_mut();
+        source.leased_catalog.insert(
+            id,
+            LeasedSource {
+                owner: Rc::downgrade(&inner),
+            },
+        );
+        source.issued_authorities.insert(id, authority);
+    }
     Ok(RuntimeSourceLease(inner))
 }
 

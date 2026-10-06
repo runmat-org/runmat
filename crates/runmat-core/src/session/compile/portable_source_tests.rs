@@ -35,6 +35,36 @@ fn portable_source_ordinals_ignore_unrelated_session_source_allocations() {
 }
 
 #[test]
+fn portable_registry_paths_ignore_host_checkout_prefixes() {
+    let mut session = crate::RunMatSession::with_options(false, false).expect("session");
+    let unit = futures::executor::block_on(session.compile_executable_unit(
+        crate::ExecutableSource::new("fixture", "main.m", "function y = main(); y = 1; end"),
+        None,
+    ))
+    .expect("unit");
+    let relocated = |prefix: &str| {
+        let mut entries = unit.source_map().entries().to_vec();
+        for entry in &mut entries {
+            entry.full_path = Some(format!("{prefix}/{}", entry.relative_path));
+        }
+        crate::ExecutableUnit::new(
+            unit.source().clone(),
+            unit.revision().clone(),
+            crate::ExecutableSourceMap::new(entries),
+            unit.mir().clone(),
+            unit.analysis().clone(),
+            unit.bytecode().clone(),
+        )
+        .expect("relocated host unit")
+        .portable_envelope()
+        .expect("portable envelope")
+        .canonical_bytes()
+        .expect("portable bytes")
+    };
+    assert_eq!(relocated("/checkout/one"), relocated("/checkout/two"));
+}
+
+#[test]
 fn changed_reachable_source_text_changes_portable_identity() {
     let mut session = crate::RunMatSession::with_options(false, false).expect("session");
     let compile = |session: &mut crate::RunMatSession, value| {
