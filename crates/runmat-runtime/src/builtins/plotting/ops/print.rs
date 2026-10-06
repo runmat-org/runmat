@@ -1,19 +1,16 @@
 //! MATLAB-compatible `print` builtin for exporting figures.
 
 use std::ffi::OsString;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
+#[cfg(test)]
+use runmat_builtins::PRINT_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
+    print_dimensions, BuiltinErrorDescriptor, PrintControl, PrintControlError, PrintDevice,
+    PRINT_DEFAULT_DPI, PRINT_ERROR_INVALID_INPUT, PRINT_ERROR_INVALID_OPTION, PRINT_ERROR_IO,
+    PRINT_ERROR_RENDER, PRINT_ERROR_TOO_MANY_OUTPUTS, PRINT_ERROR_UNSUPPORTED_DEVICE,
+    PRINT_INTEGER_FIGURE_EXTENSION, PRINT_STATUS_OUTPUT_EXTENSION,
 };
-use runmat_filesystem::OpenOptions;
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
@@ -25,6 +22,8 @@ use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use super::op_common::handles::{handle_from_integer, handle_from_scalar};
+#[cfg(feature = "plot-core")]
+use super::state::clone_figure;
 use super::state::{current_figure_handle, FigureHandle};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::print")]
@@ -55,131 +54,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "print";
-const DEFAULT_WIDTH: u32 = 800;
-const DEFAULT_HEIGHT: u32 = 600;
-const DEFAULT_DPI: u32 = 150;
-const MAX_EXPORT_DIMENSION: u32 = 8192;
-static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-const PRINT_OUTPUT_OK: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ok",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when the export completed.",
-}];
-const PRINT_INPUTS_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "args",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Optional figure handle, filename, device token such as '-dpng', and resolution token such as '-r300'.",
-}];
-const PRINT_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "ok = print(filename, '-dpng')",
-        inputs: &PRINT_INPUTS_ARGS,
-        outputs: &PRINT_OUTPUT_OK,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ok = print(filename, '-dpng', '-r300')",
-        inputs: &PRINT_INPUTS_ARGS,
-        outputs: &PRINT_OUTPUT_OK,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ok = print(fig, filename, '-dpng')",
-        inputs: &PRINT_INPUTS_ARGS,
-        outputs: &PRINT_OUTPUT_OK,
-    },
-    BuiltinSignatureDescriptor {
-        label: "ok = print('-dpng', filename)",
-        inputs: &PRINT_INPUTS_ARGS,
-        outputs: &PRINT_OUTPUT_OK,
-    },
-];
-
-const PRINT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PRINT.INVALID_INPUT",
-    identifier: Some("RunMat:print:InvalidInput"),
-    when: "Arguments are missing, malformed, or cannot be interpreted as a supported print form.",
-    message: "print: invalid input arguments",
-};
-const PRINT_ERROR_UNSUPPORTED_DEVICE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PRINT.UNSUPPORTED_DEVICE",
-    identifier: Some("RunMat:print:UnsupportedDevice"),
-    when: "The requested output device is not supported by the active exporter.",
-    message: "print: unsupported output device",
-};
-const PRINT_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PRINT.INVALID_OPTION",
-    identifier: Some("RunMat:print:InvalidOption"),
-    when: "A print option token is unsupported or invalid.",
-    message: "print: invalid option",
-};
-const PRINT_ERROR_RENDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PRINT.RENDER",
-    identifier: Some("RunMat:print:RenderFailed"),
-    when: "The figure renderer fails while serializing the figure.",
-    message: "print: figure export failed",
-};
-const PRINT_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PRINT.IO",
-    identifier: Some("RunMat:print:IoFailure"),
-    when: "The exported bytes cannot be written to the target file.",
-    message: "print: file I/O failed",
-};
-const PRINT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PRINT.INTERNAL",
-    identifier: None,
-    when: "Internal runtime control-flow or conversion fails.",
-    message: "print: internal error",
-};
-const PRINT_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    PRINT_ERROR_INVALID_INPUT,
-    PRINT_ERROR_UNSUPPORTED_DEVICE,
-    PRINT_ERROR_INVALID_OPTION,
-    PRINT_ERROR_RENDER,
-    PRINT_ERROR_IO,
-    PRINT_ERROR_INTERNAL,
-];
-
-pub const PRINT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PRINT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PRINT_ERRORS,
-};
-
-const PRINT_INTEGER_FIGURE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "print-integer-figure-handle",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "print accepts a typed-integer alias for RunMat's numeric figure registry",
-    error_identifier: Some("RunMat:compatibility:PrintIntegerFigureHandleExtension"),
-};
-pub const PRINT_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [PRINT_INTEGER_FIGURE_EXTENSION];
-const PRINT_INTEGER_FIGURE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "fig numeric handle alias",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "MATLAB documents a Figure object, not a typed integer. RunMat mode permits an exact nonnegative alias for its numeric graphics registry.",
-    }];
-pub const PRINT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "ok = print(integer_fig,___)",
-        inputs: &PRINT_INTEGER_FIGURE_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The alias is gated before gather and must map exactly into RunMat's f64-backed graphics handle registry; resolution remains a documented text option such as '-r300'.",
-    }];
-
-pub fn print_type(_args: &[Type], _context: &runmat_builtins::ResolveContext) -> Type {
-    Type::Bool
-}
+#[path = "print/export.rs"]
+mod export;
 
 #[runtime_builtin(
     name = "print",
@@ -189,46 +66,147 @@ pub fn print_type(_args: &[Type], _context: &runmat_builtins::ResolveContext) ->
     sink = true,
     suppress_auto_output = true,
     accel = "metadata",
-    type_resolver(print_type),
-    descriptor(crate::builtins::plotting::print::PRINT_DESCRIPTOR),
-    extensions(crate::builtins::plotting::print::PRINT_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::print::PRINT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::print"
 )]
-pub async fn print_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
+pub async fn print_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<bool> {
+    let requested_outputs = if let Some(runtime) = runtime.as_ref() {
+        runtime
+            .scope(async { crate::output_count::current_output_count() })
+            .await
+    } else {
+        crate::output_count::current_output_count()
+    };
+    match requested_outputs {
+        Some(count) if count > 1 => {
+            return Err(print_error_with_detail(
+                &PRINT_ERROR_TOO_MANY_OUTPUTS,
+                "print returns at most one RunMat status result",
+            ));
+        }
+        Some(1) => {
+            if let Some(runtime) = runtime.as_ref() {
+                crate::compatibility::ensure_builtin_extension_enabled_in_context(
+                    runtime,
+                    &PRINT_STATUS_OUTPUT_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            } else {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &PRINT_STATUS_OUTPUT_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
+        }
+        _ => {}
+    }
+    let selected_figure = current_figure_handle();
+    preflight_host_arguments(&args)?;
+    if args
+        .first()
+        .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
+    {
+        if let Some(runtime) = runtime.as_ref() {
+            crate::compatibility::ensure_builtin_extension_enabled_in_context(
+                runtime,
+                &PRINT_INTEGER_FIGURE_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        } else {
+            crate::compatibility::ensure_builtin_extension_enabled(
+                &PRINT_INTEGER_FIGURE_EXTENSION,
+                BUILTIN_NAME,
+            )?;
+        }
+    }
+    #[cfg(feature = "plot-core")]
+    let early_handle = match args.first() {
+        Some(value) if is_host_text(value) => Some(selected_figure),
+        Some(value) => figure_handle_arg(value)?,
+        None => None,
+    };
+    // The ordinary host-known scene is cloned before any provider or renderer
+    // await. A resident handle is resolved and cloned after materialization.
+    #[cfg(feature = "plot-core")]
+    let early_scene = early_handle.and_then(clone_figure);
+    let owner = export::PrintFsOwner::capture().map_err(export::map_io)?;
     if let Some(first) = args.first() {
         crate::builtins::common::validation::reject_typed_complex_integer(first, "print")?;
-        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-            first,
-            &PRINT_INTEGER_FIGURE_EXTENSION,
-            "print",
-            "figure handle",
-        )
-        .await?;
+        if crate::builtins::common::validation::value_has_native_integer_class(first)
+            && !export::await_effect(
+                runtime.as_ref(),
+                crate::builtins::common::validation::native_integer_value_is_exact_f64_async(first),
+            )
+            .await??
+        {
+            return Err(build_runtime_error(
+                "print: integer figure handle values must be exactly representable as double",
+            )
+            .with_builtin(BUILTIN_NAME)
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build());
+        }
     }
-    let args = gather_values(&args).await?;
-    let request = parse_print_args(&args)?;
+    // Host-known invalid controls are rejected before any resident download or
+    // filesystem service capture. Dynamic controls receive the same parser
+    // after materialization.
+    let args = gather_values(runtime.as_ref(), &args).await?;
+    let request = parse_print_args(&args, selected_figure)?;
     let path = request.output_path()?;
-    let bytes = render_png(request.figure, request.width, request.height).await?;
-    write_bytes(&path, &bytes).await?;
+    let selected = owner.path(path).map_err(export::map_io)?;
+    #[cfg(feature = "plot-core")]
+    let scene = if early_handle == Some(request.figure) {
+        early_scene
+    } else {
+        clone_figure(request.figure)
+    }
+    .ok_or_else(|| {
+        print_error_with_detail(
+            &PRINT_ERROR_RENDER,
+            format!("figure handle {} does not exist", request.figure.as_u32()),
+        )
+    })?;
+    #[cfg(feature = "plot-core")]
+    let bytes = export::await_effect(
+        runtime.as_ref(),
+        render_png(scene, request.width, request.height),
+    )
+    .await??;
+    #[cfg(not(feature = "plot-core"))]
+    let bytes = export::await_effect(
+        runtime.as_ref(),
+        render_png(request.figure, request.width, request.height),
+    )
+    .await??;
+    export::replace_png(runtime.as_ref(), &selected, &bytes).await?;
     Ok(true)
 }
 
-async fn gather_values(values: &[Value]) -> BuiltinResult<Vec<Value>> {
+#[cfg(feature = "plot-core")]
+fn is_host_text(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::String(_) | Value::CharArray(_) | Value::StringArray(_)
+    )
+}
+
+async fn gather_values(
+    runtime: Option<&crate::context::RuntimeContext>,
+    values: &[Value],
+) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(values.len());
     for value in values {
         out.push(
-            gather_if_needed_async(value)
-                .await
+            export::await_effect(runtime, gather_if_needed_async(value))
+                .await?
                 .map_err(map_control_flow)?,
         );
     }
     Ok(out)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PrintDevice {
-    Png,
 }
 
 #[derive(Debug, Clone)]
@@ -260,7 +238,7 @@ impl PrintRequest {
     }
 }
 
-fn parse_print_args(args: &[Value]) -> BuiltinResult<PrintRequest> {
+fn parse_print_args(args: &[Value], selected_figure: FigureHandle) -> BuiltinResult<PrintRequest> {
     if args.is_empty() {
         return Err(print_error_with_detail(
             &PRINT_ERROR_INVALID_INPUT,
@@ -269,7 +247,7 @@ fn parse_print_args(args: &[Value]) -> BuiltinResult<PrintRequest> {
     }
 
     let mut idx = 0usize;
-    let mut figure = current_figure_handle();
+    let mut figure = selected_figure;
     if let Some(handle) = figure_handle_arg(&args[0])? {
         figure = handle;
         idx = 1;
@@ -277,7 +255,7 @@ fn parse_print_args(args: &[Value]) -> BuiltinResult<PrintRequest> {
 
     let mut filename: Option<String> = None;
     let mut device: Option<PrintDevice> = None;
-    let mut dpi = DEFAULT_DPI;
+    let mut dpi = PRINT_DEFAULT_DPI;
 
     while idx < args.len() {
         let token = string_arg(&args[idx])?;
@@ -289,8 +267,8 @@ fn parse_print_args(args: &[Value]) -> BuiltinResult<PrintRequest> {
             ));
         }
 
-        if let Some(option) = trimmed.strip_prefix('-') {
-            parse_option(option, &mut device, &mut dpi)?;
+        if trimmed.starts_with('-') {
+            parse_option(trimmed, &mut device, &mut dpi)?;
         } else if filename.is_none() {
             filename = Some(trimmed.to_string());
         } else {
@@ -321,7 +299,12 @@ fn parse_print_args(args: &[Value]) -> BuiltinResult<PrintRequest> {
         (None, Some(device)) => device,
         (None, None) => PrintDevice::Png,
     };
-    let (width, height) = dimensions_for_dpi(dpi)?;
+    let (width, height) = print_dimensions(dpi).map_err(|error| {
+        print_error_with_detail(
+            &PRINT_ERROR_INVALID_OPTION,
+            format!("unsupported resolution: {error:?}"),
+        )
+    })?;
     Ok(PrintRequest {
         figure,
         filename,
@@ -329,6 +312,57 @@ fn parse_print_args(args: &[Value]) -> BuiltinResult<PrintRequest> {
         width,
         height,
     })
+}
+
+fn preflight_host_arguments(args: &[Value]) -> BuiltinResult<()> {
+    if args.is_empty() {
+        return Err(print_error_with_detail(
+            &PRINT_ERROR_INVALID_INPUT,
+            "filename is required",
+        ));
+    }
+    let mut filenames = 0usize;
+    let mut devices = 0usize;
+    let mut dpi = PRINT_DEFAULT_DPI;
+    for (index, value) in args.iter().enumerate() {
+        if index == 0 && figure_handle_arg(value)?.is_some() {
+            continue;
+        }
+        let token = match value {
+            Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => string_arg(value)?,
+            // Resident controls are validated after their admitted gather.
+            _ => continue,
+        };
+        let token = token.trim();
+        if token.is_empty() {
+            return Err(print_error_with_detail(
+                &PRINT_ERROR_INVALID_INPUT,
+                "empty string arguments are not valid print options",
+            ));
+        }
+        if token.starts_with('-') {
+            let mut device = None;
+            parse_option(token, &mut device, &mut dpi)?;
+            if device.is_some() {
+                devices += 1;
+            }
+        } else {
+            filenames += 1;
+            if token.contains('\0') {
+                return Err(print_error_with_detail(
+                    &PRINT_ERROR_INVALID_INPUT,
+                    "filename must not contain NUL bytes",
+                ));
+            }
+        }
+        if filenames > 1 || devices > 1 {
+            return Err(print_error_with_detail(
+                &PRINT_ERROR_INVALID_INPUT,
+                "too many filenames or device options",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn figure_handle_arg(value: &Value) -> BuiltinResult<Option<FigureHandle>> {
@@ -351,73 +385,44 @@ fn figure_handle_arg(value: &Value) -> BuiltinResult<Option<FigureHandle>> {
     }
 }
 
-fn parse_option(
-    option: &str,
-    device: &mut Option<PrintDevice>,
-    dpi: &mut u32,
-) -> BuiltinResult<()> {
-    let lower = option.to_ascii_lowercase();
-    if let Some(device_name) = lower.strip_prefix('d') {
-        let parsed = parse_device(device_name)?;
-        if device.replace(parsed).is_some() {
-            return Err(print_error_with_detail(
-                &PRINT_ERROR_INVALID_OPTION,
-                "multiple output devices were specified",
-            ));
+fn parse_option(token: &str, device: &mut Option<PrintDevice>, dpi: &mut u32) -> BuiltinResult<()> {
+    match PrintControl::decode(token) {
+        Ok(PrintControl::Device(parsed)) => {
+            if device.replace(parsed).is_some() {
+                return Err(print_error_with_detail(
+                    &PRINT_ERROR_INVALID_OPTION,
+                    "multiple output devices were specified",
+                ));
+            }
+            Ok(())
         }
-        return Ok(());
-    }
-
-    if let Some(resolution) = lower.strip_prefix('r') {
-        *dpi = parse_resolution(resolution)?;
-        return Ok(());
-    }
-
-    Err(print_error_with_detail(
-        &PRINT_ERROR_INVALID_OPTION,
-        format!("unsupported option '-{option}'"),
-    ))
-}
-
-fn parse_device(device: &str) -> BuiltinResult<PrintDevice> {
-    match device {
-        "png" => Ok(PrintDevice::Png),
-        "pdf" | "eps" | "epsc" | "eps2" | "svg" => Err(print_error_with_detail(
+        Ok(PrintControl::Resolution(parsed)) => {
+            *dpi = parsed;
+            Ok(())
+        }
+        Err(PrintControlError::UnsupportedDevice) => Err(print_error_with_detail(
             &PRINT_ERROR_UNSUPPORTED_DEVICE,
-            format!("'-d{device}' is not available yet; RunMat currently supports '-dpng'"),
+            format!("'{token}' is not available yet; RunMat currently supports '-dpng'"),
         )),
-        "" => Err(print_error_with_detail(
+        Err(PrintControlError::InvalidOption) => Err(print_error_with_detail(
             &PRINT_ERROR_INVALID_OPTION,
-            "device option must name a format, for example '-dpng'",
+            format!("unsupported option '{token}'"),
         )),
-        other => Err(print_error_with_detail(
-            &PRINT_ERROR_UNSUPPORTED_DEVICE,
-            format!("unsupported output device '-d{other}'"),
-        )),
-    }
-}
-
-fn parse_resolution(value: &str) -> BuiltinResult<u32> {
-    if value == "0" {
-        return Ok(DEFAULT_DPI);
-    }
-    let dpi = value.parse::<u32>().map_err(|err| {
-        print_error_with_source(
+        Err(PrintControlError::ResolutionParse(source)) => Err(print_error_with_source(
             format!(
-                "{}: expected '-r<N>' with a positive integer DPI",
+                "{}: expected '-r<N>' with a nonnegative integer DPI",
                 PRINT_ERROR_INVALID_OPTION.message
             ),
             &PRINT_ERROR_INVALID_OPTION,
-            err,
-        )
-    })?;
-    if dpi == 0 {
-        return Err(print_error_with_detail(
+            source,
+        )),
+        Err(PrintControlError::UnsupportedResolution(scaled)) => Err(print_error_with_detail(
             &PRINT_ERROR_INVALID_OPTION,
-            "resolution must be positive, or use '-r0' for default screen resolution",
-        ));
+            format!(
+                "resolution '{token}' would produce an unsupported image dimension ({scaled}px)"
+            ),
+        )),
     }
-    Ok(dpi)
 }
 
 fn infer_device_from_filename(filename: &str) -> Option<PrintDevice> {
@@ -429,25 +434,6 @@ fn infer_device_from_filename(filename: &str) -> Option<PrintDevice> {
         "png" => Some(PrintDevice::Png),
         _ => None,
     }
-}
-
-fn dimensions_for_dpi(dpi: u32) -> BuiltinResult<(u32, u32)> {
-    let width = scaled_dimension(DEFAULT_WIDTH, dpi)?;
-    let height = scaled_dimension(DEFAULT_HEIGHT, dpi)?;
-    Ok((width, height))
-}
-
-fn scaled_dimension(base: u32, dpi: u32) -> BuiltinResult<u32> {
-    let scaled = (u64::from(base) * u64::from(dpi)).div_ceil(u64::from(DEFAULT_DPI));
-    if scaled == 0 || scaled > u64::from(MAX_EXPORT_DIMENSION) {
-        return Err(print_error_with_detail(
-            &PRINT_ERROR_INVALID_OPTION,
-            format!(
-                "resolution '-r{dpi}' would produce an unsupported image dimension ({scaled}px)"
-            ),
-        ));
-    }
-    Ok(scaled as u32)
 }
 
 fn has_extension(path: &Path, expected: &str) -> bool {
@@ -478,8 +464,12 @@ fn string_arg(value: &Value) -> BuiltinResult<String> {
 }
 
 #[cfg(feature = "plot-core")]
-async fn render_png(handle: FigureHandle, width: u32, height: u32) -> BuiltinResult<Vec<u8>> {
-    super::render_figure_snapshot(handle, width, height, None)
+async fn render_png(
+    scene: runmat_plot::plots::Figure,
+    width: u32,
+    height: u32,
+) -> BuiltinResult<Vec<u8>> {
+    super::render_figure_png_bytes(scene, width, height)
         .await
         .map_err(|err| {
             print_error_with_source(
@@ -496,105 +486,6 @@ async fn render_png(_handle: FigureHandle, _width: u32, _height: u32) -> Builtin
         &PRINT_ERROR_RENDER,
         "plot-core support is not enabled in this build",
     ))
-}
-
-async fn write_bytes(path: &Path, payload: &[u8]) -> BuiltinResult<()> {
-    let temp_path = temporary_output_path(path);
-    let mut created_temp = false;
-
-    let result: BuiltinResult<()> = async {
-        let mut options = OpenOptions::new();
-        options.create_new(true).write(true);
-        let mut file = options.open_async(&temp_path).await.map_err(|err| {
-            print_error_with_source(
-                format!(
-                    "{}: unable to open temporary file '{}': {}",
-                    PRINT_ERROR_IO.message,
-                    temp_path.display(),
-                    err
-                ),
-                &PRINT_ERROR_IO,
-                err,
-            )
-        })?;
-        created_temp = true;
-        file.write_all(payload).map_err(|err| {
-            print_error_with_source(
-                format!(
-                    "{}: unable to write temporary file '{}': {}",
-                    PRINT_ERROR_IO.message,
-                    temp_path.display(),
-                    err
-                ),
-                &PRINT_ERROR_IO,
-                err,
-            )
-        })?;
-        file.flush_async().await.map_err(|err| {
-            print_error_with_source(
-                format!(
-                    "{}: unable to flush temporary file '{}': {}",
-                    PRINT_ERROR_IO.message,
-                    temp_path.display(),
-                    err
-                ),
-                &PRINT_ERROR_IO,
-                err,
-            )
-        })?;
-        file.sync_all_async().await.map_err(|err| {
-            print_error_with_source(
-                format!(
-                    "{}: unable to sync temporary file '{}': {}",
-                    PRINT_ERROR_IO.message,
-                    temp_path.display(),
-                    err
-                ),
-                &PRINT_ERROR_IO,
-                err,
-            )
-        })?;
-        drop(file);
-
-        runmat_filesystem::rename_async(&temp_path, path)
-            .await
-            .map_err(|err| {
-                print_error_with_source(
-                    format!(
-                        "{}: unable to replace '{}' with temporary file '{}': {}",
-                        PRINT_ERROR_IO.message,
-                        path.display(),
-                        temp_path.display(),
-                        err
-                    ),
-                    &PRINT_ERROR_IO,
-                    err,
-                )
-            })?;
-        Ok(())
-    }
-    .await;
-
-    if result.is_err() && created_temp {
-        let _ = runmat_filesystem::remove_file_async(&temp_path).await;
-    }
-
-    result
-}
-
-fn temporary_output_path(path: &Path) -> PathBuf {
-    let file_name = path
-        .file_name()
-        .map(OsString::from)
-        .unwrap_or_else(|| OsString::from("print-output"));
-    let mut temp_name = OsString::from(".");
-    temp_name.push(file_name);
-    temp_name.push(format!(
-        ".{}.tmp",
-        TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-
-    path.with_file_name(temp_name)
 }
 
 fn print_error_with_detail(
@@ -630,11 +521,14 @@ fn print_error_with_source(
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
-    print_error_with_source(
-        format!("{}: {}", PRINT_ERROR_INTERNAL.message, err.message()),
-        &PRINT_ERROR_INTERNAL,
-        err,
-    )
+    let identifier = err.identifier().map(str::to_owned);
+    let mut builder = build_runtime_error(err.message().to_owned())
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[cfg(test)]
@@ -698,20 +592,38 @@ mod tests {
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(labels.contains(&"ok = print(filename, '-dpng')"));
-        assert!(labels.contains(&"ok = print(fig, filename, '-dpng')"));
-        assert!(labels.contains(&"ok = print('-dpng', filename)"));
+        assert!(labels.contains(&"print(filename)"));
+        assert!(labels.contains(&"print(fig, filename, ___)"));
+        assert!(labels.contains(&"ok = print(filename, ___)"));
     }
 
     #[test]
     fn print_rejects_unsupported_device() {
         let _guard = setup();
-        let err = block_on(print_builtin(vec![
-            Value::from("plot"),
-            Value::from("-dsvg"),
-        ]))
+        let err = block_on(print_builtin(
+            None,
+            vec![Value::from("plot"), Value::from("-dsvg")],
+        ))
         .expect_err("svg is not supported yet");
         assert!(err.message().contains("currently supports '-dpng'"));
+    }
+
+    #[test]
+    fn output_admission_precedes_render_and_file_effects() {
+        let _guard = setup();
+        let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
+        let one = crate::output_count::push_output_count(Some(1));
+        let error = block_on(print_builtin(None, vec![Value::from("never-created.png")]))
+            .expect_err("status output is an extension");
+        assert_eq!(
+            error.identifier(),
+            PRINT_STATUS_OUTPUT_EXTENSION.error_identifier
+        );
+        drop(one);
+        let _two = crate::output_count::push_output_count(Some(2));
+        let error = block_on(print_builtin(None, vec![Value::from("never-created.png")]))
+            .expect_err("excess outputs");
+        assert_eq!(error.identifier(), PRINT_ERROR_TOO_MANY_OUTPUTS.identifier);
     }
 
     #[test]
@@ -726,11 +638,15 @@ mod tests {
         let stem = unique_temp_path("basic");
         let output = stem.with_extension("png");
         let _ = std::fs::remove_file(&output);
-        block_on(print_builtin(vec![
-            Value::String(stem.to_string_lossy().into_owned()),
-            Value::from("-dpng"),
-            Value::from("-r75"),
-        ]))
+        let _statement = crate::output_count::push_output_count(Some(0));
+        block_on(print_builtin(
+            None,
+            vec![
+                Value::String(stem.to_string_lossy().into_owned()),
+                Value::from("-dpng"),
+                Value::from("-r75"),
+            ],
+        ))
         .expect("print");
 
         let bytes = std::fs::read(&output).expect("read exported png");
@@ -739,11 +655,31 @@ mod tests {
         let _ = std::fs::remove_file(&output);
     }
 
+    #[cfg(feature = "plot-core")]
+    #[test]
+    fn captured_scene_renders_after_ambient_figure_is_cleared() {
+        let _guard = setup();
+        block_on(plot_builtin(vec![
+            Value::Tensor(tensor(&[0.0, 1.0, 2.0])),
+            Value::Tensor(tensor(&[1.0, 3.0, 2.0])),
+        ]))
+        .expect("plot");
+        let selected = current_figure_handle();
+        let scene = clone_figure(selected).expect("captured plotted scene");
+        clear_figure(None).expect("clear ambient figure");
+        let bytes = block_on(render_png(scene, 800, 600)).expect("captured scene export");
+        assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(bytes.len() > 1000);
+    }
+
     #[test]
     fn command_style_order_accepts_device_then_filename() {
         let _guard = setup();
-        let request = parse_print_args(&[Value::from("-dpng"), Value::from("command_style_name")])
-            .expect("parse");
+        let request = parse_print_args(
+            &[Value::from("-dpng"), Value::from("command_style_name")],
+            current_figure_handle(),
+        )
+        .expect("parse");
         assert_eq!(
             request.output_path().expect("output path"),
             PathBuf::from("command_style_name.png")
@@ -753,8 +689,11 @@ mod tests {
 
     #[test]
     fn print_appends_png_to_filename_component_only() {
-        let request = parse_print_args(&[Value::from("exports/report"), Value::from("-dpng")])
-            .expect("parse");
+        let request = parse_print_args(
+            &[Value::from("exports/report"), Value::from("-dpng")],
+            current_figure_handle(),
+        )
+        .expect("parse");
         assert_eq!(
             request.output_path().expect("output path"),
             PathBuf::from("exports/report.png")
@@ -763,7 +702,11 @@ mod tests {
 
     #[test]
     fn print_rejects_directory_like_png_output_path() {
-        let request = parse_print_args(&[Value::from("/"), Value::from("-dpng")]).expect("parse");
+        let request = parse_print_args(
+            &[Value::from("/"), Value::from("-dpng")],
+            current_figure_handle(),
+        )
+        .expect("parse");
         let err = request
             .output_path()
             .expect_err("root path has no filename component");
