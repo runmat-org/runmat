@@ -12,6 +12,16 @@ use std::collections::{HashMap, HashSet};
 
 #[path = "program_execution/unit_sources.rs"]
 mod unit_sources;
+#[path = "program_execution/region_sources.rs"]
+mod region_sources;
+pub use region_sources::encode_portable_region_sources_v1;
+
+pub(crate) fn capture_region_sources(
+    bytecode: &crate::Bytecode,
+    runtime: &runmat_runtime::context::RuntimeContext,
+) -> Result<Vec<u8>, String> {
+    region_sources::capture(bytecode, runtime)
+}
 
 pub fn materialize_deferred_call(
     call: &DeferredCall,
@@ -71,6 +81,15 @@ pub fn materialize_deferred_call(
     let program = call.program.as_deref().ok_or_else(|| {
         ExecutionServiceError::Failed("execution is missing its exact program".into())
     })?;
+    if matches!(
+        &callable,
+        ProgramCallable::ParallelRegion { .. } | ProgramCallable::SpmdRegion { .. }
+    ) && call.program_revision.is_none()
+    {
+        return Err(ExecutionServiceError::Failed(
+            "isolated region is missing its compiler-bound program revision".into(),
+        ));
+    }
     let revision = call
         .program_revision
         .clone()
@@ -96,7 +115,7 @@ pub fn materialize_deferred_call(
         &callable,
         ProgramCallable::ParallelRegion { .. } | ProgramCallable::SpmdRegion { .. }
     ) {
-        ExecutableForm::InterpreterScriptV2
+        ExecutableForm::InterpreterRegionSourcesV1
     } else {
         ExecutableForm::InterpreterBytecodeV2
     };
@@ -247,6 +266,16 @@ async fn execute_program_request_in_context(
     if request.artifact.form == ExecutableForm::ExecutableUnitV3 {
         return execute_unit_request(request, runtime).await;
     }
+    if matches!(
+        &request.callable,
+        ProgramCallable::ParallelRegion { .. } | ProgramCallable::SpmdRegion { .. }
+    ) && request.artifact.form != ExecutableForm::InterpreterRegionSourcesV1
+    {
+        return ProgramExecutionResponse::Failure {
+            message: "worker rejected source-less region bytecode; rebuild the parallel program"
+                .into(),
+        };
+    }
     if request.artifact.form == ExecutableForm::InterpreterBytecodeV1 {
         return ProgramExecutionResponse::Failure {
             message: format!(
@@ -257,6 +286,7 @@ async fn execute_program_request_in_context(
     }
     if request.artifact.form != ExecutableForm::InterpreterBytecodeV2
         && request.artifact.form != ExecutableForm::InterpreterScriptV2
+        && request.artifact.form != ExecutableForm::InterpreterRegionSourcesV1
     {
         return ProgramExecutionResponse::Failure {
             message:
@@ -377,15 +407,18 @@ async fn execute_spmd_region_request(
             }
         }
     };
-    let bytecode: crate::Bytecode =
-        match crate::decode_interpreter_script_v2(&request.artifact.executable_bytes) {
-            Ok(bytecode) => bytecode,
-            Err(error) => {
-                return ProgramExecutionResponse::Failure {
-                    message: format!("worker rejected invalid SPMD bytecode: {error}"),
-                }
+    let (bytecode, runtime) = match region_sources::bind(
+        &request.artifact.executable_bytes,
+        runtime,
+        &request.recipe.program_revision,
+    ) {
+        Ok(bound) => bound,
+        Err(error) => {
+            return ProgramExecutionResponse::Failure {
+                message: format!("worker rejected invalid SPMD sources: {error}"),
             }
-        };
+        }
+    };
     let Some(executable) = bytecode
         .spmd_regions
         .iter()
@@ -513,15 +546,18 @@ async fn execute_parallel_region_request(
             message: "parallel region tasks return one typed result envelope".into(),
         };
     }
-    let bytecode: crate::Bytecode =
-        match crate::decode_interpreter_script_v2(&request.artifact.executable_bytes) {
-            Ok(bytecode) => bytecode,
-            Err(error) => {
-                return ProgramExecutionResponse::Failure {
-                    message: format!("worker rejected invalid parallel bytecode: {error}"),
-                }
+    let (bytecode, runtime) = match region_sources::bind(
+        &request.artifact.executable_bytes,
+        runtime,
+        &request.recipe.program_revision,
+    ) {
+        Ok(bound) => bound,
+        Err(error) => {
+            return ProgramExecutionResponse::Failure {
+                message: format!("worker rejected invalid parallel sources: {error}"),
             }
-        };
+        }
+    };
     let Some(executable) = bytecode
         .parfor_regions
         .iter()

@@ -52,8 +52,8 @@ pub use layout::{
     VmFunctionLayout, VmSlotId, VM_LAYOUT_SCHEMA_VERSION,
 };
 pub use program_execution::{
-    execute_deferred_program_in_context, execute_program_request,
-    execute_program_request_with_context, materialize_deferred_call,
+    encode_portable_region_sources_v1, execute_deferred_program_in_context,
+    execute_program_request, execute_program_request_with_context, materialize_deferred_call,
 };
 pub use runtime::workspace::{
     push_pending_workspace, take_updated_workspace_assigned_report, take_updated_workspace_state,

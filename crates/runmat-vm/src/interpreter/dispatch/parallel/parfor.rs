@@ -221,12 +221,14 @@ async fn execute_parfor_tasks(
         workers = graph.worker_limit,
         "scheduled compiler-bound parfor task graph"
     );
-    let program = crate::encode_interpreter_script_v2(execution.bytecode).map_err(|error| {
-        crate::interpreter::errors::mex(
-            "ExecutionProgram",
-            &format!("failed to encode the exact parallel program: {error}"),
-        )
-    })?;
+    let program =
+        crate::program_execution::capture_region_sources(execution.bytecode, &context.runtime)
+            .map_err(|error| {
+                crate::interpreter::errors::mex(
+                    "ExecutionProgram",
+                    &format!("failed to encode the exact parallel program: {error}"),
+                )
+            })?;
     let mut tasks = Vec::with_capacity(graph.chunks.len());
     for chunk in &graph.chunks {
         let values = iterations[chunk.start..chunk.start + chunk.len].to_vec();
