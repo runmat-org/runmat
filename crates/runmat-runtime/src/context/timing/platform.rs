@@ -200,7 +200,8 @@ mod tests {
     use super::*;
     use chrono::NaiveDate;
 
-    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn unavailable_calendar_does_not_fall_back_to_utc() {
         let timing = PlatformTimingService {
             origin: Instant::now(),
@@ -213,5 +214,53 @@ mod tests {
 
         assert_eq!(timing.local_datetime_to_epoch(local), None);
         assert_eq!(timing.local_datetime_at_epoch(Duration::ZERO), None);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn browser_platform_calendar_matches_intl_zone_and_round_trips() {
+        use wasm_bindgen::JsValue;
+
+        let format =
+            js_sys::Intl::DateTimeFormat::new(&js_sys::Array::new(), &js_sys::Object::new());
+        let options = format.resolved_options();
+        let zone_name = js_sys::Reflect::get(&options, &JsValue::from_str("timeZone"))
+            .expect("Intl resolvedOptions.timeZone access")
+            .as_string()
+            .filter(|name| !name.is_empty())
+            .expect("browser-selected IANA time zone");
+
+        let timing = PlatformTimingService::new();
+        let epoch = Duration::new(1_705_320_000, 123_000_000);
+        let date = js_sys::Date::new(&JsValue::from_f64(epoch.as_millis() as f64));
+        let expected = NaiveDate::from_ymd_opt(
+            i32::try_from(date.get_full_year()).expect("browser year"),
+            date.get_month() + 1,
+            date.get_date(),
+        )
+        .and_then(|date_value| {
+            date_value.and_hms_milli_opt(
+                date.get_hours(),
+                date.get_minutes(),
+                date.get_seconds(),
+                date.get_milliseconds(),
+            )
+        })
+        .unwrap_or_else(|| panic!("browser date in {zone_name} must be representable"));
+
+        let first = timing
+            .local_datetime_at_epoch(epoch)
+            .unwrap_or_else(|| panic!("captured browser calendar unavailable for {zone_name}"));
+        assert_eq!(first, expected, "captured calendar must match browser zone");
+        assert_eq!(
+            timing.local_datetime_to_epoch(first),
+            Some(epoch),
+            "paired conversion must use the same captured rules"
+        );
+        assert_eq!(
+            timing.local_datetime_at_epoch(epoch),
+            Some(first),
+            "the service must retain its captured calendar policy"
+        );
     }
 }

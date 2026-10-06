@@ -72,7 +72,8 @@ mod tests {
             .expect("test time")
     }
 
-    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn capture_keeps_the_selected_rules_after_the_selector_changes() {
         let selection = RefCell::new("America/New_York");
         let calendar = CapturedCalendar::capture_with(|| TimeZone::get(*selection.borrow()))
@@ -92,7 +93,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn epoch_conversion_follows_rules_across_a_dst_transition() {
         let calendar = named("America/New_York");
         assert_eq!(
@@ -105,7 +107,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn local_conversion_rejects_dst_gaps_and_folds() {
         let calendar = named("America/New_York");
         assert_eq!(calendar.local_to_epoch(local(2024, 3, 10, 2, 30)), None);
@@ -116,7 +119,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn conversion_rejects_pre_epoch_and_out_of_range_values() {
         let calendar = named("UTC");
         assert_eq!(calendar.local_to_epoch(local(1969, 12, 31, 23, 59)), None);
@@ -124,7 +128,8 @@ mod tests {
         assert_eq!(calendar.local_to_epoch(local(10_000, 1, 1, 0, 0)), None);
     }
 
-    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn checked_boundary_preserves_subsecond_precision() {
         let calendar = named("UTC");
         let local = NaiveDate::from_ymd_opt(2024, 1, 1)
