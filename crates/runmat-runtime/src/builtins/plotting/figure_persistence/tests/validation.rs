@@ -144,7 +144,10 @@ fn openfig_reuse_reimports_a_complete_bundle_after_one_copy_closes() {
     let Value::Tensor(opened) = opened else {
         panic!("expected a handle row");
     };
-    let handles = opened.data;
+    let handles = opened
+        .as_f64_slice()
+        .expect("graphics handles use authoritative double storage")
+        .to_vec();
     assert_eq!(handles.len(), 2);
     let survivor = FigureHandle::from(handles[1] as u32);
     close_figure(Some(FigureHandle::from(handles[0] as u32))).expect("close one imported copy");
@@ -157,9 +160,11 @@ fn openfig_reuse_reimports_a_complete_bundle_after_one_copy_closes() {
     let Value::Tensor(reopened) = reopened else {
         panic!("expected a replacement handle row");
     };
-    assert_eq!(reopened.data.len(), 2);
+    let reopened = reopened
+        .as_f64_slice()
+        .expect("graphics handles use authoritative double storage");
+    assert_eq!(reopened.len(), 2);
     assert!(reopened
-        .data
         .iter()
         .all(|handle| *handle != survivor.as_u32() as f64));
     assert_eq!(figure_handles().len(), 3);

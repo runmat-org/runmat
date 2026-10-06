@@ -98,7 +98,7 @@ mod tests {
 
     #[test]
     fn incremental_decompression_can_cancel_after_bounded_progress() {
-        let payload = (0..32 * 1024)
+        let payload = (0usize..32 * 1024)
             .map(|index| (index.wrapping_mul(31) % 251) as u8)
             .collect::<Vec<_>>();
         let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());

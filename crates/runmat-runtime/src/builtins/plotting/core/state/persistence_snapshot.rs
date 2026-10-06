@@ -138,7 +138,7 @@ mod tests {
         let _guard = lock_plot_test_registry();
         reset_plot_state();
         let mut figure = Figure::new();
-        figure.set_name("before".into());
+        figure.set_name("before");
         let handle = import_figure(figure);
         let expected_bytes = figure_arc_allocation_upper_bound(
             clone_figure(handle)
