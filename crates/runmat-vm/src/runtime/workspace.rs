@@ -210,40 +210,37 @@ pub struct WorkspaceStateGuard {
 
 impl Drop for WorkspaceStateGuard {
     fn drop(&mut self) {
-        let retired_delegate = with_stack_mut(self.owner, |stack| {
-            let Some(frame) = stack.pop() else {
-                return None;
-            };
-            frame.lifecycle.set(WorkspaceFrameLifecycle::Closed);
-            let retired_delegate = frame.delegate.borrow_mut().take();
-            if frame.publish_on_drop {
-                let ws = frame.state;
-                let removed_ids = ws.removed_slots_this_execution.keys().copied().collect();
-                let removed_names = ws.removed_slots_this_execution.values().cloned().collect();
-                LAST_WORKSPACE_ASSIGNED_REPORTS.with(|reports| {
-                    reports.borrow_mut().insert(
-                        self.owner,
-                        WorkspaceAssignedReport {
-                            ids: ws.assigned_ids_this_execution,
-                            names: ws.assigned_names_this_execution,
-                            removed_ids,
-                            removed_names,
-                        },
-                    );
-                });
-                LAST_WORKSPACE_STATES.with(|states| {
-                    states.borrow_mut().insert(
-                        self.owner,
-                        WorkspaceValueSnapshot {
-                            vars: ws.values,
-                            names: ws.names,
-                            assigned: ws.assigned,
-                        },
-                    );
-                });
-            }
-            retired_delegate
-        });
+        let Some(frame) = with_stack_mut(self.owner, |stack| stack.pop()) else {
+            return;
+        };
+        frame.lifecycle.set(WorkspaceFrameLifecycle::Closed);
+        let retired_delegate = frame.delegate.borrow_mut().take();
+        if frame.publish_on_drop {
+            let ws = frame.state;
+            let removed_ids = ws.removed_slots_this_execution.keys().copied().collect();
+            let removed_names = ws.removed_slots_this_execution.values().cloned().collect();
+            LAST_WORKSPACE_ASSIGNED_REPORTS.with(|reports| {
+                reports.borrow_mut().insert(
+                    self.owner,
+                    WorkspaceAssignedReport {
+                        ids: ws.assigned_ids_this_execution,
+                        names: ws.assigned_names_this_execution,
+                        removed_ids,
+                        removed_names,
+                    },
+                );
+            });
+            LAST_WORKSPACE_STATES.with(|states| {
+                states.borrow_mut().insert(
+                    self.owner,
+                    WorkspaceValueSnapshot {
+                        vars: ws.values,
+                        names: ws.names,
+                        assigned: ws.assigned,
+                    },
+                );
+            });
+        }
         drop(retired_delegate);
     }
 }
