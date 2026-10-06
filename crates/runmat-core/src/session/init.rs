@@ -37,12 +37,16 @@ impl RunMatSession {
         let parallel_services = crate::parallel_runtime::CoreParallelServices::new();
         let local_tasks = std::rc::Rc::new(SessionLocalTaskSupervisor::new());
         let base_workspace = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+        let source_evaluator = std::rc::Rc::new(
+            super::source_evaluation::SessionSourceEvaluator::new(base_workspace.clone()),
+        );
         let base_workspace_service = std::rc::Rc::new(
             runmat_runtime::workspace::BaseWorkspaceService::new(base_workspace.clone()),
         );
         let runtime_services = runmat_runtime::context::RuntimeServicePorts::default()
             .with_workspace(base_workspace_service.clone())
             .with_base_workspace(base_workspace_service)
+            .with_source_evaluation(source_evaluator.clone())
             .with_local_tasks(local_tasks.submission_port(runtime_context.local_identity()))
             .with_call(std::rc::Rc::new(runmat_runtime::context::RuntimeCallRouter))
             .with_http(super::http_host::default_http_service())
@@ -146,6 +150,7 @@ impl RunMatSession {
             native_tiering_enabled,
             project_handoff: None,
             source_pool: SourcePool::default(),
+            source_evaluator,
             cancellation: cancellation.clone(),
             runtime_context: runtime_context.with_service_ports(runtime_services),
             local_tasks,

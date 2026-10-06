@@ -18,6 +18,10 @@ pub(in crate::builtins::timing::timer) struct RecordingSourceEvaluator(
 );
 
 impl RuntimeSourceEvaluationService for RecordingSourceEvaluator {
+    fn bind_background_authority(&self) -> BuiltinResult<Rc<dyn RuntimeSourceEvaluationService>> {
+        Ok(Rc::new(Self(self.0.clone())))
+    }
+
     fn capture_session_source(
         &self,
         runtime: &RuntimeContext,

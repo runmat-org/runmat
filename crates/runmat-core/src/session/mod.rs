@@ -67,6 +67,7 @@ mod init;
 mod local_tasks_tests;
 mod project;
 mod run;
+mod source_evaluation;
 mod user_path;
 mod workspace;
 
@@ -121,6 +122,8 @@ pub struct RunMatSession {
     project_handoff: Option<runmat_package::FrozenProjectHandoff>,
     /// Interned source pool for user-defined functions
     source_pool: SourcePool,
+    /// Session-owned compiler/executor entry for asynchronous source callbacks.
+    source_evaluator: std::rc::Rc<source_evaluation::SessionSourceEvaluator>,
     /// Publishes one immutable cancellation generation per admitted execution.
     cancellation: cancellation::SessionCancellation,
     /// Root-scoped execution authority inherited by every invocation.

@@ -42,6 +42,38 @@ impl Future for PendingEvaluation {
     }
 }
 
+struct ObserveInvocationPolicy {
+    expected: RuntimeLanguagePolicy,
+    polls: Rc<Cell<usize>>,
+}
+
+impl Future for ObserveInvocationPolicy {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+        let active = crate::context::legacy::active().expect("invocation context is active");
+        assert_eq!(active.language_mode(), self.expected.language_mode);
+        assert_eq!(
+            active.runmat_extensions_enabled(),
+            self.expected.extensions_enabled
+        );
+        assert_eq!(
+            active.top_level_await_enabled(),
+            self.expected.top_level_await_enabled
+        );
+        assert_eq!(
+            active.dynamic_eval_enabled(),
+            self.expected.dynamic_eval_enabled
+        );
+        assert_eq!(
+            crate::compatibility::runmat_extensions_enabled(),
+            self.expected.extensions_enabled
+        );
+        self.polls.set(self.polls.get() + 1);
+        Poll::Pending
+    }
+}
+
 impl Drop for PendingEvaluation {
     fn drop(&mut self) {
         self.0.set(self.0.get() + 1);
@@ -49,6 +81,16 @@ impl Drop for PendingEvaluation {
 }
 
 impl RuntimeSourceEvaluationService for PendingExecutor {
+    fn bind_background_authority(
+        &self,
+    ) -> Result<Rc<dyn RuntimeSourceEvaluationService>, RuntimeError> {
+        Ok(Rc::new(Self {
+            entries: self.entries.clone(),
+            drops: self.drops.clone(),
+            retirements: self.retirements.clone(),
+        }))
+    }
+
     fn capture_session_source(
         &self,
         runtime: &RuntimeContext,
@@ -222,4 +264,49 @@ fn source_request_captures_session_and_policy_without_retaining_a_frame() {
         request.validate_session(&other).unwrap_err().identifier(),
         Some("RunMat:SourceEvaluation:SessionMismatch")
     );
+}
+
+#[test]
+fn pending_sibling_invocations_retain_independent_language_policy() {
+    let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+    runtime.set_language_mode(RuntimeLanguageMode::Matlab);
+    runtime.set_runmat_extensions_enabled(false);
+    let first_policy = RuntimeLanguagePolicy {
+        language_mode: RuntimeLanguageMode::RunMat,
+        extensions_enabled: true,
+        top_level_await_enabled: false,
+        dynamic_eval_enabled: true,
+    };
+    let second_policy = RuntimeLanguagePolicy {
+        language_mode: RuntimeLanguageMode::Strict,
+        extensions_enabled: false,
+        top_level_await_enabled: true,
+        dynamic_eval_enabled: false,
+    };
+    let first_polls = Rc::new(Cell::new(0));
+    let second_polls = Rc::new(Cell::new(0));
+    let first_runtime = runtime.clone().with_language_policy(first_policy);
+    let second_runtime = runtime.clone().with_language_policy(second_policy);
+    let mut first = Box::pin(first_runtime.scope(ObserveInvocationPolicy {
+        expected: first_policy,
+        polls: first_polls.clone(),
+    }));
+    let mut second = Box::pin(second_runtime.scope(ObserveInvocationPolicy {
+        expected: second_policy,
+        polls: second_polls.clone(),
+    }));
+    let mut context = Context::from_waker(futures::task::noop_waker_ref());
+
+    assert!(first.as_mut().poll(&mut context).is_pending());
+    assert!(second.as_mut().poll(&mut context).is_pending());
+    drop(second);
+    assert!(first.as_mut().poll(&mut context).is_pending());
+    drop(first);
+
+    assert_eq!(first_polls.get(), 2);
+    assert_eq!(second_polls.get(), 1);
+    assert_eq!(runtime.language_mode(), RuntimeLanguageMode::Matlab);
+    assert!(!runtime.runmat_extensions_enabled());
+    assert!(runtime.top_level_await_enabled());
+    assert!(runtime.dynamic_eval_enabled());
 }

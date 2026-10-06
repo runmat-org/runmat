@@ -3,6 +3,7 @@
 use super::*;
 use crate::context::RuntimeLocalTaskOutcome;
 use crate::context::{TimerAdmissionError, TimerFailureReceipt, TimerPhase};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,6 +18,7 @@ struct TimerRunConfig {
     start_delay: Duration,
     period: Duration,
     tasks: usize,
+    requires_source_evaluation: bool,
 }
 
 impl TimerRunConfig {
@@ -32,6 +34,7 @@ impl TimerRunConfig {
                 "timer: TimerFcn must be set before starting a timer",
             ));
         }
+        let mut requires_source_evaluation = false;
         for slot in TimerCallback::ALL {
             let callback = property(handle, slot.property().name())?;
             if let Some(text) = nonempty_text_callback(&callback) {
@@ -40,6 +43,7 @@ impl TimerRunConfig {
                 // source identity so callback property edits remain visible.
                 let request = text_callback_request(runtime, handle, slot, text)?;
                 drop(request);
+                requires_source_evaluation = true;
             }
         }
         let busy_mode =
@@ -81,6 +85,7 @@ impl TimerRunConfig {
             start_delay,
             period,
             tasks,
+            requires_source_evaluation,
         })
     }
 }
@@ -134,6 +139,7 @@ pub(super) async fn start_one_timer(
         .service_ports()
         .require_local_tasks("timer")
         .map_err(crate::context::RuntimeCapabilityError::into_runtime_error)?;
+    let task_runtime = background_callback_runtime(runtime, config.requires_source_evaluation)?;
     // The session record owns discovery, while this independent root keeps a
     // currently polled callback's receiver alive if it deletes its timer.
     let task_root = runmat_gc::gc_root(handle.target)
@@ -159,8 +165,7 @@ pub(super) async fn start_one_timer(
         let _ = set_property(&handle, "Running", Value::String("off".into()));
         return Err(error);
     }
-    let task_runtime = runtime.clone();
-    let scoped_runtime = runtime.clone();
+    let scoped_runtime = task_runtime.clone();
     let task_handle = handle.clone();
     let future = scoped_runtime.scope(async move {
         let _task_root = task_root;
@@ -186,6 +191,40 @@ pub(super) async fn start_one_timer(
         ));
     }
     Ok(())
+}
+
+fn background_callback_runtime(
+    runtime: &RuntimeContext,
+    requires_source_evaluation: bool,
+) -> BuiltinResult<RuntimeContext> {
+    let policy = crate::context::RuntimeLanguagePolicy {
+        language_mode: runtime.language_mode(),
+        extensions_enabled: runtime.runmat_extensions_enabled(),
+        top_level_await_enabled: runtime.top_level_await_enabled(),
+        dynamic_eval_enabled: runtime.dynamic_eval_enabled(),
+    };
+    let mut services = runtime.service_ports().clone().without_workspace();
+    if let Some(base) = runtime.service_ports().base_workspace() {
+        let base_service = Rc::new(crate::workspace::BaseWorkspaceService::new(base.owner()));
+        services = services.with_workspace(base_service);
+    } else if requires_source_evaluation {
+        runtime
+            .service_ports()
+            .require_base_workspace("timer text callback")
+            .map_err(crate::context::RuntimeCapabilityError::into_runtime_error)?;
+    }
+    if let Some(source_evaluation) = runtime.service_ports().source_evaluation() {
+        services = services.with_source_evaluation(source_evaluation.bind_background_authority()?);
+    } else if requires_source_evaluation {
+        runtime
+            .service_ports()
+            .require_source_evaluation("timer text callback")
+            .map_err(crate::context::RuntimeCapabilityError::into_runtime_error)?;
+    }
+    Ok(runtime
+        .clone()
+        .with_language_policy(policy)
+        .with_service_ports(services))
 }
 
 async fn run_timer_task(

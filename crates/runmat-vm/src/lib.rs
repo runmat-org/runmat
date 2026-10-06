@@ -35,7 +35,9 @@ pub use bytecode::{
 pub use bytecode::{
     FusionCandidateGroup, FusionInstructionKind, FusionInstructionWindow, FusionMetadata,
 };
-pub use call::builtins::{push_dynamic_eval_options, set_dynamic_eval_options};
+pub use call::builtins::{
+    evaluate_session_source_in_context, push_dynamic_eval_options, set_dynamic_eval_options,
+};
 pub use compiler::CompileError;
 pub use interpreter::runner::{
     interpret, interpret_function, interpret_function_with_counts, interpret_with_vars,

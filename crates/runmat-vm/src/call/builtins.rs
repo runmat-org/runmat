@@ -17,6 +17,9 @@ use runmat_thread_local::runmat_thread_local;
 use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
 
+mod source_evaluation;
+pub use source_evaluation::evaluate_session_source_in_context;
+
 #[derive(Clone, Copy)]
 enum VmIntrinsicBuiltin {
     Nargin,

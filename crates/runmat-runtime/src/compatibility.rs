@@ -48,7 +48,7 @@ runmat_thread_local! {
 /// RunMat-only builtin forms.
 pub fn runmat_extensions_enabled() -> bool {
     if let Some(context) = crate::context::legacy::active() {
-        return context.state().runmat_extensions_enabled.get();
+        return context.runmat_extensions_enabled();
     }
     RUNMAT_EXTENSIONS_ENABLED.with(Cell::get)
 }
@@ -56,7 +56,7 @@ pub fn runmat_extensions_enabled() -> bool {
 /// Set the extension policy for subsequent builtin dispatch on this thread.
 pub fn set_runmat_extensions_enabled(enabled: bool) {
     if let Some(context) = crate::context::legacy::active() {
-        context.state().runmat_extensions_enabled.set(enabled);
+        context.set_runmat_extensions_enabled(enabled);
         return;
     }
     RUNMAT_EXTENSIONS_ENABLED.with(|slot| slot.set(enabled));
@@ -234,20 +234,20 @@ pub fn push_runmat_extensions_enabled(enabled: bool) -> RunMatExtensionsGuard {
     set_runmat_extensions_enabled(enabled);
     RunMatExtensionsGuard {
         previous,
-        state: crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state())),
+        context: crate::context::legacy::active(),
     }
 }
 
 #[must_use]
 pub struct RunMatExtensionsGuard {
     previous: bool,
-    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
+    context: Option<crate::context::RuntimeContext>,
 }
 
 impl Drop for RunMatExtensionsGuard {
     fn drop(&mut self) {
-        if let Some(state) = &self.state {
-            state.runmat_extensions_enabled.set(self.previous);
+        if let Some(context) = &self.context {
+            context.set_runmat_extensions_enabled(self.previous);
         } else {
             RUNMAT_EXTENSIONS_ENABLED.with(|slot| slot.set(self.previous));
         }
