@@ -1866,7 +1866,10 @@ impl PlotRenderer {
             config.width,
             config.height
         );
-        if axes_count <= 1 && !self.axes_position_explicit_for_axes(0) {
+        if axes_count <= 1
+            && !self.axes_position_explicit_for_axes(0)
+            && self.axes_grid_cell_for_axes(0).is_none()
+        {
             log::debug!("runmat-plot: renderer.scene_to_target.branch_single_axes");
             return self.render(
                 emission,
@@ -1903,102 +1906,17 @@ impl PlotRenderer {
         })
     }
 
-    fn compute_tiled_viewports(
-        total_width: u32,
-        total_height: u32,
-        rows: usize,
-        cols: usize,
-    ) -> Vec<(u32, u32, u32, u32)> {
-        if rows == 0 || cols == 0 {
-            return vec![(0, 0, total_width.max(1), total_height.max(1))];
-        }
-        let rows_u32 = rows as u32;
-        let cols_u32 = cols as u32;
-        let cell_w = (total_width / cols_u32).max(1);
-        let cell_h = (total_height / rows_u32).max(1);
-        let mut out = Vec::with_capacity(rows * cols);
-        for r in 0..rows_u32 {
-            for c in 0..cols_u32 {
-                let x = c * cell_w;
-                let y = r * cell_h;
-                let mut w = cell_w;
-                let mut h = cell_h;
-                if c + 1 == cols_u32 {
-                    w = total_width.saturating_sub(x).max(1);
-                }
-                if r + 1 == rows_u32 {
-                    h = total_height.saturating_sub(y).max(1);
-                }
-                out.push((x, y, w, h));
-            }
-        }
-        out
-    }
-
     pub fn compute_axes_viewports_px(
         &self,
         total_width: u32,
         total_height: u32,
     ) -> Vec<(u32, u32, u32, u32)> {
-        let total_width = total_width.max(1);
-        let total_height = total_height.max(1);
-        let (rows, cols) = self.figure_axes_grid();
-        let axes_count = self.figure_axes_count().max(1);
-        let full = (0, 0, total_width, total_height);
-        let mut viewports = if rows.saturating_mul(cols) > 1 {
-            Self::compute_tiled_viewports(total_width, total_height, rows, cols)
-        } else {
-            vec![full; axes_count]
-        };
-        if viewports.len() < axes_count {
-            let grid_len = viewports.len().max(1);
-            for axes_index in viewports.len()..axes_count {
-                let parent = self
-                    .overlay_parent_for_axes(axes_index)
-                    .unwrap_or(axes_index)
-                    .min(grid_len - 1);
-                viewports.push(viewports.get(parent).copied().unwrap_or(full));
-            }
-        }
-        viewports.truncate(axes_count);
-        for (axes_index, viewport) in viewports.iter_mut().enumerate() {
-            if let Some((position, units)) = self.overlay_position_for_axes(axes_index) {
-                *viewport =
-                    Self::axes_position_to_viewport_px(total_width, total_height, position, &units);
-            }
-        }
-        viewports
-    }
-
-    fn axes_position_to_viewport_px(
-        total_width: u32,
-        total_height: u32,
-        position: [f64; 4],
-        units: &str,
-    ) -> (u32, u32, u32, u32) {
-        let tw = f64::from(total_width.max(1));
-        let th = f64::from(total_height.max(1));
-        let (left, bottom, width, height) = if units.eq_ignore_ascii_case("normalized") {
-            (
-                position[0] * tw,
-                position[1] * th,
-                position[2] * tw,
-                position[3] * th,
-            )
-        } else {
-            (position[0], position[1], position[2], position[3])
-        };
-        let x = left.clamp(0.0, tw - 1.0);
-        let h = height.max(1.0).min(th);
-        let y = (th - bottom - h).clamp(0.0, th - 1.0);
-        let w = width.max(1.0).min(tw - x);
-        let h = h.min(th - y);
-        (
-            x.round() as u32,
-            y.round() as u32,
-            w.round().max(1.0) as u32,
-            h.round().max(1.0) as u32,
-        )
+        self.last_figure
+            .as_ref()
+            .map(|figure| {
+                crate::core::axes_layout::figure_viewports_px(figure, total_width, total_height)
+            })
+            .unwrap_or_else(|| vec![(0, 0, total_width.max(1), total_height.max(1))])
     }
 
     /// Render using the camera-based pipeline into a viewport region with a scissor rectangle.
@@ -3937,6 +3855,14 @@ impl PlotRenderer {
             .and_then(|f| f.axes_metadata(axes_index))
             .map(|m| m.position_explicit)
             .unwrap_or(false)
+    }
+    fn axes_grid_cell_for_axes(
+        &self,
+        axes_index: usize,
+    ) -> Option<crate::plots::figure::AxesGridCell> {
+        self.last_figure
+            .as_ref()
+            .and_then(|figure| figure.axes_grid_cell(axes_index))
     }
     pub fn overlay_position_for_axes(&self, axes_index: usize) -> Option<([f64; 4], String)> {
         self.last_figure

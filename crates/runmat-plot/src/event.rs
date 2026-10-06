@@ -629,6 +629,12 @@ impl FigureSnapshot {
     /// Capture a snapshot from a [`Figure`] reference.
     pub fn capture(figure: &Figure) -> Self {
         let (rows, cols) = figure.axes_grid();
+        let mut axes_grid_cells = (0..figure.axes_count())
+            .map(|axes| figure.axes_grid_cell(axes))
+            .collect::<Vec<_>>();
+        if axes_grid_cells.iter().all(Option::is_none) {
+            axes_grid_cells.clear();
+        }
         let layout = FigureLayout {
             axes_rows: rows as u32,
             axes_cols: cols as u32,
@@ -637,6 +643,7 @@ impl FigureSnapshot {
                 .iter()
                 .map(|idx| *idx as u32)
                 .collect(),
+            axes_grid_cells,
         };
 
         let metadata = FigureMetadata::from_figure(figure);
@@ -669,7 +676,7 @@ impl FigureSnapshot {
 }
 
 impl FigureScene {
-    pub const SCHEMA_VERSION: u32 = 4;
+    pub const SCHEMA_VERSION: u32 = 5;
 
     pub fn capture(figure: &Figure) -> Self {
         let snapshot = FigureSnapshot::capture(figure);
@@ -743,6 +750,7 @@ impl FigureScene {
                 axes_rows: 1,
                 axes_cols: 1,
                 axes_indices: vec![0; plots.len()],
+                axes_grid_cells: Vec::new(),
             },
             metadata: snapshot.metadata,
             plots,
@@ -782,6 +790,7 @@ impl FigureScene {
                 figure.set_axes_axis_equal(figure.active_axes_index, true);
             }
         }
+        figure.restore_axes_grid_cells(self.layout.axes_grid_cells)?;
         figure.name = self.metadata.name;
         figure.number_title = self.metadata.number_title;
         figure.visible = self.metadata.visible;
@@ -862,6 +871,9 @@ impl FigureScene {
                 "mesh plots require figure scene schema version {}",
                 3
             ));
+        }
+        if self.schema_version < 5 && !self.layout.axes_grid_cells.is_empty() {
+            return Err("axes grid-cell identity requires figure scene schema version 5".into());
         }
         Ok(())
     }
@@ -1063,6 +1075,8 @@ pub struct FigureLayout {
     pub axes_rows: u32,
     pub axes_cols: u32,
     pub axes_indices: Vec<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub axes_grid_cells: Vec<Option<crate::plots::figure::AxesGridCell>>,
 }
 
 /// Figure-level metadata (title, labels, theming).

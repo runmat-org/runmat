@@ -362,6 +362,13 @@ export interface FigureLayout {
   axesRows: number;
   axesCols: number;
   axesIndices: number[];
+  axesGridCells?: Array<AxesGridCell | null>;
+}
+
+export interface AxesGridCell {
+  rows: number;
+  columns: number;
+  index: number;
 }
 
 export interface FigureMetadata {

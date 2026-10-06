@@ -5,6 +5,7 @@
 //! camera systems.
 
 pub mod camera;
+pub(crate) mod axes_layout;
 pub mod depth;
 pub mod gpu_pack;
 pub mod interaction;

@@ -33,7 +33,11 @@ pub use contour_fill::ContourFillPlot;
 pub use errorbar::ErrorBar;
 pub use export_error::PlotDataExportError;
 pub use figure::{
-    AxesKind, AxesMetadata, Figure, LegendEntry, LegendStyle, PlotElement, PlotType, TextStyle,
+    project_figure_for_persistence, AxesGridCell, AxesKind, AxesMetadata,
+    FigureAxesContainerSelection, FigureAxesPersistenceSelection, FigureAxesSelectionKind,
+    FigureDecoration, FigurePersistenceProjection, FigurePersistenceProjectionError,
+    FigurePersistenceSelection, FigureProjectionRemap, LegendEntry, LegendStyle, PlotElement,
+    PlotType, TextStyle,
 };
 pub use line::{LineGpuStyle, LineMarkerAppearance, LinePlot, LineStyle};
 pub use line3::Line3Plot;

@@ -12,6 +12,7 @@ use crate::plots::{
 };
 use glam::Vec4;
 use log::trace;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 #[path = "figure/axes_reset.rs"]
 mod axes_reset;
@@ -28,7 +29,16 @@ mod dimensionality;
 mod limits;
 #[path = "figure/preparation.rs"]
 mod preparation;
+#[path = "figure/persistence_projection/mod.rs"]
+mod persistence_projection;
 pub use limits::{display_bounds_3d, positive_log_bounds};
+pub use persistence_projection::project_figure_for_persistence;
+pub use persistence_projection::{
+    FigureAnnotationRemap, FigureAxesContainerSelection, FigureAxesPersistenceSelection,
+    FigureAxesRemap, FigureAxesSelectionKind, FigureDecoration, FigureDecorationRemap,
+    FigurePersistenceProjection, FigurePersistenceProjectionError, FigurePersistenceSelection,
+    FigurePlotRemap, FigureProjectionRemap,
+};
 
 type ViewBounds2D = (f64, f64, f64, f64);
 type PerAxesViewBoundsRef<'a> = &'a [Option<ViewBounds2D>];
@@ -87,6 +97,9 @@ pub struct Figure {
     /// For each plot element, the axes index (row-major, 0..rows*cols-1)
     plot_axes_indices: Vec<usize>,
 
+    /// Exact source grid cells retained when a hierarchy is compacted.
+    axes_grid_cells: Vec<Option<AxesGridCell>>,
+
     /// The axes index whose annotation metadata is currently active.
     pub active_axes_index: usize,
 
@@ -103,6 +116,14 @@ pub struct TextStyle {
     pub font_angle: Option<String>,
     pub interpreter: Option<String>,
     pub visible: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AxesGridCell {
+    pub rows: u32,
+    pub columns: u32,
+    pub index: u32,
 }
 
 impl Default for TextStyle {
@@ -410,6 +431,12 @@ impl Figure {
         )?;
         crate::plots::clone_budget::add(
             &mut total,
+            crate::plots::clone_budget::vec::<Option<AxesGridCell>>(
+                self.axes_grid_cells.capacity(),
+            )?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
             crate::plots::clone_budget::vec::<AxesMetadata>(self.axes_metadata.capacity())?,
         )?;
         crate::plots::clone_budget::add(
@@ -486,6 +513,7 @@ impl Figure {
             axes_rows: 1,
             axes_cols: 1,
             plot_axes_indices: Vec::new(),
+            axes_grid_cells: vec![None],
             active_axes_index: 0,
             axes_metadata: vec![Self::default_axes_metadata()],
             sg_title_style: TextStyle::default(),
@@ -496,6 +524,7 @@ impl Figure {
         while self.axes_metadata.len() < min_len.max(1) {
             self.axes_metadata.push(self.inherited_axes_metadata());
         }
+        self.axes_grid_cells.resize(self.axes_metadata.len(), None);
     }
 
     fn sync_legacy_fields_from_active_axes(&mut self) {
@@ -538,6 +567,31 @@ impl Figure {
 
     pub fn axes_metadata(&self, axes_index: usize) -> Option<&AxesMetadata> {
         self.axes_metadata.get(axes_index)
+    }
+
+    pub fn axes_grid_cell(&self, axes_index: usize) -> Option<AxesGridCell> {
+        self.axes_grid_cells.get(axes_index).copied().flatten()
+    }
+
+    pub(crate) fn restore_axes_grid_cells(
+        &mut self,
+        cells: Vec<Option<AxesGridCell>>,
+    ) -> Result<(), String> {
+        if cells.len() > self.axes_metadata.len() {
+            return Err("axes grid-cell metadata exceeds the axes count".into());
+        }
+        for cell in cells.iter().flatten() {
+            let count = cell
+                .rows
+                .checked_mul(cell.columns)
+                .ok_or_else(|| "axes grid-cell dimensions overflow".to_string())?;
+            if cell.rows == 0 || cell.columns == 0 || cell.index >= count {
+                return Err("axes grid-cell metadata is invalid".into());
+            }
+        }
+        self.axes_grid_cells = cells;
+        self.axes_grid_cells.resize(self.axes_metadata.len(), None);
+        Ok(())
     }
 
     pub fn active_axes_metadata(&self) -> Option<&AxesMetadata> {
@@ -1153,6 +1207,7 @@ impl Figure {
                 meta.minor_grid_enabled = false;
             }
         }
+        self.axes_grid_cells[index] = self.axes_grid_cells.get(parent).copied().flatten();
         self.dirty = true;
         index
     }
@@ -1177,6 +1232,7 @@ impl Figure {
             meta.position = position;
             meta.position_explicit = true;
         }
+        self.axes_grid_cells[axes_index] = None;
         self.dirty = true;
     }
 
@@ -1216,6 +1272,7 @@ impl Figure {
         self.axes_cols = cols.max(1);
         let grid_axes = self.axes_rows * self.axes_cols;
         self.ensure_axes_metadata_capacity(grid_axes);
+        self.axes_grid_cells.fill(None);
         for axes_index in 0..grid_axes {
             if self
                 .axes_metadata

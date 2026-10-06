@@ -59,7 +59,10 @@ pub use geometry_scene::{
     GeometrySceneRegionSummary, GeometrySceneTriangleRange,
 };
 pub use plots::{
-    AreaPlot, ContourFillPlot, ContourPlot, Figure, Line3Plot, LinePlot, PieChart, QuiverPlot,
+    project_figure_for_persistence, AreaPlot, AxesGridCell, ContourFillPlot, ContourPlot, Figure,
+    FigureAxesContainerSelection, FigureAxesPersistenceSelection, FigureAxesSelectionKind,
+    FigureDecoration, FigurePersistenceProjection, FigurePersistenceProjectionError,
+    FigurePersistenceSelection, FigureProjectionRemap, Line3Plot, LinePlot, PieChart, QuiverPlot,
     ReferenceLine, ReferenceLineOrientation, Scatter3Plot, ScatterPlot, StairsPlot, StemPlot,
     SurfacePlot,
 };
