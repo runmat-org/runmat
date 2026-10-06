@@ -171,11 +171,8 @@ fn openfig_reuse_reimports_a_complete_bundle_after_one_copy_closes() {
 fn openfig_validates_the_complete_archive_before_importing_any_figure() {
     let _guard = setup();
     let figure = figure_builtin(vec![]).expect("source figure");
-    let valid = block_on(export_figure_snapshot(
-        clone_figure(FigureHandle::from(figure as u32)).expect("source snapshot"),
-        SAVEFIG,
-    ))
-    .expect("valid scene payload");
+    let source = clone_figure(FigureHandle::from(figure as u32)).expect("source snapshot");
+    let valid = block_on(export_figure_snapshot(&source, SAVEFIG)).expect("valid scene payload");
     let archive = block_on(encode_figure_bundle(
         None,
         &[valid, b"not-a-scene".to_vec()],

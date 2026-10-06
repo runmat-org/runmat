@@ -46,6 +46,40 @@ impl NumericPlotData {
     pub fn estimated_byte_len(&self) -> usize {
         self.storage.checked_byte_len().unwrap_or(usize::MAX)
     }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let storage = match &self.storage {
+            NumericStorage::F64(values) => {
+                crate::plots::clone_budget::vec::<f64>(values.capacity())?
+            }
+            NumericStorage::F32(values) => {
+                crate::plots::clone_budget::vec::<f32>(values.capacity())?
+            }
+            NumericStorage::I8(values) => crate::plots::clone_budget::vec::<i8>(values.capacity())?,
+            NumericStorage::I16(values) => {
+                crate::plots::clone_budget::vec::<i16>(values.capacity())?
+            }
+            NumericStorage::I32(values) => {
+                crate::plots::clone_budget::vec::<i32>(values.capacity())?
+            }
+            NumericStorage::I64(values) => {
+                crate::plots::clone_budget::vec::<i64>(values.capacity())?
+            }
+            NumericStorage::U8(values) => crate::plots::clone_budget::vec::<u8>(values.capacity())?,
+            NumericStorage::U16(values) => {
+                crate::plots::clone_budget::vec::<u16>(values.capacity())?
+            }
+            NumericStorage::U32(values) => {
+                crate::plots::clone_budget::vec::<u32>(values.capacity())?
+            }
+            NumericStorage::U64(values) => {
+                crate::plots::clone_budget::vec::<u64>(values.capacity())?
+            }
+        };
+        storage.checked_add(crate::plots::clone_budget::vec::<usize>(
+            self.shape.capacity(),
+        )?)
+    }
 }
 
 #[cfg(test)]

@@ -493,6 +493,39 @@ impl PatchPlot {
                 .as_ref()
                 .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
     }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = crate::plots::clone_budget::optional_string(self.label.as_ref());
+        for bytes in [
+            crate::plots::clone_budget::vec::<Vec3>(self.vertices.capacity())?,
+            crate::plots::clone_budget::nested_vec(&self.faces)?,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.face_vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+            crate::plots::clone_budget::vec::<u32>(
+                self.face_indices.as_ref().map_or(0, Vec::capacity),
+            )?,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.edge_vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+        ] {
+            crate::plots::clone_budget::add(&mut total, bytes)?;
+        }
+        for source in [
+            &self.x_data,
+            &self.y_data,
+            &self.z_data,
+            &self.c_data,
+            &self.faces_data,
+            &self.vertices_data,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, source.retained_snapshot_bytes()?)?;
+        }
+        Some(total)
+    }
 }
 
 fn sanitize_color(color: Vec4) -> Vec4 {

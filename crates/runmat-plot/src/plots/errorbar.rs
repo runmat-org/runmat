@@ -752,6 +752,33 @@ impl ErrorBar {
                 .as_ref()
                 .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
     }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label.as_ref().map_or(0, String::capacity);
+        for values in [
+            &self.x,
+            &self.y,
+            &self.y_neg,
+            &self.y_pos,
+            &self.x_neg,
+            &self.x_pos,
+        ] {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(values.capacity())?,
+            )?;
+        }
+        for vertices in [&self.vertices, &self.marker_vertices]
+            .into_iter()
+            .flatten()
+        {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<Vertex>(vertices.capacity())?,
+            )?;
+        }
+        Some(total)
+    }
 }
 
 fn include_segment(index: usize, style: LineStyle) -> bool {

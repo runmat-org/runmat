@@ -118,6 +118,23 @@ impl Default for TextStyle {
     }
 }
 
+impl TextStyle {
+    fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = 0usize;
+        for value in [
+            self.font_weight.as_ref(),
+            self.font_angle.as_ref(),
+            self.interpreter.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, value.capacity())?;
+        }
+        Some(total)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LegendStyle {
     pub location: Option<String>,
@@ -144,6 +161,25 @@ impl Default for LegendStyle {
             orientation: None,
             text_color: None,
         }
+    }
+}
+
+impl LegendStyle {
+    fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = 0usize;
+        for value in [
+            self.location.as_ref(),
+            self.font_weight.as_ref(),
+            self.font_angle.as_ref(),
+            self.interpreter.as_ref(),
+            self.orientation.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, value.capacity())?;
+        }
+        Some(total)
     }
 }
 
@@ -215,6 +251,76 @@ pub struct TextAnnotation {
     pub style: TextStyle,
 }
 
+impl AxesMetadata {
+    fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = 0usize;
+        crate::plots::clone_budget::add(&mut total, self.colormap.retained_snapshot_bytes()?)?;
+        for value in [
+            Some(&self.y_axis_location),
+            Some(&self.units),
+            self.title.as_ref(),
+            self.subtitle.as_ref(),
+            self.x_label.as_ref(),
+            self.y_label.as_ref(),
+            self.z_label.as_ref(),
+            self.x_tick_format.as_ref(),
+            self.y_tick_format.as_ref(),
+            Some(&self.data_aspect_ratio_mode),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, value.capacity())?;
+        }
+        for values in [&self.x_ticks, &self.y_ticks].into_iter().flatten() {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(values.capacity())?,
+            )?;
+        }
+        for labels in [&self.x_tick_labels, &self.y_tick_labels]
+            .into_iter()
+            .flatten()
+        {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::strings(labels)?,
+            )?;
+        }
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vec4>(
+                self.color_order.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        for style in [
+            &self.axes_style,
+            &self.title_style,
+            &self.subtitle_style,
+            &self.x_label_style,
+            &self.y_label_style,
+            &self.z_label_style,
+        ] {
+            crate::plots::clone_budget::add(&mut total, style.retained_snapshot_bytes()?)?;
+        }
+        crate::plots::clone_budget::add(&mut total, self.legend_style.retained_snapshot_bytes()?)?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<TextAnnotation>(
+                self.world_text_annotations.capacity(),
+            )?,
+        )?;
+        for annotation in &self.world_text_annotations {
+            crate::plots::clone_budget::add(&mut total, annotation.text.capacity())?;
+            crate::plots::clone_budget::add(
+                &mut total,
+                annotation.style.retained_snapshot_bytes()?,
+            )?;
+        }
+        Some(total)
+    }
+}
+
 /// A plot element that can be any type of plot
 #[derive(Debug, Clone)]
 pub enum PlotElement {
@@ -274,6 +380,51 @@ pub enum PlotType {
 }
 
 impl Figure {
+    /// Heap bytes retained by an immutable snapshot of this figure.
+    ///
+    /// Shared GPU buffers are cheap resident handles. Reference-counted host
+    /// tables are included because the snapshot pins their payloads in memory.
+    pub fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = crate::plots::clone_budget::vec::<PlotElement>(self.plots.capacity())?;
+        crate::plots::clone_budget::add(&mut total, self.colormap.retained_snapshot_bytes()?)?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            self.default_colormap.retained_snapshot_bytes()?,
+        )?;
+        for value in [
+            self.name.as_ref(),
+            self.title.as_ref(),
+            self.sg_title.as_ref(),
+            self.x_label.as_ref(),
+            self.y_label.as_ref(),
+            self.z_label.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, value.capacity())?;
+        }
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<usize>(self.plot_axes_indices.capacity())?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<AxesMetadata>(self.axes_metadata.capacity())?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            self.sg_title_style.retained_snapshot_bytes()?,
+        )?;
+        for plot in &self.plots {
+            crate::plots::clone_budget::add(&mut total, plot.retained_snapshot_bytes()?)?;
+        }
+        for axes in &self.axes_metadata {
+            crate::plots::clone_budget::add(&mut total, axes.retained_snapshot_bytes()?)?;
+        }
+        Some(total)
+    }
+
     fn default_axes_metadata() -> AxesMetadata {
         AxesMetadata {
             axes_kind: AxesKind::Cartesian,
@@ -2095,6 +2246,35 @@ fn normalize_reference_range(range: (f64, f64)) -> (f64, f64) {
 }
 
 impl PlotElement {
+    fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let (boxed, payload) = match self {
+            Self::Line(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Scatter(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Bar(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::ErrorBar(plot) => (
+                std::mem::size_of::<ErrorBar>(),
+                plot.retained_snapshot_bytes()?,
+            ),
+            Self::Stairs(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Stem(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Area(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Quiver(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Pie(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Surface(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Mesh(plot) => (
+                std::mem::size_of::<MeshPlot>(),
+                plot.retained_snapshot_bytes()?,
+            ),
+            Self::Patch(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Line3(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Scatter3(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::Contour(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::ContourFill(plot) => (0, plot.retained_snapshot_bytes()?),
+            Self::ReferenceLine(plot) => (0, plot.retained_snapshot_bytes()?),
+        };
+        boxed.checked_add(payload)
+    }
+
     /// Check if the plot is visible
     pub fn is_visible(&self) -> bool {
         match self {

@@ -561,6 +561,37 @@ impl Scatter3Plot {
         self.ensure_bounds();
         self.bounds.unwrap_or_default()
     }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label.as_ref().map_or(0, String::capacity);
+        for bytes in [
+            crate::plots::clone_budget::vec::<Vec3>(self.points.capacity())?,
+            crate::plots::clone_budget::vec::<Vec4>(self.colors.capacity())?,
+            crate::plots::clone_budget::vec::<f32>(
+                self.point_sizes.as_ref().map_or(0, Vec::capacity),
+            )?,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+        ] {
+            crate::plots::clone_budget::add(&mut total, bytes)?;
+        }
+        for source in [&self.source_x, &self.source_y, &self.source_z]
+            .into_iter()
+            .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, source.retained_snapshot_bytes()?)?;
+        }
+        if let Some(inputs) = &self.gpu_inputs {
+            if let crate::gpu::scatter2::ScatterColorBuffer::Host(colors) = &inputs.colors {
+                crate::plots::clone_budget::add(
+                    &mut total,
+                    crate::plots::clone_budget::vec::<[f32; 4]>(colors.capacity())?,
+                )?;
+            }
+        }
+        Some(total)
+    }
 }
 
 #[cfg(test)]

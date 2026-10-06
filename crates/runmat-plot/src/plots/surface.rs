@@ -135,6 +135,15 @@ pub enum ColorMap {
     Listed(Arc<[[f32; 3]]>),
 }
 
+impl ColorMap {
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        match self {
+            Self::Listed(colors) => crate::plots::clone_budget::arc_slice::<[f32; 3]>(colors.len()),
+            _ => Some(0),
+        }
+    }
+}
+
 impl std::fmt::Debug for ColorMap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -1305,6 +1314,57 @@ impl SurfacePlot {
                 data,
             }),
         }
+    }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = crate::plots::clone_budget::optional_string(self.label.as_ref());
+        crate::plots::clone_budget::add(&mut total, self.colormap.retained_snapshot_bytes()?)?;
+        for values in [&self.x_data, &self.y_data] {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(values.capacity())?,
+            )?;
+        }
+        for grid in [&self.z_data, &self.x_grid, &self.y_grid]
+            .into_iter()
+            .flatten()
+        {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::nested_vec(grid)?,
+            )?;
+        }
+        if let Some(grid) = &self.color_grid {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::nested_vec(grid)?,
+            )?;
+        }
+        for source in [&self.source_x, &self.source_y, &self.source_z]
+            .into_iter()
+            .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, source.retained_snapshot_bytes()?)?;
+        }
+        for bytes in [
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+            crate::plots::clone_budget::vec::<u32>(self.indices.as_ref().map_or(0, Vec::capacity))?,
+        ] {
+            crate::plots::clone_budget::add(&mut total, bytes)?;
+        }
+        if let Some(source) = &self.gpu_source {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::owned_axis(&source.x_axis)?,
+            )?;
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::owned_axis(&source.y_axis)?,
+            )?;
+        }
+        Some(total)
     }
 }
 

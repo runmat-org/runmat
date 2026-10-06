@@ -5,6 +5,7 @@
 
 pub mod area;
 pub mod bar;
+mod clone_budget;
 pub mod contour;
 pub mod contour_fill;
 pub mod errorbar;

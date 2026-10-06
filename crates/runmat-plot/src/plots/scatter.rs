@@ -682,6 +682,43 @@ impl ScatterPlot {
                 .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
             + self.gpu_point_count.unwrap_or(0) * std::mem::size_of::<Vertex>()
     }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label.as_ref().map_or(0, String::capacity);
+        crate::plots::clone_budget::add(&mut total, self.colormap.retained_snapshot_bytes()?)?;
+        for source in [&self.source_x, &self.source_y].into_iter().flatten() {
+            crate::plots::clone_budget::add(&mut total, source.retained_snapshot_bytes()?)?;
+        }
+        for len in [
+            self.theta_data.as_ref().map_or(0, Vec::capacity),
+            self.r_data.as_ref().map_or(0, Vec::capacity),
+            self.color_values.as_ref().map_or(0, Vec::capacity),
+        ] {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(len)?,
+            )?;
+        }
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<f32>(
+                self.per_point_sizes.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vec4>(
+                self.per_point_colors.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        Some(total)
+    }
 }
 
 /// Plot performance and data statistics

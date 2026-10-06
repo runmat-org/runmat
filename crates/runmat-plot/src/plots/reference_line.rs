@@ -123,4 +123,17 @@ impl ReferenceLine {
             + self.display_name.as_ref().map_or(0, String::len)
             + self.label_orientation.len()
     }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label_orientation.capacity();
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::optional_string(self.label.as_ref()),
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::optional_string(self.display_name.as_ref()),
+        )?;
+        Some(total)
+    }
 }

@@ -1096,6 +1096,24 @@ impl LinePlot {
                 .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
             + self.gpu_vertex_count.unwrap_or(0) * std::mem::size_of::<Vertex>()
     }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label.as_ref().map_or(0, String::capacity);
+        crate::plots::clone_budget::add(&mut total, self.handle_visibility.capacity())?;
+        for source in [&self.source_x, &self.source_y].into_iter().flatten() {
+            crate::plots::clone_budget::add(&mut total, source.retained_snapshot_bytes()?)?;
+        }
+        for vertices in [&self.vertices, &self.marker_vertices]
+            .into_iter()
+            .flatten()
+        {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<Vertex>(vertices.capacity())?,
+            )?;
+        }
+        Some(total)
+    }
 }
 
 fn marker_style_code(kind: ScatterMarkerStyle) -> f32 {

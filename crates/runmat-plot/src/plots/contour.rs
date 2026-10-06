@@ -307,6 +307,17 @@ impl ContourPlot {
             .map(|v| v.len() * std::mem::size_of::<Vertex>())
             .unwrap_or(0)
     }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = crate::plots::clone_budget::optional_string(self.label.as_ref());
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        Some(total)
+    }
 }
 
 pub fn contour_bounds(x_min: f32, x_max: f32, y_min: f32, y_max: f32, base_z: f32) -> BoundingBox {

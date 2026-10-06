@@ -256,4 +256,35 @@ impl AreaPlot {
                 .as_ref()
                 .map_or(0, |i| i.len() * std::mem::size_of::<u32>())
     }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label.as_ref().map_or(0, String::capacity);
+        for len in [
+            self.x.capacity(),
+            self.y.capacity(),
+            self.lower_y.as_ref().map_or(0, Vec::capacity),
+        ] {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(len)?,
+            )?;
+        }
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<u32>(self.indices.as_ref().map_or(0, Vec::capacity))?,
+        )?;
+        if let Some(source) = &self.gpu_source {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::owned_axis(&source.x_axis)?,
+            )?;
+        }
+        Some(total)
+    }
 }

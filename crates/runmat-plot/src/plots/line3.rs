@@ -571,6 +571,23 @@ impl Line3Plot {
             .map(|v| v.len() * std::mem::size_of::<Vertex>())
             .unwrap_or(0)
     }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label.as_ref().map_or(0, String::capacity);
+        for source in [&self.source_x, &self.source_y, &self.source_z]
+            .into_iter()
+            .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, source.retained_snapshot_bytes()?)?;
+        }
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        Some(total)
+    }
 }
 
 #[cfg(test)]

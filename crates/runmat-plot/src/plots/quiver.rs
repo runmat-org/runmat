@@ -634,6 +634,52 @@ impl QuiverPlot {
                 .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>()),
         )
     }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label.as_ref().map_or(0, String::capacity);
+        for source in [
+            &self.source_x,
+            &self.source_y,
+            &self.source_z,
+            &self.source_u,
+            &self.source_v,
+            &self.source_w,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            crate::plots::clone_budget::add(&mut total, source.retained_snapshot_bytes()?)?;
+        }
+        for values in [&self.x, &self.y, &self.u, &self.v] {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(values.capacity())?,
+            )?;
+        }
+        for values in [&self.z, &self.w].into_iter().flatten() {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(values.capacity())?,
+            )?;
+        }
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        if let Some(source) = &self.gpu_source {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::owned_axis(&source.x_data)?,
+            )?;
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::owned_axis(&source.y_data)?,
+            )?;
+        }
+        Some(total)
+    }
 }
 
 #[cfg(test)]

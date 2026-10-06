@@ -488,6 +488,29 @@ impl StemPlot {
                 .as_ref()
                 .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
     }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = self.label.as_ref().map_or(0, String::capacity);
+        for values in [&self.x, &self.y] {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(values.capacity())?,
+            )?;
+        }
+        for source in [&self.x_source, &self.y_source].into_iter().flatten() {
+            crate::plots::clone_budget::add(&mut total, source.retained_snapshot_bytes()?)?;
+        }
+        for vertices in [&self.vertices, &self.marker_vertices]
+            .into_iter()
+            .flatten()
+        {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<Vertex>(vertices.capacity())?,
+            )?;
+        }
+        Some(total)
+    }
 }
 
 fn include_segment(index: usize, style: LineStyle) -> bool {

@@ -28,6 +28,15 @@ use crate::{BuiltinResult, RuntimeError};
 
 #[path = "state/callbacks.rs"]
 pub(crate) mod callbacks;
+#[path = "state/shared_figure.rs"]
+mod shared_figure;
+use shared_figure::SharedFigure;
+#[path = "state/persistence_snapshot.rs"]
+mod persistence_snapshot;
+pub use persistence_snapshot::{
+    capture_figure_persistence_snapshot, FigurePersistenceSnapshot, FigurePersistenceSnapshotError,
+    FigureSnapshotEntry, FigureSnapshotScope,
+};
 
 #[path = "state/colorbar.rs"]
 mod colorbar;
@@ -349,7 +358,7 @@ impl LineColorCycle {
 
 #[derive(Default)]
 struct FigureState {
-    figure: Figure,
+    figure: SharedFigure,
     active_axes: usize,
     tag: String,
     hold_per_axes: HashMap<usize, bool>,
@@ -373,7 +382,7 @@ impl FigureState {
         let title = format!("Figure {}", handle.as_u32());
         let figure = default_figure(&title, "X", "Y");
         Self {
-            figure,
+            figure: figure.into(),
             active_axes: 0,
             tag: String::new(),
             hold_per_axes: HashMap::new(),
@@ -1996,7 +2005,7 @@ fn clone_touched_figures(
         .filter_map(|handle| {
             let state = registry.figures.get_mut(&handle)?;
             state.revision = state.revision.wrapping_add(1);
-            Some((handle, state.figure.clone()))
+            Some((handle, state.figure.owned_clone()))
         })
         .collect()
 }
@@ -2041,7 +2050,7 @@ fn set_axes_limits_with_links(
             .expect("validated source axes target should exist");
         state.figure.set_axes_limits(source_axes, x, y);
         state.revision = state.revision.wrapping_add(1);
-        return Ok(vec![(source_handle, state.figure.clone())]);
+        return Ok(vec![(source_handle, state.figure.owned_clone())]);
     };
 
     let mut updates = HashMap::new();
@@ -4259,7 +4268,7 @@ where
             .get(&handle)
             .expect("figure exists")
             .figure
-            .clone();
+            .owned_clone();
         (handle, axes_indices, figure_clone)
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
@@ -5363,7 +5372,7 @@ fn with_axes_target_mut<R>(
     state.figure.set_active_axes_index(axes_index);
     let result = f(state);
     state.revision = state.revision.wrapping_add(1);
-    Ok((result, state.figure.clone()))
+    Ok((result, state.figure.owned_clone()))
 }
 
 fn with_figure_mut<R>(
@@ -5374,7 +5383,7 @@ fn with_figure_mut<R>(
     let state = get_state_mut(&mut reg, handle);
     let result = f(state);
     state.revision = state.revision.wrapping_add(1);
-    Ok((result, state.figure.clone()))
+    Ok((result, state.figure.owned_clone()))
 }
 
 pub fn current_hold_enabled() -> bool {
@@ -5460,7 +5469,9 @@ pub fn set_root_show_hidden_handles(enabled: bool) {
 
 pub fn clone_figure(handle: FigureHandle) -> Option<Figure> {
     let reg = registry();
-    reg.figures.get(&handle).map(|state| state.figure.clone())
+    reg.figures
+        .get(&handle)
+        .map(|state| state.figure.owned_clone())
 }
 
 pub fn figure_tag(handle: FigureHandle) -> Option<String> {
@@ -5485,7 +5496,7 @@ pub fn import_figure(figure: Figure) -> FigureHandle {
     reg.figures.insert(
         handle,
         FigureState {
-            figure,
+            figure: figure.into(),
             ..FigureState::new(handle)
         },
     );
@@ -5696,7 +5707,7 @@ where
             .get(&handle)
             .expect("figure exists")
             .figure
-            .clone();
+            .owned_clone();
         (handle, figure_clone)
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
@@ -5748,7 +5759,7 @@ where
             .get(&handle)
             .expect("figure exists")
             .figure
-            .clone();
+            .owned_clone();
         (handle, figure_clone)
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);

@@ -960,6 +960,40 @@ impl BarChart {
 
         labels_size + values_size + vertices_size + indices_size
     }
+
+    pub(crate) fn retained_snapshot_bytes(&self) -> Option<usize> {
+        let mut total = crate::plots::clone_budget::strings(&self.labels)?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::optional_string(self.label.as_ref()),
+        )?;
+        for values in [&self.values, &self.stack_offsets, &self.histogram_bin_edges]
+            .into_iter()
+            .flatten()
+        {
+            crate::plots::clone_budget::add(
+                &mut total,
+                crate::plots::clone_budget::vec::<f64>(values.capacity())?,
+            )?;
+        }
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vec4>(
+                self.per_bar_colors.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<Vertex>(
+                self.vertices.as_ref().map_or(0, Vec::capacity),
+            )?,
+        )?;
+        crate::plots::clone_budget::add(
+            &mut total,
+            crate::plots::clone_budget::vec::<u32>(self.indices.as_ref().map_or(0, Vec::capacity))?,
+        )?;
+        Some(total)
+    }
 }
 
 /// Bar chart statistics

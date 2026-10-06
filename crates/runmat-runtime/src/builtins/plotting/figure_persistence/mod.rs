@@ -18,7 +18,11 @@ use crate::replay::limits::ReplayLimits;
 use crate::{BuiltinResult, RuntimeError};
 
 use super::properties::{get_properties, resolve_plot_handle, set_properties, PlotHandle};
-use super::state::{clone_figure, current_figure_handle, set_figure_visible, FigureHandle};
+#[cfg(test)]
+use super::state::clone_figure;
+use super::state::{
+    capture_figure_persistence_snapshot, current_figure_handle, set_figure_visible, FigureHandle,
+};
 
 pub(super) const SAVEAS: &str = "saveas";
 pub(super) const SAVEFIG: &str = "savefig";

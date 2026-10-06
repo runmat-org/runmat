@@ -32,24 +32,22 @@ pub(super) async fn save_figures(
     }
     #[cfg(feature = "plot-core")]
     {
-        let snapshots = figures
-            .iter()
-            .map(|handle| {
-                clone_figure(*handle).ok_or_else(|| {
-                    persistence_error(
-                        &ERROR_RENDER,
-                        builtin,
-                        format!(
-                            "{builtin}: figure handle {} does not exist",
-                            handle.as_u32()
-                        ),
-                    )
-                })
-            })
-            .collect::<BuiltinResult<Vec<_>>>()?;
-        let mut payloads = Vec::with_capacity(snapshots.len());
-        for figure in snapshots {
-            payloads.push(export_figure_snapshot(figure, builtin).await?);
+        let snapshot = capture_figure_persistence_snapshot(
+            figures,
+            MAX_FIGURE_BUNDLE_COUNT,
+            MAX_FIGURE_ARCHIVE_BYTES,
+        )
+        .map_err(|source| {
+            persistence_error_with_source(
+                &ERROR_RENDER,
+                builtin,
+                format!("{builtin}: unable to capture a bounded figure snapshot"),
+                source,
+            )
+        })?;
+        let mut payloads = Vec::with_capacity(snapshot.entries.len());
+        for entry in snapshot.entries {
+            payloads.push(export_figure_snapshot(entry.figure.as_ref(), builtin).await?);
         }
         let bytes = encode_figure_bundle(runtime, &payloads, profile, builtin).await?;
         write_bytes(runtime, selected, &bytes, builtin).await
@@ -58,13 +56,13 @@ pub(super) async fn save_figures(
 
 #[cfg(feature = "plot-core")]
 pub(super) async fn export_figure_snapshot(
-    figure: runmat_plot::plots::Figure,
+    figure: &runmat_plot::plots::Figure,
     builtin: &'static str,
 ) -> BuiltinResult<Vec<u8>> {
     let policy = runmat_plot::event::resolve_scene_export_policy(Some(
         super::super::super::perf::scene_export_budget_bytes(),
     ));
-    let scene = runmat_plot::event::FigureScene::capture_for_export_with_cause(&figure, policy)
+    let scene = runmat_plot::event::FigureScene::capture_for_export_with_cause(figure, policy)
         .await
         .map_err(|source| {
             persistence_error_with_source(
