@@ -33,7 +33,7 @@ pub use contour_fill::ContourFillPlot;
 pub use errorbar::ErrorBar;
 pub use export_error::PlotDataExportError;
 pub use figure::{
-    project_figure_for_persistence, AxesGridCell, AxesKind, AxesMetadata,
+    project_figure_for_persistence, AxesGridCell, AxesKind, AxesMetadata, Figure,
     FigureAxesContainerSelection, FigureAxesPersistenceSelection, FigureAxesSelectionKind,
     FigureDecoration, FigurePersistenceProjection, FigurePersistenceProjectionError,
     FigurePersistenceSelection, FigureProjectionRemap, LegendEntry, LegendStyle, PlotElement,

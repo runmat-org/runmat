@@ -163,7 +163,7 @@ fn project_axes_metadata(
         });
     }
 
-    let mut projected = AxesMetadata {
+    let projected = AxesMetadata {
         colormap_length: source.colormap_length,
         y_direction: source.y_direction,
         axes_kind: source.axes_kind,
