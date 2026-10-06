@@ -38,11 +38,12 @@ impl SourceKey {
 
 /// One source table for the immutable compiler product. These ordinals never
 /// borrow authority from the session SourcePool or a runtime source lease.
-pub(super) struct ProgramSourceTable {
-    pub source_map: crate::ExecutableSourceMap,
-    pub statement_sources: Vec<ProgramSourceId>,
-    pub function_sources: HashMap<String, ProgramSourceId>,
-    pub retained_runtime_sources: HashMap<runmat_hir::SourceId, ProgramSourceId>,
+pub(in crate::session) struct ProgramSourceTable {
+    pub(in crate::session) source_map: crate::ExecutableSourceMap,
+    pub(in crate::session) statement_sources: Vec<ProgramSourceId>,
+    pub(in crate::session) function_sources: HashMap<String, ProgramSourceId>,
+    pub retained_runtime_sources:
+        HashMap<runmat_runtime::source_context::RuntimeSourceRef, ProgramSourceId>,
 }
 
 pub(super) struct SourceCompileProjection {
@@ -83,6 +84,17 @@ struct CompanionSource {
 }
 
 impl ProgramSourceTable {
+    pub(in crate::session) fn dynamic_root(
+        path: &str,
+        text: &str,
+        handoff: Option<&runmat_package::FrozenProjectHandoff>,
+    ) -> Result<crate::ExecutableSource, String> {
+        let fallback = crate::ExecutableSource::new("dynamic-function", path, text);
+        let (owner, relative) =
+            executable_source_identity(&fallback, handoff, Some(path), path, Some(path))?;
+        Ok(crate::ExecutableSource::new(owner, relative, text))
+    }
+
     pub fn intern_runtime_projection(
         &self,
         pool: &mut crate::source_pool::SourcePool,
@@ -107,13 +119,12 @@ impl ProgramSourceTable {
             }
             program_to_runtime.insert(program, issued);
         }
-        for (runtime, program) in &self.retained_runtime_sources {
-            let program = *program;
-            let issued = pool
-                .issued_source_ref(*runtime, runtime_context)
-                .map_err(|error| error.to_string())?;
-            if let Some(previous) = runtime_to_program.insert(issued, program) {
-                if previous != program {
+        for (issued, program) in &self.retained_runtime_sources {
+            if issued.resolve_in(runtime_context).is_none() {
+                return Err("retained source belongs to a missing or foreign session owner".into());
+            }
+            if let Some(previous) = runtime_to_program.insert(*issued, *program) {
+                if previous != *program {
                     return Err("retained source identity disagrees with the source table".into());
                 }
             }
@@ -124,13 +135,16 @@ impl ProgramSourceTable {
         })
     }
 
-    pub fn build(
+    pub(in crate::session) fn build(
         root: &crate::ExecutableSource,
         root_full_path: Option<&str>,
         discovery: &CompanionSourceDiscovery,
         primary_statement_count: usize,
         handoff: Option<&runmat_package::FrozenProjectHandoff>,
-        retained: &[(runmat_hir::SourceId, SourceContextData)],
+        retained: &[(
+            runmat_runtime::source_context::RuntimeSourceRef,
+            SourceContextData,
+        )],
     ) -> Result<Self, String> {
         let mut companions = BTreeMap::<SourceKey, CompanionSource>::new();
         let mut discovered_locations = BTreeMap::<(String, String), String>::new();
@@ -317,6 +331,25 @@ mod tests {
     use super::*;
     use crate::session::compile::DiscoveredSourceStatement;
 
+    fn runtime() -> runmat_runtime::context::RuntimeContext {
+        runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+    }
+
+    fn lease(
+        runtime: &runmat_runtime::context::RuntimeContext,
+        source: &SourceContextData,
+    ) -> runmat_runtime::source_context::RuntimeSourceLease {
+        runmat_runtime::source_context::lease_source_context_in_context(
+            runtime,
+            source.display_name.as_str(),
+            source.fullpath_name.as_deref().map(Arc::<str>::from),
+            source.text.as_str(),
+        )
+        .expect("canonical retained source")
+    }
+
     fn discovered(text: &str, name: &str, display: &str) -> DiscoveredSourceStatement {
         let statement = runmat_parser::parse(text)
             .expect("source parses")
@@ -389,6 +422,9 @@ mod tests {
             fullpath_name: Some("/project/prior.m".into()),
             text: "function y = prior(); y = 4; end".into(),
         };
+        let runtime = runtime();
+        let first_lease = lease(&runtime, &prior);
+        let second_lease = lease(&runtime, &prior);
         let empty = CompanionSourceDiscovery::default();
         let first = ProgramSourceTable::build(
             &root,
@@ -396,7 +432,7 @@ mod tests {
             &empty,
             1,
             None,
-            &[(runmat_hir::SourceId(99), prior.clone())],
+            &[(first_lease.source_ref(), prior.clone())],
         )
         .unwrap();
         let second = ProgramSourceTable::build(
@@ -405,16 +441,16 @@ mod tests {
             &empty,
             1,
             None,
-            &[(runmat_hir::SourceId(2), prior)],
+            &[(second_lease.source_ref(), prior)],
         )
         .unwrap();
         assert_eq!(first.source_map, second.source_map);
         assert_eq!(
-            first.retained_runtime_sources[&runmat_hir::SourceId(99)],
+            first.retained_runtime_sources[&first_lease.source_ref()],
             ProgramSourceId(1)
         );
         assert_eq!(
-            second.retained_runtime_sources[&runmat_hir::SourceId(2)],
+            second.retained_runtime_sources[&second_lease.source_ref()],
             ProgramSourceId(1)
         );
     }
@@ -427,6 +463,11 @@ mod tests {
             fullpath_name: Some("/project/prior.m".into()),
             text: text.into(),
         };
+        let runtime = runtime();
+        let first_source = source("function y = prior(); y = 1; end");
+        let second_source = source("function y = prior(); y = 2; end");
+        let first_lease = lease(&runtime, &first_source);
+        let second_lease = lease(&runtime, &second_source);
         let table = ProgramSourceTable::build(
             &root,
             None,
@@ -434,21 +475,15 @@ mod tests {
             1,
             None,
             &[
-                (
-                    runmat_hir::SourceId(5),
-                    source("function y = prior(); y = 1; end"),
-                ),
-                (
-                    runmat_hir::SourceId(6),
-                    source("function y = prior(); y = 2; end"),
-                ),
+                (first_lease.source_ref(), first_source),
+                (second_lease.source_ref(), second_source),
             ],
         )
         .unwrap();
         assert_eq!(table.source_map.entries().len(), 3);
         assert_ne!(
-            table.retained_runtime_sources[&runmat_hir::SourceId(5)],
-            table.retained_runtime_sources[&runmat_hir::SourceId(6)]
+            table.retained_runtime_sources[&first_lease.source_ref()],
+            table.retained_runtime_sources[&second_lease.source_ref()]
         );
     }
 
@@ -462,7 +497,17 @@ mod tests {
         };
         let a = source("a.m", "function y = a(); y = 1; end");
         let b = source("b.m", "function y = b(); y = 2; end");
-        let build = |retained: &[(runmat_hir::SourceId, SourceContextData)]| {
+        let changed_a = source("a.m", "function y = a(); y = 3; end");
+        let runtime = runtime();
+        let first_a = lease(&runtime, &a);
+        let first_b = lease(&runtime, &b);
+        let second_b = lease(&runtime, &b);
+        let second_a = lease(&runtime, &a);
+        let changed = lease(&runtime, &changed_a);
+        let build = |retained: &[(
+            runmat_runtime::source_context::RuntimeSourceRef,
+            SourceContextData,
+        )]| {
             ProgramSourceTable::build(
                 &root,
                 None,
@@ -475,20 +520,17 @@ mod tests {
             .source_map
         };
         let first = build(&[
-            (runmat_hir::SourceId(99), a.clone()),
-            (runmat_hir::SourceId(100), b.clone()),
+            (first_a.source_ref(), a.clone()),
+            (first_b.source_ref(), b.clone()),
         ]);
         let reordered = build(&[
-            (runmat_hir::SourceId(2), b.clone()),
-            (runmat_hir::SourceId(1), a),
+            (second_b.source_ref(), b.clone()),
+            (second_a.source_ref(), a),
         ]);
         assert_eq!(first, reordered);
         let changed = build(&[
-            (runmat_hir::SourceId(2), b),
-            (
-                runmat_hir::SourceId(1),
-                source("a.m", "function y = a(); y = 3; end"),
-            ),
+            (second_b.source_ref(), b),
+            (changed.source_ref(), changed_a),
         ]);
         assert_ne!(first, changed);
     }

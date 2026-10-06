@@ -236,6 +236,7 @@ struct DynamicFunctionCacheEntry {
     source_text: String,
     project_revision: Option<runmat_package::ProjectRevision>,
     registry: Arc<runmat_vm::FunctionRegistry>,
+    source_map: Arc<crate::ExecutableSourceMap>,
 }
 
 #[cfg(test)]

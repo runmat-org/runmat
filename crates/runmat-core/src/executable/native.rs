@@ -320,7 +320,7 @@ impl ExecutableUnit {
             entrypoint: envelope.manifest.identity.entrypoint_function,
             manifest: envelope.manifest,
             source_map: self
-                .source_map
+                .source_map()
                 .portable_v2()
                 .map_err(native_product_error)?,
             binding_names: self.binding_names(),

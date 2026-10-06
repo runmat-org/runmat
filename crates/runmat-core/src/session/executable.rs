@@ -593,7 +593,7 @@ impl RunMatSession {
             }
         };
         let outputs = result.map_err(|mut error| {
-            self.populate_callstack(&mut error);
+            self.populate_callstack(&mut error, runtime);
             RunError::Runtime(error)
         })?;
         ensure_invocation_allowed(control)?;
