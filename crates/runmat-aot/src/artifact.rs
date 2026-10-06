@@ -241,7 +241,12 @@ mod tests {
         bytes: &[u8],
     ) -> ProgramArtifact {
         let payload = NativeObjectPayload::new(
-            execution_object_format(manifest.object_format.token()).unwrap(),
+            recipe
+                .target
+                .native
+                .as_ref()
+                .expect("native fixture")
+                .object_format,
             super::canonical_native_manifest(manifest).unwrap(),
             bytes.to_vec(),
         )
@@ -349,16 +354,19 @@ mod tests {
             payload.object.clone(),
         )
         .unwrap();
-        let wrong_format_artifact = ProgramArtifact::materialize(
+        let wrong_format = ProgramArtifact::materialize(
             &recipe,
             ExecutableForm::NativeObjectV1,
             wrong_payload.to_canonical_bytes().unwrap(),
         )
-        .unwrap();
-        assert!(read_native_object_artifact(&recipe, &wrong_format_artifact)
-            .unwrap_err()
+        .expect_err("artifact admission must reject a foreign object format");
+        assert!(matches!(
+            &wrong_format,
+            runmat_execution_artifact::ArtifactError::Identity(_)
+        ));
+        assert!(wrong_format
             .to_string()
-            .contains("aot.artifact.payload_format"));
+            .contains("native object format differs from its target identity"));
 
         let mut wrong_manifest_format = object.manifest.clone();
         wrong_manifest_format.object_format = match wrong_manifest_format.object_format {
@@ -410,9 +418,9 @@ mod tests {
         assert!(changed_schema_error
             .to_string()
             .contains("aot.artifact.native_schema"));
-        assert!(changed_schema_error
-            .to_string()
-            .contains("actual 4, expected 5"));
+        assert!(changed_schema_error.to_string().contains(&format!(
+            "actual 4, expected {NATIVE_OBJECT_SCHEMA_VERSION}"
+        )));
 
         for (mutate, expected_code) in [
             (

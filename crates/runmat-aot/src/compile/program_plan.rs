@@ -295,8 +295,8 @@ mod tests {
     fn closed_world_maps_catalog_bindings_to_stable_native_symbols() {
         for name in [
             "abs", "angle", "conj", "double", "exp", "expm1", "imag", "int8", "int16", "int32",
-            "flintmax", "int64", "intmax", "intmin", "log", "log10", "log1p", "log2", "real",
-            "realmax", "realmin", "realsqrt", "sign", "single", "sqrt", "uint8", "uint16",
+            "flintmax", "int64", "intmax", "intmin", "log", "log10", "log1p", "log2", "plus",
+            "real", "realmax", "realmin", "realsqrt", "sign", "single", "sqrt", "uint8", "uint16",
             "uint32", "uint64",
         ] {
             let bindings =
@@ -313,12 +313,14 @@ mod tests {
     }
 
     #[test]
-    fn closed_world_rejects_legacy_and_unbounded_builtin_authorities() {
-        let legacy =
-            retained_builtin_bindings(CompilationPolicy::ClosedWorld, &builtin_report("plus"))
-                .expect_err("legacy builtin must not imply exact retention");
+    fn closed_world_rejects_unregistered_and_unbounded_builtin_authorities() {
+        let unregistered = retained_builtin_bindings(
+            CompilationPolicy::ClosedWorld,
+            &builtin_report("unregistered_aot_fixture"),
+        )
+        .expect_err("an undeclared builtin must not imply exact retention");
         assert!(matches!(
-            legacy,
+            unregistered,
             crate::AotError::Contract {
                 code: "aot.compile.closed_world_builtin",
                 ..
