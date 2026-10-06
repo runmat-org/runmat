@@ -10,6 +10,7 @@ mod journal;
 mod owner;
 mod projection;
 mod revision;
+mod service;
 mod values;
 
 pub use delta::{WorkspaceChange, WorkspaceChangeKind, WorkspaceDelta};
@@ -19,6 +20,8 @@ pub use owner::{
 };
 pub use projection::BaseWorkspaceProjection;
 pub use revision::WorkspaceRevision;
+pub(crate) use service::base_workspace_error_to_runtime;
+pub use service::BaseWorkspaceService;
 
 #[cfg(test)]
 mod tests;

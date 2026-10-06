@@ -141,6 +141,34 @@ impl BaseWorkspaceOwner {
         Ok(state.snapshot())
     }
 
+    pub fn lookup(&self, name: &str) -> Result<Option<Value>, BaseWorkspaceError> {
+        let state = self
+            .state
+            .try_borrow()
+            .map_err(|_| BaseWorkspaceError::BorrowConflict)?;
+        state.ensure_open()?;
+        Ok(state.entries.get(name).map(|entry| entry.clone_value()))
+    }
+
+    /// Visit canonical retained values without materializing a workspace
+    /// snapshot. `None` means the visitor stopped before completing the view.
+    pub fn visit_retained_values(
+        &self,
+        visitor: &mut dyn FnMut(&Value) -> Option<()>,
+    ) -> Result<Option<()>, BaseWorkspaceError> {
+        let state = self
+            .state
+            .try_borrow()
+            .map_err(|_| BaseWorkspaceError::BorrowConflict)?;
+        state.ensure_open()?;
+        for (_, entry) in state.entries.iter() {
+            if visitor(entry.value()).is_none() {
+                return Ok(None);
+            }
+        }
+        Ok(Some(()))
+    }
+
     pub fn revision(&self) -> Result<WorkspaceRevision, BaseWorkspaceError> {
         let state = self
             .state

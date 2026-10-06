@@ -1,13 +1,18 @@
 use runmat_value::Value;
 
 mod base;
+mod checked;
 pub mod session;
 pub mod bindings;
 
 pub use base::{
     BaseWorkspaceCommit, BaseWorkspaceError, BaseWorkspaceOwner, BaseWorkspaceProjection,
-    BaseWorkspaceReconciliation, BaseWorkspaceSnapshot, WorkspaceChange, WorkspaceChangeKind,
-    WorkspaceDelta, WorkspaceRevision,
+    BaseWorkspaceReconciliation, BaseWorkspaceService, BaseWorkspaceSnapshot, WorkspaceChange,
+    WorkspaceChangeKind, WorkspaceDelta, WorkspaceRevision,
+};
+pub use checked::{
+    base_workspace_owner, begin_base_workspace_projection, try_assign, try_clear, try_global_names,
+    try_lookup, try_remove, try_snapshot,
 };
 
 #[cfg(test)]

@@ -121,6 +121,31 @@ pub trait RuntimeWorkspaceService {
     fn lookup(&self, name: &str) -> Option<Value>;
     fn snapshot(&self) -> Vec<(String, Value)>;
     fn global_names(&self) -> Vec<String>;
+
+    /// Checked workspace reads used by canonical session workspace owners.
+    /// Legacy services may retain their infallible read contract through the
+    /// defaults, while authority-bearing services override these methods so a
+    /// closed or temporarily unavailable owner is never mistaken for an empty
+    /// workspace.
+    fn try_lookup(&self, name: &str) -> Result<Option<Value>, RuntimeError> {
+        Ok(self.lookup(name))
+    }
+
+    fn try_snapshot(&self) -> Result<Vec<(String, Value)>, RuntimeError> {
+        Ok(self.snapshot())
+    }
+
+    fn try_global_names(&self) -> Result<Vec<String>, RuntimeError> {
+        Ok(self.global_names())
+    }
+
+    /// Return the canonical base-workspace authority when this service owns
+    /// one. Caller-frame adapters deliberately return `None`: globals,
+    /// persistents, and procedure-local workspaces are separate authorities.
+    fn base_workspace_owner(&self) -> Option<crate::workspace::BaseWorkspaceOwner> {
+        None
+    }
+
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError>;
     fn clear(&self) -> Result<(), RuntimeError>;
     fn remove(&self, name: &str) -> Result<(), RuntimeError>;

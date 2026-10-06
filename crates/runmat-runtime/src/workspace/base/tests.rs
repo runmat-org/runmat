@@ -182,6 +182,139 @@ fn close_revokes_owner_and_projection_access() {
     ));
 }
 
+#[test]
+fn close_revokes_effect_authority_but_retains_the_local_projection_view() {
+    let workspace = BaseWorkspaceOwner::new();
+    workspace
+        .apply(assigned("admitted", Value::Num(7.0)))
+        .unwrap();
+    let projection = workspace.begin_projection().unwrap();
+
+    workspace.close().unwrap();
+
+    assert_eq!(projection.lookup("admitted"), Some(&Value::Num(7.0)));
+    assert_eq!(projection.iter().count(), 1);
+    assert!(matches!(
+        projection.ensure_effect_authority(),
+        Err(BaseWorkspaceError::Closed)
+    ));
+}
+
+#[test]
+fn canonical_service_keeps_base_globals_and_persistents_as_separate_authorities() {
+    use crate::context::{RuntimeContext, RuntimeServicePorts, RuntimeWorkspaceService};
+    use crate::execution::RuntimeExecutionService;
+    use std::rc::Rc;
+
+    let owner = BaseWorkspaceOwner::new();
+    owner.apply(assigned("base", Value::Num(1.0))).unwrap();
+    let service = Rc::new(BaseWorkspaceService::new(owner));
+    let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+        .with_service_ports(RuntimeServicePorts::default().with_workspace(service.clone()));
+    let _scope = crate::context::RuntimeContextGuard::enter(runtime);
+    crate::workspace::session::store_global_named("global", Value::Num(2.0));
+    crate::workspace::session::store_persistent_named("f", "persistent", Value::Num(3.0));
+
+    assert_eq!(service.try_lookup("base").unwrap(), Some(Value::Num(1.0)));
+    assert_eq!(service.try_lookup("global").unwrap(), None);
+    assert_eq!(service.try_global_names().unwrap(), vec!["global"]);
+    assert_eq!(service.try_snapshot().unwrap().len(), 1);
+}
+
+#[test]
+fn checked_facade_does_not_fall_back_when_canonical_owner_is_closed() {
+    use crate::context::{RuntimeContext, RuntimeServicePorts};
+    use crate::execution::RuntimeExecutionService;
+    use std::rc::Rc;
+
+    fn legacy_lookup(name: &str) -> Option<Value> {
+        (name == "shadow").then_some(Value::Num(99.0))
+    }
+    fn empty_snapshot() -> Vec<(String, Value)> {
+        Vec::new()
+    }
+    fn empty_globals() -> Vec<String> {
+        Vec::new()
+    }
+
+    let _workspace_guard = crate::workspace::test_guard();
+    let owner = BaseWorkspaceOwner::new();
+    let service = Rc::new(BaseWorkspaceService::new(owner.clone()));
+    let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+        .with_service_ports(RuntimeServicePorts::default().with_workspace(service));
+    let _scope = crate::context::RuntimeContextGuard::enter(runtime);
+    crate::workspace::register_workspace_resolver(crate::workspace::WorkspaceResolver {
+        lookup: legacy_lookup,
+        snapshot: empty_snapshot,
+        globals: empty_globals,
+        assign: None,
+        clear: None,
+        remove: None,
+    });
+    owner.close().unwrap();
+
+    let error = crate::workspace::try_lookup("shadow").unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:Workspace:Closed"));
+    assert_eq!(
+        crate::workspace::try_snapshot()
+            .expect_err("closed owner must not become an empty snapshot")
+            .identifier(),
+        Some("RunMat:Workspace:Closed")
+    );
+    assert_eq!(
+        crate::workspace::try_assign("x", Value::Num(1.0))
+            .expect_err("closed owner must reject mutations")
+            .identifier(),
+        Some("RunMat:Workspace:Closed")
+    );
+}
+
+#[test]
+fn caller_workspace_service_does_not_gain_base_workspace_authority() {
+    use crate::context::{RuntimeContext, RuntimeServicePorts};
+    use crate::execution::RuntimeExecutionService;
+    use std::rc::Rc;
+
+    #[derive(Default)]
+    struct CallerWorkspace;
+
+    impl crate::context::RuntimeWorkspaceService for CallerWorkspace {
+        fn lookup(&self, _name: &str) -> Option<Value> {
+            None
+        }
+
+        fn snapshot(&self) -> Vec<(String, Value)> {
+            Vec::new()
+        }
+
+        fn global_names(&self) -> Vec<String> {
+            Vec::new()
+        }
+
+        fn assign(&self, _name: &str, _value: Value) -> Result<(), crate::RuntimeError> {
+            Ok(())
+        }
+
+        fn clear(&self) -> Result<(), crate::RuntimeError> {
+            Ok(())
+        }
+
+        fn remove(&self, _name: &str) -> Result<(), crate::RuntimeError> {
+            Ok(())
+        }
+    }
+
+    let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new())).with_service_ports(
+        RuntimeServicePorts::default().with_workspace(Rc::new(CallerWorkspace)),
+    );
+    let _scope = crate::context::RuntimeContextGuard::enter(runtime);
+    let error = crate::workspace::base_workspace_owner().unwrap_err();
+    assert_eq!(
+        error.identifier(),
+        Some(crate::context::RuntimeCapabilityError::IDENTIFIER)
+    );
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn rooted_handle(label: &str) -> (runmat_gc::ExplicitRoot, runmat_gc::GcHandle, Value) {
     let initial = runmat_gc::gc_allocate_rooted(Value::String(label.into())).unwrap();
@@ -228,6 +361,28 @@ fn commit_receipt_does_not_retain_an_intermediate_removed_assignment() {
             receipt.changes().changes()[0].kind(),
             WorkspaceChangeKind::Remove
         );
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(runmat_gc::gc_clone_value(&handle).is_err());
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn unpublished_ordered_delta_retains_intermediate_values_until_dropped() {
+    runmat_gc::gc_test_context(|| {
+        let (initial, handle, value) = rooted_handle("pending");
+        let workspace = BaseWorkspaceOwner::new();
+        let mut projection = workspace.begin_projection().unwrap();
+        projection.assign("temporary", value).unwrap();
+        projection.remove("temporary");
+        initial.unroot().unwrap();
+
+        assert!(projection.lookup("temporary").is_none());
+        assert!(projection.has_pending_changes());
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+
+        drop(projection);
         runmat_gc::gc_collect_major().unwrap();
         assert!(runmat_gc::gc_clone_value(&handle).is_err());
     });

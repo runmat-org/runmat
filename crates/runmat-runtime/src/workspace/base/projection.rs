@@ -45,14 +45,31 @@ impl BaseWorkspaceProjection {
         self.entries.is_empty()
     }
 
+    /// Iterate the projection's retained local view. The view remains valid
+    /// after its owner closes so diagnostics and unwind code can inspect
+    /// already-admitted values; it does not confer executable authority.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &Value)> {
         self.entries
             .iter()
             .map(|(name, entry)| (name.as_str(), entry.value()))
     }
 
+    /// Read the projection's retained local view. Call
+    /// [`Self::ensure_effect_authority`] before admitting new execution or an
+    /// external effect against this projection.
     pub fn lookup(&self, name: &str) -> Option<&Value> {
         self.entries.get(name).map(|entry| entry.value())
+    }
+
+    /// Verify that the canonical owner which admitted this projection is
+    /// still live. Local reads remain available after closure, but publication,
+    /// reconciliation, and new executor/effect admission must pass this check.
+    pub fn ensure_effect_authority(&self) -> Result<(), BaseWorkspaceError> {
+        let owner = self.owner.upgrade().ok_or(BaseWorkspaceError::Closed)?;
+        owner
+            .try_borrow()
+            .map_err(|_| BaseWorkspaceError::BorrowConflict)?
+            .ensure_open()
     }
 
     pub fn has_pending_changes(&self) -> bool {

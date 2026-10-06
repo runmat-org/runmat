@@ -76,6 +76,13 @@ impl WorkspaceChange {
     }
 }
 
+/// Ordered, unpublished workspace mutations.
+///
+/// Every assigned value remains rooted until the delta is published or
+/// dropped, including an assignment later overwritten, removed, or cleared in
+/// the same delta. This is intentional: the pending record is replayable in
+/// order. A successful commit returns a canonical-effect delta which omits
+/// intermediate values that no longer contribute to workspace state.
 #[derive(Debug, Default)]
 pub struct WorkspaceDelta {
     changes: Vec<WorkspaceChange>,
