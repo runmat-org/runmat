@@ -229,6 +229,9 @@ impl RuntimeContext {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+    use runmat_accelerate_api::{
+        handle_identity, test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+    };
     use runmat_value::{Closure, ObjectInstance, Value};
 
     #[test]
@@ -237,17 +240,24 @@ mod tests {
             let captured = runmat_gc::gc_allocate_rooted(Value::String("capture".into()))
                 .expect("captured handle");
             let captured_handle = captured.handle();
+            let resident = TestAllocationOwner::new()
+                .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+                .expect("resident callback capture")
+                .handle;
             let mut object = ObjectInstance::new("timer");
             object.properties.insert(
                 "TimerFcn".into(),
                 Value::Closure(Closure {
                     function_name: "callback".into(),
                     bound_function: None,
-                    captures: vec![Value::HandleObject(HandleRef {
-                        class_name: "Capture".into(),
-                        target: captured_handle,
-                        valid: true,
-                    })],
+                    captures: vec![
+                        Value::HandleObject(HandleRef {
+                            class_name: "Capture".into(),
+                            target: captured_handle,
+                            valid: true,
+                        }),
+                        Value::GpuTensor(resident.clone()),
+                    ],
                 }),
             );
             let timer = runmat_gc::gc_allocate_rooted(Value::Object(object)).expect("timer object");
@@ -268,8 +278,32 @@ mod tests {
             runmat_gc::gc_collect_major().expect("collect while discoverable");
             assert!(runmat_gc::gc_clone_value(&handle.target).is_ok());
             assert!(runmat_gc::gc_clone_value(&captured_handle).is_ok());
+            let mut resident_aliases = Vec::new();
+            assert_eq!(
+                runmat_gc::gc_visit_retained_values(&[], &mut |value| {
+                    crate::dispatcher::try_visit_gpu_handles(value, &mut |handle| {
+                        resident_aliases.push(handle_identity(handle));
+                    })
+                    .ok()?;
+                    Some(())
+                }),
+                Some(())
+            );
+            assert!(resident_aliases.contains(&handle_identity(&resident)));
 
             session.delete(&handle);
+            resident_aliases.clear();
+            assert_eq!(
+                runmat_gc::gc_visit_retained_values(&[], &mut |value| {
+                    crate::dispatcher::try_visit_gpu_handles(value, &mut |handle| {
+                        resident_aliases.push(handle_identity(handle));
+                    })
+                    .ok()?;
+                    Some(())
+                }),
+                Some(())
+            );
+            assert!(!resident_aliases.contains(&handle_identity(&resident)));
             runmat_gc::gc_collect_major().expect("collect after deletion");
             assert!(runmat_gc::gc_clone_value(&handle.target).is_err());
             assert!(runmat_gc::gc_clone_value(&captured_handle).is_err());
