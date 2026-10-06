@@ -6,12 +6,17 @@ use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
+mod lexical;
+use lexical::SourceFileIdentity;
+pub use lexical::{lease_nested_source_context_in_context, NestedSourceIdentityError};
+
 #[derive(Debug, Clone)]
 pub struct SourceInfo {
     pub source_id: Option<SourceId>,
     pub name: Arc<str>,
     pub fullpath_name: Option<Arc<str>>,
     pub text: Arc<str>,
+    lexical_file: Option<SourceFileIdentity>,
 }
 
 #[derive(Debug)]
@@ -128,6 +133,7 @@ fn imported_identity(info: &SourceInfo) -> Digest {
             None => digest.update(&[0]),
         }
     }
+    lexical::update_identity_digest(info, &mut digest);
     digest.finish()
 }
 
@@ -503,12 +509,23 @@ pub fn lease_source_context_in_context(
     fullpath_name: Option<Arc<str>>,
     text: impl Into<Arc<str>>,
 ) -> Result<RuntimeSourceLease, SourceIdExhausted> {
+    lease_source_context_with_lexical_file(runtime, name, fullpath_name, text, None)
+}
+
+fn lease_source_context_with_lexical_file(
+    runtime: &crate::context::RuntimeContext,
+    name: impl Into<Arc<str>>,
+    fullpath_name: Option<Arc<str>>,
+    text: impl Into<Arc<str>>,
+    lexical_file: Option<SourceFileIdentity>,
+) -> Result<RuntimeSourceLease, SourceIdExhausted> {
     let id = runtime.state().source.borrow_mut().issue_id()?;
     let info = SourceInfo {
         source_id: Some(id),
         name: name.into(),
         fullpath_name,
         text: text.into(),
+        lexical_file,
     };
     let authority = RuntimeSourceAuthority {
         issuer: runtime.local_identity(),
@@ -650,6 +667,7 @@ pub fn replace_current_source_context(
         name: Arc::<str>::from(name.unwrap_or_default()),
         fullpath_name: None,
         text: Arc::<str>::from(text),
+        lexical_file: None,
     });
     if let Some(runtime) = crate::context::legacy::active() {
         if let Some(current) = runtime.source_current() {
@@ -765,6 +783,7 @@ pub fn replace_source_catalog_with_fullpaths(
                     name: Arc::<str>::from(name),
                     fullpath_name: fullpath_name.map(Arc::<str>::from),
                     text: Arc::<str>::from(text),
+                    lexical_file: None,
                 },
             )
             .is_some()
@@ -1003,6 +1022,7 @@ mod lease_tests {
                 name: Arc::from("imported"),
                 fullpath_name: None,
                 text: Arc::from("old"),
+                lexical_file: None,
             },
         );
         let first = lease_source_context_in_context(&runtime, "first", None, "one").unwrap();

@@ -126,11 +126,13 @@ pub(crate) fn dispatch_mfilename(args: Vec<Value>) -> crate::BuiltinResult<Value
     let mode = mode_from_args(&args)?;
     let result = match mode {
         MfilenameMode::Name => crate::source_context::current_source_info()
-            .map(|source| file_stem_without_extension(&source.name))
+            .map(|source| file_stem_without_extension(source.lexical_file_name()))
             .unwrap_or_default(),
         MfilenameMode::Fullpath => crate::source_context::current_source_info()
             .map(|source| {
-                let path = source.fullpath_name.as_deref().unwrap_or(&source.name);
+                let path = source
+                    .lexical_file_fullpath_name()
+                    .unwrap_or_else(|| source.lexical_file_name());
                 path_without_extension(path)
             })
             .unwrap_or_default(),
@@ -175,5 +177,48 @@ mod tests {
         let value = dispatch_mfilename(vec![Value::String("fullpath".to_string())])
             .expect("mfilename fullpath succeeds");
         assert_eq!(value, Value::String("/tmp/demo_file".to_string()));
+    }
+
+    #[test]
+    fn mfilename_uses_lexical_file_while_nested_source_remains_distinct() {
+        let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let _runtime = runtime.enter();
+        let outer = crate::source_context::lease_source_context_in_context(
+            &runtime,
+            "outer_file.m",
+            Some(std::sync::Arc::from("/project/outer_file.m")),
+            "value = eval('mfilename()');",
+        )
+        .expect("outer source identity");
+        let _outer = crate::source_context::replace_current_source_id_in_context(
+            &runtime,
+            Some(outer.source_id()),
+        );
+        let nested = crate::source_context::lease_nested_source_context_in_context(
+            &runtime,
+            "<eval>",
+            "mfilename()",
+            Some(outer.source_id()),
+        )
+        .expect("nested source identity");
+        let _nested = crate::source_context::replace_current_source_id_in_context(
+            &runtime,
+            Some(nested.source_id()),
+        );
+
+        let current = crate::source_context::current_source_info().expect("nested source active");
+        assert_eq!(current.name.as_ref(), "<eval>");
+        assert_eq!(current.text.as_ref(), "mfilename()");
+        assert_eq!(
+            dispatch_mfilename(Vec::new()).expect("mfilename succeeds"),
+            Value::String("outer_file".to_string())
+        );
+        assert_eq!(
+            dispatch_mfilename(vec![Value::String("fullpath".to_string())])
+                .expect("mfilename fullpath succeeds"),
+            Value::String("/project/outer_file".to_string())
+        );
     }
 }

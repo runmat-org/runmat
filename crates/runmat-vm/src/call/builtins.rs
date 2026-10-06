@@ -395,7 +395,7 @@ pub async fn vm_dynamic_workspace_builtin(
     arg_count: usize,
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
-    _source_id: Option<runmat_hir::SourceId>,
+    source_id: Option<runmat_hir::SourceId>,
 ) -> Result<Value, RuntimeError> {
     let Some(builtin) = VmDynamicWorkspaceBuiltin::classify(name) else {
         return Err(mex(
@@ -409,7 +409,7 @@ pub async fn vm_dynamic_workspace_builtin(
         VmDynamicWorkspaceBuiltin::Eval => {
             validate_intrinsic_arg_count(builtin.name(), args.len(), 1)?;
             let source = workspace_text_arg(builtin.name(), &args[0])?;
-            let source_lease = dynamic_source_context(runtime, "<eval>", &source)?;
+            let source_lease = dynamic_source_context(runtime, "<eval>", &source, source_id)?;
             eval_workspace_source(
                 WorkspaceEvalRequest {
                     builtin: builtin.name(),
@@ -431,7 +431,7 @@ pub async fn vm_dynamic_workspace_builtin(
         VmDynamicWorkspaceBuiltin::Evalc => {
             validate_intrinsic_arg_count(builtin.name(), args.len(), 1)?;
             let source = workspace_text_arg(builtin.name(), &args[0])?;
-            let source_lease = dynamic_source_context(runtime, "<evalc>", &source)?;
+            let source_lease = dynamic_source_context(runtime, "<evalc>", &source, source_id)?;
             let eval_requested_outputs = if requested_outputs == 1 {
                 1
             } else {
@@ -463,7 +463,7 @@ pub async fn vm_dynamic_workspace_builtin(
             validate_intrinsic_arg_count(builtin.name(), args.len(), 2)?;
             let target = workspace_target_arg(builtin.name(), &args[0])?;
             let source = workspace_text_arg(builtin.name(), &args[1])?;
-            let source_lease = dynamic_source_context(runtime, "<eval>", &source)?;
+            let source_lease = dynamic_source_context(runtime, "<eval>", &source, source_id)?;
             eval_workspace_source(
                 WorkspaceEvalRequest {
                     builtin: builtin.name(),
@@ -724,26 +724,20 @@ fn dynamic_source_context(
     runtime: &runmat_runtime::context::RuntimeContext,
     name: impl Into<String>,
     text: &str,
+    lexical_source_id: Option<runmat_hir::SourceId>,
 ) -> Result<runmat_runtime::source_context::RuntimeSourceLease, RuntimeError> {
-    let fallback_name = name.into();
-    let current = runmat_runtime::source_context::current_source_info();
-    let name = current
-        .as_ref()
-        .map(|source| source.name.clone())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| std::sync::Arc::from(fallback_name));
-    let fullpath_name = current.and_then(|source| source.fullpath_name);
-    runmat_runtime::source_context::lease_source_context_in_context(
+    let name = std::sync::Arc::<str>::from(name.into());
+    runmat_runtime::source_context::lease_nested_source_context_in_context(
         runtime,
         name,
-        fullpath_name,
         text,
+        lexical_source_id,
     )
     .map_err(dynamic_source_identity_error)
 }
 
 fn dynamic_source_identity_error(
-    error: runmat_runtime::source_context::SourceIdExhausted,
+    error: runmat_runtime::source_context::NestedSourceIdentityError,
 ) -> RuntimeError {
     runmat_runtime::build_runtime_error(error.to_string())
         .with_identifier("RunMat:DynamicSourceIdentity")
@@ -1308,7 +1302,7 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_eval_inherits_the_calling_file_identity() {
+    fn dynamic_eval_has_distinct_source_and_inherits_calling_file_identity() {
         let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
@@ -1323,12 +1317,17 @@ mod tests {
             )])
             .expect("dynamic eval source catalog admission");
         let _current = runmat_runtime::source_context::replace_current_source_id(Some(source_id));
-        let dynamic = dynamic_source_context(&runtime, "<eval>", "mfilename()")
+        let dynamic = dynamic_source_context(&runtime, "<eval>", "mfilename()", Some(source_id))
             .expect("session-owned source lease");
         let info = dynamic.source_info();
-        assert_eq!(info.name.as_ref(), "analysis.m");
-        assert_eq!(info.fullpath_name.as_deref(), Some("/project/analysis.m"));
+        assert_eq!(info.name.as_ref(), "<eval>");
+        assert_eq!(info.fullpath_name.as_deref(), None);
         assert_eq!(info.text.as_ref(), "mfilename()");
+        assert_eq!(info.lexical_file_name(), "analysis.m");
+        assert_eq!(
+            info.lexical_file_fullpath_name(),
+            Some("/project/analysis.m")
+        );
         assert_ne!(dynamic.source_id(), source_id);
     }
 

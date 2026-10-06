@@ -261,12 +261,11 @@ fn dropped_pending_public_eval_retires_only_its_source() {
     assert_eq!(eval_source.name.as_ref(), "<eval>");
     let eval_id = eval_source.source_id.expect("eval source identity");
     assert_eq!(eval_source.text.as_ref(), "input('wait: '); 41 + 1");
-    assert_eq!(
-        runmat_runtime::source_context::source_info_in_context(&runtime, eval_id)
-            .expect("pending eval source still live")
-            .text,
-        eval_source.text
-    );
+    let pending_eval = runmat_runtime::source_context::source_info_in_context(&runtime, eval_id)
+        .expect("pending eval source still live");
+    assert_eq!(pending_eval.name.as_ref(), "<eval>");
+    assert_eq!(pending_eval.text.as_ref(), eval_source.text.as_ref());
+    assert_eq!(pending_eval.lexical_file_name(), "pending_eval.m");
     drop(future);
     assert!(runmat_runtime::source_context::source_info_in_context(&runtime, eval_id).is_none());
     assert_eq!(
