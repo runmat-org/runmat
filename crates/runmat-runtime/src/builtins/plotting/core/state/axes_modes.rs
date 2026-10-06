@@ -72,11 +72,7 @@ pub fn set_hidden_line_removal_for_axes(
 ) -> Result<(), FigureError> {
     let figure = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        validate_axes_index(state, axes_index)?;
+        let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
         state
             .figure
             .set_axes_hidden_line_removal(axes_index, enabled);
@@ -94,11 +90,7 @@ pub fn set_y_direction_for_axes(
 ) -> Result<(), FigureError> {
     let figure = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        validate_axes_index(state, axes_index)?;
+        let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
         state.figure.set_axes_y_direction(axes_index, direction);
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
@@ -112,11 +104,7 @@ pub fn set_y_direction_for_axes(
 pub fn lock_axes_limits(handle: FigureHandle, axes_index: usize) -> Result<(), FigureError> {
     let updates = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        validate_axes_index(state, axes_index)?;
+        let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
         let has_z = state.figure.axes_has_3d_content(axes_index)
             || state
                 .figure

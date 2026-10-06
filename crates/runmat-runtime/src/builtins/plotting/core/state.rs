@@ -5,7 +5,7 @@ use runmat_plot::plots::{
     TextStyle,
 };
 use runmat_thread_local::runmat_thread_local;
-use runmat_value::{GraphicsReceiverKind, GraphicsReceiverRef, Tensor};
+use runmat_value::{GraphicsReceiverKind, GraphicsReceiverRef, GraphicsSceneLease, Tensor};
 use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
@@ -30,6 +30,14 @@ use crate::{BuiltinResult, RuntimeError};
 pub(crate) mod callbacks;
 #[path = "state/shared_figure.rs"]
 mod shared_figure;
+#[path = "state/scene_mutation.rs"]
+mod scene_mutation;
+use scene_mutation::{
+    existing_axes_state_mut, existing_state_mut, get_state_for_query, get_state_mut,
+};
+#[cfg(test)]
+#[path = "state/scene_lease_tests.rs"]
+mod scene_lease_tests;
 use shared_figure::SharedFigure;
 #[path = "state/persistence_snapshot.rs"]
 pub(crate) mod persistence_snapshot;
@@ -367,6 +375,10 @@ impl LineColorCycle {
 
 struct FigureState {
     figure: SharedFigure,
+    /// Runtime-only exact scene identity. Numeric `revision` is a cache hint,
+    /// never host-event authority. Direct mutation sites still need migration
+    /// before this lease can be exposed to a host consumer.
+    scene_lease: GraphicsSceneLease,
     figure_receiver: Option<GraphicsReceiverRef>,
     axes_receivers: HashMap<usize, GraphicsReceiverRef>,
     active_axes: usize,
@@ -393,6 +405,7 @@ impl FigureState {
         let figure = default_figure(&title, "X", "Y");
         Self {
             figure: figure.into(),
+            scene_lease: GraphicsSceneLease::candidate(handle.as_u32()),
             figure_receiver: issue_graphics_receiver(GraphicsReceiverKind::Figure {
                 figure: handle.as_u32(),
             })
@@ -523,6 +536,8 @@ struct PlotRegistry {
     current: FigureHandle,
     next_handle: FigureHandle,
     figures: HashMap<FigureHandle, FigureState>,
+    scene_transaction_lease: Option<GraphicsSceneLease>,
+    extra_scene_transaction_leases: Vec<GraphicsSceneLease>,
     root_defaults: HashMap<String, RootPropertyEntry>,
     root_units: String,
     root_show_hidden_handles: bool,
@@ -1183,6 +1198,8 @@ impl Default for PlotRegistry {
             current: FigureHandle::default(),
             next_handle: FigureHandle::default().next(),
             figures: HashMap::new(),
+            scene_transaction_lease: None,
+            extra_scene_transaction_leases: Vec::new(),
             root_defaults: HashMap::new(),
             root_units: "pixels".to_string(),
             root_show_hidden_handles: false,
@@ -1318,6 +1335,10 @@ struct PlotRegistryGuard<'a> {
     inner: RegistryBackendGuard<'a>,
     #[cfg(test)]
     _test_lock: Option<std::sync::MutexGuard<'static, ()>>,
+    // Rust drops fields in declaration order. The registry and optional test
+    // lock retire before the exact scene identities held here.
+    _scene_transaction_lease: Option<GraphicsSceneLease>,
+    _extra_scene_transaction_leases: Vec<GraphicsSceneLease>,
 }
 
 impl<'a> PlotRegistryGuard<'a> {
@@ -1326,12 +1347,29 @@ impl<'a> PlotRegistryGuard<'a> {
         inner: RegistryBackendGuard<'a>,
         _test_lock: Option<std::sync::MutexGuard<'static, ()>>,
     ) -> Self {
-        Self { inner, _test_lock }
+        Self {
+            inner,
+            _test_lock,
+            _scene_transaction_lease: None,
+            _extra_scene_transaction_leases: Vec::new(),
+        }
     }
 
     #[cfg(not(test))]
     fn new(inner: RegistryBackendGuard<'a>) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            _scene_transaction_lease: None,
+            _extra_scene_transaction_leases: Vec::new(),
+        }
+    }
+}
+
+impl Drop for PlotRegistryGuard<'_> {
+    fn drop(&mut self) {
+        self._scene_transaction_lease = self.inner.scene_transaction_lease.take();
+        self._extra_scene_transaction_leases =
+            std::mem::take(&mut self.inner.extra_scene_transaction_leases);
     }
 }
 
@@ -1566,7 +1604,7 @@ pub fn color_order_for_axes(
     axes_index: usize,
 ) -> Result<Vec<Vec4>, FigureError> {
     let mut reg = registry();
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     let total_axes = axes_count(state);
     if axes_index >= total_axes {
         return Err(FigureError::InvalidSubplotIndex {
@@ -1590,7 +1628,7 @@ pub fn color_order_for_axes(
 
 pub fn color_order_for_figure(handle: FigureHandle) -> Result<Vec<Vec4>, FigureError> {
     let mut reg = registry();
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     Ok(state
         .figure_color_order
         .clone()
@@ -1604,15 +1642,7 @@ pub fn set_color_order_for_axes(
 ) -> Result<(), FigureError> {
     let figure_clone = {
         let mut reg = registry();
-        let state = get_state_mut(&mut reg, handle);
-        let total_axes = axes_count(state);
-        if axes_index >= total_axes {
-            return Err(FigureError::InvalidSubplotIndex {
-                rows: state.figure.axes_rows.max(1),
-                cols: state.figure.axes_cols.max(1),
-                index: axes_index,
-            });
-        }
+        let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
         state.color_cycle_for_axes_mut(axes_index).set_order(colors);
         state
             .figure
@@ -1953,7 +1983,7 @@ pub fn set_axis_equal_for_axes(
 pub fn data_aspect_ratio_snapshot() -> ([f64; 3], String) {
     let mut reg = registry();
     let handle = reg.current;
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     let axes = state.active_axes;
     state
         .figure
@@ -1967,7 +1997,7 @@ pub fn data_aspect_ratio_snapshot_for_axes(
     axes_index: usize,
 ) -> Result<([f64; 3], String), FigureError> {
     let mut reg = registry();
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     validate_axes_index(state, axes_index)?;
     Ok(state
         .figure
@@ -1999,8 +2029,9 @@ pub fn set_data_aspect_ratio_for_axes(
 ) -> Result<(), FigureError> {
     let figure_clone = {
         let mut reg = registry();
-        let state = get_state_mut(&mut reg, handle);
+        let state = get_state_for_query(&mut reg, handle);
         validate_axes_index(state, axes_index)?;
+        let state = get_state_mut(&mut reg, handle);
         state
             .figure
             .set_axes_data_aspect_ratio(axes_index, ratio, mode.to_string());
@@ -2059,10 +2090,7 @@ fn set_axes_limits_with_links(
         })
         .cloned();
     if x_group.is_none() && y_group.is_none() {
-        let state = registry
-            .figures
-            .get_mut(&source_handle)
-            .expect("validated source axes target should exist");
+        let state = get_state_mut(registry, source_handle);
         state.figure.set_axes_limits(source_axes, x, y);
         state.revision = state.revision.wrapping_add(1);
         return Ok(vec![(source_handle, state.figure.owned_clone())]);
@@ -2107,12 +2135,13 @@ fn set_axes_limits_with_links(
 
     let mut touched = HashSet::new();
     for ((handle, axes_index), (x_limits, y_limits)) in updates {
-        let Some(state) = registry.figures.get_mut(&handle) else {
+        let Some(state) = registry.figures.get(&handle) else {
             continue;
         };
         if axes_index >= axes_count(state) {
             continue;
         }
+        let state = get_state_mut(registry, handle);
         state.figure.set_axes_limits(axes_index, x_limits, y_limits);
         touched.insert(handle);
     }
@@ -2349,18 +2378,7 @@ pub fn set_axis_ticks_for_axes(
 ) -> Result<(), FigureError> {
     let figure_clone = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        let total_axes = axes_count(state);
-        if axes_index >= total_axes {
-            return Err(FigureError::InvalidSubplotIndex {
-                rows: state.figure.axes_rows.max(1),
-                cols: state.figure.axes_cols.max(1),
-                index: axes_index,
-            });
-        }
+        let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
         state.figure.set_axes_ticks(axes_index, x, y);
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
@@ -2390,18 +2408,7 @@ pub fn set_axis_tick_labels_for_axes(
 ) -> Result<(), FigureError> {
     let figure_clone = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        let total_axes = axes_count(state);
-        if axes_index >= total_axes {
-            return Err(FigureError::InvalidSubplotIndex {
-                rows: state.figure.axes_rows.max(1),
-                cols: state.figure.axes_cols.max(1),
-                index: axes_index,
-            });
-        }
+        let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
         state.figure.set_axes_tick_labels(axes_index, x, y);
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
@@ -2431,18 +2438,7 @@ pub fn set_axis_tick_formats_for_axes(
 ) -> Result<(), FigureError> {
     let figure_clone = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        let total_axes = axes_count(state);
-        if axes_index >= total_axes {
-            return Err(FigureError::InvalidSubplotIndex {
-                rows: state.figure.axes_rows.max(1),
-                cols: state.figure.axes_cols.max(1),
-                index: axes_index,
-            });
-        }
+        let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
         state.figure.set_axes_tick_formats(axes_index, x, y);
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
@@ -2472,18 +2468,7 @@ pub fn set_axis_tick_angles_for_axes(
 ) -> Result<(), FigureError> {
     let figure_clone = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        let total_axes = axes_count(state);
-        if axes_index >= total_axes {
-            return Err(FigureError::InvalidSubplotIndex {
-                rows: state.figure.axes_rows.max(1),
-                cols: state.figure.axes_cols.max(1),
-                index: axes_index,
-            });
-        }
+        let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
         state.figure.set_axes_tick_label_rotations(axes_index, x, y);
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
@@ -2495,7 +2480,7 @@ pub fn set_axis_tick_angles_for_axes(
 pub fn axis_limits_snapshot() -> AxisLimitSnapshot {
     let mut reg = registry();
     let handle = reg.current;
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     let axes = state.active_axes;
     let meta = state
         .figure
@@ -2508,7 +2493,7 @@ pub fn axis_limits_snapshot() -> AxisLimitSnapshot {
 pub fn axis_ticks_snapshot() -> AxisTickSnapshot {
     let mut reg = registry();
     let handle = reg.current;
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     let axes = state.active_axes;
     let meta = state
         .figure
@@ -2521,7 +2506,7 @@ pub fn axis_ticks_snapshot() -> AxisTickSnapshot {
 pub fn axis_tick_labels_snapshot() -> AxisTickLabelSnapshot {
     let mut reg = registry();
     let handle = reg.current;
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     let axes = state.active_axes;
     let meta = state
         .figure
@@ -2534,7 +2519,7 @@ pub fn axis_tick_labels_snapshot() -> AxisTickLabelSnapshot {
 pub fn axis_tick_formats_snapshot() -> AxisTickFormatSnapshot {
     let mut reg = registry();
     let handle = reg.current;
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     let axes = state.active_axes;
     let meta = state
         .figure
@@ -2547,7 +2532,7 @@ pub fn axis_tick_formats_snapshot() -> AxisTickFormatSnapshot {
 pub fn axis_tick_angles_snapshot() -> AxisTickAngleSnapshot {
     let mut reg = registry();
     let handle = reg.current;
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     let axes = state.active_axes;
     let meta = state
         .figure
@@ -2660,7 +2645,7 @@ pub fn axis_tick_angles_snapshot_for_axes(
 pub fn axis_display_bounds_snapshot() -> AxisDisplayBoundsSnapshot {
     let mut reg = registry();
     let handle = reg.current;
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     let axes_index = state.active_axes;
     display_bounds_for_state_axes(state, axes_index)
 }
@@ -2889,10 +2874,7 @@ pub fn set_zoom_mode_for_figure(
 ) -> Result<(), FigureError> {
     let figure_clone = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        let state = existing_state_mut(&mut reg, handle)?;
         apply_zoom_mode_command(
             &mut state.zoom_mode,
             &mut state.last_enabled_zoom_motion,
@@ -2913,11 +2895,7 @@ pub fn set_zoom_mode_for_axes(
 ) -> Result<(), FigureError> {
     let figure_clone = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        validate_axes_index(state, axes_index)?;
+        let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
         let mut mode = zoom_mode_for_target(state, Some(axes_index));
         apply_zoom_mode_command(&mut mode, &mut state.last_enabled_zoom_motion, command);
         if mode.enabled {
@@ -2937,10 +2915,7 @@ pub fn set_zoom_motion_for_figure(
 ) -> Result<(), FigureError> {
     let figure_clone = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        let state = existing_state_mut(&mut reg, handle)?;
         state.zoom_mode.motion = motion;
         if state.zoom_mode.enabled {
             state.last_enabled_zoom_motion = motion;
@@ -2955,10 +2930,7 @@ pub fn set_zoom_motion_for_figure(
 pub fn set_zoom_enabled_for_figure(handle: FigureHandle, enabled: bool) -> Result<(), FigureError> {
     let figure_clone = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        let state = existing_state_mut(&mut reg, handle)?;
         state.zoom_mode.enabled = enabled;
         interaction_exclusivity::zoom_selected_for_figure(state, false);
         state.revision = state.revision.wrapping_add(1);
@@ -2974,10 +2946,7 @@ pub fn set_zoom_direction_for_figure(
 ) -> Result<(), FigureError> {
     let figure_clone = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        let state = existing_state_mut(&mut reg, handle)?;
         state.zoom_mode.direction = direction;
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
@@ -2992,10 +2961,7 @@ pub fn set_zoom_right_click_action_for_figure(
 ) -> Result<(), FigureError> {
     let figure_clone = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        let state = existing_state_mut(&mut reg, handle)?;
         state.zoom_mode.right_click_action = action;
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
@@ -3007,10 +2973,7 @@ pub fn set_zoom_right_click_action_for_figure(
 pub fn set_zoom_legacy_for_figure(handle: FigureHandle, enabled: bool) -> Result<(), FigureError> {
     let figure_clone = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        let state = existing_state_mut(&mut reg, handle)?;
         state.zoom_mode.use_legacy_exploration_modes = enabled;
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
@@ -3022,10 +2985,7 @@ pub fn set_zoom_legacy_for_figure(handle: FigureHandle, enabled: bool) -> Result
 pub fn reset_zoom_baseline_for_figure(handle: FigureHandle) -> Result<(), FigureError> {
     let figure_clone = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        let state = existing_state_mut(&mut reg, handle)?;
         for axes_index in 0..axes_count(state) {
             let snapshot = axis_limit_basis_for_zoom(state, axes_index);
             state.zoom_baselines.insert(axes_index, snapshot);
@@ -3043,11 +3003,7 @@ pub fn reset_zoom_baseline_for_axes(
 ) -> Result<(), FigureError> {
     let figure_clone = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        validate_axes_index(state, axes_index)?;
+        let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
         let snapshot = axis_limit_basis_for_zoom(state, axes_index);
         state.zoom_baselines.insert(axes_index, snapshot);
         state.revision = state.revision.wrapping_add(1);
@@ -3186,7 +3142,7 @@ pub fn pan_state_snapshot(
     axes_index: Option<usize>,
 ) -> Result<PanStateSnapshot, FigureError> {
     let mut reg = registry();
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     if let Some(index) = axes_index {
         validate_axes_index(state, index)?;
     }
@@ -3255,7 +3211,7 @@ pub fn data_cursor_state_snapshot(
     handle: FigureHandle,
 ) -> Result<DataCursorStateSnapshot, FigureError> {
     let mut reg = registry();
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     Ok(DataCursorStateSnapshot {
         figure: handle,
         mode: state.data_cursor_mode.clone(),
@@ -3312,7 +3268,7 @@ pub fn set_waitbar_state(
 
 pub fn waitbar_state_snapshot(handle: FigureHandle) -> Result<Option<WaitbarState>, FigureError> {
     let mut reg = registry();
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     Ok(state.waitbar.clone())
 }
 
@@ -3331,7 +3287,7 @@ pub fn current_or_any_waitbar_handle() -> Option<FigureHandle> {
 pub fn z_limits_snapshot() -> Option<(f64, f64)> {
     let mut reg = registry();
     let handle = reg.current;
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     let axes = state.active_axes;
     state.figure.axes_metadata(axes).and_then(|m| m.z_limits)
 }
@@ -3339,7 +3295,7 @@ pub fn z_limits_snapshot() -> Option<(f64, f64)> {
 pub fn color_limits_snapshot() -> Option<(f64, f64)> {
     let mut reg = registry();
     let handle = reg.current;
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     let axes = state.active_axes;
     state
         .figure
@@ -3426,18 +3382,7 @@ pub fn set_log_modes_for_axes(
 ) -> Result<(), FigureError> {
     let figure_clone = {
         let mut reg = registry();
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        let total_axes = axes_count(state);
-        if axes_index >= total_axes {
-            return Err(FigureError::InvalidSubplotIndex {
-                rows: state.figure.axes_rows.max(1),
-                cols: state.figure.axes_cols.max(1),
-                index: axes_index,
-            });
-        }
+        let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
         state.figure.set_axes_log_modes(axes_index, x_log, y_log);
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
@@ -3502,7 +3447,7 @@ pub fn legend_entries_snapshot(
     axes_index: usize,
 ) -> Result<Vec<runmat_plot::plots::LegendEntry>, FigureError> {
     let mut reg = registry();
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     let total_axes = axes_count(state);
     if axes_index >= total_axes {
         return Err(FigureError::InvalidSubplotIndex {
@@ -5089,13 +5034,6 @@ fn registry() -> PlotRegistryGuard<'static> {
     })
 }
 
-fn get_state_mut(registry: &mut PlotRegistry, handle: FigureHandle) -> &mut FigureState {
-    registry
-        .figures
-        .entry(handle)
-        .or_insert_with(|| FigureState::new(handle))
-}
-
 fn observer_registry() -> &'static FigureObserverRegistry {
     FIGURE_OBSERVERS.get_or_init(FigureObserverRegistry::new)
 }
@@ -5149,21 +5087,21 @@ pub fn reset_recent_figures() {
 }
 
 pub fn reset_plot_state() {
-    {
-        let mut reg = registry();
-        for child in reg.plot_children.values() {
-            match child {
-                PlotChildHandleState::FunctionSurface(surface) => {
-                    release_function_state(&surface.function);
-                }
-                PlotChildHandleState::FunctionContour(contour) => {
-                    release_function_ref(&contour.function);
-                }
-                _ => {}
+    let mut reg = registry();
+    for child in reg.plot_children.values() {
+        match child {
+            PlotChildHandleState::FunctionSurface(surface) => {
+                release_function_state(&surface.function);
             }
+            PlotChildHandleState::FunctionContour(contour) => {
+                release_function_ref(&contour.function);
+            }
+            _ => {}
         }
-        *reg = PlotRegistry::default();
     }
+    let retired = std::mem::replace(&mut *reg, PlotRegistry::default());
+    drop(reg);
+    drop(retired);
     reset_recent_figures();
 }
 
@@ -5196,7 +5134,7 @@ pub fn new_figure_handle() -> FigureHandle {
     reg.next_handle = reg.next_handle.next();
     reg.current = handle;
     let figure_clone = {
-        let state = get_state_mut(&mut reg, handle);
+        let state = get_state_for_query(&mut reg, handle);
         state.figure.clone()
     };
     drop(reg);
@@ -5230,7 +5168,7 @@ pub fn current_axes_state() -> FigureAxesState {
     let mut reg = registry();
     let handle = reg.current;
     // Ensure a default figure exists even if nothing has rendered yet (common on wasm/web).
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     FigureAxesState {
         handle,
         rows: state.figure.axes_rows.max(1),
@@ -5257,7 +5195,7 @@ pub fn axes_metadata_snapshot(
     axes_index: usize,
 ) -> Result<runmat_plot::plots::AxesMetadata, FigureError> {
     let mut reg = registry();
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     let total_axes = axes_count(state);
     if axes_index >= total_axes {
         return Err(FigureError::InvalidSubplotIndex {
@@ -5278,7 +5216,7 @@ pub fn axes_state_snapshot(
     axes_index: usize,
 ) -> Result<FigureAxesState, FigureError> {
     let mut reg = registry();
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     let total_axes = axes_count(state);
     if axes_index >= total_axes {
         return Err(FigureError::InvalidSubplotIndex {
@@ -5297,13 +5235,13 @@ pub fn axes_state_snapshot(
 
 pub fn current_axes_handle_for_figure(handle: FigureHandle) -> Result<f64, FigureError> {
     let mut reg = registry();
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     Ok(encode_axes_handle(handle, state.active_axes))
 }
 
 pub fn axes_handles_for_figure(handle: FigureHandle) -> Result<Vec<f64>, FigureError> {
     let mut reg = registry();
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     let total_axes = axes_count(state);
     Ok((0..total_axes)
         .map(|idx| encode_axes_handle(handle, idx))
@@ -5328,7 +5266,7 @@ pub fn plot_child_handles_for_axes(handle: FigureHandle, axes_index: usize) -> V
 
 pub fn select_axes_for_figure(handle: FigureHandle, axes_index: usize) -> Result<(), FigureError> {
     let mut reg = registry();
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     let total_axes = axes_count(state);
     if axes_index >= total_axes {
         return Err(FigureError::InvalidSubplotIndex {
@@ -5384,7 +5322,11 @@ fn with_axes_target_mut<R>(
     f: impl FnOnce(&mut FigureState) -> R,
 ) -> Result<(R, Figure), FigureError> {
     let mut reg = registry();
-    let state = get_state_mut(&mut reg, handle);
+    // Invalid axes do not acquire a new scene lease or mutate Figure state.
+    let state = reg
+        .figures
+        .entry(handle)
+        .or_insert_with(|| FigureState::new(handle));
     let total_axes = axes_count(state);
     if axes_index >= total_axes {
         return Err(FigureError::InvalidSubplotIndex {
@@ -5393,11 +5335,14 @@ fn with_axes_target_mut<R>(
             index: axes_index,
         });
     }
+    let state = get_state_mut(&mut reg, handle);
     state.active_axes = axes_index;
     state.figure.set_active_axes_index(axes_index);
     let result = f(state);
     state.revision = state.revision.wrapping_add(1);
-    Ok((result, state.figure.owned_clone()))
+    let figure = state.figure.owned_clone();
+    drop(reg);
+    Ok((result, figure))
 }
 
 fn with_figure_mut<R>(
@@ -5408,14 +5353,16 @@ fn with_figure_mut<R>(
     let state = get_state_mut(&mut reg, handle);
     let result = f(state);
     state.revision = state.revision.wrapping_add(1);
-    Ok((result, state.figure.owned_clone()))
+    let figure = state.figure.owned_clone();
+    drop(reg);
+    Ok((result, figure))
 }
 
 pub fn current_hold_enabled() -> bool {
     let mut reg = registry();
     let handle = reg.current;
     // Ensure a default figure exists even if nothing has rendered yet (common on wasm/web).
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     *state
         .hold_per_axes
         .get(&state.active_axes)
@@ -5533,13 +5480,13 @@ pub fn import_figure(figure: Figure) -> FigureHandle {
 pub fn clear_figure(target: Option<FigureHandle>) -> Result<FigureHandle, FigureError> {
     let mut reg = registry();
     let handle = target.unwrap_or(reg.current);
-    {
+    let retired = {
         let state = reg
             .figures
             .get_mut(&handle)
             .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        *state = FigureState::new(handle);
-    }
+        std::mem::replace(state, FigureState::new(handle))
+    };
     purge_link_axes_for_figure(&mut reg, handle);
     purge_plot_children_for_figure(&mut reg, handle);
     let figure_clone = reg
@@ -5549,6 +5496,7 @@ pub fn clear_figure(target: Option<FigureHandle>) -> Result<FigureHandle, Figure
         .figure
         .clone();
     drop(reg);
+    drop(retired);
     notify_with_figure(handle, &figure_clone, FigureEventKind::Cleared);
     Ok(handle)
 }
@@ -5571,12 +5519,14 @@ pub fn close_figure(target: Option<FigureHandle>) -> Result<FigureHandle, Figure
             reg.current = default;
             reg.next_handle = default.next();
             drop(reg);
+            drop(existed);
             notify_without_figure(handle, FigureEventKind::Closed);
             return Ok(handle);
         }
     }
 
     drop(reg);
+    drop(existed);
     notify_without_figure(handle, FigureEventKind::Closed);
     Ok(handle)
 }
@@ -5896,7 +5846,7 @@ pub fn set_line_style_order_for_axes(axes_index: usize, order: &[LineStyle]) {
     }
     let mut reg = registry();
     let handle = reg.current;
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     state.cycle_for_axes_mut(axes_index).set_order(order);
 }
 
@@ -5906,7 +5856,7 @@ pub fn next_line_style_for_axes(axes_index: usize) -> LineStyle {
     }
     let mut reg = registry();
     let handle = reg.current;
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     state.cycle_for_axes_mut(axes_index).next()
 }
 
@@ -5921,7 +5871,7 @@ pub fn line_color_for_axes_series_index(axes_index: usize, series_index: usize) 
     }
     let mut reg = registry();
     let handle = reg.current;
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     state
         .color_cycle_for_axes_mut(axes_index)
         .color_at(series_index)
@@ -5933,7 +5883,7 @@ pub fn line_color_for_target_axes_series_index(
     series_index: usize,
 ) -> Vec4 {
     let mut reg = registry();
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     state
         .color_cycle_for_axes_mut(axes_index)
         .color_at(series_index)
@@ -5945,7 +5895,7 @@ pub fn next_line_color_for_axes(axes_index: usize) -> Vec4 {
     }
     let mut reg = registry();
     let handle = reg.current;
-    let state = get_state_mut(&mut reg, handle);
+    let state = get_state_for_query(&mut reg, handle);
     state.color_cycle_for_axes_mut(axes_index).next()
 }
 
@@ -5969,9 +5919,11 @@ mod tests {
             }
         }
         reg.plot_children.clear();
-        reg.figures.clear();
+        let retired = std::mem::take(&mut reg.figures);
         reg.current = FigureHandle::default();
         reg.next_handle = FigureHandle::default().next();
+        drop(reg);
+        drop(retired);
     }
 
     #[test]

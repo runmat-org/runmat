@@ -37,17 +37,7 @@ pub fn set_colormap_for_axes_with_length(
         let mut reg = registry();
         let direct_images =
             direct_image_limits_updates(&reg.plot_children, handle, Some(axes_index));
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-        if axes_index >= axes_count(state) {
-            return Err(FigureError::InvalidSubplotIndex {
-                rows: state.figure.axes_rows.max(1),
-                cols: state.figure.axes_cols.max(1),
-                index: axes_index,
-            });
-        }
+        let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
         state
             .figure
             .set_axes_colormap_with_length(axes_index, colormap, length);
@@ -67,10 +57,7 @@ pub fn set_colormap_for_figure_with_length(
     let figure = {
         let mut reg = registry();
         let direct_images = direct_image_limits_updates(&reg.plot_children, handle, None);
-        let state = reg
-            .figures
-            .get_mut(&handle)
-            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        let state = existing_state_mut(&mut reg, handle)?;
         state.figure.set_figure_colormap(colormap, length);
         for axes in 0..state.figure.axes_metadata.len() {
             refresh_direct_image_limits(&direct_images, axes, length, &mut state.figure);

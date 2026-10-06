@@ -140,7 +140,7 @@ pub fn clear_axes_target(
             .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
         validate_axes_index(state, axes_index)?;
         clear_registered_axes(&mut reg, handle, &[axes_index]);
-        let state = reg.figures.get_mut(&handle).expect("validated figure");
+        let state = get_state_mut(&mut reg, handle);
         if reset {
             state.figure.reset_axes_properties(axes_index);
             state.hold_per_axes.remove(&axes_index);

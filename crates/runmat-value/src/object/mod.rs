@@ -3,6 +3,7 @@ mod containers_map;
 mod dynamic_property;
 mod graphics_callback;
 mod graphics_receiver;
+mod graphics_scene;
 mod handle;
 mod instance;
 mod listener;
@@ -19,6 +20,7 @@ pub use graphics_callback::{
     GraphicsCallbackKind, GraphicsCallbackResult,
 };
 pub use graphics_receiver::{GraphicsReceiverKind, GraphicsReceiverRef};
+pub use graphics_scene::GraphicsSceneLease;
 pub use handle::HandleRef;
 pub use instance::{ObjectInstance, ObjectPersistencePayloadKind};
 pub use listener::Listener;

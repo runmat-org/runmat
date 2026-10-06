@@ -89,11 +89,12 @@ pub fn set_colorbar_enabled_for_axes(
         let mut reg = registry();
         let state = reg
             .figures
-            .get_mut(&handle)
+            .get(&handle)
             .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
         if axes_index >= axes_count(state) {
             return Err(FigureError::InvalidAxesHandle);
         }
+        let state = get_state_mut(&mut reg, handle);
         state.figure.set_axes_colorbar_enabled(axes_index, enabled);
         state.revision = state.revision.wrapping_add(1);
         let figure = state.figure.clone();
