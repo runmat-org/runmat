@@ -236,3 +236,6 @@ fn compiled_package_closure_rejects_non_compiled_artifacts_after_decode() {
     .unwrap();
     assert!(bundle.validate().is_err());
 }
+
+#[path = "deterministic_bundle/environment.rs"]
+mod environment;

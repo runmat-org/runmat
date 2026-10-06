@@ -179,3 +179,5 @@ fn complete_units_reject_partial_vm_execution_and_succeed_through_session_owner(
     assert!(matches!(rejected, ProgramExecutionResponse::Failure { .. }));
     assert_eq!(values(invoke(&original)), vec![Value::Num(42.0)]);
 }
+
+mod environment;

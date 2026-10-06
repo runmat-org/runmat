@@ -143,3 +143,30 @@ This API provides session invocation of a portable compiler product. It does not
 by itself complete the legacy batch/script cutover, console transport, host-policy
 admission, nested process allocation, or placement/resource qualification. Those
 require their complete original host contracts and independent execution witnesses.
+
+## Invocation environment
+
+Runtime sessions own their environment values. `getenv`, `setenv`, `unsetenv`, and
+native subprocess environment construction use the active session; mutation does
+not change a different session or the host process. Nested calls and async polls
+inherit their invocation context. Standalone compatibility APIs keep their existing
+host behavior outside an active session.
+
+Hosts can construct a session with `RunMatSession::with_frozen_environment` without
+first collecting ambient variables or the host search path. An empty snapshot means
+no visible variables, not ambient inheritance. Snapshot replacement validates sorted,
+unique names before changing state and invalidates dynamic source discovery caches.
+
+Bundles carry only explicitly selected public values through
+`ExecutionBundleBuilder::with_portable_environment`. The existing secret-name policy
+is retained; invalid names, duplicates, more than256 entries, over4096 bytes per value,
+and over1MiB total name/value bytes reject before execution. The snapshot participates
+in bundle identity and archive validation. Both driver-local and worker program/test
+routes install the exact bundle snapshot after cold source materialization; each
+attempt starts with its own copy. This is a bounded semantic environment contract,
+not measured process memory or a complete host sandbox.
+
+Complete console retention, portable host policy, standalone deferred-call environment
+capture and parent allocation transport still require their own execution evidence.
+No remote/distributed, accelerator, FEA family or release qualification follows from
+these environment checks.

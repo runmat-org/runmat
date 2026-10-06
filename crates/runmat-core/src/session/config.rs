@@ -16,6 +16,35 @@ impl RunMatSession {
             .set_dynamic_eval_enabled(self.dynamic_eval_enabled);
     }
 
+    /// Install an exact environment owned by this session and its nested invocations.
+    /// Missing names remain absent; this never changes the worker process environment.
+    pub fn install_environment_snapshot(
+        &mut self,
+        entries: Vec<(String, String)>,
+    ) -> std::io::Result<()> {
+        self.runtime_context.install_environment_snapshot(entries)?;
+        let path = self
+            .environment_snapshot()
+            .into_iter()
+            .find_map(|(name, value)| (name == "RUNMAT_PATH").then_some(value))
+            .unwrap_or_default();
+        self.runtime_context = self
+            .runtime_context
+            .clone()
+            .with_search_path(std::sync::Arc::new(
+                runmat_runtime::builtins::common::path_state::SearchPath::new(path),
+            ));
+        self.dynamic_function_cache
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clear();
+        Ok(())
+    }
+
+    pub fn environment_snapshot(&self) -> Vec<(String, String)> {
+        self.runtime_context.environment_snapshot()
+    }
+
     /// Replace the root execution service used by this session and every
     /// nested invocation compiled from it.
     pub fn install_execution_services(

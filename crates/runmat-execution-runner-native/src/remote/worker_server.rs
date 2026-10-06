@@ -281,11 +281,18 @@ pub(super) async fn run_worker_loop(
                 let connection = Arc::clone(&connection);
                 let sender = Arc::clone(&sender);
                 let state_for_task = Arc::clone(&state);
-                let (materialized_project, objects) = {
+                let (materialized_project, objects, environment) = {
                     let state = state.lock().await;
                     (
                         state.materialized_project.as_ref().cloned(),
                         state.objects.clone(),
+                        state
+                            .bundle
+                            .as_ref()
+                            .expect("validated installed bundle")
+                            .manifest
+                            .portable_environment
+                            .clone(),
                     )
                 };
                 let externalized = matches!(
@@ -332,7 +339,10 @@ pub(super) async fn run_worker_loop(
                                 super::worker_execution::execute(
                                     attempt_id,
                                     program,
-                                    materialized_project,
+                                    super::worker_execution::RemoteProgramContext {
+                                        project: materialized_project,
+                                        environment,
+                                    },
                                     meshing_host,
                                     objects,
                                     cancellation_for_task,

@@ -46,6 +46,7 @@ pub struct ExecutionBundleBuilder<'a, R> {
     materializations: Vec<Materialization>,
     resources: BuildResourceDeclaration,
     code_closure: CodeClosureMode,
+    portable_environment: Vec<(String, String)>,
 }
 
 impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
@@ -77,6 +78,7 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
                 scratch_bytes: 1024 * 1024 * 1024,
             },
             code_closure: CodeClosureMode::SourceProject,
+            portable_environment: Vec::new(),
         })
     }
 
@@ -111,6 +113,16 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
     pub fn with_compiled_package_closure(mut self) -> Self {
         self.code_closure = CodeClosureMode::Compiled;
         self
+    }
+
+    /// Freeze explicitly selected nonsecret values. Never collects ambient process variables.
+    pub fn with_portable_environment(
+        mut self,
+        entries: Vec<(String, String)>,
+    ) -> ArtifactResult<Self> {
+        super::environment::validate(&entries)?;
+        self.portable_environment = entries;
+        Ok(self)
     }
 
     pub fn build(mut self) -> ArtifactResult<ExecutionBundle> {
@@ -249,7 +261,7 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
             artifacts,
             requested_capabilities: Default::default(),
             resources: self.resources,
-            portable_environment: Vec::new(),
+            portable_environment: self.portable_environment,
         };
         let bundle = ExecutionBundle { manifest, objects };
         bundle.validate()?;

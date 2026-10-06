@@ -8,10 +8,24 @@ impl RunMatSession {
 
     /// Create a new session with specific options
     pub fn with_options(enable_jit: bool, verbose: bool) -> Result<Self> {
-        Self::initialize(enable_jit, verbose)
+        Self::initialize(enable_jit, verbose, None)
     }
 
-    fn initialize(enable_jit: bool, verbose: bool) -> Result<Self> {
+    /// Create a session with exactly the supplied environment. No ambient variables or
+    /// source search path are collected before the frozen context is installed.
+    pub fn with_frozen_environment(
+        enable_jit: bool,
+        verbose: bool,
+        entries: Vec<(String, String)>,
+    ) -> Result<Self> {
+        Self::initialize(enable_jit, verbose, Some(entries))
+    }
+
+    fn initialize(
+        enable_jit: bool,
+        verbose: bool,
+        environment: Option<Vec<(String, String)>>,
+    ) -> Result<Self> {
         #[cfg(not(target_arch = "wasm32"))]
         let native_tiering_enabled = enable_jit && cfg!(feature = "jit");
         #[cfg(all(not(target_arch = "wasm32"), not(feature = "jit")))]
@@ -22,11 +36,30 @@ impl RunMatSession {
         let _ = enable_jit;
 
         let interrupt_flag = Arc::new(AtomicBool::new(false));
-        let search_path = Arc::new(
-            runmat_runtime::builtins::common::path_state::SearchPath::new(
-                runmat_runtime::builtins::common::path_state::current_path_string(),
+        let explicit_environment = environment.is_some();
+        let execution = std::rc::Rc::new(runmat_runtime::execution::RuntimeExecutionService::new());
+        let runtime_context = match environment {
+            Some(entries) => runmat_runtime::context::RuntimeContext::with_frozen_environment(
+                execution,
+                Arc::clone(&interrupt_flag),
+                entries,
+            )?,
+            None => runmat_runtime::context::RuntimeContext::with_cancellation(
+                execution,
+                Arc::clone(&interrupt_flag),
             ),
-        );
+        };
+        let path = if explicit_environment {
+            runtime_context
+                .environment_snapshot()
+                .into_iter()
+                .find_map(|(key, value)| (key == "RUNMAT_PATH").then_some(value))
+                .unwrap_or_default()
+        } else {
+            runmat_runtime::builtins::common::path_state::current_path_string()
+        };
+        let search_path =
+            Arc::new(runmat_runtime::builtins::common::path_state::SearchPath::new(path));
         let placement = std::rc::Rc::new(runmat_accelerate::placement::PlacementSession::default());
         let runtime_services = runmat_runtime::context::RuntimeServicePorts::default()
             .with_placement(placement.clone());
@@ -53,12 +86,9 @@ impl RunMatSession {
             captured_project: None,
             source_pool: SourcePool::default(),
             interrupt_flag: Arc::clone(&interrupt_flag),
-            runtime_context: runmat_runtime::context::RuntimeContext::with_cancellation(
-                std::rc::Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
-                Arc::clone(&interrupt_flag),
-            )
-            .with_search_path(search_path)
-            .with_service_ports(runtime_services),
+            runtime_context: runtime_context
+                .with_search_path(search_path)
+                .with_service_ports(runtime_services),
             program_service,
             placement_session: placement,
             is_executing: false,

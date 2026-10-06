@@ -1201,3 +1201,5 @@ fn unused_bootstrap() -> DriverBootstrap {
         worker_resources: resource_request(),
     }
 }
+
+mod environment;

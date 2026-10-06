@@ -330,11 +330,13 @@ pub(super) async fn run_remote_driver(
                     .iter()
                     .map(|argument| super::value_transfer::materialize(argument, &values))
                     .collect::<NativeExecutionResult<Vec<_>>>()?;
-                crate::execute_host_program_request_with_project(
+                crate::test_workload::execute_host_program_request_in_context(
                     request,
                     materialized_project
                         .as_ref()
                         .map(|project| project.handoff()),
+                    Some(&bundle.manifest.portable_environment),
+                    None,
                 )
                 .await
             };

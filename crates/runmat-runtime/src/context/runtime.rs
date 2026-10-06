@@ -44,7 +44,19 @@ impl RuntimeContext {
         execution: Rc<dyn RuntimeExecutionServices>,
         cancellation: Arc<AtomicBool>,
     ) -> Self {
-        let state = Rc::new(RuntimeContextState::new(cancellation));
+        Self::with_environment_state(
+            execution,
+            cancellation,
+            super::environment::EnvironmentState::from_host(),
+        )
+    }
+
+    pub(super) fn with_environment_state(
+        execution: Rc<dyn RuntimeExecutionServices>,
+        cancellation: Arc<AtomicBool>,
+        environment: super::environment::EnvironmentState,
+    ) -> Self {
+        let state = Rc::new(RuntimeContextState::new(cancellation, environment));
         crate::class_registry::register_context_state(&state);
         Self {
             execution,

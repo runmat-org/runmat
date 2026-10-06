@@ -84,15 +84,25 @@ impl RemoteMeshingHost {
     }
 }
 
+/// Frozen language inputs installed together for one original program attempt.
+pub(super) struct RemoteProgramContext {
+    pub project: Option<Arc<crate::materialized_project::MaterializedProject>>,
+    pub environment: Vec<(String, String)>,
+}
+
 pub(super) async fn execute(
     attempt_id: AttemptId,
     program: ProgramExecutionRequest,
-    project: Option<Arc<crate::materialized_project::MaterializedProject>>,
+    context: RemoteProgramContext,
     meshing_host: Option<RemoteMeshingHost>,
     mut objects: RemoteObjectStore,
     cancellation: Arc<AttemptCancellation>,
     progress_sender: tokio::sync::mpsc::Sender<crate::ProgramProgress>,
 ) -> ProgramExecutionResponse {
+    let RemoteProgramContext {
+        project,
+        environment,
+    } = context;
     #[cfg(all(test, feature = "occt-native"))]
     if let Some(held) = meshing_host.as_ref().and_then(|host| host.held_attempt) {
         let matches_target = match held.target {
@@ -198,11 +208,13 @@ pub(super) async fn execute(
         .unwrap_or_else(|error| failure(&error.to_string()));
     }
     drop(progress_sender);
-    crate::execute_host_program_request_with_project(
+    crate::test_workload::execute_host_program_request_in_context(
         program,
         project
             .as_deref()
             .map(crate::materialized_project::MaterializedProject::handoff),
+        Some(&environment),
+        Some(cancellation.flag()),
     )
     .await
 }

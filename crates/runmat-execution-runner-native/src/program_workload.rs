@@ -1,11 +1,14 @@
 //! Interpreter unit requests enter core's full session/program context.
 use runmat_execution_artifact::{ProgramExecutionRequest, ProgramExecutionResponse};
+use std::sync::{atomic::AtomicBool, Arc};
 
 pub(crate) async fn execute_unit(
     request: &ProgramExecutionRequest,
     project: Option<&runmat_package::FrozenProjectHandoff>,
+    environment: Option<&[(String, String)]>,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> ProgramExecutionResponse {
-    match invoke_unit(request, project).await {
+    match invoke_unit(request, project, environment, cancellation).await {
         Ok(outputs) => ProgramExecutionResponse::from_success_outputs(outputs, vec![]),
         Err(message) => ProgramExecutionResponse::Failure { message },
     }
@@ -14,8 +17,14 @@ pub(crate) async fn execute_unit(
 async fn invoke_unit(
     request: &ProgramExecutionRequest,
     project: Option<&runmat_package::FrozenProjectHandoff>,
+    environment: Option<&[(String, String)]>,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<Vec<runmat_execution::value::ValuePayload>, String> {
-    let mut session = prepare_session(request, project)?;
+    let mut session = prepare_session(request, project, environment)?;
+    let mut control = runmat_core::InvocationControl::default();
+    if let Some(cancellation) = cancellation {
+        control = control.with_cancellation(cancellation);
+    }
     let envelope = request
         .artifact
         .executable_unit()
@@ -32,7 +41,7 @@ async fn invoke_unit(
             &envelope,
             arguments,
             usize::from(request.requested_outputs),
-            &runmat_core::InvocationControl::default(),
+            &control,
         )
         .await?;
     runmat_runtime::execution::value_codec::encode_inline_outputs(
@@ -45,6 +54,7 @@ async fn invoke_unit(
 fn prepare_session(
     request: &ProgramExecutionRequest,
     project: Option<&runmat_package::FrozenProjectHandoff>,
+    environment: Option<&[(String, String)]>,
 ) -> Result<runmat_core::RunMatSession, String> {
     request
         .validate_for_portable_host()
@@ -58,8 +68,13 @@ fn prepare_session(
             .clone(),
     ))
     .map_err(|error| format!("unsupported portable language mode: {error}"))?;
-    let mut session = runmat_core::RunMatSession::with_options(false, false)
-        .map_err(|error| format!("failed to initialize portable execution session: {error}"))?;
+    let mut session = match environment {
+        Some(entries) => {
+            runmat_core::RunMatSession::with_frozen_environment(false, false, entries.to_vec())
+        }
+        None => runmat_core::RunMatSession::with_options(false, false),
+    }
+    .map_err(|error| format!("failed to initialize portable execution session: {error}"))?;
     session.set_compat_mode(mode);
     if let Some(project) = project {
         session
@@ -68,3 +83,6 @@ fn prepare_session(
     }
     Ok(session)
 }
+
+#[cfg(test)]
+mod tests;

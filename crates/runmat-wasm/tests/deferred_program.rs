@@ -187,3 +187,46 @@ async fn original_transitive_products_survive_wasm_producer_teardown() {
         .unwrap();
     assert_eq!(result, Value::Num(27.0));
 }
+
+#[wasm_bindgen_test]
+async fn cold_wasm_program_uses_session_environment_without_cross_session_mutation() {
+    runmat_runtime::builtins::wasm_registry::register_all();
+    let mut producer = runmat_core::RunMatSession::with_options(false, false).unwrap();
+    let unit = producer
+        .compile_executable_unit(
+            runmat_core::ExecutableSource::frozen(
+                "environment-wasm",
+                "environment.m",
+                "environment.m",
+                "setenv('RUNMAT_WASM_MODE', 'changed'); ans = getenv('RUNMAT_WASM_MODE');",
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    let bytes = unit.portable_envelope().unwrap().canonical_bytes().unwrap();
+    drop(producer);
+    drop(unit);
+    let envelope = runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(&bytes).unwrap();
+    let mut first = runmat_core::RunMatSession::with_options(false, false).unwrap();
+    let second = runmat_core::RunMatSession::with_options(false, false).unwrap();
+    first
+        .install_environment_snapshot(vec![("RUNMAT_WASM_MODE".into(), "first".into())])
+        .unwrap();
+    let mut second = second;
+    second
+        .install_environment_snapshot(vec![("RUNMAT_WASM_MODE".into(), "second".into())])
+        .unwrap();
+    let result = first
+        .invoke_portable_unit(&envelope, Vec::new(), 1, &Default::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        result,
+        Value::CharArray(runmat_value::CharArray::new_row("changed"))
+    );
+    assert_eq!(
+        second.environment_snapshot(),
+        [("RUNMAT_WASM_MODE".into(), "second".into())]
+    );
+}

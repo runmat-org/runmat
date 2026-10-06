@@ -1,6 +1,8 @@
 //! MATLAB-compatible `setenv` builtin for RunMat.
 
+use crate::builtins::common::env as runtime_env;
 use std::any::Any;
+#[cfg(test)]
 use std::env;
 use std::panic;
 
@@ -258,7 +260,7 @@ fn apply(name_value: &Value, value_value: &Value) -> BuiltinResult<SetenvResult>
 
 fn update_environment(name: &str, value: &str) -> SetenvResult {
     if value.is_empty() {
-        match panic::catch_unwind(|| env::remove_var(name)) {
+        match panic::catch_unwind(|| runtime_env::remove_var(name)) {
             Ok(()) => SetenvResult::success(),
             Err(payload) => SetenvResult::failure(format!(
                 "{}{}",
@@ -267,7 +269,7 @@ fn update_environment(name: &str, value: &str) -> SetenvResult {
             )),
         }
     } else {
-        match panic::catch_unwind(|| env::set_var(name, value)) {
+        match panic::catch_unwind(|| runtime_env::set_var(name, value)) {
             Ok(()) => SetenvResult::success(),
             Err(payload) => SetenvResult::failure(format!(
                 "{}{}",

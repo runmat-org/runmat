@@ -5,6 +5,7 @@
 //! migrated through [`legacy`] and must not become new semantic dependencies.
 
 mod capability;
+mod environment;
 mod runtime;
 mod scope;
 mod services;

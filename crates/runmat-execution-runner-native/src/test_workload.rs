@@ -17,6 +17,15 @@ pub async fn execute_host_program_request_with_project(
     request: ProgramExecutionRequest,
     project: Option<&runmat_package::FrozenProjectHandoff>,
 ) -> ProgramExecutionResponse {
+    execute_host_program_request_in_context(request, project, None, None).await
+}
+
+pub(crate) async fn execute_host_program_request_in_context(
+    request: ProgramExecutionRequest,
+    project: Option<&runmat_package::FrozenProjectHandoff>,
+    environment: Option<&[(String, String)]>,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> ProgramExecutionResponse {
     if request.artifact.form == ExecutableForm::AnalysisWorkload {
         let Some(root) = std::env::var_os(crate::NATIVE_OBJECT_STORE_ROOT_ENV) else {
             return ProgramExecutionResponse::Failure {
@@ -64,12 +73,13 @@ pub async fn execute_host_program_request_with_project(
         );
     }
     if request.artifact.form == ExecutableForm::ExecutableUnitV4 {
-        return crate::program_workload::execute_unit(&request, project).await;
+        return crate::program_workload::execute_unit(&request, project, environment, cancellation)
+            .await;
     }
     if request.artifact.form != ExecutableForm::TestAttemptV1 {
         return runmat_vm::execute_program_request(request).await;
     }
-    match execute_test_attempt(&request, project).await {
+    match execute_test_attempt(&request, project, environment, cancellation).await {
         Ok(execution) => match runmat_test_runner_execution::encode_execution(&execution) {
             Ok(value) => ProgramExecutionResponse::Success { value },
             Err(message) => ProgramExecutionResponse::Failure { message },
@@ -81,6 +91,8 @@ pub async fn execute_host_program_request_with_project(
 async fn execute_test_attempt(
     request: &ProgramExecutionRequest,
     project: Option<&runmat_package::FrozenProjectHandoff>,
+    environment: Option<&[(String, String)]>,
+    cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<WorkerExecution, String> {
     let workload = TestAttemptWorkload::from_program_request(request)?;
     if let Some(project) = project {
@@ -94,8 +106,13 @@ async fn execute_test_attempt(
             );
         }
     }
-    let mut session = runmat_core::RunMatSession::with_options(true, false)
-        .map_err(|error| format!("failed to initialize test execution session: {error}"))?;
+    let mut session = match environment {
+        Some(entries) => {
+            runmat_core::RunMatSession::with_frozen_environment(true, false, entries.to_vec())
+        }
+        None => runmat_core::RunMatSession::with_options(true, false),
+    }
+    .map_err(|error| format!("failed to initialize test execution session: {error}"))?;
     if let Some(project) = project {
         session
             .install_project_handoff(project.clone())
@@ -107,7 +124,7 @@ async fn execute_test_attempt(
             &workload.submission.plan,
             &workload.test_id,
             workload.attempt,
-            Arc::new(AtomicBool::new(false)),
+            cancellation.unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
         )
         .await
         .map_err(|error| error.to_string())?;
