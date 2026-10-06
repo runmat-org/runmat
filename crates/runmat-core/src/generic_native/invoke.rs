@@ -146,17 +146,19 @@ pub(crate) async fn invoke(
 
     let previous_external_invoker = user_functions::current_external_function_invoker();
     let external_registry = Arc::clone(&registry);
+    let external_unit = unit.clone();
     let external_runtime = runtime.clone();
     let external_invoker =
         user_functions::install_local_external_function_invoker(Rc::new(move |call| {
             let previous = previous_external_invoker.clone();
             let registry = Arc::clone(&external_registry);
+            let unit = external_unit.clone();
             let runtime = external_runtime.clone();
             Box::pin(async move {
                 let runtime = isolated_procedure_runtime(runtime);
-                if registry
-                    .get(runmat_hir::FunctionId(call.function))
-                    .is_some()
+                if u32::try_from(call.function)
+                    .map(ProgramFunctionId)
+                    .is_ok_and(|id| unit.owns_callable(id))
                 {
                     return runmat_vm::invoke_semantic_function_value_in_context(
                         call.function,

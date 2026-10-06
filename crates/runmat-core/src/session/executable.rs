@@ -442,6 +442,9 @@ impl RunMatSession {
     ) -> std::result::Result<Value, RunError> {
         let _interrupt_guard = control.runtime_scope(self.interrupt_flag.clone(), parent_control);
         let _program_guard = self.program_service.enter(unit);
+        let _dependency_guard = self
+            .program_service
+            .install_dependency_invoker(unit, self.runtime_context.clone());
         let _test_services = runmat_runtime::testing::install_test_services(
             crate::testing::runtime_adapter::services(
                 self.compat_mode,
@@ -529,11 +532,36 @@ impl RunMatSession {
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 if control.backend() == crate::ExecutableBackendPolicy::ForcedGenericNative {
-                    return Err(runtime_error(
-                        "RunMat:ExecutableBackend",
-                        "exact semantic invocation currently requires the portable interpreter",
-                    ));
+                    let name = &unit
+                        .functions()
+                        .get(function)
+                        .expect("checked function")
+                        .display_name;
+                    if unit.native_function_id(name) != Some(function)
+                        || !unit.owns_callable(runmat_types::ProgramFunctionId(index as u32))
+                    {
+                        return Err(runtime_error(
+                            "RunMat:ExecutableBackend",
+                            "semantic function is not owned by this native compiler product",
+                        ));
+                    }
+                    self.invoke_generic_native(
+                        unit,
+                        Some(name),
+                        invocation.arguments,
+                        invocation.requested_outputs,
+                    )
+                    .await
+                } else {
+                    self.invoke_procedure_interpreted(
+                        unit,
+                        function,
+                        invocation.arguments,
+                        invocation.requested_outputs,
+                    )
+                    .await
                 }
+                #[cfg(target_arch = "wasm32")]
                 self.invoke_procedure_interpreted(
                     unit,
                     function,

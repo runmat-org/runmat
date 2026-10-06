@@ -24,6 +24,28 @@ impl Bytecode {
     /// optional optimization candidates; a composed or transformed product
     /// that cannot represent one must execute normally without it.
     pub fn install_regions(&mut self, contracts: &[RegionContract]) -> Result<(), String> {
+        self.install_regions_scoped(contracts, None)
+    }
+
+    /// Install this assembly's regions without rewriting retained foreign function metadata.
+    /// The root bytecode still receives synthetic-entrypoint regions; registry
+    /// functions receive regions only when the compiler declares their ownership.
+    pub fn install_regions_for_functions(
+        &mut self,
+        contracts: &[RegionContract],
+        owned_functions: &std::collections::BTreeSet<runmat_hir::FunctionId>,
+    ) -> Result<(), String> {
+        self.install_regions_scoped(contracts, Some(owned_functions))
+    }
+
+    fn install_regions_scoped(
+        &mut self,
+        contracts: &[RegionContract],
+        owned_functions: Option<&std::collections::BTreeSet<runmat_hir::FunctionId>>,
+    ) -> Result<(), String> {
+        let owns = |function: runmat_hir::FunctionId| {
+            owned_functions.is_none_or(|ids| ids.contains(&function))
+        };
         let mut contracts = contracts.iter().collect::<Vec<_>>();
         contracts.sort_by_key(|contract| contract.id);
         if contracts.windows(2).any(|pair| pair[0].id == pair[1].id) {
@@ -51,6 +73,7 @@ impl Bytecode {
                 .function_registry
                 .functions
                 .get(&function)
+                .filter(|_| owns(function))
                 .map(|function| &function.resume_points);
             let Some(points) = layout_points
                 .filter(|points| contains_region_boundaries(contract, points))
@@ -66,12 +89,19 @@ impl Bytecode {
 
         self.regions = mapped.iter().map(|(_, region)| region.clone()).collect();
         for function in self.function_registry.functions.values_mut() {
-            function.regions.clear();
+            if owns(function.function) {
+                function.regions.clear();
+            }
         }
         for function in self.bound_functions.values_mut() {
-            function.regions.clear();
+            if owns(function.function) {
+                function.regions.clear();
+            }
         }
         for (function, region) in mapped {
+            if !owns(function) {
+                continue;
+            }
             if let Some(bytecode) = self.function_registry.functions.get_mut(&function) {
                 bytecode.regions.push(region.clone());
             }

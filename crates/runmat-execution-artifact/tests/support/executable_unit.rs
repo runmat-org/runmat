@@ -21,7 +21,7 @@ use runmat_types::{
 pub fn recipe(mut recipe: ProgramBuildRecipe) -> ProgramBuildRecipe {
     recipe.entrypoint = "0".into();
     recipe.target =
-        runmat_execution_artifact::ProgramTarget::portable("portable-executable-unit-v3");
+        runmat_execution_artifact::ProgramTarget::portable("portable-executable-unit-v4");
     recipe
 }
 
@@ -80,6 +80,7 @@ pub fn bytes(revision: ProgramRevision) -> Vec<u8> {
                 parallel_schema: runmat_types::PARALLEL_MANIFEST_SCHEMA_VERSION,
             },
             components,
+            dependencies: Vec::new(),
             capabilities: CapabilitySet(BTreeSet::from([
                 CapabilityRequirement::ForeignRuntime,
                 CapabilityRequirement::ParallelRuntime,

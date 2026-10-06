@@ -69,6 +69,19 @@ impl ExecutableUnit {
         &self,
         selected: Option<(String, runmat_hir::FunctionId)>,
     ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
+        let local = self.portable_local_envelope_for_selection(selected)?;
+        runmat_execution::ExecutableUnitEnvelope::with_dependencies(
+            local.manifest,
+            local.payloads,
+            self.portable_dependency_products()?,
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    pub(super) fn portable_local_envelope_for_selection(
+        &self,
+        selected: Option<(String, runmat_hir::FunctionId)>,
+    ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
         let payloads = self.component_payloads()?;
         let revisions = self.component_revisions()?;
         let components = payloads
@@ -111,6 +124,7 @@ impl ExecutableUnit {
                 .collect(),
         );
         let manifest = runmat_execution::ExecutableUnitManifest {
+            dependencies: Vec::new(),
             schema_version: runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION,
             identity: runmat_execution::ExecutableIdentity {
                 program: self.revision().program_revision.clone(),

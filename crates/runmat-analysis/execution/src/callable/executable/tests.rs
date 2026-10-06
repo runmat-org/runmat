@@ -156,6 +156,7 @@ pub(crate) fn envelope(analysis: &AnalysisStore) -> ExecutableUnitEnvelope {
                 parallel_schema: runmat_types::PARALLEL_MANIFEST_SCHEMA_VERSION,
             },
             components,
+            dependencies: Vec::new(),
             capabilities: CapabilitySet::default(),
             regions: Vec::new(),
             interop: runmat_types::InteropManifest::empty(),

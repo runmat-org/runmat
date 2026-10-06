@@ -12,7 +12,7 @@ use runmat_types::{
     CapabilityRequirement, CapabilitySet, InteropManifest, ParallelManifest, RegionContract,
 };
 
-pub const EXECUTABLE_UNIT_SCHEMA_VERSION: u16 = crate::schema::EXECUTABLE_UNIT_SCHEMA_V3;
+pub const EXECUTABLE_UNIT_SCHEMA_VERSION: u16 = crate::schema::EXECUTABLE_UNIT_SCHEMA_V4;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -21,6 +21,7 @@ pub struct ExecutableUnitManifest {
     pub identity: ExecutableIdentity,
     pub revisions: ExecutableComponentRevisions,
     pub components: Vec<ExecutableComponentDescriptor>,
+    pub dependencies: Vec<super::ExecutableDependencyDescriptor>,
     pub capabilities: CapabilitySet,
     pub regions: Vec<RegionContract>,
     pub interop: InteropManifest,
@@ -39,6 +40,7 @@ impl ExecutableUnitManifest {
         self.identity.validate()?;
         self.revisions.validate()?;
         validate_component_descriptors(&self.components, &self.revisions)?;
+        super::dependencies::validate_descriptors(&self.dependencies)?;
         if self.identity.program.catalog_fingerprint() != &self.revisions.catalog_fingerprint {
             return Err(ContractError::invalid(
                 "executable.revisions.catalog_fingerprint",

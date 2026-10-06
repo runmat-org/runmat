@@ -30,6 +30,8 @@ pub struct ExecutableUnit {
     bytecode: Rc<runmat_vm::Bytecode>,
     layout: Rc<runmat_vm::VmAssemblyLayout>,
     functions: Rc<runmat_vm::FunctionRegistry>,
+    pub(super) original_dependencies:
+        std::collections::BTreeMap<runmat_types::ProgramFunctionId, Rc<ExecutableUnit>>,
     pub(super) interop: runmat_types::InteropManifest,
     pub(super) parallel: runmat_types::ParallelManifest,
     pub(super) optional_sections: Vec<runmat_execution::ExecutableOptionalSection>,
@@ -49,7 +51,24 @@ impl ExecutableUnit {
             .iter()
             .map(|region| region.contract.clone())
             .collect::<Vec<_>>();
-        bytecode.install_regions(&region_contracts)?;
+        let owned_functions = mir
+            .functions
+            .keys()
+            .copied()
+            .filter(|id| {
+                u32::try_from(id.0)
+                    .map(runmat_types::ProgramFunctionId)
+                    .is_ok_and(|function| {
+                        super::dependencies::owns_callable_parts(
+                            &mir,
+                            &analysis,
+                            &bytecode.function_registry,
+                            function,
+                        )
+                    })
+            })
+            .collect();
+        bytecode.install_regions_for_functions(&region_contracts, &owned_functions)?;
         let coverage = CoveragePlan::instrument(&source, &revision, &source_map, &mut bytecode);
         let layout = bytecode
             .layout
@@ -66,6 +85,7 @@ impl ExecutableUnit {
             bytecode: Rc::new(bytecode),
             layout: Rc::new(layout),
             functions,
+            original_dependencies: Default::default(),
             interop: runmat_types::InteropManifest::empty(),
             parallel: runmat_types::ParallelManifest::empty(),
             optional_sections: Vec::new(),

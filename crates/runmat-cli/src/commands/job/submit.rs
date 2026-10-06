@@ -122,14 +122,14 @@ pub async fn submit(
     let executable_function = usize::try_from(identity.entrypoint_function.0)
         .context("portable entrypoint identity exceeds this host")?;
     let executable_bytes = executable.canonical_bytes()?;
-    let form = ExecutableForm::ExecutableUnitV3;
+    let form = ExecutableForm::ExecutableUnitV4;
     let recipe = ProgramBuildRecipe {
         schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: revision.clone(),
         entrypoint: executable_function.to_string(),
         outputs: OutputContract { requested_outputs },
         execution_mode: "interpreter".into(),
-        target: runmat_execution_artifact::ProgramTarget::portable("portable-executable-unit-v3"),
+        target: runmat_execution_artifact::ProgramTarget::portable("portable-executable-unit-v4"),
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),

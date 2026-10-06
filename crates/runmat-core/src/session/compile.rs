@@ -892,6 +892,7 @@ impl RunMatSession {
             prepared.analysis,
             prepared.bytecode,
         )
+        .and_then(|unit| self.program_service.bind_original_dependencies(unit))
         .map_err(|error| {
             RunError::Runtime(
                 build_runtime_error(error)

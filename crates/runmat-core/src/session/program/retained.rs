@@ -8,6 +8,13 @@ pub(super) struct RetainedPrograms {
 }
 
 impl SessionProgramService {
+    pub(in crate::session) fn bind_original_dependencies(
+        &self,
+        unit: ExecutableUnit,
+    ) -> Result<ExecutableUnit, String> {
+        unit.bind_original_dependencies(&self.retained.borrow().owners)
+    }
+
     pub(in crate::session) fn publish(
         &self,
         unit: &ExecutableUnit,
@@ -21,7 +28,7 @@ impl SessionProgramService {
         });
         let owner = Rc::new(unit.clone());
         for analysis in unit.analysis().functions.iter() {
-            if owns_callable(unit, analysis.function)
+            if unit.owns_callable(analysis.function)
                 && registry
                     .get(runmat_hir::FunctionId(analysis.function.0 as usize))
                     .is_some()
@@ -52,34 +59,17 @@ impl SessionProgramService {
     pub(super) fn resolve<'a>(
         &self,
         caller: &'a ExecutableUnit,
-        retained: &'a RetainedPrograms,
         function: ProgramFunctionId,
     ) -> Result<&'a ExecutableUnit, runmat_runtime::RuntimeError> {
-        if owns_callable(caller, function) {
+        if caller.owns_callable(function) {
             return Ok(caller);
         }
-        retained
-            .owners
+        caller
+            .original_dependencies()
             .get(&function)
             .map(Rc::as_ref)
             .ok_or_else(|| {
                 program_error("semantic function has no retained original compiler product")
             })
     }
-}
-
-fn owns_callable(unit: &ExecutableUnit, function: ProgramFunctionId) -> bool {
-    let id = runmat_hir::FunctionId(function.0 as usize);
-    let Some(metadata) = unit.mir().functions.get(&id) else {
-        return false;
-    };
-    let Some(bytecode) = unit.functions().get(id) else {
-        return false;
-    };
-    !matches!(metadata.kind, runmat_hir::FunctionKind::SyntheticEntrypoint)
-        && bytecode.display_name == metadata.name.0
-        && bytecode
-            .source_id
-            .is_some_and(|source| source.0 == metadata.source.0 as usize)
-        && unit.function_analysis(function).is_some()
 }

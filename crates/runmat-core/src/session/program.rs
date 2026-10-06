@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+mod invocation;
 mod retained;
 
 use runmat_runtime::context::{RuntimeProgramCallable, RuntimeProgramService};
@@ -38,8 +39,7 @@ impl RuntimeProgramService for SessionProgramService {
                 "invocation revision differs from its active original product",
             ));
         }
-        let retained = self.retained.borrow();
-        self.resolve(caller, &retained, function)?
+        self.resolve(caller, function)?
             .portable_envelope_for_function(function)
             .map_err(program_error)
     }
@@ -53,8 +53,7 @@ impl RuntimeProgramService for SessionProgramService {
         let caller = active
             .last()
             .ok_or_else(|| program_error("no executable is active"))?;
-        let retained = self.retained.borrow();
-        let unit = self.resolve(caller, &retained, function)?;
+        let unit = self.resolve(caller, function)?;
         let analysis = unit.function_analysis(function).cloned().ok_or_else(|| {
             program_error(format!(
                 "active executable does not contain callable function {}",

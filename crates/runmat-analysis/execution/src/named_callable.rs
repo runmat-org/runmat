@@ -11,7 +11,7 @@ use runmat_execution_artifact::{
 use runmat_types::{CapabilityRequirement, ProgramFunctionId};
 use std::collections::BTreeSet;
 
-pub const ANALYSIS_CALLABLE_TARGET_PROFILE: &str = "portable-executable-unit-v3";
+pub const ANALYSIS_CALLABLE_TARGET_PROFILE: &str = "portable-executable-unit-v4";
 #[derive(Clone, Debug)]
 pub struct NamedCallableExecutionContext {
     pub scope_id: runmat_execution::ExecutionScopeId,
@@ -85,7 +85,7 @@ pub fn prepare_named_callable_descriptor(
         expected_artifact_id: None,
     };
     let artifact =
-        ProgramArtifact::materialize(&recipe, ExecutableForm::ExecutableUnitV3, executable_bytes)?;
+        ProgramArtifact::materialize(&recipe, ExecutableForm::ExecutableUnitV4, executable_bytes)?;
     let descriptor = ProgramExecutionDescriptor {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         recipe,

@@ -20,14 +20,14 @@ impl ProgramArtifact {
             program_revision: envelope.manifest.identity.program.clone(),
             entrypoint: envelope.manifest.identity.entrypoint_function.0.to_string(),
             outputs,
-            execution_mode: "portable-v3".into(),
+            execution_mode: "portable-v4".into(),
             target,
             features: Default::default(),
             compile_options: Default::default(),
             source_objects: Vec::new(),
             expected_artifact_id: None,
         };
-        let artifact = Self::materialize(&recipe, ExecutableForm::ExecutableUnitV3, program)?;
+        let artifact = Self::materialize(&recipe, ExecutableForm::ExecutableUnitV4, program)?;
         Ok((recipe, artifact))
     }
 }

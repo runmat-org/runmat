@@ -19,7 +19,7 @@ pub struct DeferredCall {
     pub arguments: Vec<Value>,
     pub requested_outputs: usize,
     pub program_revision: Option<runmat_execution::ProgramRevision>,
-    /// Canonical complete V3 compiler product frozen by the active session owner.
+    /// Canonical complete V4 compiler product and flat original dependency inventory frozen by the active session owner.
     /// The serial service does not inspect it; isolated consumers reject partial
     /// registries and inconsistent original revision/function identity.
     pub program: Option<Vec<u8>>,

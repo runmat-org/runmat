@@ -108,6 +108,7 @@ fn manifest() -> ExecutableUnitManifest {
         },
         revisions,
         components,
+        dependencies: Vec::new(),
         capabilities: CapabilitySet(BTreeSet::from([
             CapabilityRequirement::ForeignRuntime,
             CapabilityRequirement::ParallelRuntime,
@@ -193,7 +194,7 @@ fn executable_manifest_round_trips_all_contract_families() {
     round_trip_vector();
     assert_eq!(
         manifest().cache_key().unwrap().to_string(),
-        "sha256:f19f3e2aab64c58611c48210de564e6b9a2d275a4d4b96c5285ac636efa00c7f"
+        "sha256:9bbb2ccd900aacf97d752e6e5484b3aafa8cb9d4dcf70b36aeba74a4fb40195d"
     );
 }
 
@@ -293,3 +294,6 @@ fn decoder_rejects_unknown_core_fields_and_noncanonical_json() {
 fn wasm_uses_the_same_executable_manifest_vector() {
     round_trip_vector();
 }
+
+#[path = "executable_manifest/dependencies.rs"]
+mod dependencies;

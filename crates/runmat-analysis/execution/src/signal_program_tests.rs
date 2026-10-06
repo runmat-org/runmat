@@ -107,6 +107,7 @@ fn executable(admitted: &AdmittedSignalGenerator) -> ExecutableUnitEnvelope {
                 parallel_schema: PARALLEL_MANIFEST_SCHEMA_VERSION,
             },
             components,
+            dependencies: Vec::new(),
             capabilities: CapabilitySet::default(),
             regions: Vec::new(),
             interop: InteropManifest::empty(),
@@ -212,7 +213,7 @@ fn portable_program_binds_exact_callable_revision_and_chunk_arguments() {
     );
     assert_eq!(
         prepared.descriptor.artifact.form,
-        ExecutableForm::ExecutableUnitV3
+        ExecutableForm::ExecutableUnitV4
     );
 
     let mut substituted = executable(&admitted);

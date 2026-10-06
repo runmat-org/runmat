@@ -33,7 +33,7 @@ async fn browser_executes_the_exact_portable_artifact_without_a_project() {
             requested_outputs: 1,
         },
         execution_mode: "interpreter".into(),
-        target: ProgramTarget::portable("portable-executable-unit-v3"),
+        target: ProgramTarget::portable("portable-executable-unit-v4"),
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),
@@ -41,7 +41,7 @@ async fn browser_executes_the_exact_portable_artifact_without_a_project() {
     };
     let artifact = ProgramArtifact::materialize(
         &recipe,
-        ExecutableForm::ExecutableUnitV3,
+        ExecutableForm::ExecutableUnitV4,
         envelope.canonical_bytes().unwrap(),
     )
     .unwrap();

@@ -40,7 +40,7 @@ async fn request(text: &str, selected: Option<&str>, outputs: u16) -> ProgramExe
         function: envelope.manifest.identity.entrypoint_function.0 as usize,
         artifact: ProgramArtifact::materialize(
             &recipe,
-            ExecutableForm::ExecutableUnitV3,
+            ExecutableForm::ExecutableUnitV4,
             envelope.canonical_bytes().unwrap(),
         )
         .unwrap(),
@@ -134,7 +134,62 @@ async fn execute(
     assert_eq!(cold.task_execution_evidence(task_id).unwrap(), *evidence);
 }
 
+async fn transitive_request() -> ProgramExecutionRequest {
+    let mut producer = runmat_core::RunMatSession::with_options(false, false).unwrap();
+    for (name, source) in [
+        ("leaf.m", "function y = originalLeaf(x); y = x + 7; end"),
+        (
+            "middle.m",
+            "function y = originalMiddle(x); y = originalLeaf(x) * 2; end",
+        ),
+    ] {
+        let request = runmat_core::abi::ExecutionRequest::for_source(
+            runmat_core::abi::SourceInput::Text {
+                name: name.into(),
+                text: source.into(),
+            },
+            Default::default(),
+            runmat_core::abi::HostExecutionPolicy::default(),
+            runmat_core::abi::WorkspaceHandle(uuid::Uuid::nil()),
+        );
+        producer.execute_request(request).await.result.unwrap();
+    }
+    let unit = producer
+        .compile_executable_unit(
+            runmat_core::ExecutableSource::new(
+                "original-portable-worker",
+                "consumer.m",
+                "function y = consumer(x); y = originalMiddle(x) + 3; end",
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+    let envelope = unit.portable_envelope_for(Some("consumer")).unwrap();
+    assert_eq!(envelope.dependency_products.len(), 2);
+    drop(producer);
+    let (recipe, artifact) = ProgramArtifact::materialize_executable_unit(
+        &envelope,
+        OutputContract {
+            requested_outputs: 1,
+        },
+        ProgramTarget::portable("original-session-worker"),
+    )
+    .unwrap();
+    ProgramExecutionRequest {
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        function: envelope.manifest.identity.entrypoint_function.0 as usize,
+        arguments: vec![
+            runmat_runtime::execution::value_codec::encode_inline_value(&Value::Num(5.0)).unwrap(),
+        ],
+        requested_outputs: 1,
+        recipe,
+        artifact,
+    }
+}
+
 pub(super) async fn verify(config: &NativeExecutionConfig) {
+    execute(config, transitive_request().await, vec![Value::Num(27.0)]).await;
     for outputs in [0, 1, 2] {
         let mut original = request(
             concat!(
@@ -167,5 +222,5 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
     )
     .await;
     execute(config, request("unrelated = 999;", None, 0).await, vec![]).await;
-    println!("original V3 captures, exact semantic functions and script output authority passed real native tasks and cold checkpoints");
+    println!("original V4 captures, exact semantic functions and script output authority passed real native tasks and cold checkpoints");
 }

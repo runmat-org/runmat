@@ -296,7 +296,7 @@ pub(crate) fn validate_prepared_generator_program(
             != usize::try_from(admission.function.0).unwrap_or(usize::MAX)
         || program.descriptor.requested_outputs != 1
         || program.descriptor.recipe.execution_mode != GENERATOR_EXECUTION_MODE
-        || program.descriptor.artifact.form != ExecutableForm::ExecutableUnitV3
+        || program.descriptor.artifact.form != ExecutableForm::ExecutableUnitV4
     {
         return Err(AnalysisBridgeError::Identity(
             "prepared generator program differs from its admitted callable",

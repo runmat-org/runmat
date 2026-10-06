@@ -99,13 +99,13 @@ async fn deferred_capture_preserves_original_complete_product_in_both_executors(
         let outputs = runmat_execution::OutputContract {
             requested_outputs: 1,
         };
-        let target = runmat_execution_artifact::ProgramTarget::portable("original-deferred-v3");
+        let target = runmat_execution_artifact::ProgramTarget::portable("original-deferred-v4");
         let (recipe, artifact, arguments) =
             runmat_vm::materialize_deferred_call(&call, outputs.clone(), target.clone()).unwrap();
         assert_eq!(recipe.program_revision, unit.revision().program_revision);
         assert_eq!(
             artifact.form,
-            runmat_execution_artifact::ExecutableForm::ExecutableUnitV3
+            runmat_execution_artifact::ExecutableForm::ExecutableUnitV4
         );
         assert_eq!(artifact.executable_unit().unwrap().unwrap(), captured);
         assert_eq!(arguments.len(), 1);

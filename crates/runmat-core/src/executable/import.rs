@@ -5,6 +5,7 @@ use runmat_execution::{
 use serde::de::DeserializeOwned;
 
 use super::{ExecutableRevision, ExecutableUnit};
+mod dependencies;
 mod sources;
 #[cfg(test)]
 mod tests;
@@ -15,6 +16,21 @@ impl ExecutableUnit {
     /// schema and component consistency; it does not recompile or attest source semantics.
     pub fn from_portable_envelope(envelope: &ExecutableUnitEnvelope) -> Result<Self, String> {
         envelope.validate().map_err(|error| error.to_string())?;
+        let unit = Self::decode_local_product(envelope)?;
+        let unit = dependencies::restore(unit, &envelope.dependency_products)?;
+        let restored = match envelope.manifest.identity.entrypoint_kind {
+            ExecutableEntrypointKind::Function => {
+                unit.portable_envelope_for_function(envelope.manifest.identity.entrypoint_function)?
+            }
+            ExecutableEntrypointKind::Script => unit.portable_envelope_for_selection(None)?,
+        };
+        if restored != *envelope {
+            return Err("portable dependency closure differs from original inventory".into());
+        }
+        Ok(unit)
+    }
+
+    fn decode_local_product(envelope: &ExecutableUnitEnvelope) -> Result<Self, String> {
         envelope
             .manifest
             .validate_for(&runmat_execution::ExecutableSectionSupport::default())
@@ -56,14 +72,18 @@ impl ExecutableUnit {
         unit.interop = envelope.manifest.interop.clone();
         unit.parallel = envelope.manifest.parallel.clone();
         unit.optional_sections = envelope.manifest.optional_sections.clone();
-        let restored = match envelope.manifest.identity.entrypoint_kind {
-            ExecutableEntrypointKind::Function => {
-                unit.portable_envelope_for_function(envelope.manifest.identity.entrypoint_function)?
-            }
-            ExecutableEntrypointKind::Script => unit.portable_envelope_for_selection(None)?,
+        let selected = match envelope.manifest.identity.entrypoint_kind {
+            ExecutableEntrypointKind::Function => Some((
+                envelope.manifest.identity.entrypoint.clone(),
+                runmat_hir::FunctionId(envelope.manifest.identity.entrypoint_function.0 as usize),
+            )),
+            ExecutableEntrypointKind::Script => None,
         };
-        if restored != *envelope {
-            return Err("portable product differs from its canonical source, coverage, region or component inventory".into());
+        let restored = unit.portable_local_envelope_for_selection(selected)?;
+        let mut local_manifest = envelope.manifest.clone();
+        local_manifest.dependencies.clear();
+        if restored.manifest != local_manifest || restored.payloads != envelope.payloads {
+            return Err("portable product differs from canonical source, coverage, region or component inventory".into());
         }
         Ok(unit)
     }

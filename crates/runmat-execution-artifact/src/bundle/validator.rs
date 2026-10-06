@@ -173,7 +173,7 @@ fn validate_code_closure(bundle: &ExecutionBundle) -> ArtifactResult<()> {
                 || bundle.manifest.artifacts.iter().any(|artifact| {
                     !matches!(
                         artifact.form,
-                        crate::ExecutableForm::ExecutableUnitV3
+                        crate::ExecutableForm::ExecutableUnitV4
                             | crate::ExecutableForm::NativeObjectV1
                             | crate::ExecutableForm::MeshingWorkload
                             | crate::ExecutableForm::AnalysisWorkload

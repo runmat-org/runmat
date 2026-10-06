@@ -9,7 +9,7 @@ pub(crate) async fn execute(
     request: ProgramExecutionRequest,
     execution: Option<Rc<dyn RuntimeExecutionServices>>,
 ) -> ProgramExecutionResponse {
-    if request.artifact.form != ExecutableForm::ExecutableUnitV3 {
+    if request.artifact.form != ExecutableForm::ExecutableUnitV4 {
         return runmat_vm::execute_program_request(request).await;
     }
     match invoke(&request, execution).await {

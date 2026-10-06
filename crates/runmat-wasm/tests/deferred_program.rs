@@ -125,3 +125,65 @@ async fn raw_wasm_script_captures_complete_original_program() {
     assert_eq!(retained.function, call.function);
     assert_eq!(retained.arguments, call.arguments);
 }
+
+#[wasm_bindgen_test]
+async fn original_transitive_products_survive_wasm_producer_teardown() {
+    runmat_runtime::builtins::wasm_registry::register_all();
+    let mut producer = runmat_core::RunMatSession::with_options(false, false).unwrap();
+    let service = Rc::new(CapturingService::default());
+    producer.install_execution_services(service.clone());
+    for (name, source) in [
+        ("leaf.m", "function y = originalLeaf(x); y = x + 7; end"),
+        (
+            "middle.m",
+            "function y = originalMiddle(x); y = originalLeaf(x) * 2; end",
+        ),
+        (
+            "root.m",
+            "async function y = retainedAsync(x); y = originalMiddle(x) + 3; end",
+        ),
+        ("caller.m", "f = retainedAsync(5);"),
+    ] {
+        let request = runmat_core::abi::ExecutionRequest::for_source(
+            runmat_core::abi::SourceInput::Text {
+                name: name.into(),
+                text: source.into(),
+            },
+            Default::default(),
+            runmat_core::abi::HostExecutionPolicy::default(),
+            runmat_core::abi::WorkspaceHandle(uuid::Uuid::nil()),
+        );
+        producer
+            .execute_request(request)
+            .await
+            .result
+            .expect("original declaration/capture");
+    }
+    let call = service.original.borrow_mut().take().unwrap();
+    drop(producer);
+    let envelope = runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(
+        call.program.as_deref().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(envelope.dependency_products.len(), 2);
+    let (_, artifact, _) = runmat_vm::materialize_deferred_call(
+        &call,
+        runmat_execution::OutputContract {
+            requested_outputs: 1,
+        },
+        runmat_execution_artifact::ProgramTarget::portable("original-wasm-dependencies"),
+    )
+    .unwrap();
+    assert_eq!(artifact.executable_unit().unwrap().unwrap(), envelope);
+    let mut cold = runmat_core::RunMatSession::with_options(false, false).unwrap();
+    let result = cold
+        .invoke_portable_unit(
+            &envelope,
+            call.arguments,
+            call.requested_outputs,
+            &runmat_core::InvocationControl::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result, Value::Num(27.0));
+}

@@ -62,7 +62,7 @@ pub async fn execute_program_request(request: ProgramExecutionRequest) -> Progra
             message: "analysis workloads require an analysis-capable execution host".into(),
         };
     }
-    if request.artifact.form == ExecutableForm::ExecutableUnitV3 {
+    if request.artifact.form == ExecutableForm::ExecutableUnitV4 {
         return ProgramExecutionResponse::Failure {
             message: "executable units require a session-capable execution host".into(),
         };

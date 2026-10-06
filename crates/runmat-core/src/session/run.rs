@@ -697,7 +697,7 @@ impl RunMatSession {
             mir,
             analysis,
             bytecode,
-            function_registry_after_success,
+            mut function_registry_after_success,
             next_semantic_function_id_after_success,
         } = self.compile_input(input)?;
         let interactive_unit = {
@@ -719,6 +719,7 @@ impl RunMatSession {
                 analysis,
                 bytecode,
             )
+            .and_then(|unit| self.program_service.bind_original_dependencies(unit))
             .map_err(|error| {
                 RunError::Runtime(
                     build_runtime_error(error)
@@ -730,6 +731,9 @@ impl RunMatSession {
         #[cfg(not(target_arch = "wasm32"))]
         let analysis = interactive_unit.analysis();
         let _program_guard = self.program_service.enter(&interactive_unit);
+        let _dependency_guard = self
+            .program_service
+            .install_dependency_invoker(&interactive_unit, self.runtime_context.clone());
         let mut bytecode = interactive_unit.bytecode().clone();
         let source_catalog_entries = self
             .source_pool
@@ -1269,6 +1273,20 @@ impl RunMatSession {
                             workspace_updates.push(workspace_entry(&name, &value_clone));
                         }
                     }
+                }
+            }
+            // Publish the finalized original function product, including its
+            // region and coverage metadata, rather than the pre-unit registry.
+            for (id, function) in &mut function_registry_after_success.functions {
+                if u32::try_from(id.0)
+                    .map(runmat_types::ProgramFunctionId)
+                    .is_ok_and(|id| interactive_unit.owns_callable(id))
+                {
+                    *function = interactive_unit
+                        .functions()
+                        .get(*id)
+                        .expect("owned published function exists")
+                        .clone();
                 }
             }
             #[cfg(not(target_arch = "wasm32"))]

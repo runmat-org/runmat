@@ -1604,14 +1604,14 @@ async fn build_executable_bundle(
     };
     let executable_bytes = envelope.canonical_bytes().unwrap();
     let artifact =
-        ProgramArtifact::materialize(&recipe, ExecutableForm::ExecutableUnitV3, executable_bytes)
+        ProgramArtifact::materialize(&recipe, ExecutableForm::ExecutableUnitV4, executable_bytes)
             .unwrap();
     let bundle = ExecutionBundleBuilder::native(&project, recipe.program_revision.clone())
         .unwrap()
         .with_compiled_package_closure()
         .with_materialized_program(
             recipe.clone(),
-            ExecutableForm::ExecutableUnitV3,
+            ExecutableForm::ExecutableUnitV4,
             artifact.executable_bytes.clone(),
         )
         .build()

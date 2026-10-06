@@ -14,7 +14,7 @@ pub enum ExecutableForm {
     InterpreterBytecodeV1 = 0,
     InterpreterScriptV1 = 1,
     TestAttemptV1 = 2,
-    ExecutableUnitV3 = 3,
+    ExecutableUnitV4 = 8,
     NativeObjectV1 = 4,
     MeshingWorkload = 5,
     AnalysisWorkload = 6,
@@ -43,7 +43,7 @@ impl ProgramArtifact {
     pub fn executable_unit(
         &self,
     ) -> ArtifactResult<Option<runmat_execution::ExecutableUnitEnvelope>> {
-        if self.form != ExecutableForm::ExecutableUnitV3 {
+        if self.form != ExecutableForm::ExecutableUnitV4 {
             return Ok(None);
         }
         runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(&self.executable_bytes)

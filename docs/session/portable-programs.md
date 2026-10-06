@@ -1,6 +1,6 @@
 # Portable compiler products and session invocation
 
-A V3 executable unit carries the original MIR, analysis, bytecode, VM layout,
+A V4 executable unit carries the original MIR, analysis, bytecode, VM layout,
 function registry and source map. `ExecutableUnit::from_portable_envelope` restores
 these through core's executable owner. It validates the supported environment and
 component revisions, original primary source identity and canonical component
@@ -25,7 +25,7 @@ source nor proves that arbitrary imported bytecode implements that source.
 - Functions are selected by their original semantic function identity. A display
   name does not replace that identity.
 - Core does not create another scheduler or artifact transport owner.
-- The low-level VM request executor rejects complete V3 units. Native assessment
+- The low-level VM request executor rejects complete V4 units. Native assessment
   and signal adapters, and browser artifact execution, enter the core session host.
   They do not reconstruct only bytecode and registry state.
 - Program context is installed on native and WASM targets. Its active-unit scope
@@ -33,6 +33,28 @@ source nor proves that arbitrary imported bytecode implements that source.
   when invocation ends.
 - Browser in-process execution inherits the existing browser execution service.
   This does not establish nested worker allocation or console/project transport.
+
+## Original dependency closure
+
+Each unit binds foreign semantic functions to the immutable compiler products
+published when that unit was compiled. Later interactive redefinitions do not
+replace these owners. Capture serializes a flat, sorted, deduplicated inventory of
+original products; member products carry their local components and cannot contain
+nested inventories. The existing 256 MiB envelope limit and a 1,024-product limit
+bound the portable inventory.
+
+Cold import restores the complete ownership graph before exposing the unit. Missing,
+ambiguous, cyclic, extra or modified products reject. Copied foreign function
+bytecode must match its original owner, including instructions, source identities,
+spans and ABI. Only caller-specific coverage sites are excluded from that projection
+comparison. Descriptor hashes bind transported content; they do not prove source
+semantics or numerical correctness.
+
+Foreign calls enter the original owner's program and source scope, inherit caller
+services and cancellation, and restore the caller scope on return. Exact owned
+semantic functions also support forced generic native invocation. V4 has a distinct
+artifact wire discriminant; V3 products cannot be interpreted as dependency-bearing
+units.
 
 ## Script outputs
 
@@ -92,7 +114,7 @@ establish arbitrary recursion depth or whole-task resource qualification.
 ## Deferred calls
 
 When an execution service requests a portable capture, interpreter and native
-future creation ask the active core program service for the complete V3 product
+future creation ask the active core program service for the complete V4 product
 of the exact semantic function. They preserve the original revision, source map,
 analysis and compiler components. Missing program authority fails explicitly.
 Raw script execution also enters the original core program scope on native and
@@ -101,11 +123,11 @@ context; the session's outer revision is restored after execution.
 Serial in-context services may retain a future without portable capture.
 
 Artifact construction belongs to the shared artifact owner. Deferred materialization
-requires canonical V3 bytes, the same original revision and function identity, and
+requires canonical V4 bytes, the same original revision and function identity, and
 the original output contract. Partial registries and absent revisions reject; the
 consumer does not invent a replacement program revision. Native executor/JIT state
 no longer retains a second registry-only capture for this purpose. Standalone AOT
-manifests retain their existing owner and do not substitute for a V3 capture.
+manifests retain their existing owner and do not substitute for a V4 capture.
 
 The original native output/cancellation/pending-await/cold-attachment witness now
 uses authored complete compiler products. Core tests compare the captured product

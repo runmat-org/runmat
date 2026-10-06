@@ -119,7 +119,7 @@ impl<R: Borrow<ProgramBuildRecipe>, A: Borrow<ProgramArtifact>, V: AsRef<[ValueP
                 "program execution request has an inconsistent callable, output contract, or argument count".into(),
             ));
         }
-        if artifact.form == ExecutableForm::ExecutableUnitV3 {
+        if artifact.form == ExecutableForm::ExecutableUnitV4 {
             let envelope = artifact
                 .executable_unit()?
                 .expect("executable-unit form returns its validated envelope");
@@ -188,7 +188,7 @@ fn entrypoint_matches(form: ExecutableForm, function: usize, entrypoint: &str) -
         ExecutableForm::MeshingWorkload => function == 0 && entrypoint == "meshing_workload",
         ExecutableForm::AnalysisWorkload => function == 0 && entrypoint == "analysis_workload",
         ExecutableForm::GeometryWorkload => function == 0 && entrypoint == "geometry_workload",
-        ExecutableForm::ExecutableUnitV3 => function.to_string() == entrypoint,
+        ExecutableForm::ExecutableUnitV4 => function.to_string() == entrypoint,
         ExecutableForm::NativeObjectV1 => function.to_string() == entrypoint,
     }
 }

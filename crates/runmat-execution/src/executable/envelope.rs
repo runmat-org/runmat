@@ -11,6 +11,7 @@ pub struct ExecutableUnitEnvelope {
     pub schema_version: u16,
     pub manifest: ExecutableUnitManifest,
     pub payloads: Vec<ExecutableComponentPayload>,
+    pub dependency_products: Vec<super::ExecutableDependencyProduct>,
 }
 
 impl ExecutableUnitEnvelope {
@@ -18,10 +19,29 @@ impl ExecutableUnitEnvelope {
         manifest: ExecutableUnitManifest,
         payloads: Vec<ExecutableComponentPayload>,
     ) -> Result<Self, ContractError> {
+        Self::with_dependencies(manifest, payloads, Vec::new())
+    }
+
+    pub fn with_dependencies(
+        mut manifest: ExecutableUnitManifest,
+        payloads: Vec<ExecutableComponentPayload>,
+        dependency_products: Vec<super::ExecutableDependencyProduct>,
+    ) -> Result<Self, ContractError> {
+        if dependency_products.len() > super::EXECUTABLE_DEPENDENCY_MAX_PRODUCTS {
+            return Err(ContractError::Limit {
+                field: "executable.dependencies",
+                limit: super::EXECUTABLE_DEPENDENCY_MAX_PRODUCTS as u64,
+            });
+        }
+        manifest.dependencies = dependency_products
+            .iter()
+            .map(|product| product.descriptor())
+            .collect::<Result<Vec<_>, _>>()?;
         let envelope = Self {
             schema_version: super::EXECUTABLE_UNIT_SCHEMA_VERSION,
             manifest,
             payloads,
+            dependency_products,
         };
         envelope.validate()?;
         Ok(envelope)
@@ -35,24 +55,11 @@ impl ExecutableUnitEnvelope {
             });
         }
         self.manifest.validate()?;
-        if self.payloads.len() != self.manifest.components.len() {
-            return Err(ContractError::invalid(
-                "executable.payloads",
-                "payload count does not match the component manifest",
-            ));
-        }
-        for (payload, descriptor) in self.payloads.iter().zip(&self.manifest.components) {
-            if payload.kind != descriptor.kind
-                || payload.bytes.len() as u64 != descriptor.encoded_length
-                || Digest::sha256(&payload.bytes) != descriptor.digest
-            {
-                return Err(ContractError::invalid(
-                    "executable.payloads",
-                    "payload identity does not match the component manifest",
-                ));
-            }
-        }
-        Ok(())
+        super::dependencies::validate_products(
+            &self.manifest.dependencies,
+            &self.dependency_products,
+        )?;
+        validate_payloads(&self.manifest, &self.payloads)
     }
 
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ContractError> {
@@ -94,4 +101,28 @@ impl ExecutableUnitEnvelope {
     pub fn component(&self, kind: ExecutableComponentKind) -> Option<&ExecutableComponentPayload> {
         self.payloads.iter().find(|payload| payload.kind == kind)
     }
+}
+
+pub(super) fn validate_payloads(
+    manifest: &ExecutableUnitManifest,
+    payloads: &[ExecutableComponentPayload],
+) -> Result<(), ContractError> {
+    if payloads.len() != manifest.components.len() {
+        return Err(ContractError::invalid(
+            "executable.payloads",
+            "payload count does not match the component manifest",
+        ));
+    }
+    for (payload, descriptor) in payloads.iter().zip(&manifest.components) {
+        if payload.kind != descriptor.kind
+            || payload.bytes.len() as u64 != descriptor.encoded_length
+            || Digest::sha256(&payload.bytes) != descriptor.digest
+        {
+            return Err(ContractError::invalid(
+                "executable.payloads",
+                "payload identity does not match the component manifest",
+            ));
+        }
+    }
+    Ok(())
 }

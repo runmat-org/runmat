@@ -164,6 +164,7 @@ fn executable(admitted: &AdmittedGeometryGenerator) -> ExecutableUnitEnvelope {
                 parallel_schema: PARALLEL_MANIFEST_SCHEMA_VERSION,
             },
             components,
+            dependencies: Vec::new(),
             capabilities: CapabilitySet::default(),
             regions: Vec::new(),
             interop: InteropManifest::empty(),

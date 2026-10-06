@@ -67,7 +67,7 @@ fn complete_executable_unit_survives_package_archive_round_trip() {
         .unwrap()
         .with_materialized_program(
             executable_unit_support::recipe(support::recipe(revision)),
-            ExecutableForm::ExecutableUnitV3,
+            ExecutableForm::ExecutableUnitV4,
             bytes.clone(),
         )
         .build()
@@ -179,7 +179,7 @@ fn compiled_package_closure_round_trips_without_source_or_project_payloads() {
         .with_compiled_package_closure()
         .with_materialized_program(
             executable_unit_support::recipe(support::recipe(revision)),
-            ExecutableForm::ExecutableUnitV3,
+            ExecutableForm::ExecutableUnitV4,
             bytes,
         )
         .build()
@@ -222,7 +222,7 @@ fn compiled_package_closure_rejects_non_compiled_artifacts_after_decode() {
         .with_compiled_package_closure()
         .with_materialized_program(
             executable_unit_support::recipe(support::recipe(revision)),
-            ExecutableForm::ExecutableUnitV3,
+            ExecutableForm::ExecutableUnitV4,
             bytes,
         )
         .build()

@@ -35,7 +35,7 @@ fn request(text: &str, selected: Option<&str>, outputs: u16) -> ProgramExecution
         function: envelope.manifest.identity.entrypoint_function.0 as usize,
         artifact: ProgramArtifact::materialize(
             &recipe,
-            ExecutableForm::ExecutableUnitV3,
+            ExecutableForm::ExecutableUnitV4,
             envelope.canonical_bytes().unwrap(),
         )
         .unwrap(),

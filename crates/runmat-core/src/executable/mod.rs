@@ -1,4 +1,5 @@
 mod coverage;
+mod dependencies;
 mod import;
 mod invocation;
 #[cfg(not(target_arch = "wasm32"))]
