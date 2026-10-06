@@ -99,8 +99,121 @@ fn legacy_output_type_tracks_text_and_struct_without_guessing_empty_shape() {
         &NARGOUTCHK_CATALOG_ENTRY,
     );
     assert!(matches!(value.outputs[0].kind, ValueKindFact::Struct(_)));
-    assert_eq!(value.outputs[0].shape, ShapeFact::from(vec![None, None]));
+    assert_eq!(value.outputs[0].shape, ShapeFact::Scalar);
     assert!(value.diagnostics.is_empty());
+}
+
+#[test]
+fn typed_real_and_exact_integer_literals_preserve_bound_ordering() {
+    for invalid in ["-1", "1.5", "NaN", "-Inf", "+Inf"] {
+        let result = inference::infer_narginchk(
+            &request(
+                vec![scalar_numeric(), scalar_numeric()],
+                vec![
+                    LiteralValue::Real {
+                        text: invalid.into(),
+                        class: NumericClass::Single,
+                    },
+                    LiteralValue::Number(2.0),
+                ],
+                0,
+            ),
+            &NARGINCHK_CATALOG_ENTRY,
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "RM-NARGINCHK-INPUT"),
+            "typed single {invalid} must reject"
+        );
+    }
+    let explicit_invalid = inference::infer_nargoutchk(
+        &request(
+            vec![scalar_numeric(), scalar_numeric(), scalar_numeric()],
+            vec![
+                LiteralValue::Number(0.0),
+                LiteralValue::Number(2.0),
+                LiteralValue::Real {
+                    text: "3.5".into(),
+                    class: NumericClass::Double,
+                },
+            ],
+            1,
+        ),
+        &NARGOUTCHK_CATALOG_ENTRY,
+    );
+    assert!(!explicit_invalid.diagnostics.is_empty());
+
+    let min = LiteralValue::Integer {
+        text: "9007199254740995".into(),
+        class: NumericClass::UInt64,
+    };
+    let max = LiteralValue::Integer {
+        text: "9007199254740994".into(),
+        class: NumericClass::UInt64,
+    };
+    let exact_order = inference::infer_narginchk(
+        &request(vec![scalar_numeric(), scalar_numeric()], vec![min, max], 0),
+        &NARGINCHK_CATALOG_ENTRY,
+    );
+    assert!(exact_order
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-NARGINCHK-INPUT"));
+    let unbounded_max = inference::infer_narginchk(
+        &request(
+            vec![scalar_numeric(), scalar_numeric()],
+            vec![
+                LiteralValue::Number(0.0),
+                LiteralValue::Real {
+                    text: "Inf".into(),
+                    class: NumericClass::Double,
+                },
+            ],
+            0,
+        ),
+        &NARGINCHK_CATALOG_ENTRY,
+    );
+    assert!(unbounded_max.diagnostics.is_empty());
+}
+
+#[test]
+fn selector_inference_matches_one_row_character_and_scalar_string_admission() {
+    let mut args = vec![scalar_numeric(), scalar_numeric(), scalar_numeric()];
+    args.push(ValueFact::proven(
+        ValueKindFact::Character,
+        ShapeFact::from(vec![Some(1), Some(8)]),
+        StorageFact::Dense,
+    ));
+    let padded = inference::infer_nargoutchk(
+        &request(
+            args.clone(),
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::Unknown,
+                LiteralValue::Unknown,
+                LiteralValue::Character(" struct ".into()),
+            ],
+            1,
+        ),
+        &NARGOUTCHK_CATALOG_ENTRY,
+    );
+    assert!(padded.diagnostics.is_empty());
+    args[3].shape = ShapeFact::from(vec![Some(2), Some(4)]);
+    let multirow =
+        inference::infer_nargoutchk(&request(args, vec![], 1), &NARGOUTCHK_CATALOG_ENTRY);
+    assert!(!multirow.diagnostics.is_empty());
+
+    let mut strings = vec![scalar_numeric(), scalar_numeric(), scalar_numeric()];
+    strings.push(ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::from(vec![Some(1), Some(2)]),
+        StorageFact::Dense,
+    ));
+    let multiple_strings =
+        inference::infer_nargoutchk(&request(strings, vec![], 1), &NARGOUTCHK_CATALOG_ENTRY);
+    assert!(!multiple_strings.diagnostics.is_empty());
 }
 
 #[test]

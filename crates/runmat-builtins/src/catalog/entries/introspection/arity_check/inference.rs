@@ -4,12 +4,19 @@ use runmat_types::*;
 
 fn invalid_bound_literal(literal: &LiteralValue, maximum: bool) -> bool {
     match literal {
-        LiteralValue::Number(value) => {
-            *value < 0.0
-                || (!value.is_finite() && !(maximum && *value == f64::INFINITY))
-                || (value.is_finite() && value.fract() != 0.0)
+        LiteralValue::Number(_) | LiteralValue::Real { .. } => {
+            LiteralContext::numeric_from_literal(literal).is_some_and(|value| {
+                value < 0.0
+                    || (!value.is_finite() && !(maximum && value == f64::INFINITY))
+                    || (value.is_finite()
+                        && (value.fract() != 0.0
+                            || value > usize::MAX as f64
+                            || (usize::BITS == 64 && value == usize::MAX as f64)))
+            })
         }
-        LiteralValue::Integer { .. } => literal.integer_value_i128().is_some_and(|value| value < 0),
+        LiteralValue::Integer { .. } => literal
+            .integer_value_i128()
+            .is_some_and(|value| usize::try_from(value).is_err()),
         LiteralValue::Bool(_)
         | LiteralValue::Character(_)
         | LiteralValue::String(_)
@@ -19,6 +26,27 @@ fn invalid_bound_literal(literal: &LiteralValue, maximum: bool) -> bool {
         | LiteralValue::Empty => true,
         _ => false,
     }
+}
+
+fn known_min_exceeds_max(min: &LiteralValue, max: &LiteralValue) -> bool {
+    let exact_min = min.integer_value_i128();
+    let exact_max = max.integer_value_i128();
+    if let (Some(min), Some(max)) = (exact_min, exact_max) {
+        return min > max;
+    }
+    let (Some(min_value), Some(max_value)) = (
+        LiteralContext::numeric_from_literal(min),
+        LiteralContext::numeric_from_literal(max),
+    ) else {
+        return false;
+    };
+    const EXACT_BINARY64_INTEGER: i128 = 1i128 << 53;
+    if exact_min.is_some_and(|value| value.unsigned_abs() > EXACT_BINARY64_INTEGER as u128)
+        || exact_max.is_some_and(|value| value.unsigned_abs() > EXACT_BINARY64_INTEGER as u128)
+    {
+        return false;
+    }
+    min_value.is_finite() && max_value.is_finite() && min_value > max_value
 }
 
 fn infer(
@@ -52,7 +80,20 @@ fn infer(
                 ValueKindFact::Numeric(_) | ValueKindFact::Unknown
             )
         };
-        if known_bad || (!selector && argument.shape.is_definitely_nonscalar()) {
+        let invalid_shape = if selector {
+            match argument.kind {
+                ValueKindFact::String => argument.shape.is_definitely_nonscalar(),
+                ValueKindFact::Character => argument
+                    .shape
+                    .known_dims()
+                    .and_then(|dims| dims.first().copied().flatten())
+                    .is_some_and(|rows| rows != 1),
+                _ => false,
+            }
+        } else {
+            argument.shape.is_definitely_nonscalar()
+        };
+        if known_bad || invalid_shape {
             result.diagnostics.push(argument_error(
                 code,
                 "expected a scalar arity bound or selector",
@@ -93,11 +134,11 @@ fn infer(
             .diagnostics
             .push(argument_error(code, "expected the struct selector", 3));
     }
-    if let (Some(LiteralValue::Number(min)), Some(LiteralValue::Number(max))) = (
+    if let (Some(min), Some(max)) = (
         request.literals.literal_args.first(),
         request.literals.literal_args.get(1),
     ) {
-        if min.is_finite() && max.is_finite() && min > max {
+        if known_min_exceeds_max(min, max) {
             result
                 .diagnostics
                 .push(argument_error(code, "minimum exceeds maximum", 1));
@@ -121,13 +162,8 @@ pub(super) fn infer_nargoutchk(
             StorageFact::Dense,
         )),
         4 => Some(ValueFact::proven(
-            ValueKindFact::Struct(StructFact::array(
-                Default::default(),
-                false,
-                Vec::new(),
-                false,
-            )),
-            ShapeFact::from(vec![None, None]),
+            ValueKindFact::Struct(StructFact::scalar(Default::default(), false)),
+            ShapeFact::Scalar,
             StorageFact::Dense,
         )),
         _ => None,
