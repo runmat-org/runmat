@@ -234,12 +234,12 @@ pub fn handle_builtin_outcome(
     }
 }
 
-pub async fn handle_builtin_call_multi(
-    ctx: BuiltinCallContext<'_>,
+pub fn handle_builtin_call_multi<'a>(
+    ctx: BuiltinCallContext<'a>,
     out_count: usize,
-    refresh_vars: impl Fn(&[Value]),
-) -> Result<BuiltinHandling, RuntimeError> {
-    handle_builtin_call_inner(ctx, refresh_vars, out_count).await
+    refresh_vars: impl Fn(&[Value]) + 'a,
+) -> impl std::future::Future<Output = Result<BuiltinHandling, RuntimeError>> + 'a {
+    handle_builtin_call_inner(ctx, refresh_vars, out_count)
 }
 
 async fn handle_builtin_call_inner(
