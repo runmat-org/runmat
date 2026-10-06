@@ -1,4 +1,8 @@
 use super::*;
+use crate::context::host_effect::{
+    HostEffectAllocationError, HostEffectLiveAllocationClaim, HostEffectLiveAllocationKind,
+    HostEffectStageReservation, ManagedHostEffectLedger, ManagedHostEffectStageReservation,
+};
 use crate::context::RuntimeContext;
 use crate::execution::{
     CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError, RuntimeExecutionService,
@@ -40,6 +44,60 @@ fn selected_path(bytes: &[u8]) -> (runmat_filesystem::ProviderGuard, TabularFsPa
         .path(path)
         .expect("selected path");
     (restore, selected)
+}
+
+struct TestDiagnosticStage(Arc<ManagedHostEffectStageReservation>);
+
+impl DiagnosticReservation for TestDiagnosticStage {
+    fn reserve_diagnostic_claim(
+        &self,
+        bytes: usize,
+    ) -> Result<HostEffectLiveAllocationClaim, HostEffectAllocationError> {
+        self.0
+            .reserve_live_exact_claim(HostEffectLiveAllocationKind::Diagnostic, bytes)
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn staged_scan_retains_full_first_numeric_error_through_remaining_utf8_validation() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let bytes = b"1,abc\n2,3\n";
+    let (_restore, selected) = selected_path(bytes);
+    let mut source = block_on(selected.open_bounded_input())
+        .expect("bounded source")
+        .expect("memory snapshot");
+    let ledger = ManagedHostEffectLedger::new(4096);
+    let stage = ledger.reserve_stage(4096).expect("diagnostic stage");
+    let diagnostic = TestDiagnosticStage(stage.clone());
+    let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
+    let error = block_on(bounded::scan_utf8(
+        &mut source,
+        &mut cooperation,
+        &selected,
+        &ReadMatrixOptions::default(),
+        Some(crate::context::host_effect::ExactHostEffectBytes::test_buffer(bytes.len())),
+        Some(crate::context::host_effect::ExactHostEffectBytes::test_buffer(bytes.len())),
+        Some(crate::context::host_effect::ExactHostEffectBytes::test_buffer(bytes.len())),
+        Some(&diagnostic),
+    ))
+    .expect_err("numeric error after complete UTF-8 scan");
+    assert_eq!(
+        error.message(),
+        "readmatrix: unable to parse numeric value 'abc' on line 1 column 2"
+    );
+    assert_eq!(
+        error.identifier(),
+        READMATRIX_ERROR_NON_NUMERIC_TOKEN.identifier
+    );
+    assert!(error.retained_diagnostic_allocation.is_some());
+    assert!(ledger.snapshot().live_claimed_bytes > 0);
+    drop(diagnostic);
+    drop(stage);
+    assert!(ledger.snapshot().live_reserved_bytes > 0);
+    drop(error);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
 }
 
 #[derive(Debug)]
@@ -94,6 +152,7 @@ fn retained_utf8_replay_writes_exact_wide_integer_output_without_mirror() {
         None,
         None,
         None,
+        None,
     ))
     .expect("first pass");
     let live = Arc::new(AtomicUsize::new(0));
@@ -107,6 +166,7 @@ fn retained_utf8_replay_writes_exact_wide_integer_output_without_mirror() {
         None,
         None,
         Some(&permit),
+        None,
     ))
     .expect("exact replay");
     assert_eq!(tensor.shape.as_slice(), [1, 2]);
@@ -383,6 +443,7 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         None,
         None,
         None,
+        None,
     ))
     .expect("first pass");
     std::fs::write(&file, b"9,8\n7,6\n").expect("same-length in-place mutation");
@@ -392,6 +453,7 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &mut cooperation,
         &selected,
         &options,
+        None,
         None,
         None,
         None,
@@ -413,9 +475,13 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         None,
         None,
         None,
+        None,
     ))
     .expect("new first pass");
     std::fs::write(&file, b"x,2\n3,4\n").expect("same-length malformed mutation");
+    let ledger = ManagedHostEffectLedger::new(4096);
+    let stage = ledger.reserve_stage(4096).expect("diagnostic stage");
+    let diagnostic = TestDiagnosticStage(stage.clone());
     let error = block_on(bounded::fill_utf8(
         &mut opened,
         &geometry,
@@ -425,11 +491,16 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         None,
         None,
         None,
+        Some(&diagnostic),
     ))
     .expect_err("changed-source error precedes replay token error");
     assert!(error
         .message()
         .contains("changed between validation and output"));
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    drop(diagnostic);
+    drop(stage);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
 
     std::fs::write(&file, b"1,2\n3,4\n").expect("reset payload");
     let mut opened = block_on(selected.open_bounded_input())
@@ -445,6 +516,7 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         None,
         None,
         None,
+        None,
     ))
     .expect("out-of-range first pass");
     std::fs::write(&file, b"9,8\n7,6\n").expect("same-length mutation outside range");
@@ -454,6 +526,7 @@ fn retained_seekable_utf8_scan_rejects_same_shape_in_place_mutation() {
         &mut cooperation,
         &selected,
         &empty_options,
+        None,
         None,
         None,
         None,

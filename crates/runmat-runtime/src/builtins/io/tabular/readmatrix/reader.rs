@@ -54,6 +54,10 @@ pub(super) async fn read_default_staged(
     // source line, the first 32 sampled lines, and one quoted-field scratch.
     // Each holds at most bytes from this opened extent. The sample owner is
     // dropped before replay; replay needs only line and field scratch.
+    let capacity = usize::try_from(extent).map_err(|_| matrix_overflow())?;
+    let diagnostic_bytes =
+        maximum_numeric_diagnostic_bytes(capacity).ok_or_else(matrix_overflow)?;
+    let diagnostic_bytes = u64::try_from(diagnostic_bytes).map_err(|_| matrix_overflow())?;
     let claim_bytes =
         u64::try_from(stage.live_claim_metadata_bytes()).map_err(|_| matrix_overflow())?;
     let scan_buffers = extent
@@ -63,11 +67,12 @@ pub(super) async fn read_default_staged(
     let promoted = stage
         .reserved_bytes()
         .checked_add(scan_buffers)
+        .and_then(|bytes| bytes.checked_add(diagnostic_bytes))
+        .and_then(|bytes| bytes.checked_add(claim_bytes))
         .ok_or_else(matrix_overflow)?;
     stage
         .promote_scan_envelope(promoted)
         .map_err(|source| admission::allocation_error(BUILTIN_NAME, source))?;
-    let capacity = usize::try_from(extent).map_err(|_| matrix_overflow())?;
     let workspace = || {
         stage
             .allocate_exact_bytes(HostEffectLiveAllocationKind::CodecWorkspace, capacity)
@@ -82,6 +87,7 @@ pub(super) async fn read_default_staged(
         Some(workspace()?),
         Some(workspace()?),
         Some(workspace()?),
+        Some(&stage),
     )
     .await?;
     let fill_line = workspace()?;
@@ -120,6 +126,7 @@ pub(super) async fn read_default_staged(
             Some(fill_line),
             Some(fill_field),
             Some(output_permit.as_ref()),
+            Some(&receipt),
         )
         .await?;
         cooperation.completed(0).await?;
@@ -185,15 +192,24 @@ pub(super) async fn read_numeric_matrix(
                     ),
                 ));
             }
-            let geometry =
-                bounded::scan_utf8(&mut source, cooperation, path, options, None, None, None)
-                    .await?;
+            let geometry = bounded::scan_utf8(
+                &mut source,
+                cooperation,
+                path,
+                options,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await?;
             bounded::fill_utf8(
                 &mut source,
                 &geometry,
                 cooperation,
                 path,
                 options,
+                None,
                 None,
                 None,
                 None,
@@ -471,7 +487,12 @@ fn strip_utf8_bom(text: &str) -> &str {
 
 mod numeric;
 pub(super) use numeric::parse_integer_numeric_token;
-use numeric::{integer_output_dtype, parse_numeric_token, validate_numeric_token};
+use numeric::{
+    integer_output_dtype, maximum_numeric_diagnostic_bytes,
+    parse_integer_numeric_token_with_reservation, parse_numeric_token,
+    parse_numeric_token_with_reservation, validate_numeric_token,
+    validate_numeric_token_with_reservation, DiagnosticReservation,
+};
 
 #[cfg(test)]
 #[path = "reader/tests.rs"]

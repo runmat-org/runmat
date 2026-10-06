@@ -47,6 +47,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
     staged_line: Option<ExactHostEffectBytes>,
     mut staged_field: Option<ExactHostEffectBytes>,
     output_permit: Option<&dyn ExactHostAllocationPermit>,
+    diagnostic_reservation: Option<&dyn DiagnosticReservation>,
 ) -> BuiltinResult<Tensor> {
     let (first_row, first_col, rows, cols) = selected_geometry(geometry, options.range.as_ref())?;
     let count = rows.checked_mul(cols).ok_or_else(matrix_overflow)?;
@@ -81,6 +82,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) async fn fill_utf8(
             integer_dtype,
             options,
             storage: &mut storage,
+            diagnostic_reservation,
         };
         let field_count = scan::for_each_field_ref(
             reader.text(),
@@ -160,6 +162,7 @@ struct FillTarget<'a> {
     integer_dtype: Option<NumericDType>,
     options: &'a ReadMatrixOptions,
     storage: &'a mut FillStorage,
+    diagnostic_reservation: Option<&'a dyn DiagnosticReservation>,
 }
 
 impl FillTarget<'_> {
@@ -173,16 +176,23 @@ impl FillTarget<'_> {
         let output_col = source_col - self.first_col;
         let index = output_col * self.rows + output_row;
         if let Some(dtype) = self.integer_dtype {
-            let value = parse_integer_numeric_token(
+            let value = parse_integer_numeric_token_with_reservation(
                 token,
                 self.options,
                 dtype,
                 line_number,
                 source_col + 1,
+                self.diagnostic_reservation,
             )?;
             self.storage.set(index, value)?;
         } else {
-            let value = parse_numeric_token(token, self.options, line_number, source_col + 1)?;
+            let value = parse_numeric_token_with_reservation(
+                token,
+                self.options,
+                line_number,
+                source_col + 1,
+                self.diagnostic_reservation,
+            )?;
             self.storage.set(index, NumericScalar::F64(value))?;
         }
         Ok(())

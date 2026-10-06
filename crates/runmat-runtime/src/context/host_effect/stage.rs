@@ -20,6 +20,7 @@ pub enum HostEffectLiveAllocationKind {
     CodecWorkspace,
     ParsedMetadata,
     TemporaryResult,
+    Diagnostic,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -297,6 +298,15 @@ pub struct HostEffectStagePermit {
 }
 
 impl HostEffectStagePermit {
+    /// Reserve the complete byte payload of one diagnostic under this same
+    /// staged invocation. The owning claim includes its own metadata cost.
+    pub fn reserve_diagnostic_claim(
+        &self,
+        bytes: usize,
+    ) -> Result<HostEffectLiveAllocationClaim, HostEffectAllocationError> {
+        self.reserve_live_exact_claim(HostEffectLiveAllocationKind::Diagnostic, bytes)
+    }
+
     pub(super) fn owns_managed_observation(
         &self,
         lease: &crate::context::ManagedObservationLease,

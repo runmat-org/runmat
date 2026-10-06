@@ -30,6 +30,7 @@ fn exact_float_replay_preserves_ragged_empty_values_and_retained_claim() {
             None,
             None,
             None,
+            None,
         ))
         .expect("whole-source validation");
         let live = Arc::new(AtomicUsize::new(0));
@@ -43,6 +44,7 @@ fn exact_float_replay_preserves_ragged_empty_values_and_retained_claim() {
             None,
             None,
             Some(&permit),
+            None,
         ))
         .expect("exact ragged output");
         assert_eq!(tensor.shape, [2, 3]);
@@ -123,6 +125,7 @@ fn exact_output_claim_releases_on_changed_source_digest() {
         None,
         None,
         None,
+        None,
     ))
     .expect("first pass");
     std::fs::write(&file, b"9,8\n7,6\n").expect("same-shape mutation");
@@ -137,6 +140,7 @@ fn exact_output_claim_releases_on_changed_source_digest() {
         None,
         None,
         Some(&permit),
+        None,
     ))
     .expect_err("changed bytes cannot publish the charged output");
     assert!(error
@@ -164,6 +168,7 @@ fn exact_output_claim_releases_on_pending_drop_and_cancellation() {
         &mut scan_cooperation,
         &selected,
         &options,
+        None,
         None,
         None,
         None,
@@ -197,6 +202,7 @@ fn exact_output_claim_releases_on_pending_drop_and_cancellation() {
             None,
             None,
             Some(&permit),
+            None,
         ));
         let waker = futures::task::noop_waker();
         assert!(matches!(

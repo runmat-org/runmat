@@ -2,8 +2,15 @@
 //! Its checked byte length is an input to a future exact retained allocation;
 //! ordinary `to_string` below does not by itself certify resource use.
 
+use crate::context::host_effect::{
+    ExactHostEffectDiagnosticStrings, HostEffectAllocationError, HostEffectLiveAllocationClaim,
+    HostEffectReceipt, HostEffectStagePermit,
+};
+use runmat_builtins::READMATRIX_ERROR_NON_NUMERIC_TOKEN;
 use std::fmt;
 use std::fmt::Write as _;
+
+const BUILTIN: &str = "readmatrix";
 
 const PREFIX: &str = "readmatrix: unable to parse numeric value '";
 const LINE: &str = "' on line ";
@@ -13,6 +20,31 @@ pub(super) struct NumericTokenDiagnostic<'a> {
     token: &'a str,
     line: usize,
     column: usize,
+}
+
+pub(in crate::builtins::io::tabular::readmatrix::reader) trait DiagnosticReservation {
+    fn reserve_diagnostic_claim(
+        &self,
+        bytes: usize,
+    ) -> Result<HostEffectLiveAllocationClaim, HostEffectAllocationError>;
+}
+
+impl DiagnosticReservation for HostEffectStagePermit {
+    fn reserve_diagnostic_claim(
+        &self,
+        bytes: usize,
+    ) -> Result<HostEffectLiveAllocationClaim, HostEffectAllocationError> {
+        HostEffectStagePermit::reserve_diagnostic_claim(self, bytes)
+    }
+}
+
+impl DiagnosticReservation for HostEffectReceipt {
+    fn reserve_diagnostic_claim(
+        &self,
+        bytes: usize,
+    ) -> Result<HostEffectLiveAllocationClaim, HostEffectAllocationError> {
+        HostEffectReceipt::reserve_diagnostic_claim(self, bytes)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -26,6 +58,19 @@ pub(super) enum NumericDiagnosticBuildError {
 }
 
 impl<'a> NumericTokenDiagnostic<'a> {
+    pub(super) fn maximum_total_bytes(opened_extent: usize) -> Option<usize> {
+        let coordinate = opened_extent.checked_add(1)?;
+        PREFIX
+            .len()
+            .checked_add(opened_extent)?
+            .checked_add(LINE.len())?
+            .checked_add(decimal_digits(coordinate))?
+            .checked_add(COLUMN.len())?
+            .checked_add(decimal_digits(coordinate))?
+            .checked_add(READMATRIX_ERROR_NON_NUMERIC_TOKEN.identifier?.len())?
+            .checked_add(BUILTIN.len())
+    }
+
     pub(super) fn new(token: &'a str, line: usize, column: usize) -> Self {
         Self {
             token,
@@ -55,6 +100,33 @@ impl<'a> NumericTokenDiagnostic<'a> {
         debug_assert_eq!(text.len(), requested);
         Ok(text)
     }
+
+    pub(super) fn try_render_charged(
+        &self,
+        reservation: &dyn DiagnosticReservation,
+    ) -> Result<crate::RuntimeError, HostEffectAllocationError> {
+        let message_bytes = self
+            .requested_text_bytes()
+            .ok_or(HostEffectAllocationError::Overflow)?;
+        let identifier = READMATRIX_ERROR_NON_NUMERIC_TOKEN
+            .identifier
+            .ok_or(HostEffectAllocationError::InvalidInvocation)?;
+        let total = message_bytes
+            .checked_add(identifier.len())
+            .and_then(|bytes| bytes.checked_add(BUILTIN.len()))
+            .ok_or(HostEffectAllocationError::Overflow)?;
+        let claim = reservation.reserve_diagnostic_claim(total)?;
+        let mut strings = ExactHostEffectDiagnosticStrings::new(total, claim);
+        let message = strings.render(message_bytes, self)?;
+        let identifier = strings.copy(identifier)?;
+        let builtin = strings.copy(BUILTIN)?;
+        let claim = strings.finish()?;
+        Ok(crate::build_runtime_error(message)
+            .with_identifier(identifier)
+            .with_builtin(builtin)
+            .with_retained_diagnostic_allocation(claim.into_diagnostic_retention())
+            .build())
+    }
 }
 
 impl fmt::Display for NumericTokenDiagnostic<'_> {
@@ -79,6 +151,23 @@ fn decimal_digits(mut number: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context::host_effect::{
+        HostEffectLiveAllocationKind, HostEffectStageReservation, ManagedHostEffectLedger,
+        ManagedHostEffectStageReservation,
+    };
+    use std::sync::Arc;
+
+    struct TestReservation(Arc<ManagedHostEffectStageReservation>);
+
+    impl DiagnosticReservation for TestReservation {
+        fn reserve_diagnostic_claim(
+            &self,
+            bytes: usize,
+        ) -> Result<HostEffectLiveAllocationClaim, HostEffectAllocationError> {
+            self.0
+                .reserve_live_exact_claim(HostEffectLiveAllocationKind::Diagnostic, bytes)
+        }
+    }
 
     #[test]
     fn exact_text_length_and_spelling_cover_unicode_and_wide_coordinates() {
@@ -98,5 +187,69 @@ mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn float_and_integer_errors_retain_full_charged_text_code_builtin_until_last_drop() {
+        let ledger = ManagedHostEffectLedger::new(4096);
+        let stage = ledger.reserve_stage(4096).expect("diagnostic envelope");
+        let reservation = TestReservation(stage.clone());
+        let options = super::super::ReadMatrixOptions::default();
+        for integer in [false, true] {
+            let error = if integer {
+                super::super::parse_integer_numeric_token_with_reservation(
+                    "αbad",
+                    &options,
+                    runmat_value::NumericDType::U64,
+                    12,
+                    34,
+                    Some(&reservation),
+                )
+                .expect_err("invalid integer token")
+            } else {
+                super::super::parse_numeric_token_with_reservation(
+                    "αbad",
+                    &options,
+                    12,
+                    34,
+                    Some(&reservation),
+                )
+                .expect_err("invalid numeric token")
+            };
+            assert_eq!(
+                error.message(),
+                "readmatrix: unable to parse numeric value 'αbad' on line 12 column 34"
+            );
+            assert_eq!(
+                error.identifier(),
+                READMATRIX_ERROR_NON_NUMERIC_TOKEN.identifier
+            );
+            assert_eq!(error.context.builtin.as_deref(), Some(BUILTIN));
+            assert!(error.source.is_none());
+            assert!(error.retained_diagnostic_allocation.is_some());
+            let payload = error.message.capacity()
+                + error.identifier.as_ref().unwrap().capacity()
+                + error.context.builtin.as_ref().unwrap().capacity();
+            assert_eq!(
+                ledger.snapshot().live_claimed_bytes,
+                (payload + stage.live_claim_metadata_bytes()) as u64
+            );
+            drop(error);
+            assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        }
+        drop(reservation);
+        drop(stage);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    }
+
+    #[test]
+    fn maximum_opened_extent_plan_covers_full_error_and_fixed_metadata() {
+        let opened_extent = "αbad,1\n".len();
+        let actual = NumericTokenDiagnostic::new("αbad", 1, 1)
+            .requested_text_bytes()
+            .unwrap()
+            + READMATRIX_ERROR_NON_NUMERIC_TOKEN.identifier.unwrap().len()
+            + BUILTIN.len();
+        assert!(NumericTokenDiagnostic::maximum_total_bytes(opened_extent).unwrap() >= actual);
     }
 }

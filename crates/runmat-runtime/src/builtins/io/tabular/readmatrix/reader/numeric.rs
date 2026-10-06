@@ -3,10 +3,27 @@ use super::*;
 use std::borrow::Cow;
 
 mod diagnostic;
+pub(in crate::builtins::io::tabular::readmatrix::reader) use diagnostic::DiagnosticReservation;
 use diagnostic::NumericTokenDiagnostic;
 
-fn invalid_numeric_token(token: &str, line: usize, column: usize) -> RuntimeError {
+pub(in crate::builtins::io::tabular::readmatrix::reader) fn maximum_numeric_diagnostic_bytes(
+    opened_extent: usize,
+) -> Option<usize> {
+    NumericTokenDiagnostic::maximum_total_bytes(opened_extent)
+}
+
+fn invalid_numeric_token(
+    token: &str,
+    line: usize,
+    column: usize,
+    reservation: Option<&dyn DiagnosticReservation>,
+) -> RuntimeError {
     let diagnostic = NumericTokenDiagnostic::new(token, line, column);
+    if let Some(reservation) = reservation {
+        return diagnostic
+            .try_render_charged(reservation)
+            .unwrap_or_else(|source| admission::allocation_error(BUILTIN_NAME, source));
+    }
     match diagnostic.try_render() {
         Ok(message) => readmatrix_error_with(&READMATRIX_ERROR_NON_NUMERIC_TOKEN, message),
         Err(source) => readmatrix_error_with_source(
@@ -22,6 +39,16 @@ pub(super) fn parse_numeric_token(
     options: &ReadMatrixOptions,
     line_number: usize,
     column_number: usize,
+) -> BuiltinResult<f64> {
+    parse_numeric_token_with_reservation(token, options, line_number, column_number, None)
+}
+
+pub(in crate::builtins::io::tabular::readmatrix::reader) fn parse_numeric_token_with_reservation(
+    token: &str,
+    options: &ReadMatrixOptions,
+    line_number: usize,
+    column_number: usize,
+    reservation: Option<&dyn DiagnosticReservation>,
 ) -> BuiltinResult<f64> {
     let trimmed = token.trim();
     if trimmed.is_empty() {
@@ -56,7 +83,7 @@ pub(super) fn parse_numeric_token(
     }
     normalized
         .parse::<f64>()
-        .map_err(|_| invalid_numeric_token(inner, line_number, column_number))
+        .map_err(|_| invalid_numeric_token(inner, line_number, column_number, reservation))
 }
 
 pub(super) fn validate_numeric_token(
@@ -66,6 +93,17 @@ pub(super) fn validate_numeric_token(
     column_number: usize,
 ) -> BuiltinResult<()> {
     parse_numeric_token(token, options, line_number, column_number).map(|_| ())
+}
+
+pub(in crate::builtins::io::tabular::readmatrix::reader) fn validate_numeric_token_with_reservation(
+    token: &str,
+    options: &ReadMatrixOptions,
+    line_number: usize,
+    column_number: usize,
+    reservation: Option<&dyn DiagnosticReservation>,
+) -> BuiltinResult<()> {
+    parse_numeric_token_with_reservation(token, options, line_number, column_number, reservation)
+        .map(|_| ())
 }
 
 pub(super) fn integer_output_dtype(template: &OutputTemplate) -> Option<NumericDType> {
@@ -101,6 +139,24 @@ pub(in crate::builtins::io::tabular::readmatrix) fn parse_integer_numeric_token(
     line_number: usize,
     column_number: usize,
 ) -> BuiltinResult<NumericScalar> {
+    parse_integer_numeric_token_with_reservation(
+        token,
+        options,
+        dtype,
+        line_number,
+        column_number,
+        None,
+    )
+}
+
+pub(in crate::builtins::io::tabular::readmatrix::reader) fn parse_integer_numeric_token_with_reservation(
+    token: &str,
+    options: &ReadMatrixOptions,
+    dtype: NumericDType,
+    line_number: usize,
+    column_number: usize,
+    reservation: Option<&dyn DiagnosticReservation>,
+) -> BuiltinResult<NumericScalar> {
     let trimmed = token.trim();
     let unquoted = unquote(trimmed);
     let inner = unquoted.trim();
@@ -129,7 +185,7 @@ pub(in crate::builtins::io::tabular::readmatrix) fn parse_integer_numeric_token(
     {
         return Ok(integer_scalar_from_f64(dtype, f64::NEG_INFINITY));
     }
-    let invalid = || invalid_numeric_token(inner, line_number, column_number);
+    let invalid = || invalid_numeric_token(inner, line_number, column_number, reservation);
     if normalized.chars().any(|ch| matches!(ch, '.' | 'e' | 'E')) {
         return normalized
             .parse::<f64>()

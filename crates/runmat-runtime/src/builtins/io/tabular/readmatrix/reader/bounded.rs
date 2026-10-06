@@ -68,6 +68,7 @@ pub(super) async fn scan_utf8(
     staged_line: Option<ExactHostEffectBytes>,
     staged_samples: Option<ExactHostEffectBytes>,
     mut staged_field: Option<ExactHostEffectBytes>,
+    diagnostic_reservation: Option<&dyn DiagnosticReservation>,
 ) -> BuiltinResult<BoundedScanGeometry> {
     let mut reader = RowReader::new(source, staged_line);
     let mut sample = SampleRows::new(staged_samples);
@@ -115,6 +116,7 @@ pub(super) async fn scan_utf8(
             cooperation,
             path,
             staged_field.as_mut(),
+            diagnostic_reservation,
         )
         .await;
         match result {
@@ -141,6 +143,7 @@ pub(super) async fn scan_utf8(
                 cooperation,
                 path,
                 staged_field.as_mut(),
+                diagnostic_reservation,
             )
             .await
             {
@@ -174,6 +177,7 @@ async fn validate_row(
     cooperation: &mut TabularCooperation<'_>,
     path: &impl TabularReadPath,
     staged_field: Option<&mut ExactHostEffectBytes>,
+    diagnostic_reservation: Option<&dyn DiagnosticReservation>,
 ) -> BuiltinResult<usize> {
     scan::for_each_field_ref(
         text,
@@ -183,15 +187,22 @@ async fn validate_row(
         staged_field,
         |index, field| {
             if let Some(dtype) = integer_dtype {
-                parse_integer_numeric_token(
+                parse_integer_numeric_token_with_reservation(
                     field.as_str(),
                     options,
                     dtype,
                     line_number,
                     index + 1,
+                    diagnostic_reservation,
                 )?;
             } else {
-                validate_numeric_token(field.as_str(), options, line_number, index + 1)?;
+                validate_numeric_token_with_reservation(
+                    field.as_str(),
+                    options,
+                    line_number,
+                    index + 1,
+                    diagnostic_reservation,
+                )?;
             }
             Ok(())
         },

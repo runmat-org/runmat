@@ -24,10 +24,12 @@ mod managed_ledger;
 mod output_permit;
 mod final_facts;
 mod exact_bytes;
+mod exact_diagnostic;
 pub(crate) fn hash_serializable<T: serde::Serialize>(facts: &T) -> Digest {
     Digest::sha256_serialized(facts).expect("typed host effect facts serialize")
 }
 pub use exact_bytes::ExactHostEffectBytes;
+pub(crate) use exact_diagnostic::ExactHostEffectDiagnosticStrings;
 pub use final_facts::HostEffectFinalFacts;
 pub use managed_ledger::{
     ManagedHostEffectLedger, ManagedHostEffectLedgerSnapshot, ManagedHostEffectStagePool,
@@ -496,6 +498,30 @@ enum SelectedHostEffect {
 }
 
 impl HostEffectReceipt {
+    pub fn reserve_diagnostic_claim(
+        &self,
+        bytes: usize,
+    ) -> Result<HostEffectLiveAllocationClaim, HostEffectAllocationError> {
+        if self.runtime.is_cancelled() {
+            return Err(HostEffectAllocationError::Cancelled);
+        }
+        if !self.resource_liveness_lease.is_current() {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        let claim = self
+            ._stage
+            .as_ref()
+            .ok_or(HostEffectAllocationError::Unavailable)?
+            .reserve_diagnostic_claim(bytes)?;
+        if self.runtime.is_cancelled() {
+            return Err(HostEffectAllocationError::Cancelled);
+        }
+        if !self.resource_liveness_lease.is_current() {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        Ok(claim)
+    }
+
     pub fn reserve_live_exact(
         &self,
         kind: HostEffectLiveAllocationKind,
