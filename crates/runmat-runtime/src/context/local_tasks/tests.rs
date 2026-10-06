@@ -202,6 +202,76 @@ fn pending_idle_drive_does_not_admit_unrelated_foreground() {
 }
 
 #[test]
+fn shutdown_releases_pending_child_even_when_drive_future_is_retained() {
+    struct StartedPending {
+        polls: Rc<Cell<usize>>,
+        drops: Rc<Cell<usize>>,
+        _pinned: PhantomPinned,
+    }
+    impl Future for StartedPending {
+        type Output = ();
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+            self.polls.set(self.polls.get() + 1);
+            Poll::Pending
+        }
+    }
+    impl Drop for StartedPending {
+        fn drop(&mut self) {
+            self.drops.set(self.drops.get() + 1);
+        }
+    }
+    let supervisor = RuntimeLocalTaskSupervisor::new();
+    let owner = owner();
+    let drops = Rc::new(Cell::new(0));
+    let polls = Rc::new(Cell::new(0));
+    let lease = supervisor
+        .submission_port(owner)
+        .spawn_local(
+            owner,
+            Box::pin(StartedPending {
+                polls: polls.clone(),
+                drops: drops.clone(),
+                _pinned: PhantomPinned,
+            }),
+        )
+        .expect("schedule pending child");
+    let mut idle = Box::pin(supervisor.drive_until(std::future::pending::<()>()));
+    let wake = futures::task::noop_waker();
+    let mut context = Context::from_waker(&wake);
+    assert!(idle.as_mut().poll(&mut context).is_pending());
+    assert!(polls.get() > 0, "child reached Pending before shutdown");
+    supervisor.shutdown();
+    assert_eq!(
+        drops.get(),
+        1,
+        "host cancellation owns child drop without another poll"
+    );
+    assert_eq!(lease.outcome(), Some(RuntimeLocalTaskOutcome::Cancelled));
+    assert_eq!(supervisor.retained_task_count(), 0);
+    drop(idle);
+    assert_eq!(drops.get(), 1);
+}
+
+#[test]
+fn interleaved_pending_drivers_restore_exact_poll_owner() {
+    let first = RuntimeLocalTaskSupervisor::new();
+    let second = RuntimeLocalTaskSupervisor::new();
+    let mut first_idle = Box::pin(first.drive_until(std::future::pending::<()>()));
+    let mut second_idle = Box::pin(second.drive_until(std::future::pending::<()>()));
+    let wake = futures::task::noop_waker();
+    let mut context = Context::from_waker(&wake);
+    assert!(first_idle.as_mut().poll(&mut context).is_pending());
+    assert!(second_idle.as_mut().poll(&mut context).is_pending());
+    assert!(futures::executor::block_on(first.participate_foreground(async {})).is_err());
+    assert!(futures::executor::block_on(second.participate_foreground(async {})).is_err());
+    drop(first_idle);
+    assert!(futures::executor::block_on(first.participate_foreground(async {})).is_ok());
+    assert!(futures::executor::block_on(second.participate_foreground(async {})).is_err());
+    drop(second_idle);
+    assert!(futures::executor::block_on(second.participate_foreground(async {})).is_ok());
+}
+
+#[test]
 fn sibling_supervisor_cannot_enter_during_another_driver_poll() {
     let primary = RuntimeLocalTaskSupervisor::new();
     let sibling = RuntimeLocalTaskSupervisor::new();

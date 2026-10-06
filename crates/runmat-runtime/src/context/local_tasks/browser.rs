@@ -2,87 +2,9 @@
 //! abandoned child immediately without waiting for a later browser callback.
 
 use super::*;
-use std::task::Context;
-
-struct BrowserSlotState {
-    future: Option<RuntimeLocalTaskFuture>,
-    polling: bool,
-    cancelled: bool,
-    wake: Option<Waker>,
-}
-
-struct BrowserSlot(RefCell<BrowserSlotState>);
-
-struct BrowserPollReset<'a> {
-    slot: &'a BrowserSlot,
-    armed: bool,
-}
-
-impl Drop for BrowserPollReset<'_> {
-    fn drop(&mut self) {
-        if self.armed {
-            let mut slot = self.slot.0.borrow_mut();
-            slot.polling = false;
-            slot.cancelled = true;
-            slot.wake = None;
-        }
-    }
-}
-
-impl BrowserSlot {
-    fn cancel(&self) {
-        let (future, wake) = {
-            let mut slot = self.0.borrow_mut();
-            slot.cancelled = true;
-            let future = if slot.polling {
-                None
-            } else {
-                slot.future.take()
-            };
-            (future, slot.wake.take())
-        };
-        drop(future);
-        if let Some(wake) = wake {
-            wake.wake();
-        }
-    }
-
-    fn poll(&self, context: &mut Context<'_>) -> Poll<()> {
-        let mut future = {
-            let mut slot = self.0.borrow_mut();
-            if slot.cancelled {
-                return Poll::Ready(());
-            }
-            slot.polling = true;
-            slot.wake = Some(context.waker().clone());
-            slot.future
-                .take()
-                .expect("browser task polled after completion")
-        };
-        let mut reset = BrowserPollReset {
-            slot: self,
-            armed: true,
-        };
-        let result = future.as_mut().poll(context);
-        {
-            let mut slot = self.0.borrow_mut();
-            slot.polling = false;
-            slot.wake = None;
-            if result.is_pending() && !slot.cancelled {
-                slot.future = Some(future);
-                reset.armed = false;
-                return Poll::Pending;
-            }
-        }
-        reset.armed = false;
-        drop(future);
-        Poll::Ready(())
-    }
-}
-
 struct BrowserInner {
     closed: Cell<bool>,
-    tasks: RefCell<HashMap<u64, Rc<BrowserSlot>>>,
+    tasks: RefCell<HashMap<u64, Rc<TaskSlot>>>,
     next_task: Cell<u64>,
 }
 
@@ -137,12 +59,7 @@ impl RuntimeLocalTaskService for BrowserPort {
             future.await;
             completion.0.finish(RuntimeLocalTaskOutcome::Completed);
         });
-        let slot = Rc::new(BrowserSlot(RefCell::new(BrowserSlotState {
-            future: Some(child),
-            polling: false,
-            cancelled: false,
-            wake: None,
-        })));
+        let slot = Rc::new(TaskSlot::new(child));
         owner.tasks.borrow_mut().insert(id, slot.clone());
         let weak = Rc::downgrade(&owner);
         let abort: Rc<dyn Fn()> = Rc::new(move || {
@@ -213,6 +130,7 @@ mod tests {
     use crate::context::RuntimeContext;
     use crate::execution::RuntimeExecutionService;
     use std::marker::PhantomPinned;
+    use std::task::Context;
     use wasm_bindgen_test::wasm_bindgen_test;
 
     fn owner() -> RuntimeContextLocalId {

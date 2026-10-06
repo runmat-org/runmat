@@ -7,7 +7,7 @@ struct SupervisorInner {
     local: RefCell<Option<Rc<LocalSet>>>,
     closed: Cell<bool>,
     driving: Cell<bool>,
-    tasks: RefCell<HashMap<u64, (Weak<TaskState>, tokio::task::AbortHandle)>>,
+    tasks: RefCell<HashMap<u64, Rc<TaskSlot>>>,
     next_task: Cell<u64>,
 }
 
@@ -69,27 +69,27 @@ impl RuntimeLocalTaskService for SubmissionPort {
             supervisor: Rc::downgrade(&owner),
             id,
         };
-        let handle = local.spawn_local(async move {
+        let child: RuntimeLocalTaskFuture = Box::pin(async move {
             let completion = completion;
             future.await;
             completion.state.finish(RuntimeLocalTaskOutcome::Completed);
         });
-        let abort = handle.abort_handle();
+        let slot = Rc::new(TaskSlot::new(child));
+        let task_slot = slot.clone();
+        let _task = local.spawn_local(async move {
+            std::future::poll_fn(|context| task_slot.poll(context)).await;
+        });
         {
             let mut tasks = owner.tasks.borrow_mut();
-            tasks.insert(id, (Rc::downgrade(&state), abort));
+            tasks.insert(id, slot);
         }
         let weak = Rc::downgrade(&owner);
         let cancel: Rc<dyn Fn()> = Rc::new(move || {
-            let abort = weak.upgrade().and_then(|owner| {
-                owner
-                    .tasks
-                    .borrow()
-                    .get(&id)
-                    .map(|(_, abort)| abort.clone())
-            });
-            if let Some(abort) = abort {
-                abort.abort();
+            let slot = weak
+                .upgrade()
+                .and_then(|owner| owner.tasks.borrow().get(&id).cloned());
+            if let Some(slot) = slot {
+                slot.cancel();
             }
         });
         Ok(RuntimeLocalTaskLease {
@@ -185,11 +185,9 @@ impl RuntimeLocalTaskSupervisor {
         if self.0.closed.replace(true) {
             return;
         }
-        let states = std::mem::take(&mut *self.0.tasks.borrow_mut());
-        for (_, (state, abort)) in states {
-            if state.upgrade().is_some() {
-                abort.abort();
-            }
+        let tasks = std::mem::take(&mut *self.0.tasks.borrow_mut());
+        for slot in tasks.into_values() {
+            slot.cancel();
         }
         // No borrow is held while the LocalSet destroys pending callback
         // futures. An in-flight drive retains its own Rc until that poll exits.

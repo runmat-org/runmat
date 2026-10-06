@@ -27,10 +27,12 @@ pub use browser::BrowserLocalTaskSupervisor;
 pub type RuntimeLocalTaskFuture = Pin<Box<dyn Future<Output = ()> + 'static>>;
 
 mod lease;
+mod slot;
 #[cfg(target_arch = "wasm32")]
 use lease::CompletionOnDrop;
 use lease::TaskState;
 pub use lease::{RuntimeLocalTaskLease, RuntimeLocalTaskOutcome};
+use slot::TaskSlot;
 
 #[derive(Clone, Copy)]
 enum LocalTaskFailure {
