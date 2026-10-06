@@ -170,7 +170,7 @@ async fn browser_sleep_chunk(millis: i32) -> Result<(), crate::RuntimeError> {
             crate::RuntimeError::new(format!("pause: timer setup failed ({error:?})"))
         })?;
     let scheduled = ScheduledTimeout {
-        global,
+        global: global.into(),
         clear,
         id,
         _callback: callback,

@@ -10,8 +10,6 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::{Rc, Weak};
-#[cfg(target_arch = "wasm32")]
-use std::task::{Poll, Waker};
 #[cfg(not(target_arch = "wasm32"))]
 mod driver;
 #[cfg(not(target_arch = "wasm32"))]
