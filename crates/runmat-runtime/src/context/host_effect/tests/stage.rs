@@ -189,6 +189,19 @@ mod managed;
 struct OwnedRevisionOnly;
 
 impl RuntimePlacementService for OwnedRevisionOnly {
+    fn plan(
+        &self,
+        _: runmat_execution::PlacementPlanRequest,
+    ) -> Result<runmat_execution::PlacementDecision, RuntimeError> {
+        panic!("missing borrowed revision must reject before planning")
+    }
+
+    fn observe(&self, _: runmat_execution::PlacementFeedback) -> Result<(), RuntimeError> {
+        panic!("rejected stage must not publish placement feedback")
+    }
+
+    fn invalidate(&self, _: runmat_execution::PlacementInvalidation) {}
+
     fn whole_work_host_service_revision(
         &self,
         program: Option<runmat_execution::ProgramRevision>,
