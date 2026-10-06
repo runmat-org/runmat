@@ -164,7 +164,11 @@ pub fn read_native_object_artifact(
     }
     let expected_native_key = manifest
         .target
-        .cache_key(&manifest.executable_cache_key)
+        .cache_key(
+            &manifest.executable_cache_key,
+            manifest.entrypoint,
+            &manifest.selected_entrypoint_body,
+        )
         .map_err(|error| AotError::contract("aot.artifact.cache", error.to_string()))?;
     if manifest.native_cache_key != expected_native_key {
         return Err(AotError::contract(
@@ -258,7 +262,10 @@ mod tests {
         let catalog = Digest::sha256(b"catalog");
         let function = ProgramFunctionId(7);
         let executable_cache_key = Digest::sha256(b"executable");
-        let native_cache_key = target.cache_key(&executable_cache_key).unwrap();
+        let entrypoint_body = Digest::sha256(b"entrypoint-body");
+        let native_cache_key = target
+            .cache_key(&executable_cache_key, function, &entrypoint_body)
+            .unwrap();
         let object = RelocatableNativeObject {
             manifest: NativeObjectManifest {
                 schema_version: NATIVE_OBJECT_SCHEMA_VERSION,
@@ -273,6 +280,7 @@ mod tests {
                 object_digest: Digest::sha256(&bytes),
                 object_bytes: bytes.len() as u64,
                 entrypoint: function,
+                selected_entrypoint_body: entrypoint_body,
                 functions: vec![NativeObjectFunction {
                     function,
                     symbol: AOT_ENTRY_SYMBOL.into(),
@@ -366,11 +374,18 @@ mod tests {
                 .contains("aot.artifact.format")
         );
 
-        let stale_schema: NativeObjectManifest = serde_json::from_slice(include_bytes!(
-            "../tests/fixtures/native-object-manifest-4.json"
-        ))
-        .expect("frozen native-object manifest 4 remains structurally decodable");
-        let stale_artifact = artifact_with_manifest(&recipe, &stale_schema, &object.bytes);
+        let stale_payload = NativeObjectPayload::new(
+            execution_object_format(object.manifest.object_format.token()).unwrap(),
+            include_bytes!("../tests/fixtures/native-object-manifest-4.json").to_vec(),
+            object.bytes.clone(),
+        )
+        .unwrap();
+        let stale_artifact = ProgramArtifact::materialize(
+            &recipe,
+            ExecutableForm::NativeObjectV1,
+            stale_payload.to_canonical_bytes().unwrap(),
+        )
+        .unwrap();
         assert!(read_native_object_artifact(&recipe, &stale_artifact)
             .unwrap_err()
             .to_string()
@@ -415,6 +430,12 @@ mod tests {
             (
                 |manifest: &mut NativeObjectManifest| {
                     manifest.native_cache_key = Digest::sha256(b"other-cache")
+                },
+                "aot.artifact.cache",
+            ),
+            (
+                |manifest: &mut NativeObjectManifest| {
+                    manifest.selected_entrypoint_body = Digest::sha256(b"other-body")
                 },
                 "aot.artifact.cache",
             ),

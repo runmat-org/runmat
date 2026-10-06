@@ -183,6 +183,7 @@ pub fn emit_relocatable_object_for_runtime(
         object_digest: runmat_execution::Digest::sha256(&bytes),
         object_bytes,
         entrypoint,
+        selected_entrypoint_body: assembly.selected_entrypoint_body,
         functions,
         data,
     };

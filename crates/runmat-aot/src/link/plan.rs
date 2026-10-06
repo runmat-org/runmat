@@ -161,6 +161,7 @@ mod tests {
                 object_digest: Digest::sha256(&bytes),
                 object_bytes: bytes.len() as u64,
                 entrypoint: function,
+                selected_entrypoint_body: Digest::sha256(b"entrypoint-body"),
                 functions: vec![NativeObjectFunction {
                     function,
                     symbol: AOT_ENTRY_SYMBOL.into(),

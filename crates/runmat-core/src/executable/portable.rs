@@ -207,13 +207,15 @@ impl ExecutableUnit {
         let mut functions = self.functions().clone();
         functions.validate_portable_source_origins()?;
         for function in functions.functions.values_mut() {
-            function.binding_origin = Some(
-                runmat_execution::FunctionBindingOrigin::from_revision(
-                    &self.revision().program_revision,
-                    function.portable_function,
-                )
-                .map_err(|error| error.to_string())?,
-            );
+            if function.binding_origin.is_none() {
+                function.binding_origin = Some(
+                    runmat_execution::FunctionBindingOrigin::from_revision(
+                        &self.revision().program_revision,
+                        function.portable_function,
+                    )
+                    .map_err(|error| error.to_string())?,
+                );
+            }
             function.source_file = function
                 .source_id
                 .and_then(runmat_vm::BytecodeSourceRef::program)

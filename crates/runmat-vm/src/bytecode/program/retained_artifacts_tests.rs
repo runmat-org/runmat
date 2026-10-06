@@ -255,6 +255,71 @@ fn same_origin_and_body_with_different_local_packaging_is_deduplicated() {
 }
 
 #[test]
+fn fingerprints_allow_reused_portable_ordinals_across_exact_origins() {
+    let dependency = FunctionBytecode {
+        function: FunctionId(7),
+        display_name: "dependency".into(),
+        portable_function: ProgramFunctionId(0),
+        binding_origin: Some(origin(b"dependency-program", 0)),
+        ..Default::default()
+    };
+    let root = FunctionBytecode {
+        function: FunctionId(11),
+        display_name: "root".into(),
+        portable_function: ProgramFunctionId(0),
+        binding_origin: Some(origin(b"root-program", 0)),
+        instructions: vec![Instr::CallSemanticFunctionMulti(FunctionId(7), 0, 1)],
+        ..Default::default()
+    };
+    let base = FunctionRegistry::new(HashMap::from([
+        (root.function, root.clone()),
+        (dependency.function, dependency.clone()),
+    ]));
+    let base_fingerprints = fingerprints::normalized(&base).expect("multi-origin registry");
+
+    let unrelated = FunctionBytecode {
+        function: FunctionId(3),
+        display_name: "unrelated".into(),
+        portable_function: ProgramFunctionId(0),
+        binding_origin: Some(origin(b"another-program", 0)),
+        ..Default::default()
+    };
+    let wider = FunctionRegistry::new(HashMap::from([
+        (root.function, root),
+        (dependency.function, dependency),
+        (unrelated.function, unrelated),
+    ]));
+    let wider_fingerprints = fingerprints::normalized(&wider).expect("wider registry");
+    assert_eq!(
+        base_fingerprints[&origin(b"root-program", 0)],
+        wider_fingerprints[&origin(b"root-program", 0)],
+        "unrelated packaging must not alter a retained definition fingerprint"
+    );
+}
+
+#[test]
+fn fingerprint_binds_the_exact_dependency_origins() {
+    let runtime = runtime();
+    let first = unit(&runtime, b"root-program", ["root", "dependency"]);
+    let mut retargeted = first.unit.registry().clone();
+    retargeted
+        .functions
+        .get_mut(&FunctionId(2))
+        .expect("dependency")
+        .binding_origin = Some(origin(b"replacement-dependency", 2));
+    let retargeted = RuntimeBoundExecutableUnit::for_test(retargeted, runtime.clone());
+    assert!(matches!(
+        prepare_retained_callable_units(
+            &runtime,
+            &FunctionRegistry::default(),
+            vec![first.unit, retargeted],
+            limits(),
+        ),
+        Err(RetainedCallableStageError::ConflictingOrigin)
+    ));
+}
+
+#[test]
 fn complete_work_census_precedes_definition_decoding_and_cloning() {
     let runtime = runtime();
     let fixture = unit(&runtime, b"over-limit", ["primary", "helper"]);

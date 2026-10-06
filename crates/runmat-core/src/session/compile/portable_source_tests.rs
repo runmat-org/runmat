@@ -108,6 +108,12 @@ fn retained_definition_content_not_session_allocation_order_decides_portable_ide
             .result
             .expect("retained definition publication");
         assert!(outcome.diagnostics.is_empty(), "{outcome:?}");
+        let helper_origin = session
+            .function_registry
+            .resolve_name("retainedHelper")
+            .and_then(|function| session.function_registry.get(function))
+            .and_then(|function| function.binding_origin)
+            .expect("published helper origin");
         let unit = futures::executor::block_on(session.compile_executable_unit(
             crate::ExecutableSource::new(
                 "fixture",
@@ -117,11 +123,15 @@ fn retained_definition_content_not_session_allocation_order_decides_portable_ide
             None,
         ))
         .expect("unit with retained semantic dependency");
-        let bytes = unit
-            .portable_envelope()
-            .expect("envelope")
-            .canonical_bytes()
-            .expect("canonical bytes");
+        let envelope = unit.portable_envelope().expect("envelope");
+        let bytes = envelope.canonical_bytes().expect("canonical bytes");
+        let admitted = runmat_vm::admit_executable_unit(&bytes).expect("admitted envelope");
+        assert!(admitted.registry().functions.values().any(|function| {
+            function.display_name == "retainedHelper"
+                && function.binding_origin == Some(helper_origin)
+        }));
+        runmat_vm::retained_callable_origin_fingerprints(admitted.registry())
+            .expect("exact multi-origin registry");
         (bytes, unit.source_map().clone())
     }
 
