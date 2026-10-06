@@ -293,6 +293,10 @@ mod dynamic_source_cache_tests {
     }
 }
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "dynamic_source_product_tests.rs"]
+mod dynamic_source_product_tests;
+
 #[cfg(test)]
 impl RunMatSession {
     pub(crate) fn cached_source_count(&self) -> usize {
