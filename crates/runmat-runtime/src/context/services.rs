@@ -151,6 +151,19 @@ pub trait RuntimeWorkspaceService {
         Ok(None)
     }
 
+    /// Confirm that this exact workspace service may still authorize a new
+    /// externally visible effect. Callers retain the service across suspension
+    /// and invoke this checkpoint immediately before and after awaited effect
+    /// work; they must not re-resolve a replacement from ambient context.
+    ///
+    /// Ordinary frame-local services have no independently revocable owner and
+    /// therefore remain current for as long as their retained service exists.
+    /// Authority-bearing services override this method to report closure or
+    /// another typed liveness failure.
+    fn ensure_effect_authority(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError>;
     fn clear(&self) -> Result<(), RuntimeError>;
     fn remove(&self, name: &str) -> Result<(), RuntimeError>;

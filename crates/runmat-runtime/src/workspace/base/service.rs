@@ -100,6 +100,12 @@ impl RuntimeWorkspaceService for BaseWorkspaceService {
             .map_err(base_workspace_error_to_runtime)
     }
 
+    fn ensure_effect_authority(&self) -> Result<(), RuntimeError> {
+        self.owner
+            .ensure_effect_authority()
+            .map_err(base_workspace_error_to_runtime)
+    }
+
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
         let mut delta = WorkspaceDelta::new();
         delta

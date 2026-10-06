@@ -11,8 +11,11 @@ use runmat_value::Value;
 fn runtime_with_workspace() -> (RuntimeContext, BaseWorkspaceOwner) {
     let owner = BaseWorkspaceOwner::new();
     let service = Rc::new(BaseWorkspaceService::new(owner.clone()));
-    let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
-        .with_service_ports(RuntimeServicePorts::default().with_workspace(service.clone()));
+    let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new())).with_service_ports(
+        RuntimeServicePorts::default()
+            .with_workspace(service.clone())
+            .with_base_workspace(service),
+    );
     (runtime, owner)
 }
 

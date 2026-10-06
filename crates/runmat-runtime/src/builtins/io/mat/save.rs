@@ -112,6 +112,7 @@ async fn save_builtin(
             MatEncodeOutput::Status
         },
     };
+    let mut workspace_read = WorkspaceReadSet::capture(runtime.as_ref())?;
     let receipt = super::admission::select(runtime.as_ref(), &destination, BUILTIN_NAME, workload)?;
     let result = async {
         let mut cooperation = MatCodecCooperation::new(
@@ -124,7 +125,8 @@ async fn save_builtin(
             receipt
                 .as_ref()
                 .map(|selected| selected.resource_liveness_lease()),
-        );
+        )
+        .with_workspace_liveness(workspace_read.liveness_service());
         cooperation.completed(0).await?;
 
         let mut workspace_entries: Option<Vec<(String, Value)>> = None;
@@ -134,8 +136,12 @@ async fn save_builtin(
             && request.structs.is_empty()
             && request.regex_patterns.is_empty()
         {
-            let snapshot =
-                ensure_workspace_entries(&mut workspace_entries, &mut cooperation).await?;
+            let snapshot = ensure_workspace_entries(
+                &mut workspace_entries,
+                &mut workspace_read,
+                &mut cooperation,
+            )
+            .await?;
             entries.extend(snapshot.iter().cloned());
         } else {
             for name in &request.variables {
@@ -145,7 +151,9 @@ async fn save_builtin(
                         continue;
                     }
                 }
-                let value = cooperation.await_io(lookup_workspace(name)).await??;
+                let value = cooperation
+                    .await_io(lookup_workspace(&mut workspace_read, name))
+                    .await??;
                 entries.push((name.clone(), value));
             }
 
@@ -159,7 +167,7 @@ async fn save_builtin(
                     Some(val) => val,
                     None => {
                         cooperation
-                            .await_io(lookup_workspace(&struct_req.source))
+                            .await_io(lookup_workspace(&mut workspace_read, &struct_req.source))
                             .await??
                     }
                 };
@@ -184,8 +192,12 @@ async fn save_builtin(
             }
 
             if !request.regex_patterns.is_empty() {
-                let snapshot =
-                    ensure_workspace_entries(&mut workspace_entries, &mut cooperation).await?;
+                let snapshot = ensure_workspace_entries(
+                    &mut workspace_entries,
+                    &mut workspace_read,
+                    &mut cooperation,
+                )
+                .await?;
                 let mut matched = 0usize;
                 for (name, value) in snapshot.iter() {
                     if regex_patterns.iter().any(|regex| regex.is_match(name)) {
@@ -209,6 +221,7 @@ async fn save_builtin(
             ));
         }
 
+        workspace_read.retain_values(entries.iter().map(|(_, value)| value))?;
         let mut unique_entries = deduplicate_entries(entries);
         if request.append {
             unique_entries = append_existing_entries(
@@ -218,6 +231,7 @@ async fn save_builtin(
                 &mut cooperation,
             )
             .await?;
+            workspace_read.retain_values(unique_entries.iter().map(|(_, value)| value))?;
         }
 
         let mut mat_vars = Vec::with_capacity(unique_entries.len());
@@ -226,6 +240,7 @@ async fn save_builtin(
             let value = cooperation
                 .await_io(prepare_value_for_mat_save(value))
                 .await??;
+            workspace_read.retain_values(std::iter::once(&value))?;
             cooperation.completed(0).await?;
             mat_vars.push(MatVar {
                 name,
