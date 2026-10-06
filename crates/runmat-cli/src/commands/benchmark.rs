@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use crate::cli::Cli;
 use crate::commands::package::install_project_for_source;
-use crate::commands::session::create_session;
+use crate::commands::session::{create_session, drive_with_graphics_callbacks};
 use crate::diagnostics::format_frontend_error;
 use crate::presentation;
 use crate::telemetry::{capture_provider_snapshot, RuntimeExecutionCounters, TelemetryRunKind};
@@ -56,10 +56,13 @@ pub async fn execute_benchmark(
             HostExecutionPolicy::default(),
             engine.workspace_handle(),
         );
-        let response = local_tasks
-            .drive_until(engine.execute_request(request))
-            .await
-            .context("Local callback driver stopped during benchmark warm-up")?;
+        let callbacks = engine.graphics_callback_queue().cloned();
+        let response = drive_with_graphics_callbacks(
+            callbacks,
+            local_tasks.drive_until(engine.execute_request(request)),
+        )
+        .await?
+        .context("Local callback driver stopped during benchmark warm-up")?;
         match response.result {
             Ok(outcome) if outcome_error_code(&outcome).is_none() => {}
             Ok(outcome) => {
@@ -129,10 +132,13 @@ pub async fn execute_benchmark(
             HostExecutionPolicy::default(),
             engine.workspace_handle(),
         );
-        let response = local_tasks
-            .drive_until(engine.execute_request(request))
-            .await
-            .context("Local callback driver stopped during benchmark execution")?;
+        let callbacks = engine.graphics_callback_queue().cloned();
+        let response = drive_with_graphics_callbacks(
+            callbacks,
+            local_tasks.drive_until(engine.execute_request(request)),
+        )
+        .await?
+        .context("Local callback driver stopped during benchmark execution")?;
         let outcome = match response.result {
             Ok(outcome) => outcome,
             Err(err) => {

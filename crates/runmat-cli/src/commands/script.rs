@@ -19,7 +19,7 @@ use crate::commands::accel::dump_provider_telemetry_if_requested;
 use crate::commands::bytecode::{emit_bytecode_with_catalog, write_bytecode_output};
 use crate::commands::fea::execute_fea_path;
 use crate::commands::package::install_project_for_source;
-use crate::commands::session::create_session;
+use crate::commands::session::{create_session, drive_with_graphics_callbacks};
 use crate::commands::streams::emit_execution_streams;
 use crate::diagnostics::{format_frontend_error, format_runtime_diagnostic};
 use crate::presentation;
@@ -161,11 +161,14 @@ async fn execute_script_request(
     });
     tokio::task::yield_now().await;
     let local_tasks = engine.local_task_driver();
-    let response = local_tasks
-        .drive_until(engine.execute_request(request))
-        .await;
+    let callbacks = engine.graphics_callback_queue().cloned();
+    let response = drive_with_graphics_callbacks(
+        callbacks,
+        local_tasks.drive_until(engine.execute_request(request)),
+    )
+    .await;
     signal_task.abort();
-    let response = response.context("Local callback driver stopped during script execution")?;
+    let response = response?.context("Local callback driver stopped during script execution")?;
     engine.shutdown_local_tasks();
     let source_context = response.source_context;
     let outcome = match response.result {

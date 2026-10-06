@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_core::RunMatSession;
+use runmat_runtime::context::RuntimeGraphicsCallbackQueue;
+use std::future::Future;
 
 use crate::diagnostics::{parser_compat, resolved_error_namespace};
 use crate::telemetry::{sink as runtime_sink, telemetry_client_id};
@@ -38,4 +40,19 @@ pub(crate) fn create_session(
         engine.set_telemetry_client_id(Some(client_id));
     }
     Ok(engine)
+}
+
+/// Drive admitted GUI callbacks on the selected session lane while an
+/// execution future is suspended. The queue serializes this with drawnow.
+pub(crate) async fn drive_with_graphics_callbacks<F: Future>(
+    callbacks: Option<RuntimeGraphicsCallbackQueue>,
+    execution: F,
+) -> Result<F::Output> {
+    match callbacks {
+        Some(callbacks) => callbacks
+            .drive_execution_with_host_callbacks(execution)
+            .await
+            .context("session graphics callback failed"),
+        None => Ok(execution.await),
+    }
 }
