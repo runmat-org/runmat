@@ -134,6 +134,12 @@ pub async fn timer_startat_builtin(
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
     let runtime = timer_runtime(runtime)?;
+    if rest.len() > 1 {
+        return Err(timer_error(
+            &TIMER_ERROR_INVALID_INPUT,
+            "startat: expected a timer and at most one delay",
+        ));
+    }
     let prepared = match rest.first() {
         Some(delay) => {
             prepare_timer_property_pairs(

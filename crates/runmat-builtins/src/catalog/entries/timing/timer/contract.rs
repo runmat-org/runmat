@@ -95,6 +95,29 @@ pub const TIMER_METHOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSig
     outputs: &TIMER_METHOD_OUTPUT,
 }];
 
+pub const TIMER_STARTAT_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "t",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Timer handle or cell array of timer handles.",
+    },
+    BuiltinParamDescriptor {
+        name: "delay",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Positive relative delay in seconds.",
+    },
+];
+pub const TIMER_STARTAT_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "status = startat(t, delay)",
+        inputs: &TIMER_STARTAT_INPUTS,
+        outputs: &TIMER_METHOD_OUTPUT,
+    }];
+
 pub const TIMER_SETTER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "obj",
     ty: BuiltinParamType::Any,
@@ -274,6 +297,13 @@ pub const TIMERFINDALL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 
 pub const TIMER_METHOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &TIMER_METHOD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
+    errors: &TIMER_ERRORS,
+};
+
+pub const TIMER_STARTAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TIMER_STARTAT_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::HiddenInternal,
     errors: &TIMER_ERRORS,

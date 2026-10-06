@@ -139,7 +139,7 @@ entry!(
     STARTAT,
     "__runmat_timer_startat",
     documentation::INTERNAL_METHOD,
-    &contract::TIMER_METHOD_DESCRIPTOR,
+    &contract::TIMER_STARTAT_DESCRIPTOR,
     inference::startat,
     ExecutionStackRequirement::Process,
     &[],
