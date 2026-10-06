@@ -98,7 +98,7 @@ pub fn resolve_binding_origin(origin: runmat_execution::FunctionBindingOrigin) -
         info.function
     }
     if let Some(resolver) = selected_execution_facts() {
-        return resolver.origin(origin).map(function);
+        return resolver.origin(origin).as_ref().map(function);
     }
     if let Some(state) = active_state() {
         return unique_origin(state.call.borrow().source_functions.as_deref()?, origin)
