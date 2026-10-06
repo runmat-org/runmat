@@ -70,7 +70,7 @@ async fn load_dynamic_function(
     #[cfg(not(target_arch = "wasm32"))]
     if phase == runmat_runtime::user_functions::DynamicFunctionLoadPhase::BeforeSemantic {
         if let Some(result) = mex_runtime
-            .load_and_call(&name, args.clone(), requested_outputs, runtime)
+            .load_and_call(&name, args.clone(), requested_outputs, runtime.clone())
             .await
         {
             return Some(result);
@@ -88,15 +88,15 @@ async fn load_dynamic_function(
     let source_search_span = info_span!("runtime.source_search", resolution_purpose = "call");
     let path_result = {
         let _source_search_guard = source_search_span.enter();
-        runmat_runtime::builtins::common::path_search::find_file_with_extensions(
+        runmat_runtime::builtins::common::path_search::find_file_with_extensions_with_origin(
             &name,
             &[".m"],
             "function resolution",
         )
         .await
     };
-    let path = match path_result {
-        Ok(Some(path)) => path,
+    let selected = match path_result {
+        Ok(Some(selected)) => selected,
         Ok(None) => return None,
         Err(error) => {
             return Some(Err(build_runtime_error(error)
@@ -104,6 +104,8 @@ async fn load_dynamic_function(
                 .build()))
         }
     };
+    let path = selected.path;
+    let path_origin = selected.origin;
     Some(
         async move {
             let source_text =
@@ -147,15 +149,15 @@ async fn load_dynamic_function(
                 .unwrap_or_else(|poison| poison.into_inner())
                 .get(&path)
                 .filter(|entry| {
-                    entry.source_text == source_text && entry.project_revision == project_revision
+                    entry.matches_selection(&source_text, project_revision.as_ref(), &path_origin)
                 })
                 .cloned();
-            let registry = if let Some(entry) = cached {
+            let (registry, source_map) = if let Some(entry) = cached {
                 debug!(
                     cache = "hit",
                     "reusing dynamically compiled function source"
                 );
-                entry.registry
+                (entry.registry, entry.source_map)
             } else {
                 debug!(
                     cache = "miss",
@@ -187,8 +189,42 @@ async fn load_dynamic_function(
                 } else {
                     super::compile::CompanionSourceDiscovery::default()
                 };
+                let primary_function_names =
+                    super::compile::source_context_function_names_in_statements(&ast.body)
+                        .into_iter()
+                        .collect::<HashSet<_>>();
+                companion.apply_function_precedence(&primary_function_names);
+                let primary_statement_count = ast.body.len();
+                let primary_source =
+                    super::compile::program_sources::ProgramSourceTable::dynamic_root(
+                        path_name.as_ref(),
+                        &source_text,
+                        project_handoff.as_ref(),
+                        &path_origin,
+                    )
+                    .map_err(|error| {
+                        build_runtime_error(error)
+                            .with_identifier("RunMat:ExecutableSourceIdentity")
+                            .build()
+                    })?;
+                let source_table =
+                    super::compile::program_sources::ProgramSourceTable::build_dynamic(
+                        &primary_source,
+                        path_name.as_ref(),
+                        &companion,
+                        primary_statement_count,
+                        project_handoff.as_ref(),
+                        &path_origin,
+                    )
+                    .map_err(|error| {
+                        build_runtime_error(error)
+                            .with_identifier("RunMat:ExecutableSourceIdentity")
+                            .build()
+                    })?;
+                let source_map = Arc::new(source_table.source_map);
                 if !companion.statements.is_empty() {
-                    ast.body.append(&mut companion.statements);
+                    ast.body
+                        .extend(companion.statements.drain(..).map(|entry| entry.statement));
                 }
                 let known_project_symbols = source_catalog
                     .as_ref()
@@ -205,7 +241,8 @@ async fn load_dynamic_function(
                             &companion.private_function_aliases,
                         )
                         .with_runmat_extensions_enabled(compat.allows_runmat_extensions())
-                        .with_top_level_await_enabled(top_level_await_enabled),
+                        .with_top_level_await_enabled(top_level_await_enabled)
+                        .with_top_level_sources(&source_table.statement_sources),
                     source_catalog.as_ref(),
                 );
                 if let Some(error) = frontend.lowering_failure {
@@ -240,7 +277,7 @@ async fn load_dynamic_function(
                     .with_identifier("RunMat:FunctionCompileError")
                     .build());
                 }
-                let bytecode = frontend.bytecode.ok_or_else(|| {
+                let mut bytecode = frontend.bytecode.ok_or_else(|| {
                     build_runtime_error(format!(
                         "Canonical frontend produced no bytecode for '{}'",
                         path.display()
@@ -248,6 +285,13 @@ async fn load_dynamic_function(
                     .with_identifier("RunMat:FunctionCompileError")
                     .build()
                 })?;
+                source_table
+                    .validate_compiled_sources(&bytecode)
+                    .map_err(|error| {
+                        build_runtime_error(error)
+                            .with_identifier("RunMat:ExecutableSourceIdentity")
+                            .build()
+                    })?;
                 let mut compiled_registry = bytecode.function_registry();
                 let leaf_name = name.rsplit('.').next().unwrap_or(name.as_str());
                 if compiled_registry.resolve_name(&name).is_none() {
@@ -267,16 +311,38 @@ async fn load_dynamic_function(
                         DynamicFunctionCacheEntry {
                             source_text,
                             project_revision,
+                            path_origin,
                             registry: Arc::clone(&registry),
+                            source_map: Arc::clone(&source_map),
                         },
                     );
-                registry
+                (registry, source_map)
             };
 
+            let selected_runtime = source_map.bind_runtime_sources(runtime).map_err(|error| {
+                build_runtime_error(error)
+                    .with_identifier("RunMat:ExecutableSourceIdentity")
+                    .build()
+            })?;
+            let mut bound_registry = registry.as_ref().clone();
+            bound_registry
+                .project_current_source_ids(|source| {
+                    source.program().and_then(|ordinal| {
+                        selected_runtime
+                            .program_source_ref(ordinal)
+                            .map(runmat_vm::BytecodeSourceRef::Runtime)
+                    })
+                })
+                .map_err(|source| {
+                    build_runtime_error(format!("dynamic function source {source:?} is absent"))
+                        .with_identifier("RunMat:ExecutableSourceIdentity")
+                        .build()
+                })?;
+
             let leaf_name = name.rsplit('.').next().unwrap_or(name.as_str());
-            let function = registry
+            let function = bound_registry
                 .resolve_name(&name)
-                .or_else(|| registry.resolve_name(leaf_name))
+                .or_else(|| bound_registry.resolve_name(leaf_name))
                 .ok_or_else(|| {
                     build_runtime_error(format!(
                         "Function source '{}' does not define '{name}'.",
@@ -287,11 +353,12 @@ async fn load_dynamic_function(
                 })?;
             runmat_runtime::callsite::with_function_input_callsite(
                 input_callsite,
-                runmat_vm::invoke_semantic_function_value(
+                runmat_vm::invoke_semantic_function_value_in_context(
                     function.0,
                     &args,
                     requested_outputs,
-                    registry.as_ref(),
+                    &bound_registry,
+                    selected_runtime,
                 ),
             )
             .await
@@ -842,7 +909,8 @@ impl RunMatSession {
             &execution_runtime,
             bytecode
                 .source_id
-                .and_then(runmat_vm::BytecodeSourceRef::runtime),
+                .and_then(|source| source.runtime())
+                .and_then(|source| source.resolve_in(&execution_runtime)),
         );
         if self.verbose {
             debug!("AST: {ast:?}");
@@ -1539,7 +1607,7 @@ impl RunMatSession {
 
         if let Some(runtime_error) = &mut error {
             self.normalize_error_namespace(runtime_error);
-            self.populate_callstack(runtime_error);
+            self.populate_callstack(runtime_error, &execution_runtime);
         }
 
         let suppress_public_value =

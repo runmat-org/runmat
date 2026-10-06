@@ -197,8 +197,7 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
             };
         let native_lifecycle = native_ffi.shutdown().await;
         let mex_lifecycle = mex_guard.shutdown_gracefully().await;
-        let execution =
-            execution.map_err(|error| format!("standalone native execution failed: {error}"))?;
+        let execution = execution.map_err(execution_diagnostic)?;
         native_lifecycle
             .map_err(|error| format!("standalone native-library shutdown failed: {error}"))?;
         mex_lifecycle.map_err(|error| format!("standalone MEX shutdown failed: {error}"))?;
@@ -213,6 +212,16 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     })));
     local_tasks.shutdown();
     result.map_err(|error| format!("standalone local task driver failed: {error}"))?
+}
+
+fn execution_diagnostic(error: runmat_runtime::RuntimeError) -> String {
+    match error.identifier() {
+        Some(identifier) => format!(
+            "standalone native execution failed: {identifier}: {}",
+            error.message
+        ),
+        None => format!("standalone native execution failed: {error}"),
+    }
 }
 
 /// Initialize language policy from the verified program, independent of the

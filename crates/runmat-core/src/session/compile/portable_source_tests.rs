@@ -1,5 +1,3 @@
-use super::*;
-
 #[test]
 fn portable_source_ordinals_ignore_unrelated_session_source_allocations() {
     let source = crate::ExecutableSource::new(

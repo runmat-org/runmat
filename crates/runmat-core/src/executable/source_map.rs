@@ -24,6 +24,28 @@ impl ExecutableSourceMap {
         &self.entries
     }
 
+    pub(crate) fn bind_runtime_sources(
+        &self,
+        runtime: runmat_runtime::context::RuntimeContext,
+    ) -> Result<runmat_runtime::context::RuntimeContext, String> {
+        self.validate_content_revisions()?;
+        let records =
+            self.entries.iter().map(
+                |entry| runmat_runtime::source_context::ProgramSourceRecord {
+                    ordinal: entry.source_id,
+                    name: std::sync::Arc::from(entry.display_name.as_str()),
+                    fullpath_name: entry.full_path.as_deref().map(std::sync::Arc::<str>::from),
+                    text: std::sync::Arc::from(entry.text.as_str()),
+                },
+            );
+        runmat_runtime::source_context::bind_portable_source_map_v2_with_records(
+            runtime,
+            &self.portable_v2()?,
+            records,
+        )
+        .map_err(|error| error.to_string())
+    }
+
     pub(crate) fn portable_v2(&self) -> Result<runmat_execution::ExecutableSourceMapV2, String> {
         runmat_execution::ExecutableSourceMapV2::new(
             self.entries
@@ -56,7 +78,7 @@ impl ExecutableSourceMap {
             if entry.content_revision != runmat_execution::Digest::sha256(entry.text.as_bytes()) {
                 return Err(format!(
                     "source {} has a content revision that does not match its text",
-                    entry.source_id
+                    entry.source_id.0
                 ));
             }
         }

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[path = "compile/program_sources.rs"]
-mod program_sources;
+pub(super) mod program_sources;
 use program_sources::identity::{executable_primary_access_path, executable_source_identity};
 
 fn entrypoint_target_function(
@@ -299,7 +299,9 @@ fn class_name_in_statements(stmts: &[runmat_parser::Stmt]) -> Option<&str> {
     })
 }
 
-fn source_context_function_names_in_statements(stmts: &[runmat_parser::Stmt]) -> Vec<String> {
+pub(super) fn source_context_function_names_in_statements(
+    stmts: &[runmat_parser::Stmt],
+) -> Vec<String> {
     let mut names = Vec::new();
     for stmt in stmts {
         match stmt {
@@ -364,7 +366,7 @@ impl CompanionSourceDiscovery {
         }
     }
 
-    fn apply_function_precedence(&mut self, primary_function_names: &HashSet<String>) {
+    pub(super) fn apply_function_precedence(&mut self, primary_function_names: &HashSet<String>) {
         let discovered_private_function_names: HashSet<String> = self
             .statements
             .iter()
@@ -983,7 +985,6 @@ impl RunMatSession {
             private_companion_function_names,
             private_companion_function_owners,
             private_companion_function_aliases,
-            companion_function_source_ids,
             source_table,
             source_catalog,
             project_symbol_aliases,
@@ -1011,20 +1012,28 @@ impl RunMatSession {
                     })
                     .collect::<HashSet<_>>();
                 for runtime_id in retained_ids {
-                    let source = self.source_pool.get(runtime_id).ok_or_else(|| {
-                        RunError::Runtime(
+                    let source = runtime_id
+                        .resolve_in(&self.runtime_context)
+                        .and_then(|id| {
+                            runmat_runtime::source_context::source_info_in_context(
+                                &self.runtime_context,
+                                id,
+                            )
+                        })
+                        .ok_or_else(|| {
+                            RunError::Runtime(
                             build_runtime_error(
-                                "retained function refers to a missing session source",
+                                "retained function refers to a missing or foreign session source",
                             )
                             .with_identifier("RunMat:ExecutableSourceIdentity")
                             .build(),
                         )
-                    })?;
+                        })?;
                     retained_sources.push((
                         runtime_id,
                         SourceContextData {
                             display_name: source.name.to_string(),
-                            fullpath_name: source.fullpath_name.as_ref().map(ToString::to_string),
+                            fullpath_name: source.fullpath_name.as_deref().map(ToString::to_string),
                             text: source.text.to_string(),
                         },
                     ));
@@ -1053,13 +1062,6 @@ impl RunMatSession {
                 std::mem::take(&mut companion.private_function_aliases);
             let source_catalog = companion.source_catalog.take();
             let project_symbol_aliases = std::mem::take(&mut companion.project_symbol_aliases);
-            let mut companion_function_source_ids = HashMap::new();
-            companion_function_source_ids.extend(
-                source_table
-                    .function_sources
-                    .iter()
-                    .map(|(name, id)| (name.clone(), runmat_vm::BytecodeSourceRef::Program(*id))),
-            );
             if !companion.statements.is_empty() {
                 ast.body.extend(
                     companion
@@ -1073,7 +1075,6 @@ impl RunMatSession {
                 private_companion_function_names,
                 private_companion_function_owners,
                 private_companion_function_aliases,
-                companion_function_source_ids,
                 source_table,
                 source_catalog,
                 project_symbol_aliases,
@@ -1143,15 +1144,15 @@ impl RunMatSession {
                 },
             )?);
         }
-        let compiled_source_id =
-            runmat_vm::BytecodeSourceRef::Program(runmat_types::ProgramSourceId(0));
-        bytecode.source_id = Some(compiled_source_id);
-        for function in bytecode.function_registry.functions.values_mut() {
-            function.source_id = companion_function_source_ids
-                .get(&function.display_name)
-                .copied()
-                .or(Some(compiled_source_id));
-        }
+        source_table
+            .validate_compiled_sources(&bytecode)
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableSourceIdentity")
+                        .build(),
+                )
+            })?;
         bytecode.bound_functions = bytecode.function_registry.functions.clone();
         let source_projection = source_table
             .intern_runtime_projection(&mut self.source_pool, &self.runtime_context)
@@ -1207,7 +1208,11 @@ impl RunMatSession {
         })
     }
 
-    pub(crate) fn populate_callstack(&self, error: &mut RuntimeError) {
+    pub(crate) fn populate_callstack(
+        &self,
+        error: &mut RuntimeError,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) {
         if !error.context.call_stack.is_empty() || error.context.call_frames.is_empty() {
             return;
         }
@@ -1222,7 +1227,7 @@ impl RunMatSession {
             let mut line = frame.function.clone();
             if let (Some(source_id), Some((start, _end))) = (frame.source_id, frame.span) {
                 if let Some(source) = runmat_runtime::source_context::source_info_in_context(
-                    &self.runtime_context,
+                    runtime,
                     SourceId(source_id),
                 ) {
                     let (line_num, col) = line_col_from_offset(&source.text, start);

@@ -25,25 +25,7 @@ impl ExecutableUnit {
         &self,
         runtime: runmat_runtime::context::RuntimeContext,
     ) -> Result<runmat_runtime::context::RuntimeContext, String> {
-        self.source_map.validate_content_revisions()?;
-        let records = self
-            .source_map
-            .entries()
-            .iter()
-            .map(|entry| {
-                Ok(runmat_runtime::source_context::ProgramSourceRecord {
-                    ordinal: entry.source_id,
-                    name: std::sync::Arc::from(entry.display_name.as_str()),
-                    fullpath_name: entry.full_path.as_deref().map(std::sync::Arc::<str>::from),
-                    text: std::sync::Arc::from(entry.text.as_str()),
-                })
-            })
-            .collect::<Result<Vec<_>, String>>()?;
-        let portable = self.source_map.portable_v2()?;
-        let runtime = runmat_runtime::source_context::bind_portable_source_map_v2_with_records(
-            runtime, &portable, records,
-        )
-        .map_err(|error| error.to_string())?;
+        let runtime = self.source_map.bind_runtime_sources(runtime)?;
         for metadata in self.mir.functions.values() {
             if runtime.program_source_id(metadata.source).is_none() {
                 return Err(format!(
