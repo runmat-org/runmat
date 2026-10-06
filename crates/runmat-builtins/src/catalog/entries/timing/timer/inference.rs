@@ -69,7 +69,27 @@ fn validate_pairs(request: &CallRequest, filter: bool) -> Vec<InferenceDiagnosti
 }
 
 pub(super) fn constructor(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
-    finish_fixed(entry, request, timer_fact(), validate_pairs(request, false))
+    let mut output = timer_fact();
+    if let ValueKindFact::Object(object) = &mut output.kind {
+        for index in (0..request.arguments.len()).step_by(2) {
+            let Some(value) = request.arguments.get(index + 1) else {
+                break;
+            };
+            let Some(LiteralValue::String(name) | LiteralValue::Character(name)) =
+                request.literals.literal_args.get(index)
+            else {
+                continue;
+            };
+            if let Some(property) =
+                TimerProperty::parse(name).filter(|property| !property.is_readonly())
+            {
+                object
+                    .properties
+                    .insert(property.name().into(), value.clone());
+            }
+        }
+    }
+    finish_fixed(entry, request, output, validate_pairs(request, false))
 }
 
 pub(super) fn find(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
@@ -102,18 +122,52 @@ fn receiver(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagnostic>) {
     }
 }
 
-pub(super) fn method(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
-    infer_method(request, entry, false)
+pub(super) fn start(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    infer_method(request, entry, false, CallbackPhase::Start)
 }
 
 pub(super) fn startat(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
-    infer_method(request, entry, true)
+    infer_method(request, entry, true, CallbackPhase::Start)
+}
+
+pub(super) fn stop(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    infer_method(request, entry, false, CallbackPhase::Stop)
+}
+
+pub(super) fn wait(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    infer_method(request, entry, false, CallbackPhase::Wait)
+}
+
+pub(super) fn delete(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    infer_method(request, entry, false, CallbackPhase::Stop)
+}
+
+#[derive(Clone, Copy)]
+enum CallbackPhase {
+    Start,
+    Stop,
+    Wait,
+}
+
+impl CallbackPhase {
+    fn properties(self) -> &'static [TimerProperty] {
+        match self {
+            Self::Start | Self::Wait => &[
+                TimerProperty::StartFcn,
+                TimerProperty::TimerFcn,
+                TimerProperty::ErrorFcn,
+                TimerProperty::StopFcn,
+            ],
+            Self::Stop => &[TimerProperty::StopFcn],
+        }
+    }
 }
 
 fn infer_method(
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
     optional_delay: bool,
+    callbacks: CallbackPhase,
 ) -> CallInference {
     let mut diagnostics = Vec::new();
     let expected = if optional_delay { 1..=2 } else { 1..=1 };
@@ -125,10 +179,103 @@ fn infer_method(
         ));
     }
     receiver(request, &mut diagnostics);
-    finish_fixed(entry, request, default_double_scalar(), diagnostics)
+    let mut result = finish_fixed(entry, request, default_double_scalar(), diagnostics);
+    if let Some(receiver) = request.arguments.first() {
+        infer_callback_effects(receiver, callbacks, &mut result);
+    } else {
+        result.effects.0.insert(EffectKind::Unknown);
+    }
+    result
 }
 
-pub(super) fn setter(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+fn infer_callback_effects(receiver: &ValueFact, phase: CallbackPhase, result: &mut CallInference) {
+    let ValueKindFact::Object(object) = &receiver.kind else {
+        result.effects.0.insert(EffectKind::Unknown);
+        return;
+    };
+    for property in phase.properties() {
+        let Some(callback) = object.properties.get(property.name()) else {
+            if !object.properties_complete {
+                result.effects.0.insert(EffectKind::Unknown);
+            }
+            continue;
+        };
+        let callback = match &callback.kind {
+            ValueKindFact::Cell(cell) => cell
+                .elements
+                .first()
+                .or_else(|| (!cell.elements_complete).then_some(cell.element.as_ref())),
+            _ => Some(callback),
+        };
+        let Some(callback) = callback else { continue };
+        match &callback.kind {
+            ValueKindFact::Callable(callable) => {
+                result
+                    .capabilities
+                    .0
+                    .extend(callable.capabilities.0.iter().copied());
+                let known_builtin = matches!(
+                    &callable.identity,
+                    Some(CallableIdentity::Builtin(identity))
+                        if crate::builtin_catalog_entry_by_name(&identity.0).is_some()
+                );
+                if known_builtin {
+                    let inferred = crate::infer_callable_call(
+                        callable,
+                        &CallRequest {
+                            arguments: vec![
+                                timer_fact(),
+                                ValueFact::unknown(DynamicReason::RuntimeValue),
+                            ],
+                            literals: LiteralContext::default(),
+                            outputs: OutputSelection::new(RequestedOutputCount::Exactly(0)),
+                        },
+                    );
+                    result.effects.0.extend(inferred.effects.0);
+                    result.capabilities.0.extend(inferred.capabilities.0);
+                } else {
+                    result.effects.0.insert(EffectKind::Unknown);
+                }
+            }
+            ValueKindFact::String | ValueKindFact::Character => {
+                result.effects.0.insert(EffectKind::WorkspaceRead);
+                result.effects.0.insert(EffectKind::WorkspaceWrite);
+                result.effects.0.insert(EffectKind::Unknown);
+            }
+            _ => {
+                result.effects.0.insert(EffectKind::Unknown);
+            }
+        }
+    }
+}
+
+macro_rules! setter_inference {
+    ($name:ident, $property:ident) => {
+        pub(super) fn $name(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+            infer_setter(request, entry, TimerProperty::$property)
+        }
+    };
+}
+
+setter_inference!(set_timer_fcn, TimerFcn);
+setter_inference!(set_start_fcn, StartFcn);
+setter_inference!(set_stop_fcn, StopFcn);
+setter_inference!(set_error_fcn, ErrorFcn);
+setter_inference!(set_period, Period);
+setter_inference!(set_start_delay, StartDelay);
+setter_inference!(set_tasks_to_execute, TasksToExecute);
+setter_inference!(set_busy_mode, BusyMode);
+setter_inference!(set_execution_mode, ExecutionMode);
+setter_inference!(set_name, Name);
+setter_inference!(set_tag, Tag);
+setter_inference!(set_object_visibility, ObjectVisibility);
+setter_inference!(set_user_data, UserData);
+
+fn infer_setter(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+    property: TimerProperty,
+) -> CallInference {
     let mut diagnostics = Vec::new();
     if request.arguments.len() != 2 {
         diagnostics.push(argument_error(
@@ -138,5 +285,20 @@ pub(super) fn setter(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Call
         ));
     }
     receiver(request, &mut diagnostics);
-    finish_fixed(entry, request, timer_fact(), diagnostics)
+    let mut output = request
+        .arguments
+        .first()
+        .cloned()
+        .unwrap_or_else(timer_fact);
+    if !matches!(output.kind, ValueKindFact::Object(_)) {
+        output = timer_fact();
+    }
+    if let (Some(value), ValueKindFact::Object(object)) =
+        (request.arguments.get(1), &mut output.kind)
+    {
+        object
+            .properties
+            .insert(property.name().into(), value.clone());
+    }
+    finish_fixed(entry, request, output, diagnostics)
 }

@@ -1,7 +1,8 @@
 use super::*;
 use runmat_types::{
-    CallRequest, DynamicReason, LiteralContext, LiteralValue, OutputSelection,
-    RequestedOutputCount, ValueFact, ValueKindFact,
+    BuiltinId, CallRequest, CallableFact, CallableIdentity, CapabilityRequirement, CapabilitySet,
+    DynamicReason, EffectKind, LiteralContext, LiteralValue, OutputSelection, RequestedOutputCount,
+    ValueFact, ValueKindFact,
 };
 
 fn request(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>) -> CallRequest {
@@ -63,8 +64,102 @@ fn startat_accepts_optional_delay_other_methods_do_not() {
     let delay = ValueFact::unknown(DynamicReason::RuntimeValue);
     let call = request(vec![receiver, delay], Vec::new());
     assert!(inference::startat(&call, &STARTAT).diagnostics.is_empty());
-    assert!(inference::method(&call, &START)
+    assert!(inference::start(&call, &START)
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-CATALOG-TIMER-METHOD-ARITY"));
+}
+
+fn callback(identity: Option<CallableIdentity>, capabilities: CapabilitySet) -> ValueFact {
+    ValueFact::scalar(ValueKindFact::Callable(CallableFact {
+        identity,
+        capabilities,
+        parameters: Vec::new(),
+        parameters_complete: false,
+        outputs: Vec::new(),
+        outputs_complete: false,
+        variadic_inputs: true,
+        variadic_outputs: true,
+        captures: Vec::new(),
+        captures_complete: true,
+    }))
+}
+
+#[test]
+fn constructor_retains_callback_fact_and_start_propagates_capability() {
+    let filesystem = CapabilitySet([CapabilityRequirement::Filesystem].into_iter().collect());
+    let constructed = inference::constructor(
+        &request(
+            vec![
+                ValueFact::scalar(ValueKindFact::String),
+                callback(None, filesystem.clone()),
+            ],
+            vec![LiteralValue::String("TimerFcn".into())],
+        ),
+        &TIMER,
+    );
+    let ValueKindFact::Object(object) = &constructed.outputs[0].kind else {
+        panic!("timer constructor must retain an object fact")
+    };
+    assert!(matches!(
+        object.properties.get("TimerFcn").map(|value| &value.kind),
+        Some(ValueKindFact::Callable(_))
+    ));
+    let started = inference::start(
+        &request(vec![constructed.outputs[0].clone()], Vec::new()),
+        &START,
+    );
+    assert!(started
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::HostRuntime));
+    assert!(started
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::Filesystem));
+    assert!(started.effects.0.contains(&EffectKind::Unknown));
+    assert!(started.effects.0.contains(&EffectKind::HostCallback));
+    let replaced = inference::set_timer_fcn(
+        &request(
+            vec![constructed.outputs[0].clone(), callback(None, filesystem)],
+            Vec::new(),
+        ),
+        &SET_TIMER_FCN,
+    );
+    let ValueKindFact::Object(object) = &replaced.outputs[0].kind else {
+        panic!("timer setter must retain an object fact")
+    };
+    assert!(matches!(
+        object.properties.get("TimerFcn").map(|value| &value.kind),
+        Some(ValueKindFact::Callable(_))
+    ));
+}
+
+#[test]
+fn known_builtin_callback_adds_transitive_effects_and_find_stays_noncallback() {
+    let constructed = inference::constructor(
+        &request(
+            vec![
+                ValueFact::scalar(ValueKindFact::String),
+                callback(
+                    Some(CallableIdentity::Builtin(BuiltinId("imread".into()))),
+                    CapabilitySet::default(),
+                ),
+            ],
+            vec![LiteralValue::String("TimerFcn".into())],
+        ),
+        &TIMER,
+    );
+    let started = inference::start(
+        &request(vec![constructed.outputs[0].clone()], Vec::new()),
+        &START,
+    );
+    assert!(started.effects.0.contains(&EffectKind::FilesystemRead));
+    assert!(started
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::Filesystem));
+    let found = inference::find(&request(Vec::new(), Vec::new()), &TIMERFIND);
+    assert!(!found.effects.0.contains(&EffectKind::HostCallback));
+    assert!(!found.effects.0.contains(&EffectKind::Clock));
 }

@@ -16,7 +16,7 @@ pub use contract::{
 pub use property::{TimerBusyMode, TimerExecutionMode, TimerProperty, TimerVisibility};
 
 use crate::*;
-use runmat_types::{EffectKind, ExecutionStackRequirement};
+use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
 
 pub(crate) const ENTRIES: &[&BuiltinCatalogEntry] = &[
     &TIMER,
@@ -42,6 +42,81 @@ pub(crate) const ENTRIES: &[&BuiltinCatalogEntry] = &[
     &SET_USER_DATA,
 ];
 
+macro_rules! timer_effects {
+    (TIMER) => {
+        &[
+            EffectKind::EnvironmentWrite,
+            EffectKind::MaySuspend,
+            EffectKind::MayThrow,
+        ]
+    };
+    (TIMERFIND) => {
+        &[
+            EffectKind::EnvironmentRead,
+            EffectKind::MaySuspend,
+            EffectKind::MayThrow,
+        ]
+    };
+    (TIMERFINDALL) => {
+        &[
+            EffectKind::EnvironmentRead,
+            EffectKind::MaySuspend,
+            EffectKind::MayThrow,
+        ]
+    };
+    (START) => {
+        &[
+            EffectKind::Clock,
+            EffectKind::EnvironmentWrite,
+            EffectKind::HostCallback,
+            EffectKind::MaySuspend,
+            EffectKind::MayThrow,
+        ]
+    };
+    (STARTAT) => {
+        &[
+            EffectKind::Clock,
+            EffectKind::EnvironmentWrite,
+            EffectKind::HostCallback,
+            EffectKind::MaySuspend,
+            EffectKind::MayThrow,
+        ]
+    };
+    (STOP) => {
+        &[
+            EffectKind::Clock,
+            EffectKind::EnvironmentWrite,
+            EffectKind::HostCallback,
+            EffectKind::MaySuspend,
+            EffectKind::MayThrow,
+        ]
+    };
+    (WAIT) => {
+        &[
+            EffectKind::EnvironmentRead,
+            EffectKind::HostCallback,
+            EffectKind::MaySuspend,
+            EffectKind::MayThrow,
+        ]
+    };
+    (DELETE) => {
+        &[
+            EffectKind::Clock,
+            EffectKind::EnvironmentWrite,
+            EffectKind::HostCallback,
+            EffectKind::MaySuspend,
+            EffectKind::MayThrow,
+        ]
+    };
+    ($setter:ident) => {
+        &[
+            EffectKind::EnvironmentWrite,
+            EffectKind::MaySuspend,
+            EffectKind::MayThrow,
+        ]
+    };
+}
+
 macro_rules! entry {
     ($id:ident, $name:literal, $doc:expr, $descriptor:expr, $infer:expr,
      $stack:expr, $extensions:expr, $integers:expr, $auto_output:expr) => {
@@ -60,13 +135,11 @@ macro_rules! entry {
                 semantic_kind: BuiltinSemanticKind::General,
                 workspace_effect: None,
                 environment_effect: None,
-                effects: &[
-                    EffectKind::Clock,
-                    EffectKind::HostCallback,
-                    EffectKind::MaySuspend,
-                    EffectKind::MayThrow,
-                ],
-                capabilities: &[],
+                effects: timer_effects!($id),
+                // HostRuntime is the current schema's common authority for the
+                // session timer, local-task, timing, and source-evaluation ports.
+                // Per-port capability identities are not yet representable.
+                capabilities: &[CapabilityRequirement::HostRuntime],
             },
             placement: BuiltinPlacementContract {
                 preparation: BuiltinOperandPreparation::RuntimeOwned,
@@ -130,7 +203,7 @@ entry!(
     "__runmat_timer_start",
     documentation::INTERNAL_METHOD,
     &contract::TIMER_METHOD_DESCRIPTOR,
-    inference::method,
+    inference::start,
     ExecutionStackRequirement::Process,
     &[],
     &[],
@@ -152,7 +225,7 @@ entry!(
     "__runmat_timer_stop",
     documentation::INTERNAL_METHOD,
     &contract::TIMER_METHOD_DESCRIPTOR,
-    inference::method,
+    inference::stop,
     ExecutionStackRequirement::Process,
     &[],
     &[],
@@ -163,7 +236,7 @@ entry!(
     "__runmat_timer_wait",
     documentation::INTERNAL_METHOD,
     &contract::TIMER_METHOD_DESCRIPTOR,
-    inference::method,
+    inference::wait,
     ExecutionStackRequirement::Process,
     &[],
     &[],
@@ -174,7 +247,7 @@ entry!(
     "__runmat_timer_delete",
     documentation::INTERNAL_METHOD,
     &contract::TIMER_METHOD_DESCRIPTOR,
-    inference::method,
+    inference::delete,
     ExecutionStackRequirement::Process,
     &[],
     &[],
@@ -186,7 +259,7 @@ entry!(
     "set.TimerFcn",
     documentation::INTERNAL_SETTER,
     &contract::TIMER_SETTER_DESCRIPTOR,
-    inference::setter,
+    inference::set_timer_fcn,
     ExecutionStackRequirement::Any,
     &[],
     &[],
@@ -197,7 +270,7 @@ entry!(
     "set.StartFcn",
     documentation::INTERNAL_SETTER,
     &contract::TIMER_SETTER_DESCRIPTOR,
-    inference::setter,
+    inference::set_start_fcn,
     ExecutionStackRequirement::Any,
     &[],
     &[],
@@ -208,7 +281,7 @@ entry!(
     "set.StopFcn",
     documentation::INTERNAL_SETTER,
     &contract::TIMER_SETTER_DESCRIPTOR,
-    inference::setter,
+    inference::set_stop_fcn,
     ExecutionStackRequirement::Any,
     &[],
     &[],
@@ -219,7 +292,7 @@ entry!(
     "set.ErrorFcn",
     documentation::INTERNAL_SETTER,
     &contract::TIMER_SETTER_DESCRIPTOR,
-    inference::setter,
+    inference::set_error_fcn,
     ExecutionStackRequirement::Any,
     &[],
     &[],
@@ -230,7 +303,7 @@ entry!(
     "set.Period",
     documentation::INTERNAL_SETTER,
     &contract::TIMER_SETTER_DESCRIPTOR,
-    inference::setter,
+    inference::set_period,
     ExecutionStackRequirement::Any,
     &[],
     &[],
@@ -241,7 +314,7 @@ entry!(
     "set.StartDelay",
     documentation::INTERNAL_SETTER,
     &contract::TIMER_SETTER_DESCRIPTOR,
-    inference::setter,
+    inference::set_start_delay,
     ExecutionStackRequirement::Any,
     &[],
     &[],
@@ -252,7 +325,7 @@ entry!(
     "set.TasksToExecute",
     documentation::INTERNAL_SETTER,
     &contract::TIMER_SETTER_DESCRIPTOR,
-    inference::setter,
+    inference::set_tasks_to_execute,
     ExecutionStackRequirement::Any,
     &[],
     &[],
@@ -263,7 +336,7 @@ entry!(
     "set.BusyMode",
     documentation::INTERNAL_SETTER,
     &contract::TIMER_SETTER_DESCRIPTOR,
-    inference::setter,
+    inference::set_busy_mode,
     ExecutionStackRequirement::Any,
     &[],
     &[],
@@ -274,7 +347,7 @@ entry!(
     "set.ExecutionMode",
     documentation::INTERNAL_SETTER,
     &contract::TIMER_SETTER_DESCRIPTOR,
-    inference::setter,
+    inference::set_execution_mode,
     ExecutionStackRequirement::Any,
     &[],
     &[],
@@ -285,7 +358,7 @@ entry!(
     "set.Name",
     documentation::INTERNAL_SETTER,
     &contract::TIMER_SETTER_DESCRIPTOR,
-    inference::setter,
+    inference::set_name,
     ExecutionStackRequirement::Any,
     &[],
     &[],
@@ -296,7 +369,7 @@ entry!(
     "set.Tag",
     documentation::INTERNAL_SETTER,
     &contract::TIMER_SETTER_DESCRIPTOR,
-    inference::setter,
+    inference::set_tag,
     ExecutionStackRequirement::Any,
     &[],
     &[],
@@ -307,7 +380,7 @@ entry!(
     "set.ObjectVisibility",
     documentation::INTERNAL_SETTER,
     &contract::TIMER_SETTER_DESCRIPTOR,
-    inference::setter,
+    inference::set_object_visibility,
     ExecutionStackRequirement::Any,
     &[],
     &[],
@@ -318,7 +391,7 @@ entry!(
     "set.UserData",
     documentation::INTERNAL_SETTER,
     &contract::TIMER_SETTER_DESCRIPTOR,
-    inference::setter,
+    inference::set_user_data,
     ExecutionStackRequirement::Any,
     &[],
     &[],
