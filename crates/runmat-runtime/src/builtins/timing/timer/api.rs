@@ -90,13 +90,16 @@ pub async fn timerfindall_builtin(
     name = "__runmat_timer_start",
     binding_variant = "default",
     context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
 pub async fn timer_start_builtin(
     runtime: Option<RuntimeContext>,
+    requested_outputs: Option<usize>,
     value: Value,
 ) -> BuiltinResult<Value> {
     let runtime = timer_runtime(runtime)?;
+    admit_timer_method_outputs(&runtime, requested_outputs, "start")?;
     start_timer_values(&runtime, &value, None).await?;
     Ok(Value::Num(0.0))
 }
@@ -105,20 +108,28 @@ pub async fn timer_start_builtin(
     name = "__runmat_timer_startat",
     binding_variant = "default",
     context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
 pub async fn timer_startat_builtin(
     runtime: Option<RuntimeContext>,
+    requested_outputs: Option<usize>,
     value: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
     let runtime = timer_runtime(runtime)?;
+    admit_timer_method_outputs(&runtime, requested_outputs, "startat")?;
     if rest.len() > 1 {
         return Err(timer_error(
             &TIMER_ERROR_INVALID_INPUT,
             "startat: expected a timer and at most one delay",
         ));
     }
+    crate::compatibility::ensure_builtin_extension_enabled_in_context(
+        &runtime,
+        &TIMER_STARTAT_RELATIVE_EXTENSION,
+        "startat",
+    )?;
     let prepared = match rest.first() {
         Some(delay) => {
             prepare_timer_property_pairs(
@@ -142,13 +153,16 @@ pub async fn timer_startat_builtin(
     name = "__runmat_timer_stop",
     binding_variant = "default",
     context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
 pub async fn timer_stop_builtin(
     runtime: Option<RuntimeContext>,
+    requested_outputs: Option<usize>,
     value: Value,
 ) -> BuiltinResult<Value> {
     let runtime = timer_runtime(runtime)?;
+    admit_timer_method_outputs(&runtime, requested_outputs, "stop")?;
     stop_timer_values(&runtime, &value, true).await?;
     Ok(Value::Num(0.0))
 }
@@ -157,13 +171,16 @@ pub async fn timer_stop_builtin(
     name = "__runmat_timer_wait",
     binding_variant = "default",
     context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
 pub async fn timer_wait_builtin(
     runtime: Option<RuntimeContext>,
+    requested_outputs: Option<usize>,
     value: Value,
 ) -> BuiltinResult<Value> {
     let runtime = timer_runtime(runtime)?;
+    admit_timer_method_outputs(&runtime, requested_outputs, "wait")?;
     wait_timer_values(&runtime, &value).await?;
     Ok(Value::Num(0.0))
 }
@@ -172,13 +189,16 @@ pub async fn timer_wait_builtin(
     name = "__runmat_timer_delete",
     binding_variant = "default",
     context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::timing::timer"
 )]
 pub async fn timer_delete_builtin(
     runtime: Option<RuntimeContext>,
+    requested_outputs: Option<usize>,
     value: Value,
 ) -> BuiltinResult<Value> {
     let runtime = timer_runtime(runtime)?;
+    admit_timer_method_outputs(&runtime, requested_outputs, "delete")?;
     delete_timer_values(&runtime, &value).await?;
     Ok(Value::Num(0.0))
 }

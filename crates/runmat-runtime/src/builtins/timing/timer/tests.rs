@@ -196,22 +196,60 @@ async fn timerfindall_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 async fn timer_start_builtin(value: Value) -> BuiltinResult<Value> {
-    super::timer_start_builtin(Some(test_runtime()), value).await
+    super::timer_start_builtin(Some(test_runtime()), None, value).await
 }
 
 async fn timer_wait_builtin(value: Value) -> BuiltinResult<Value> {
     let runtime = test_runtime();
     test_supervisor()
-        .drive_until(super::timer_wait_builtin(Some(runtime), value))
+        .drive_until(super::timer_wait_builtin(Some(runtime), None, value))
         .await?
 }
 
 async fn timer_delete_builtin(value: Value) -> BuiltinResult<Value> {
-    super::timer_delete_builtin(Some(test_runtime()), value).await
+    super::timer_delete_builtin(Some(test_runtime()), None, value).await
 }
 
 async fn timer_stop_builtin(value: Value) -> BuiltinResult<Value> {
-    super::timer_stop_builtin(Some(test_runtime()), value).await
+    super::timer_stop_builtin(Some(test_runtime()), None, value).await
+}
+
+#[test]
+fn timer_method_status_and_relative_startat_are_gated_before_lifecycle_effects() {
+    let _lock = TIMER_TEST_LOCK.lock().unwrap();
+    reset_timer_state_for_tests();
+    let timer = block_on(timer_builtin(Vec::new())).expect("timer");
+    let runtime = test_runtime();
+    let assigned = block_on(super::timer_start_builtin(
+        Some(runtime.clone()),
+        Some(1),
+        timer.clone(),
+    ))
+    .expect_err("assigned start status is a RunMat extension");
+    assert_eq!(
+        assigned.identifier(),
+        Some("RunMat:compatibility:TimerMethodStatusOutputExtension")
+    );
+    let relative = block_on(super::timer_startat_builtin(
+        Some(runtime.clone()),
+        Some(0),
+        timer.clone(),
+        vec![Value::Num(0.1)],
+    ))
+    .expect_err("relative startat is a RunMat extension");
+    assert_eq!(
+        relative.identifier(),
+        Some("RunMat:compatibility:TimerStartatRelativeExtension")
+    );
+    let Value::HandleObject(handle) = &timer else {
+        panic!("expected timer handle")
+    };
+    assert_eq!(string_property(handle, "Running").unwrap(), "off");
+    runtime.state().runmat_extensions_enabled.set(true);
+    assert!(matches!(
+        block_on(super::timer_stop_builtin(Some(runtime), Some(1), timer)),
+        Ok(Value::Num(0.0))
+    ));
 }
 
 #[test]
@@ -532,8 +570,8 @@ fn reentrant_stop_and_restart_cannot_let_stale_generation_turn_running_off() {
                 let count = calls.get() + 1;
                 calls.set(count);
                 if count == 1 {
-                    super::timer_stop_builtin(Some(runtime.clone()), handle.clone()).await?;
-                    super::timer_start_builtin(Some(runtime), handle).await?;
+                    super::timer_stop_builtin(Some(runtime.clone()), None, handle.clone()).await?;
+                    super::timer_start_builtin(Some(runtime), None, handle).await?;
                 }
                 Ok(crate::sequence::ValueSequence::empty())
             })
@@ -585,9 +623,9 @@ fn stale_failure_after_restart_does_not_enter_new_generations_error_handler() {
                         let count = ticks.get() + 1;
                         ticks.set(count);
                         if count == 1 {
-                            super::timer_stop_builtin(Some(runtime.clone()), handle.clone())
+                            super::timer_stop_builtin(Some(runtime.clone()), None, handle.clone())
                                 .await?;
-                            super::timer_start_builtin(Some(runtime), handle).await?;
+                            super::timer_start_builtin(Some(runtime), None, handle).await?;
                             return Err(crate::build_runtime_error("old generation failed")
                                 .with_identifier("RunMat:TimerTest:OldGeneration")
                                 .build());
@@ -810,8 +848,12 @@ fn timer_handle_cannot_start_in_another_session_before_task_admission() {
     ]))
     .expect("timer");
     let foreign = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
-    let error = block_on(super::timer_start_builtin(Some(foreign), timer.clone()))
-        .expect_err("foreign timer start");
+    let error = block_on(super::timer_start_builtin(
+        Some(foreign),
+        None,
+        timer.clone(),
+    ))
+    .expect_err("foreign timer start");
     assert_eq!(error.identifier(), Some("RunMat:timer:InvalidHandle"));
     let Value::HandleObject(handle) = timer else {
         panic!("timer handle");

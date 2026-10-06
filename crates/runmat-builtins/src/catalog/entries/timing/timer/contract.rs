@@ -89,11 +89,18 @@ pub const TIMER_METHOD_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescri
     description: "Timer handle or cell array of timer handles.",
 }];
 
-pub const TIMER_METHOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "status = method(t)",
-    inputs: &TIMER_METHOD_INPUTS,
-    outputs: &TIMER_METHOD_OUTPUT,
-}];
+pub const TIMER_METHOD_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "method(t)",
+        inputs: &TIMER_METHOD_INPUTS,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
+        label: "status = method(t) (RunMat extension)",
+        inputs: &TIMER_METHOD_INPUTS,
+        outputs: &TIMER_METHOD_OUTPUT,
+    },
+];
 
 pub const TIMER_STARTAT_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
@@ -111,12 +118,18 @@ pub const TIMER_STARTAT_INPUTS: [BuiltinParamDescriptor; 2] = [
         description: "Positive relative delay in seconds.",
     },
 ];
-pub const TIMER_STARTAT_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
-    [BuiltinSignatureDescriptor {
-        label: "status = startat(t, delay)",
+pub const TIMER_STARTAT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "startat(t, relativeSeconds) (RunMat extension)",
+        inputs: &TIMER_STARTAT_INPUTS,
+        outputs: &[],
+    },
+    BuiltinSignatureDescriptor {
+        label: "status = startat(t, relativeSeconds) (RunMat extension)",
         inputs: &TIMER_STARTAT_INPUTS,
         outputs: &TIMER_METHOD_OUTPUT,
-    }];
+    },
+];
 
 pub const TIMER_SETTER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "obj",
@@ -201,6 +214,24 @@ pub const TIMER_EXPLICIT_GPU_NUMERIC_PROPERTY_EXTENSION: BuiltinExtensionDescrip
     };
 pub const TIMER_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
     [TIMER_EXPLICIT_GPU_NUMERIC_PROPERTY_EXTENSION];
+pub const TIMER_METHOD_STATUS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "timer-method-status-output",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "assigning the numeric status result of start, startat, stop, wait, or delete is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:TimerMethodStatusOutputExtension"),
+};
+pub const TIMER_METHOD_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [TIMER_METHOD_STATUS_EXTENSION];
+pub const TIMER_STARTAT_RELATIVE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "timer-startat-relative-seconds",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "startat with omitted time or relative seconds is a RunMat extension; MATLAB specifies an absolute firing time",
+    error_identifier: Some("RunMat:compatibility:TimerStartatRelativeExtension"),
+};
+pub const TIMER_STARTAT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
+    TIMER_STARTAT_RELATIVE_EXTENSION,
+    TIMER_METHOD_STATUS_EXTENSION,
+];
 pub const TIMERFIND_EXPLICIT_GPU_NUMERIC_FILTER_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
         id: "timerfind-explicit-gpu-numeric-filter",

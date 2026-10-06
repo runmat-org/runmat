@@ -11,7 +11,8 @@ mod tests;
 pub use contract::{
     TIMERFIND_EXPLICIT_GPU_NUMERIC_FILTER_EXTENSION, TIMER_ERROR_CALLBACK, TIMER_ERROR_GC,
     TIMER_ERROR_INVALID_HANDLE, TIMER_ERROR_INVALID_INPUT, TIMER_ERROR_INVALID_PROPERTY,
-    TIMER_EXPLICIT_GPU_NUMERIC_PROPERTY_EXTENSION,
+    TIMER_EXPLICIT_GPU_NUMERIC_PROPERTY_EXTENSION, TIMER_METHOD_STATUS_EXTENSION,
+    TIMER_STARTAT_RELATIVE_EXTENSION,
 };
 pub use property::{TimerBusyMode, TimerExecutionMode, TimerProperty, TimerVisibility};
 
@@ -117,6 +118,15 @@ macro_rules! timer_effects {
     };
 }
 
+macro_rules! timer_compatibility {
+    (STARTAT) => {
+        BuiltinCompatibility::RunMat
+    };
+    ($identity:ident) => {
+        BuiltinCompatibility::Matlab
+    };
+}
+
 macro_rules! entry {
     ($id:ident, $name:literal, $doc:expr, $descriptor:expr, $infer:expr,
      $stack:expr, $extensions:expr, $integers:expr, $auto_output:expr) => {
@@ -129,7 +139,7 @@ macro_rules! entry {
             contract: BuiltinContractDeclaration {
                 maturity: BuiltinContractMaturity::Incomplete,
                 inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new($infer)),
-                compatibility: BuiltinCompatibility::Matlab,
+                compatibility: timer_compatibility!($id),
                 async_behavior: BuiltinAsyncBehavior::MaySuspend,
                 purity: BuiltinPurity::Impure,
                 semantic_kind: BuiltinSemanticKind::General,
@@ -205,7 +215,7 @@ entry!(
     &contract::TIMER_METHOD_DESCRIPTOR,
     inference::start,
     ExecutionStackRequirement::Process,
-    &[],
+    &contract::TIMER_METHOD_EXTENSIONS,
     &[],
     true
 );
@@ -216,7 +226,7 @@ entry!(
     &contract::TIMER_STARTAT_DESCRIPTOR,
     inference::startat,
     ExecutionStackRequirement::Process,
-    &[],
+    &contract::TIMER_STARTAT_EXTENSIONS,
     &[],
     true
 );
@@ -227,7 +237,7 @@ entry!(
     &contract::TIMER_METHOD_DESCRIPTOR,
     inference::stop,
     ExecutionStackRequirement::Process,
-    &[],
+    &contract::TIMER_METHOD_EXTENSIONS,
     &[],
     true
 );
@@ -238,7 +248,7 @@ entry!(
     &contract::TIMER_METHOD_DESCRIPTOR,
     inference::wait,
     ExecutionStackRequirement::Process,
-    &[],
+    &contract::TIMER_METHOD_EXTENSIONS,
     &[],
     true
 );
@@ -249,7 +259,7 @@ entry!(
     &contract::TIMER_METHOD_DESCRIPTOR,
     inference::delete,
     ExecutionStackRequirement::Process,
-    &[],
+    &contract::TIMER_METHOD_EXTENSIONS,
     &[],
     true
 );

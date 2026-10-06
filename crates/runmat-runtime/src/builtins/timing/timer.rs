@@ -24,7 +24,8 @@ use property::{TimerBusyMode, TimerExecutionMode, TimerProperty, TimerVisibility
 use runmat_builtins::{
     TIMERFIND_EXPLICIT_GPU_NUMERIC_FILTER_EXTENSION, TIMER_ERROR_CALLBACK, TIMER_ERROR_GC,
     TIMER_ERROR_INVALID_HANDLE, TIMER_ERROR_INVALID_INPUT, TIMER_ERROR_INVALID_PROPERTY,
-    TIMER_EXPLICIT_GPU_NUMERIC_PROPERTY_EXTENSION,
+    TIMER_EXPLICIT_GPU_NUMERIC_PROPERTY_EXTENSION, TIMER_METHOD_STATUS_EXTENSION,
+    TIMER_STARTAT_RELATIVE_EXTENSION,
 };
 
 use runmat_types::MemberAccess;
@@ -53,6 +54,25 @@ const TIMER_CALLABLE_WAIT: &str = "__runmat_timer_wait";
 const TIMER_CALLABLE_DELETE: &str = "__runmat_timer_delete";
 
 const CALLBACK_PROPS: [&str; 4] = ["TimerFcn", "StartFcn", "StopFcn", "ErrorFcn"];
+
+fn admit_timer_method_outputs(
+    runtime: &RuntimeContext,
+    requested_outputs: Option<usize>,
+    method: &str,
+) -> BuiltinResult<()> {
+    match requested_outputs {
+        None | Some(0) => Ok(()),
+        Some(1) => crate::compatibility::ensure_builtin_extension_enabled_in_context(
+            runtime,
+            &TIMER_METHOD_STATUS_EXTENSION,
+            method,
+        ),
+        Some(_) => Err(timer_error(
+            &TIMER_ERROR_INVALID_INPUT,
+            format!("{method}: at most one status output is supported"),
+        )),
+    }
+}
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 static TIMER_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));

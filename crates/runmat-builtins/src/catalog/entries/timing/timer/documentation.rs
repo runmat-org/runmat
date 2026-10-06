@@ -86,7 +86,7 @@ pub(super) const TIMER: BuiltinDocumentation = BuiltinDocumentation {
         "start returns after scheduling, while the host's local task driver polls callbacks. wait joins without stopping. stop cancels and invokes StopFcn once; delete invalidates the handle and removes it from discovery.",
         "ErrorFcn receives the original callback error in event Data.Error; StopFcn runs once after a failing generation, and wait reports the original error.",
         "Fixed-rate, fixed-delay, fixed-spacing, and single-shot modes use the shared monotonic timer and local executor. The timer itself has no GPU kernel or fusion path; admitted numeric resident properties materialize through their owning provider.",
-        "startat currently accepts a positive relative delay in seconds. MATLAB date/time and date-string start times remain unsupported.",
+        "MATLAB start, stop, wait, and delete methods do not return a value. RunMat's assignable numeric status is an explicitly gated extension. The current startat route is a separately gated RunMat relative-seconds form; MATLAB absolute datetime, serial-date, date-string, date-vector, and calendar-component forms remain unsupported.",
     ] }],
     examples: TIMER_EXAMPLES, example_exemption: None,
     faqs: &[
@@ -145,7 +145,7 @@ pub(super) const INTERNAL_METHOD: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: None, slug: None,
     summary: "Internal timer method binding.",
-    description: "The compiler routes timer handle methods through these hidden, session-bound runtime identities. User-facing syntax and examples belong to timer.",
+    description: "The compiler routes timer handle methods through these hidden, session-bound runtime identities. MATLAB method calls have no output; assignable numeric status is a RunMat-only extension. The current startat relative-seconds form is also RunMat-only. User-facing syntax and examples belong to timer.",
     keywords: &["timer", "method"], related: &["timer"], sections: &[],
     examples: &[], example_exemption: Some("Hidden method bindings are exercised by timer lifecycle examples and VM method tests."),
     faqs: &[], links: &[], media: &[], evidence: TIMER_EVIDENCE,
