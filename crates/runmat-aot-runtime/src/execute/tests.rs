@@ -95,7 +95,52 @@ fn standalone_execution_diagnostic_keeps_original_identifier_and_message() {
         .with_identifier("RunMat:test:AotSource")
         .build();
     assert_eq!(
-        execution_diagnostic(original),
+        execution_diagnostic(
+            original,
+            &standalone_runtime(&revision(LanguageCompatibilityMode::Matlab)),
+        ),
         "standalone native execution failed: RunMat:test:AotSource: aot source failure"
     );
+}
+
+#[test]
+fn standalone_diagnostic_renders_bound_file_frame_span_and_original_cause() {
+    use std::error::Error as _;
+
+    let text = "first line\nerror('source failure')";
+    let map = runmat_execution::ExecutableSourceMapV2::new(vec![
+        runmat_execution::ExecutableSourceRecordV2 {
+            source_id: runmat_types::ProgramSourceId(0),
+            owner_identity: "aot-fixture".into(),
+            relative_path: "src/main.m".into(),
+            display_name: "src/main.m".into(),
+            text: text.into(),
+            content_revision: Digest::sha256(text.as_bytes()),
+        },
+    ])
+    .unwrap();
+    let runtime = runmat_runtime::source_context::bind_portable_source_map_v2(
+        standalone_runtime(&revision(LanguageCompatibilityMode::Matlab)),
+        &map,
+    )
+    .unwrap();
+    let issued = runtime
+        .program_source_id(runmat_types::ProgramSourceId(0))
+        .unwrap();
+    let original = runmat_runtime::build_runtime_error("source failure")
+        .with_identifier("RunMat:test:AotSource")
+        .with_span((11usize, 5usize).into())
+        .with_call_frames(vec![runmat_runtime::CallFrame {
+            function: "main".into(),
+            source_id: Some(issued.0),
+            span: Some((11, 5)),
+        }])
+        .with_source(std::io::Error::other("typed source cause"))
+        .build();
+    assert!(original.source().unwrap().is::<std::io::Error>());
+    let rendered = execution_diagnostic(original, &runtime);
+    assert!(rendered.contains("RunMat:test:AotSource: source failure"));
+    assert!(rendered.contains("[source span 11..16]"));
+    assert!(rendered.contains("main @ src/main.m:2:1"));
+    assert!(rendered.contains("caused by: typed source cause"));
 }
