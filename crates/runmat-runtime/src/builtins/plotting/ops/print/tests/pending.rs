@@ -5,12 +5,12 @@ use async_trait::async_trait;
 use futures::channel::oneshot;
 use futures::task::noop_waker;
 use runmat_filesystem::{
-    self as fs, DirEntry, FileHandle, FsMetadata, FsProvider, FsPublicationFailure, FsStagedOutput,
-    OpenFlags,
+    self as fs, DirEntry, FileHandle, FsMetadata, FsProvider, FsPublicationFailure,
+    FsResourceContract, FsResourceLease, FsResourceRevision, FsStagedOutput, OpenFlags,
 };
 use std::future::Future;
 use std::io;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
@@ -18,6 +18,31 @@ struct PausedProvider {
     gate: Mutex<Option<oneshot::Receiver<()>>>,
     published: Arc<Mutex<Option<Vec<u8>>>>,
     drops: Arc<AtomicUsize>,
+    lease: Arc<RevocableLease>,
+}
+
+struct RevocableLease(AtomicBool);
+
+impl RevocableLease {
+    fn live() -> Arc<Self> {
+        Arc::new(Self(AtomicBool::new(true)))
+    }
+    fn revoke(&self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+impl FsResourceLease for RevocableLease {
+    fn contract(&self) -> FsResourceContract {
+        FsResourceContract {
+            revision: FsResourceRevision::for_provider("print.pending.fixture", b"v1"),
+            opened_input_handle: None,
+            opened_output_handle: None,
+        }
+    }
+    fn is_valid(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
 }
 
 struct PausedStage {
@@ -63,6 +88,9 @@ impl FsProvider for PausedProvider {
     }
     fn current_dir_override(&self) -> Option<PathBuf> {
         Some(PathBuf::from("/"))
+    }
+    fn resource_lease(&self) -> Option<Arc<dyn FsResourceLease>> {
+        Some(self.lease.clone())
     }
     fn begin_staged_replace(&self, _path: &Path) -> io::Result<Option<Box<dyn FsStagedOutput>>> {
         let gate = self
@@ -144,6 +172,7 @@ fn public_print_keeps_selected_snapshot_across_pending_stage_and_scene_clear() {
         gate: Mutex::new(Some(receiver)),
         published: published.clone(),
         drops: drops.clone(),
+        lease: RevocableLease::live(),
     });
     let _selected = fs::replace_provider(provider.clone());
     let _statement = crate::output_count::push_output_count(Some(0));
@@ -186,6 +215,7 @@ fn cancelled_public_print_drops_pending_stage_without_publication_or_replay() {
         gate: Mutex::new(Some(receiver)),
         published: published.clone(),
         drops: drops.clone(),
+        lease: RevocableLease::live(),
     });
     let _selected = fs::replace_provider(provider.clone());
     let source = runmat_execution::cancellation::CancellationSource::new();
@@ -216,6 +246,49 @@ fn cancelled_public_print_drops_pending_stage_without_publication_or_replay() {
         sender.send(()).is_err(),
         "dropped stage must drop pending read owner"
     );
+    assert!(published.lock().unwrap().is_none());
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn revoked_selected_print_lease_after_pending_write_prevents_publication() {
+    let _plot = crate::builtins::plotting::tests::lock_plot_registry();
+    crate::builtins::plotting::tests::ensure_plot_test_env();
+    super::super::state::reset_hold_state_for_run();
+    let _ = super::super::state::clear_figure(None);
+    let _fs = fs::provider_override_lock();
+    futures::executor::block_on(crate::builtins::plotting::plot::plot_builtin(vec![
+        Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0], vec![2]).unwrap()),
+        Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![2]).unwrap()),
+    ]))
+    .expect("plot selected scene");
+    let (sender, receiver) = oneshot::channel();
+    let published = Arc::new(Mutex::new(None));
+    let drops = Arc::new(AtomicUsize::new(0));
+    let lease = RevocableLease::live();
+    let provider = Arc::new(PausedProvider {
+        gate: Mutex::new(Some(receiver)),
+        published: published.clone(),
+        drops: drops.clone(),
+        lease: lease.clone(),
+    });
+    let _selected = fs::replace_provider(provider.clone());
+    let _statement = crate::output_count::push_output_count(Some(0));
+    let mut call = Box::pin(print_builtin(None, vec![Value::from("/revoked.png")]));
+    let waker = noop_waker();
+    assert!(matches!(
+        call.as_mut().poll(&mut Context::from_waker(&waker)),
+        Poll::Pending
+    ));
+    assert!(
+        provider.gate.lock().unwrap().is_none(),
+        "selected stage owns pending write"
+    );
+    lease.revoke();
+    sender.send(()).expect("resume retained write");
+    let error = futures::executor::block_on(call).expect_err("revoked selected lease");
+    assert_eq!(error.identifier(), super::PRINT_ERROR_IO.identifier);
+    assert!(error.message().contains("revoked"));
     assert!(published.lock().unwrap().is_none());
     assert_eq!(drops.load(Ordering::SeqCst), 1);
 }
