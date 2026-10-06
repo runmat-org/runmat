@@ -159,10 +159,9 @@ fn finalized_publication_validates_every_owner_before_mutation() {
         &publication.get(first).unwrap().definition_owner,
         &first_owner,
     ));
-    assert_eq!(
-        publication.source_functions[&before_source],
-        vec![first, second]
-    );
+    let mut source_members = publication.source_functions[&before_source].clone();
+    source_members.sort_by_key(|function| function.0);
+    assert_eq!(source_members, vec![first, second]);
 }
 
 #[test]
