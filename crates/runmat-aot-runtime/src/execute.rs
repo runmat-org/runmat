@@ -42,9 +42,11 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     }
     let requested_outputs = function.abi.fixed_outputs.len();
     let mut runtime = standalone_runtime(&assembly.program);
+    let local_tasks = runmat_runtime::context::RuntimeLocalTaskSupervisor::new();
     let ports = runtime
         .service_ports()
         .clone()
+        .with_local_tasks(local_tasks.submission_port(runtime.local_identity()))
         .with_call(Rc::new(runmat_runtime::context::RuntimeCallRouter));
     runtime = runtime.with_service_ports(ports);
     if let Some(builtins) = crate::builtin::resolve(&program, input.builtin_resolver)? {
@@ -132,7 +134,7 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     // Keep the original session owner through foreign teardown and terminal
     // rendering. ContextFuture performs the existing nonblocking final drain
     // after inner destruction on success, error, or abandonment.
-    async_runtime.block_on(runtime.clone().scope(async {
+    let result = async_runtime.block_on(local_tasks.drive_until(runtime.clone().scope(async {
         let execution =
             if assembly.executable_identity.entrypoint_kind == ExecutableEntrypointKind::Script {
                 let local_names = function
@@ -178,7 +180,9 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
             }
         }
         Ok(())
-    }))
+    })));
+    local_tasks.shutdown();
+    result.map_err(|error| format!("standalone local task driver failed: {error}"))?
 }
 
 /// Initialize language policy from the verified program, independent of the

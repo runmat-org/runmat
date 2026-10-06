@@ -28,9 +28,16 @@ impl RunMatSession {
             runmat_runtime::builtins::common::path_state::environment_path_string();
         let search_path =
             Arc::new(runmat_runtime::builtins::common::path_state::SearchPath::new(String::new()));
+        let runtime_context = runmat_runtime::context::RuntimeContext::with_cancellation(
+            std::rc::Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
+            cancellation.handle().token(),
+        )
+        .with_search_path(search_path);
         let placement = std::rc::Rc::new(runmat_accelerate::placement::PlacementSession::default());
         let parallel_services = crate::parallel_runtime::CoreParallelServices::new();
+        let local_tasks = std::rc::Rc::new(SessionLocalTaskSupervisor::new());
         let runtime_services = runmat_runtime::context::RuntimeServicePorts::default()
+            .with_local_tasks(local_tasks.submission_port(runtime_context.local_identity()))
             .with_call(std::rc::Rc::new(runmat_runtime::context::RuntimeCallRouter))
             .with_http(super::http_host::default_http_service())
             .with_placement(placement.clone())
@@ -135,12 +142,8 @@ impl RunMatSession {
             project_handoff: None,
             source_pool: SourcePool::default(),
             cancellation: cancellation.clone(),
-            runtime_context: runmat_runtime::context::RuntimeContext::with_cancellation(
-                std::rc::Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
-                cancellation.handle().token(),
-            )
-            .with_search_path(search_path)
-            .with_service_ports(runtime_services),
+            runtime_context: runtime_context.with_service_ports(runtime_services),
+            local_tasks,
             placement_session: placement,
             is_executing: false,
             async_input_handler: None,

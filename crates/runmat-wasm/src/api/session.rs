@@ -1766,6 +1766,7 @@ impl RunMatWasm {
         {
             let mut session = self.session.borrow_mut();
             session.cancel_execution();
+            session.shutdown_local_tasks();
             session.clear_variables();
         }
         #[cfg(target_arch = "wasm32")]

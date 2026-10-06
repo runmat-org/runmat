@@ -63,12 +63,19 @@ mod process_host;
 #[cfg(not(target_arch = "wasm32"))]
 mod tcp_host;
 mod init;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod local_tasks_tests;
 mod project;
 mod run;
 mod user_path;
 mod workspace;
 
 /// Host-agnostic RunMat execution session (parser + interpreter + optional JIT).
+#[cfg(not(target_arch = "wasm32"))]
+type SessionLocalTaskSupervisor = runmat_runtime::context::RuntimeLocalTaskSupervisor;
+#[cfg(target_arch = "wasm32")]
+type SessionLocalTaskSupervisor = runmat_runtime::context::BrowserLocalTaskSupervisor;
+
 pub struct RunMatSession {
     /// Verbose output for debugging
     verbose: bool,
@@ -119,6 +126,8 @@ pub struct RunMatSession {
     cancellation: cancellation::SessionCancellation,
     /// Root-scoped execution authority inherited by every invocation.
     runtime_context: runmat_runtime::context::RuntimeContext,
+    /// Strong local executor owner. RuntimeContext holds only its weak port.
+    local_tasks: std::rc::Rc<SessionLocalTaskSupervisor>,
     /// Typed handle retained alongside the executor-neutral runtime port so a
     /// host may explicitly persist or restore this session's bounded profile.
     placement_session: std::rc::Rc<runmat_accelerate::placement::PlacementSession>,
@@ -152,6 +161,24 @@ pub struct RunMatSession {
 }
 
 impl RunMatSession {
+    /// Obtain the host-owned local driver before borrowing this session for an
+    /// execution. `execute_request` and `invoke_executable` drive callbacks
+    /// during foreground work. Library hosts must additionally keep
+    /// `drive_until(next_input_or_event)` polled between requests for idle
+    /// callbacks to make progress. Dropping the session cancels local jobs.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn local_task_driver(
+        &self,
+    ) -> std::rc::Rc<runmat_runtime::context::RuntimeLocalTaskSupervisor> {
+        self.local_tasks.clone()
+    }
+
+    /// Stop and release local callback jobs before host disposal. Idempotent;
+    /// subsequent scheduling reports a stable closed-session error.
+    pub fn shutdown_local_tasks(&self) {
+        self.local_tasks.shutdown();
+    }
+
     /// Drive one callback from session-owned native work. Interactive hosts
     /// poll this future alongside their next command or input event.
     #[cfg(not(target_arch = "wasm32"))]
@@ -242,6 +269,7 @@ impl Drop for ActiveExecutionGuard {
 
 impl Drop for RunMatSession {
     fn drop(&mut self) {
+        self.local_tasks.shutdown();
         #[cfg(not(target_arch = "wasm32"))]
         if let Err(error) = self.mex_runtime.shutdown(self.runtime_context.clone()) {
             tracing::warn!(%error, "could not finish MEX lifecycle during session shutdown");

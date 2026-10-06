@@ -33,6 +33,7 @@ pub async fn execute_benchmark(
 
     let mut engine = create_session(jit, false, config, "Failed to create execution engine")?;
     let _project_lease = install_project_for_source(&mut engine, &file, cli).await?;
+    let local_tasks = engine.local_task_driver();
     let mut bench_run = engine.telemetry_run(TelemetryRunConfig {
         kind: TelemetryRunKind::Benchmark,
         jit_enabled: jit,
@@ -55,7 +56,10 @@ pub async fn execute_benchmark(
             HostExecutionPolicy::default(),
             engine.workspace_handle(),
         );
-        let response = engine.execute_request(request).await;
+        let response = local_tasks
+            .drive_until(engine.execute_request(request))
+            .await
+            .context("Local callback driver stopped during benchmark warm-up")?;
         match response.result {
             Ok(outcome) if outcome_error_code(&outcome).is_none() => {}
             Ok(outcome) => {
@@ -125,7 +129,10 @@ pub async fn execute_benchmark(
             HostExecutionPolicy::default(),
             engine.workspace_handle(),
         );
-        let response = engine.execute_request(request).await;
+        let response = local_tasks
+            .drive_until(engine.execute_request(request))
+            .await
+            .context("Local callback driver stopped during benchmark execution")?;
         let outcome = match response.result {
             Ok(outcome) => outcome,
             Err(err) => {

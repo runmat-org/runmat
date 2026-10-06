@@ -160,8 +160,13 @@ async fn execute_script_request(
         }
     });
     tokio::task::yield_now().await;
-    let response = engine.execute_request(request).await;
+    let local_tasks = engine.local_task_driver();
+    let response = local_tasks
+        .drive_until(engine.execute_request(request))
+        .await;
     signal_task.abort();
+    let response = response.context("Local callback driver stopped during script execution")?;
+    engine.shutdown_local_tasks();
     let source_context = response.source_context;
     let outcome = match response.result {
         Ok(outcome) => outcome,

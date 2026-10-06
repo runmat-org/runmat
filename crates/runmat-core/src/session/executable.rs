@@ -423,6 +423,25 @@ impl RunMatSession {
         invocation: crate::ProcedureInvocation,
         control: &crate::InvocationControl,
     ) -> std::result::Result<runmat_value::ValueSequence, RunError> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let local_tasks = self.local_tasks.clone();
+            return local_tasks
+                .participate_foreground(self.invoke_executable_inner(unit, invocation, control))
+                .await
+                .map_err(RunError::Runtime)?;
+        }
+        #[cfg(target_arch = "wasm32")]
+        self.invoke_executable_inner(unit, invocation, control)
+            .await
+    }
+
+    async fn invoke_executable_inner(
+        &mut self,
+        unit: &crate::ExecutableUnit,
+        invocation: crate::ProcedureInvocation,
+        control: &crate::InvocationControl,
+    ) -> std::result::Result<runmat_value::ValueSequence, RunError> {
         let _admission = self.admit_execution(control.cancellation());
         self.ensure_user_path_hydrated().await?;
         self.configure_runtime_context();

@@ -498,6 +498,29 @@ impl RunMatSession {
         &mut self,
         request: crate::abi::ExecutionRequest,
     ) -> crate::abi::ExecutionResponse {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let local_tasks = self.local_tasks.clone();
+            let source = request.source.clone();
+            return match local_tasks
+                .participate_foreground(self.execute_request_inner(request))
+                .await
+            {
+                Ok(response) => response,
+                Err(error) => crate::abi::ExecutionResponse {
+                    source_context: unresolved_source_context(&source),
+                    result: Err(RunError::Runtime(error)),
+                },
+            };
+        }
+        #[cfg(target_arch = "wasm32")]
+        self.execute_request_inner(request).await
+    }
+
+    async fn execute_request_inner(
+        &mut self,
+        request: crate::abi::ExecutionRequest,
+    ) -> crate::abi::ExecutionResponse {
         let _admission = self.admit_execution(None);
         let requested_outputs = request.requested_outputs;
         let source_input = request.source.clone();

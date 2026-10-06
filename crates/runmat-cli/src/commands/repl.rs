@@ -46,6 +46,7 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
         jit_enabled: config.jit.enabled,
         accelerate_enabled: config.accelerate.enabled,
     });
+    let local_tasks = engine.local_task_driver();
 
     info!("RunMat REPL ready");
 
@@ -60,7 +61,12 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
         io::stdin()
             .read_to_string(&mut buffer)
             .context("Failed to read piped input")?;
-        if !process_repl_input(&buffer, &mut engine, config).await? {
+        if !local_tasks
+            .drive_until(process_repl_input(&buffer, &mut engine, config))
+            .await
+            .context("Local callback driver stopped during piped REPL input")??
+        {
+            engine.shutdown_local_tasks();
             engine
                 .shutdown_foreign_runtime()
                 .await
@@ -68,6 +74,7 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
             finalize_repl_session(&engine, session_start, repl_run);
             return Ok(());
         }
+        engine.shutdown_local_tasks();
         engine
             .shutdown_foreign_runtime()
             .await
@@ -104,17 +111,22 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
 
     let mut background_services_available = true;
     loop {
-        let wake = if background_services_available {
-            let input_ready = input.next().fuse();
-            let background_ready = engine.service_background_once().fuse();
-            futures::pin_mut!(input_ready, background_ready);
-            futures::select! {
-                event = input_ready => ReplWake::Input(event),
-                serviced = background_ready => ReplWake::Background(serviced),
-            }
-        } else {
-            ReplWake::Input(input.next().await)
-        };
+        let wake = local_tasks
+            .drive_until(async {
+                if background_services_available {
+                    let input_ready = input.next().fuse();
+                    let background_ready = engine.service_background_once().fuse();
+                    futures::pin_mut!(input_ready, background_ready);
+                    futures::select! {
+                        event = input_ready => ReplWake::Input(event),
+                        serviced = background_ready => ReplWake::Background(serviced),
+                    }
+                } else {
+                    ReplWake::Input(input.next().await)
+                }
+            })
+            .await
+            .context("Local callback driver stopped while waiting for REPL input")?;
         let ReplWake::Input(event) = wake else {
             if let ReplWake::Background(serviced) = wake {
                 background_services_available = serviced;
@@ -123,7 +135,10 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
         };
         match event {
             Some(ReplInputEvent::Line(line)) => {
-                let keep_running = process_repl_input(&line, &mut engine, config).await?;
+                let keep_running = local_tasks
+                    .drive_until(process_repl_input(&line, &mut engine, config))
+                    .await
+                    .context("Local callback driver stopped during REPL execution")??;
                 let _ = continue_sender.send(keep_running);
                 if !keep_running {
                     break;
@@ -149,6 +164,7 @@ pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()>
         .join()
         .map_err(|_| anyhow::anyhow!("REPL input thread panicked"))?;
 
+    engine.shutdown_local_tasks();
     engine
         .shutdown_foreign_runtime()
         .await
