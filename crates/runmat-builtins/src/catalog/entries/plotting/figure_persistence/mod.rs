@@ -7,6 +7,8 @@ mod savefig;
 #[cfg(test)]
 mod tests;
 
+use crate::BuiltinCatalogEntry;
+
 pub use contract::*;
 pub use hgload::*;
 pub use hgsave::*;
