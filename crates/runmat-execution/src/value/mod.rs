@@ -4,8 +4,9 @@ use crate::identity::{Digest, NodeLeaseId, ValueId, WorkerId};
 use crate::ContractError;
 
 mod identity;
-mod validation;
 mod durable_aggregate;
+mod origins;
+mod validation;
 #[cfg(test)]
 mod callable_tests;
 pub use durable_aggregate::{
@@ -54,6 +55,18 @@ impl ValuePayload {
     /// member independently would multiply every limit by the member count.
     pub fn validate_all(values: &[Self], limits: ValueLimits) -> Result<(), ContractError> {
         validation::validate_all(values, limits)
+    }
+
+    /// Validate one aggregate under the supplied shared limits, then return
+    /// every immutable bound-function origin reachable from it. Callers use
+    /// these origins to select the exact executable artifacts required to
+    /// reconstruct callable values.
+    pub fn binding_origins(
+        values: &[Self],
+        limits: ValueLimits,
+    ) -> Result<std::collections::HashSet<crate::FunctionBindingOrigin>, ContractError> {
+        Self::validate_all(values, limits)?;
+        Ok(origins::binding_origins(values))
     }
 
     /// Validate portable exception source ordinals against the exact selected

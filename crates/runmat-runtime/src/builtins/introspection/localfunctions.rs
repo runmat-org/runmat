@@ -181,6 +181,7 @@ mod tests {
                     }
                 }),
                 std::rc::Rc::new(|_| None),
+                std::rc::Rc::new(|_| None),
             )),
         ));
         let Value::Cell(cell) = dispatch_localfunctions(Vec::new()).expect("retained locals")

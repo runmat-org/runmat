@@ -8,6 +8,7 @@ pub struct ExecutionSourceFacts {
     by_function: Rc<dyn Fn(usize) -> Option<SourceFunctionInfo>>,
     by_source: Rc<dyn Fn(SourceId) -> Vec<SourceFunctionInfo>>,
     by_owners: Rc<dyn Fn(usize) -> Option<DefinitionOwnerGraph>>,
+    by_origin: Rc<dyn Fn(runmat_execution::FunctionBindingOrigin) -> Option<SourceFunctionInfo>>,
 }
 
 pub type DefinitionOwnerGraph = Arc<Vec<(usize, Arc<runmat_value::FunctionDefinitionOwner>)>>;
@@ -17,11 +18,15 @@ impl ExecutionSourceFacts {
         by_function: Rc<dyn Fn(usize) -> Option<SourceFunctionInfo>>,
         by_source: Rc<dyn Fn(SourceId) -> Vec<SourceFunctionInfo>>,
         by_owners: Rc<dyn Fn(usize) -> Option<DefinitionOwnerGraph>>,
+        by_origin: Rc<
+            dyn Fn(runmat_execution::FunctionBindingOrigin) -> Option<SourceFunctionInfo>,
+        >,
     ) -> Self {
         Self {
             by_function,
             by_source,
             by_owners,
+            by_origin,
         }
     }
 
@@ -35,6 +40,13 @@ impl ExecutionSourceFacts {
 
     fn owners(&self, function: usize) -> Option<DefinitionOwnerGraph> {
         (self.by_owners)(function)
+    }
+
+    fn origin(
+        &self,
+        origin: runmat_execution::FunctionBindingOrigin,
+    ) -> Option<SourceFunctionInfo> {
+        (self.by_origin)(origin)
     }
 }
 
@@ -85,6 +97,9 @@ pub fn resolve_binding_origin(origin: runmat_execution::FunctionBindingOrigin) -
     fn function(info: &SourceFunctionInfo) -> usize {
         info.function
     }
+    if let Some(resolver) = selected_execution_facts() {
+        return resolver.origin(origin).map(function);
+    }
     if let Some(state) = active_state() {
         return unique_origin(state.call.borrow().source_functions.as_deref()?, origin)
             .map(function);
@@ -99,7 +114,9 @@ pub fn resolve_binding_origin(origin: runmat_execution::FunctionBindingOrigin) -
 pub fn resolve_binding_origin_binding(
     origin: runmat_execution::FunctionBindingOrigin,
 ) -> Option<runmat_value::BoundFunctionBinding> {
-    let info = if let Some(state) = active_state() {
+    let info = if let Some(resolver) = selected_execution_facts() {
+        resolver.origin(origin)?
+    } else if let Some(state) = active_state() {
         unique_origin(state.call.borrow().source_functions.as_deref()?, origin)?.clone()
     } else {
         SOURCE_FUNCTION_CATALOG

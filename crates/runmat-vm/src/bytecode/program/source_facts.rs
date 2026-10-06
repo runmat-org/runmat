@@ -16,6 +16,25 @@ impl FunctionRegistry {
         source_fact(runtime, body, None)
     }
 
+    /// Resolve an immutable portable origin only when it identifies exactly
+    /// one body in this selected registry. Display names and destination-local
+    /// function numbers are not origin authority.
+    pub fn execution_source_fact_for_origin_in(
+        &self,
+        runtime: &runmat_runtime::context::RuntimeContext,
+        origin: runmat_execution::FunctionBindingOrigin,
+    ) -> Option<runmat_runtime::user_functions::SourceFunctionInfo> {
+        let mut bodies = self
+            .functions
+            .values()
+            .filter(|body| body.binding_origin == Some(origin));
+        let body = bodies.next()?;
+        if bodies.next().is_some() {
+            return None;
+        }
+        source_fact(runtime, body, None)
+    }
+
     pub fn execution_definition_owners(
         &self,
         function: FunctionId,

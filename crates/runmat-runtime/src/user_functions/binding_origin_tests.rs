@@ -114,7 +114,7 @@ fn exact_origin_binding_owns_the_selected_definition_graph() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-fn retained_execution_facts_do_not_replace_published_portable_resolution() {
+fn selected_execution_facts_resolve_only_their_exact_origins() {
     let published_origin = runmat_execution::FunctionBindingOrigin {
         program: runmat_execution::Digest::sha256("published"),
         function: runmat_types::ProgramFunctionId(1),
@@ -128,20 +128,26 @@ fn retained_execution_facts_do_not_replace_published_portable_resolution() {
         source_file: Some("/new/same_id.m".into()),
         definition_owners: None,
     };
+    let old_origin = runmat_execution::FunctionBindingOrigin {
+        program: runmat_execution::Digest::sha256("retained"),
+        function: runmat_types::ProgramFunctionId(1),
+    };
     let old_owner = Arc::new(runmat_value::FunctionDefinitionOwner::default());
     let old = SourceFunctionInfo {
         source_id: SourceId(1),
         name: "same_id".into(),
         function: 9,
         role: runmat_types::FunctionSourceRole::Local,
-        binding_origin: None,
+        binding_origin: Some(old_origin),
         source_file: Some("/old/same_id.m".into()),
         definition_owners: Some(Arc::new(vec![(9, Arc::clone(&old_owner))])),
     };
     let _catalog = install_source_function_catalog(Some(Arc::new(vec![published])));
+    let selected_old = old.clone();
     let old_group = old.clone();
+    let old_by_origin = old.clone();
     let _execution = install_execution_source_resolver(Some(Rc::new(ExecutionSourceFacts::new(
-        Rc::new(move |function| (function == 9).then(|| old.clone())),
+        Rc::new(move |function| (function == 9).then(|| selected_old.clone())),
         Rc::new(move |source| {
             (source == SourceId(1))
                 .then(|| old_group.clone())
@@ -149,13 +155,15 @@ fn retained_execution_facts_do_not_replace_published_portable_resolution() {
                 .collect()
         }),
         Rc::new(|_| None),
+        Rc::new(move |origin| (origin == old_origin).then(|| old_by_origin.clone())),
     ))));
     assert_eq!(
         source_function_for(9).unwrap().role,
         runmat_types::FunctionSourceRole::Local
     );
     assert_eq!(source_file_for(9).as_deref(), Some("/old/same_id.m"));
-    assert_eq!(resolve_binding_origin(published_origin), Some(9));
+    assert_eq!(resolve_binding_origin(old_origin), Some(9));
+    assert_eq!(resolve_binding_origin(published_origin), None);
     assert!(source_function_for(10).is_none());
 }
 
@@ -196,6 +204,7 @@ fn selected_old_definition_issues_old_owner_under_one_runtime() {
                 .into_iter()
                 .collect()
         }),
+        Rc::new(|_| None),
         Rc::new(|_| None),
     ))));
     let Value::BoundFunctionHandle { authority, .. } = bound_function_handle("reused".into(), 9)

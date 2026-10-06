@@ -338,8 +338,10 @@ pub(crate) async fn invoke(
     let execution_registry = Arc::clone(&registry);
     let execution_group_registry = Arc::clone(&registry);
     let execution_owner_registry = Arc::clone(&registry);
+    let execution_origin_registry = Arc::clone(&registry);
     let source_runtime = runtime.clone();
     let group_runtime = runtime.clone();
+    let origin_runtime = runtime.clone();
     let execution_source = user_functions::install_execution_source_resolver(Some(Rc::new(
         user_functions::ExecutionSourceFacts::new(
             Rc::new(move |function| {
@@ -352,6 +354,10 @@ pub(crate) async fn invoke(
             Rc::new(move |function| {
                 execution_owner_registry
                     .execution_definition_owners(runmat_hir::FunctionId(function))
+            }),
+            Rc::new(move |origin| {
+                execution_origin_registry
+                    .execution_source_fact_for_origin_in(&origin_runtime, origin)
             }),
         ),
     )));

@@ -490,6 +490,15 @@ impl RuntimeContext {
         self.state.call.borrow_mut().dynamic_loader = loader;
     }
 
+    /// Install the selected session's exact-definition invocation route.
+    /// This does not affect the ordinary name or numeric-function resolver.
+    pub fn set_bound_function_invoker(
+        &self,
+        invoker: Option<Rc<crate::user_functions::BoundFunctionInvoker>>,
+    ) {
+        self.state.call.borrow_mut().bound_invoker = invoker;
+    }
+
     pub fn set_dynamic_function_clearer(
         &self,
         clearer: Option<Rc<crate::user_functions::DynamicFunctionClearer>>,

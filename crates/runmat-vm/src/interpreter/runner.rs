@@ -803,8 +803,10 @@ async fn run_interpreter_inner(
     let registry_for_execution_source = Arc::clone(&function_registry);
     let registry_for_execution_group = Arc::clone(&function_registry);
     let registry_for_execution_owners = Arc::clone(&function_registry);
+    let registry_for_execution_origin = Arc::clone(&function_registry);
     let source_runtime = context.runtime.clone();
     let group_runtime = context.runtime.clone();
+    let origin_runtime = context.runtime.clone();
     let _execution_source_guard = user_functions::install_execution_source_resolver(Some(
         std::rc::Rc::new(user_functions::ExecutionSourceFacts::new(
             std::rc::Rc::new(move |function| {
@@ -817,6 +819,10 @@ async fn run_interpreter_inner(
             std::rc::Rc::new(move |function| {
                 registry_for_execution_owners
                     .execution_definition_owners(runmat_hir::FunctionId(function))
+            }),
+            std::rc::Rc::new(move |origin| {
+                registry_for_execution_origin
+                    .execution_source_fact_for_origin_in(&origin_runtime, origin)
             }),
         )),
     ));
