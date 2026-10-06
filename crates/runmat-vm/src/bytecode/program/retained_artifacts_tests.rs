@@ -190,7 +190,7 @@ fn conflicting_origin_is_rejected_in_both_input_orders() {
             .get_mut(&FunctionId(2))
             .expect("helper")
             .instructions
-            .push(Instr::LoadInt(91));
+            .push(Instr::LoadInt(runmat_value::IntValue::I64(91)));
         let conflicting = RuntimeBoundExecutableUnit::for_test(
             conflicting_registry,
             second.unit.runtime().clone(),

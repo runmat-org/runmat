@@ -229,6 +229,40 @@ fn arity_bounds_read_typed_integer_tensor_storage_exactly() {
 }
 
 #[test]
+fn arity_bound_reads_u16_tensor_storage_exactly() {
+    let tensor =
+        Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("arity tensor");
+    assert_eq!(
+        parse_finite_arity_bound(
+            &Value::Tensor(tensor),
+            "narginchk",
+            &NARGINCHK_ERROR_BOUNDS_INVALID,
+        )
+        .unwrap(),
+        7,
+    );
+}
+
+#[test]
+fn arity_bound_checks_wide_scalars_and_negative_integer_tensors() {
+    let scalar = Value::Int(IntValue::U64(u64::MAX));
+    let decoded = parse_finite_arity_bound(&scalar, "narginchk", &NARGINCHK_ERROR_BOUNDS_INVALID);
+    if usize::BITS == 64 {
+        assert_eq!(decoded.unwrap(), usize::MAX);
+    } else {
+        assert!(decoded.is_err());
+    }
+    let tensor =
+        Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("arity tensor");
+    assert!(parse_finite_arity_bound(
+        &Value::Tensor(tensor),
+        "narginchk",
+        &NARGINCHK_ERROR_BOUNDS_INVALID,
+    )
+    .is_err());
+}
+
+#[test]
 fn positive_single_infinity_is_an_admitted_maximum() {
     let runtime = runtime_with_arity(1, 1);
     let positive_single_infinity =

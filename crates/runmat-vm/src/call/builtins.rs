@@ -1029,13 +1029,12 @@ pub async fn resolve_imported_builtin(
 mod tests {
     use super::{
         current_dynamic_eval_options, dynamic_source_context, imported_builtin_qualified_name,
-        merge_eval_function_registry, parse_finite_arity_bound, push_dynamic_eval_options,
+        merge_eval_function_registry, push_dynamic_eval_options,
     };
     use crate::bytecode::{FunctionBytecode, FunctionRegistry, Instr};
     use runmat_hir::FunctionId;
     use runmat_parser::CompatMode;
     use runmat_types::{CallableFallbackPolicy, CallableIdentity};
-    use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
     use std::collections::HashMap;
 
     fn compile_test_source(source: &str) -> crate::Bytecode {
@@ -1198,34 +1197,5 @@ mod tests {
             Some("/project/analysis.m")
         );
         assert_ne!(dynamic.source_id(), source_id);
-    }
-
-    #[test]
-    fn arity_bound_reads_typed_integer_tensor_storage_exactly() {
-        let tensor =
-            Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("arity tensor");
-        assert_eq!(
-            parse_finite_arity_bound(&Value::Tensor(tensor), "narginchk", "minArgs").unwrap(),
-            7
-        );
-    }
-
-    #[test]
-    fn arity_bound_rejects_wide_integer_scalars_and_poisoned_tensor_mirrors() {
-        let scalar = Value::Int(IntValue::U64(u64::MAX));
-        if usize::BITS == 64 {
-            assert_eq!(
-                parse_finite_arity_bound(&scalar, "narginchk", "minArgs").unwrap(),
-                usize::MAX
-            );
-        } else {
-            assert!(parse_finite_arity_bound(&scalar, "narginchk", "minArgs").is_err());
-        }
-
-        let tensor =
-            Tensor::new_integer(IntegerStorage::I64(vec![-1]), vec![1, 1]).expect("arity tensor");
-        // The f64 mirror is intentionally plausible but must never decide an
-        // integer-only argument bound.
-        assert!(parse_finite_arity_bound(&Value::Tensor(tensor), "narginchk", "minArgs",).is_err());
     }
 }

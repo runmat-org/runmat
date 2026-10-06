@@ -41,8 +41,10 @@ impl RuntimeGraphicsFlushOperation for ReadyFlush {
     }
 }
 
+type GraphicsRequestLog = Rc<RefCell<Vec<GraphicsFlushRequest>>>;
+
 struct TestGraphics {
-    requests: Rc<RefCell<Vec<GraphicsFlushRequest>>>,
+    requests: GraphicsRequestLog,
     calls: Rc<Cell<usize>>,
     receipt: GraphicsFlushReceipt,
 }
@@ -60,11 +62,7 @@ impl RuntimeGraphicsPresentationService for TestGraphics {
 
 fn selected_runtime(
     receipt: GraphicsFlushReceipt,
-) -> (
-    RuntimeContext,
-    Rc<RefCell<Vec<GraphicsFlushRequest>>>,
-    Rc<Cell<usize>>,
-) {
+) -> (RuntimeContext, GraphicsRequestLog, Rc<Cell<usize>>) {
     let requests = Rc::new(RefCell::new(Vec::new()));
     let calls = Rc::new(Cell::new(0));
     let service = Rc::new(TestGraphics {

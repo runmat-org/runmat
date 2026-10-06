@@ -874,7 +874,10 @@ mod tests {
     };
     use runmat_value::Value;
 
-    use super::{execute_program_request, recipe_supports_capabilities};
+    use super::{
+        admit_executable_unit, execute_program_request, recipe_supports_capabilities,
+        ExecutableUnitAdmissionError,
+    };
     use crate::{Bytecode, Instr};
 
     fn script_request(

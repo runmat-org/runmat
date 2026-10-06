@@ -15,12 +15,19 @@ use std::task::{Context, Poll};
 
 const NAME: &str = "__output_projection_pending_fixture";
 
+type OutputObservation = (
+    Option<usize>,
+    crate::output_count::InvocationOutputScope,
+    Option<usize>,
+);
+type ControlledCall<F> = (
+    Pin<Box<F>>,
+    oneshot::Receiver<OutputObservation>,
+    oneshot::Sender<()>,
+);
+
 struct CallControl {
-    reached: oneshot::Sender<(
-        Option<usize>,
-        crate::output_count::InvocationOutputScope,
-        Option<usize>,
-    )>,
+    reached: oneshot::Sender<OutputObservation>,
     release: oneshot::Receiver<()>,
     completed: Rc<Cell<usize>>,
     presentation_outputs: usize,
@@ -91,15 +98,7 @@ fn controlled_call(
     requested_outputs: Option<usize>,
     presentation_outputs: usize,
     completed: Rc<Cell<usize>>,
-) -> (
-    Pin<Box<impl Future<Output = Result<Value, crate::RuntimeError>>>>,
-    oneshot::Receiver<(
-        Option<usize>,
-        crate::output_count::InvocationOutputScope,
-        Option<usize>,
-    )>,
-    oneshot::Sender<()>,
-) {
+) -> ControlledCall<impl Future<Output = Result<Value, crate::RuntimeError>>> {
     let (reached_tx, reached_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
     CONTROLS.with(|controls| {
