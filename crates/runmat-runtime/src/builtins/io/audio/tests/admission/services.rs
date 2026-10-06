@@ -179,7 +179,7 @@ impl RuntimePlacementService for Placement {
         Ok(RuntimeWholeWorkSelection {
             decision: WholeWorkDecision {
                 signature: request.signature.to_owned(),
-                selected: candidate.selected(&request.signature.operation),
+                selected: candidate.selected(request.signature.operation),
                 kind: WholeWorkDecisionKind::Unmeasured,
                 predicted_total_ns: None,
             },

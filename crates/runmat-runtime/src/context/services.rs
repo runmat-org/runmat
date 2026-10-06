@@ -370,7 +370,7 @@ pub(crate) fn test_managed_selection(
     Ok(RuntimeManagedWholeWorkSelection {
         identity,
         selected: runmat_execution::CompactSelectedExecutionCandidate {
-            node: runmat_execution::PlacementOperationId::new(&request.signature.operation)
+            node: runmat_execution::PlacementOperationId::new(request.signature.operation)
                 .expect("typed test operation"),
             candidate: candidate.identity_digest(),
             kind: candidate.kind,

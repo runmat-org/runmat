@@ -173,9 +173,11 @@ mod tests {
             std::rc::Rc::new(crate::user_functions::ExecutionSourceFacts::new(
                 std::rc::Rc::new(move |function| (function == 10).then(|| selected_local.clone())),
                 std::rc::Rc::new(move |source| {
-                    (source == SourceId(3))
-                        .then(|| selected_group.clone())
-                        .unwrap_or_default()
+                    if source == SourceId(3) {
+                        selected_group.clone()
+                    } else {
+                        Vec::new()
+                    }
                 }),
                 std::rc::Rc::new(|_| None),
             )),
