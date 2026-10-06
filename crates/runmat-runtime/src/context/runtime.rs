@@ -168,6 +168,45 @@ impl RuntimeContext {
         &self.state
     }
 
+    /// Read one value from this exact session's global namespace without
+    /// relying on ambient runtime activation.
+    pub fn session_global_value(
+        &self,
+        name: &str,
+    ) -> Result<Option<runmat_value::Value>, crate::RuntimeError> {
+        self.state
+            .session_variables
+            .try_borrow()
+            .map(|variables| variables.global_value(name))
+            .map_err(|error| {
+                crate::runtime_error::semantic_error(
+                    "RunMat:Workspace:GlobalBorrow",
+                    format!("session-global workspace read is reentrant: {error}"),
+                )
+            })
+    }
+
+    /// Enumerate this exact session's global namespace without relying on
+    /// ambient runtime activation.
+    pub fn session_global_names(&self) -> Result<Vec<String>, crate::RuntimeError> {
+        self.state
+            .session_variables
+            .try_borrow()
+            .map(|variables| variables.global_names())
+            .map_err(|error| {
+                crate::runtime_error::semantic_error(
+                    "RunMat:Workspace:GlobalBorrow",
+                    format!("session-global workspace read is reentrant: {error}"),
+                )
+            })
+    }
+
+    pub fn session_variable_authority(
+        &self,
+    ) -> crate::workspace::session::SessionVariableAuthority {
+        crate::workspace::session::SessionVariableAuthority::new(&self.state)
+    }
+
     pub(super) fn state_identity(&self) -> *const RuntimeContextState {
         Rc::as_ptr(&self.state)
     }

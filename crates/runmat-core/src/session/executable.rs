@@ -2,6 +2,12 @@ use super::*;
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::BTreeMap;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) enum TieredInteractiveInvocation {
+    Cold,
+    Native(std::result::Result<crate::generic_native::NativeExecution, RuntimeError>),
+}
+
 impl RunMatSession {
     #[cfg(all(test, not(target_arch = "wasm32")))]
     pub(crate) fn set_native_tiering_config_for_testing(
@@ -115,11 +121,8 @@ impl RunMatSession {
             log::debug!(target: "runmat_core::native_tiering", "native interactive admission skipped reason=no_script_entrypoint");
             return Ok(None);
         }
-        let values = workspace_projection
-            .snapshot()?
-            .into_iter()
-            .map(|(name, value)| (name.to_string(), value.clone()))
-            .collect::<BTreeMap<_, _>>();
+        workspace_projection.ensure_effect_authority()?;
+        let values = self.logical_workspace_values()?;
         let local_names = unit
             .entrypoint_workspace_bindings()
             .into_iter()
@@ -134,10 +137,22 @@ impl RunMatSession {
                 },
             )
             .collect();
+        let global_names = self.session_global_binding_names()?;
+        let global_bindings = local_names
+            .iter()
+            .filter(|(_, name)| global_names.contains(*name))
+            .map(
+                |(binding, name)| runmat_native_executor::execute::NativeWorkspaceBinding {
+                    binding: *binding,
+                    name: name.clone(),
+                },
+            )
+            .collect();
         let workspace = runmat_native_executor::execute::NativeWorkspaceInput {
             values,
             local_names,
             bindings,
+            global_bindings,
         };
         let profile_values = workspace.profile_values();
         let profile = self
@@ -151,9 +166,9 @@ impl RunMatSession {
         Ok(Some((workspace, profile)))
     }
 
-    /// Execute only an already-admitted native product. `None` preserves the
-    /// canonical cold interpreter path; observation happens after either path
-    /// completes so timing and hotness describe real semantic execution.
+    /// Execute only an already-admitted native product. The typed receipt
+    /// distinguishes a cold interpreter decision from a native invocation
+    /// that entered generated code and returned a language error.
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) async fn invoke_tiered_interactive(
         &mut self,
@@ -162,7 +177,7 @@ impl RunMatSession {
         runtime_functions: &runmat_vm::FunctionRegistry,
         workspace: &runmat_native_executor::execute::NativeWorkspaceInput,
         profile: Option<&runmat_jit::tiering::RepresentationProfile>,
-    ) -> std::result::Result<Option<crate::generic_native::NativeExecution>, RuntimeError> {
+    ) -> std::result::Result<TieredInteractiveInvocation, RuntimeError> {
         let published = self
             .generic_native_cache
             .resolve_or_schedule(unit, None, profile)?;
@@ -176,7 +191,7 @@ impl RunMatSession {
             None
         };
         let Some(published) = published else {
-            return Ok(None);
+            return Ok(TieredInteractiveInvocation::Cold);
         };
         self.stats.jit_compiled += 1;
         let execution = crate::generic_native::invoke(
@@ -192,13 +207,15 @@ impl RunMatSession {
                 workspace: Some(workspace.clone()),
             },
         )
-        .await?;
-        self.stats.native_osr_transfers += usize::from(execution.osr_entry.is_some());
-        self.stats.vectorized_native_regions = self
-            .stats
-            .vectorized_native_regions
-            .saturating_add(execution.vectorized_regions);
-        Ok(Some(execution))
+        .await;
+        if let Ok(execution) = &execution {
+            self.stats.native_osr_transfers += usize::from(execution.osr_entry.is_some());
+            self.stats.vectorized_native_regions = self
+                .stats
+                .vectorized_native_regions
+                .saturating_add(execution.vectorized_regions);
+        }
+        Ok(TieredInteractiveInvocation::Native(execution))
     }
 
     #[cfg(not(target_arch = "wasm32"))]

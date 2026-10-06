@@ -41,8 +41,9 @@ pub use call::builtins::{
 pub use compiler::CompileError;
 pub use interpreter::runner::{
     interpret, interpret_function, interpret_function_with_counts, interpret_with_vars,
-    interpret_with_vars_in_context, invoke_semantic_function_value,
-    invoke_semantic_function_value_in_context,
+    interpret_with_vars_in_context, interpret_with_workspace_in_context,
+    invoke_semantic_function_value, invoke_semantic_function_value_in_context,
+    WorkspaceInterpreterOutcome,
 };
 pub use interpreter::runner::{interpret_resume_in_context, prepare_native_execution_metadata};
 pub use interpreter::state::{
@@ -58,8 +59,9 @@ pub use program_execution::{
     execute_program_request, execute_program_request_with_context, materialize_deferred_call,
 };
 pub use runtime::workspace::{
-    push_pending_workspace, take_updated_workspace_assigned_report, take_updated_workspace_state,
-    PendingWorkspaceGuard, WorkspaceAssignedReport,
+    take_updated_workspace_assigned_report, take_updated_workspace_state, workspace_admission,
+    workspace_admission_with_global_bindings, PendingWorkspaceAdmission, WorkspaceAssignedReport,
+    WorkspaceExecutionCompletion,
 };
 
 #[doc(hidden)]

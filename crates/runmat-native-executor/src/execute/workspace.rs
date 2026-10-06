@@ -42,11 +42,49 @@ pub struct NativeWorkspaceInput {
     pub local_names: BTreeMap<BindingId, String>,
     /// Exact semantic locals that may read or write caller bindings.
     pub bindings: Vec<NativeWorkspaceBinding>,
+    /// Semantic caller bindings that resolve through the session-global store.
+    /// Values remain owned by that store; this list carries alias identity only.
+    pub global_bindings: Vec<NativeWorkspaceBinding>,
 }
 
 impl NativeWorkspaceInput {
     pub fn profile_values(&self) -> Vec<Value> {
         self.values.values().cloned().collect()
+    }
+
+    pub(super) fn frame_global_bindings(
+        &self,
+        function: &runmat_native_codegen::NativeFunction,
+    ) -> NativeExecutorResult<FrameGlobalBindings> {
+        let aliases = FrameGlobalBindings::default();
+        let mut seen = BTreeSet::new();
+        for binding in &self.global_bindings {
+            if !seen.insert(binding.binding) {
+                return Err(NativeExecutorError::Host(
+                    "native workspace input contains a duplicate global binding".into(),
+                ));
+            }
+            let local = function
+                .locals
+                .iter()
+                .find(|local| local.binding == Some(binding.binding))
+                .ok_or_else(|| {
+                    NativeExecutorError::Host(format!(
+                        "native global binding '{}' is unavailable",
+                        binding.name
+                    ))
+                })?;
+            if local.kind != runmat_native_codegen::NativeLocalKind::Binding
+                || self.local_names.get(&binding.binding) != Some(&binding.name)
+            {
+                return Err(NativeExecutorError::Host(format!(
+                    "native global binding '{}' does not match Native IR",
+                    binding.name
+                )));
+            }
+            aliases.declare_named(local.id.0 as usize, binding.name.clone());
+        }
+        Ok(aliases)
     }
 }
 
@@ -54,6 +92,7 @@ impl NativeWorkspaceInput {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NativeWorkspaceSnapshot {
     pub values: BTreeMap<String, Value>,
+    pub global_bindings: BTreeSet<String>,
 }
 
 struct NativeWorkspaceFrame {
@@ -69,6 +108,7 @@ pub(super) struct NativeWorkspaceState {
     publish: bool,
     global_aliases: FrameGlobalBindings,
     canonical: Option<Rc<dyn RuntimeWorkspaceService>>,
+    session_variables: Option<runmat_runtime::workspace::session::SessionVariableAuthority>,
 }
 
 impl NativeWorkspaceState {
@@ -77,6 +117,7 @@ impl NativeWorkspaceState {
         input: NativeWorkspaceInput,
         global_aliases: FrameGlobalBindings,
         canonical: Option<Rc<dyn RuntimeWorkspaceService>>,
+        session_variables: Option<runmat_runtime::workspace::session::SessionVariableAuthority>,
     ) -> NativeExecutorResult<Self> {
         let local_names = function
             .locals
@@ -139,6 +180,7 @@ impl NativeWorkspaceState {
             publish: true,
             global_aliases,
             canonical,
+            session_variables,
         })
     }
 
@@ -146,6 +188,7 @@ impl NativeWorkspaceState {
         function: &runmat_native_codegen::NativeFunction,
         global_aliases: FrameGlobalBindings,
         canonical: Option<Rc<dyn RuntimeWorkspaceService>>,
+        session_variables: Option<runmat_runtime::workspace::session::SessionVariableAuthority>,
     ) -> Self {
         let local_names = function
             .locals
@@ -164,6 +207,7 @@ impl NativeWorkspaceState {
             publish: false,
             global_aliases,
             canonical,
+            session_variables,
         }
     }
 
@@ -174,6 +218,7 @@ impl NativeWorkspaceState {
             local_names: self.local_names.clone(),
             canonical: self.canonical.as_ref().map(Rc::downgrade),
             publish: self.publish,
+            session_variables: self.session_variables.clone(),
         })
     }
 
@@ -256,6 +301,12 @@ impl NativeWorkspaceState {
                 .iter()
                 .map(|(name, entry)| (name.clone(), entry.value.clone()))
                 .collect(),
+            global_bindings: self
+                .global_aliases
+                .named_bindings()
+                .into_iter()
+                .map(|(_, name)| name)
+                .collect(),
         })
     }
 }
@@ -287,12 +338,20 @@ fn workspace_read_borrow_error(error: std::cell::BorrowError) -> runmat_runtime:
     )
 }
 
+fn missing_session_variable_authority() -> runmat_runtime::RuntimeError {
+    runmat_runtime::runtime_error::semantic_error(
+        "RunMat:Workspace:SessionAuthorityMissing",
+        "native workspace service has no session-variable authority",
+    )
+}
+
 struct NativeWorkspaceService {
     frame: Weak<NativeWorkspaceFrame>,
     global_aliases: FrameGlobalBindings,
     local_names: BTreeMap<usize, String>,
     canonical: Option<Weak<dyn RuntimeWorkspaceService>>,
     publish: bool,
+    session_variables: Option<runmat_runtime::workspace::session::SessionVariableAuthority>,
 }
 
 impl NativeWorkspaceService {
@@ -352,7 +411,13 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
         if !frame.active.get() {
             return Vec::new();
         }
-        runmat_runtime::workspace::session::global_names()
+        match self.session_variables.as_ref() {
+            Some(authority) => authority.global_names().unwrap_or_default(),
+            #[cfg(test)]
+            None => runmat_runtime::workspace::session::global_names(),
+            #[cfg(not(test))]
+            None => Vec::new(),
+        }
     }
 
     fn try_lookup(&self, name: &str) -> Result<Option<Value>, runmat_runtime::RuntimeError> {
@@ -380,7 +445,13 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
 
     fn try_global_names(&self) -> Result<Vec<String>, runmat_runtime::RuntimeError> {
         self.ensure_effect_authority()?;
-        Ok(runmat_runtime::workspace::session::global_names())
+        match self.session_variables.as_ref() {
+            Some(authority) => authority.global_names(),
+            #[cfg(test)]
+            None => Ok(runmat_runtime::workspace::session::global_names()),
+            #[cfg(not(test))]
+            None => Err(missing_session_variable_authority()),
+        }
     }
 
     fn ensure_effect_authority(&self) -> Result<(), runmat_runtime::RuntimeError> {
@@ -462,9 +533,13 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
             .try_borrow_mut()
             .map(drop)
             .map_err(workspace_borrow_error)?;
-        if self.publish && !publish_global {
+        if self.publish {
             if let Some(canonical) = self.canonical() {
-                canonical.assign(name, rooted.value.clone())?;
+                if publish_global {
+                    canonical.remove(name)?;
+                } else {
+                    canonical.assign(name, rooted.value.clone())?;
+                }
             }
         }
         let mut values = frame
@@ -474,7 +549,13 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
         let previous = values.insert(name.to_string(), rooted);
         drop(values);
         if let Some(value) = global_value {
-            runmat_runtime::workspace::session::store_global_named(name, value);
+            match self.session_variables.as_ref() {
+                Some(authority) => authority.store_global(name, value)?,
+                #[cfg(test)]
+                None => runmat_runtime::workspace::session::store_global_named(name, value),
+                #[cfg(not(test))]
+                None => return Err(missing_session_variable_authority()),
+            }
         }
         frame.externally_mutated.set(true);
         drop(previous);
@@ -506,6 +587,21 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
         Ok(())
     }
 
+    fn declare_global_binding(
+        &self,
+        slot: usize,
+        name: &str,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        self.ensure_mutation_authority()?;
+        if self.publish {
+            if let Some(canonical) = self.canonical() {
+                canonical.bind_base_global(name)?;
+            }
+        }
+        self.global_aliases.declare_named(slot, name.to_string());
+        Ok(())
+    }
+
     fn remove(&self, name: &str) -> Result<(), runmat_runtime::RuntimeError> {
         self.ensure_effect_authority()?;
         let frame = self.frame()?;
@@ -516,7 +612,7 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
             .map_err(workspace_borrow_error)?;
         if self.publish {
             if let Some(canonical) = self.canonical() {
-                canonical.remove(name)?;
+                canonical.unbind_base_global(name)?;
             }
         }
         let mut values = frame

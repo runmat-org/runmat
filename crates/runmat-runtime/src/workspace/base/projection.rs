@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::rc::{Rc, Weak};
 
 use runmat_value::Value;
@@ -15,6 +16,7 @@ pub struct BaseWorkspaceProjection {
     owner: Weak<std::cell::RefCell<BaseWorkspaceState>>,
     revision: WorkspaceRevision,
     entries: RootedWorkspaceEntries,
+    global_bindings: HashSet<String>,
     pending: WorkspaceDelta,
 }
 
@@ -29,6 +31,7 @@ impl BaseWorkspaceProjection {
             owner: Rc::downgrade(&owner.state),
             revision: state.revision,
             entries: state.entries.clone(),
+            global_bindings: state.global_bindings.clone(),
             pending: WorkspaceDelta::new(),
         })
     }
@@ -58,7 +61,18 @@ impl BaseWorkspaceProjection {
     /// [`Self::ensure_effect_authority`] before admitting new execution or an
     /// external effect against this projection.
     pub fn lookup(&self, name: &str) -> Option<&Value> {
+        if self.global_bindings.contains(name) {
+            return None;
+        }
         self.entries.get(name).map(|entry| entry.value())
+    }
+
+    pub fn is_global(&self, name: &str) -> bool {
+        self.global_bindings.contains(name)
+    }
+
+    pub fn global_names(&self) -> impl Iterator<Item = &str> {
+        self.global_bindings.iter().map(String::as_str)
     }
 
     /// Verify that the canonical owner which admitted this projection is
@@ -84,7 +98,9 @@ impl BaseWorkspaceProjection {
         let name = name.into();
         let entry = RootedWorkspaceEntry::new(value)?;
         self.pending.push_assign_entry(name.clone(), entry.clone());
-        self.entries.insert(name, entry);
+        if !self.global_bindings.contains(&name) {
+            self.entries.insert(name, entry);
+        }
         Ok(())
     }
 
@@ -96,6 +112,21 @@ impl BaseWorkspaceProjection {
     pub fn clear(&mut self) {
         self.pending.clear();
         self.entries.clear();
+        self.global_bindings.clear();
+    }
+
+    pub fn bind_global(&mut self, name: impl Into<String>) {
+        let name = name.into();
+        self.pending.bind_global(name.clone());
+        self.entries.remove(&name);
+        self.global_bindings.insert(name);
+    }
+
+    pub fn unbind_global(&mut self, name: impl Into<String>) {
+        let name = name.into();
+        self.pending.unbind_global(name.clone());
+        self.entries.remove(&name);
+        self.global_bindings.remove(&name);
     }
 
     /// Publish this projection's ordered mutations over the latest canonical
@@ -111,10 +142,12 @@ impl BaseWorkspaceProjection {
             let base_revision = self.revision;
             let delta = std::mem::take(&mut self.pending);
             let commit = state.commit_preflighted(base_revision, revision, delta);
-            let reconciliation =
-                state
-                    .journal
-                    .reconcile_known(base_revision, state.revision, &state.entries);
+            let reconciliation = state.journal.reconcile_known(
+                base_revision,
+                state.revision,
+                &state.entries,
+                &state.global_bindings,
+            );
             (commit, reconciliation)
         };
         self.apply_reconciliation(&reconciliation);
@@ -143,27 +176,45 @@ impl BaseWorkspaceProjection {
                 self.revision = *revision;
             }
             BaseWorkspaceReconciliation::Delta { to, changes, .. } => {
-                apply_delta(&mut self.entries, changes);
+                apply_delta(&mut self.entries, &mut self.global_bindings, changes);
                 self.revision = *to;
             }
             BaseWorkspaceReconciliation::Reset(snapshot) => {
                 self.entries = snapshot.entries.clone();
+                self.global_bindings = snapshot.global_bindings.clone();
                 self.revision = snapshot.revision();
             }
         }
     }
 }
 
-fn apply_delta(entries: &mut RootedWorkspaceEntries, delta: &WorkspaceDelta) {
+fn apply_delta(
+    entries: &mut RootedWorkspaceEntries,
+    global_bindings: &mut HashSet<String>,
+    delta: &WorkspaceDelta,
+) {
     for change in delta.changes() {
         match change.data() {
             WorkspaceChangeData::Assign { name, entry } => {
-                entries.insert(name.clone(), entry.clone());
+                if !global_bindings.contains(name) {
+                    entries.insert(name.clone(), entry.clone());
+                }
             }
             WorkspaceChangeData::Remove { name } => {
                 entries.remove(name);
             }
-            WorkspaceChangeData::Clear => entries.clear(),
+            WorkspaceChangeData::BindGlobal { name } => {
+                entries.remove(name);
+                global_bindings.insert(name.clone());
+            }
+            WorkspaceChangeData::UnbindGlobal { name } => {
+                entries.remove(name);
+                global_bindings.remove(name);
+            }
+            WorkspaceChangeData::Clear => {
+                entries.clear();
+                global_bindings.clear();
+            }
         }
     }
 }

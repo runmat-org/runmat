@@ -28,13 +28,14 @@ impl HostState {
         let Some(name) = self.global_bindings.name_for_slot(slot) else {
             return Ok(reference);
         };
-        let revision = runmat_runtime::workspace::session::global_revision();
+        let authority = self.runtime.session_variable_authority();
+        let revision = authority.global_revision()?;
         if self.global_seen_revision.get(&slot) == Some(&revision) {
             return Ok(reference);
         }
         // A nested invocation can update this alias without touching this frame's
         // local slot. The session global, not the last SSA/local snapshot, owns it.
-        let value = runmat_runtime::workspace::session::global_value(&name);
+        let value = authority.global_value(&name)?;
         self.replace_local_from_global(slot, value, revision)
     }
 
@@ -162,9 +163,15 @@ impl HostState {
                 "native local cannot be both global and persistent".into(),
             ));
         }
-        self.global_bindings.declare_named(slot, name.clone());
-        let value = runmat_runtime::workspace::session::global_value(&name)
-            .unwrap_or_else(empty_workspace_value);
+        if let Some(workspace) = self.runtime.service_ports().workspace().cloned() {
+            workspace.declare_global_binding(slot, &name)?;
+        } else {
+            self.global_bindings.declare_named(slot, name.clone());
+        }
+        let value = self
+            .runtime
+            .session_variable_authority()
+            .declare_global(&name)?;
         let reference = self.arena.insert(value);
         self.set_local(slot, reference)
     }
@@ -193,9 +200,10 @@ impl HostState {
         }
         let value = self.arena.get(reference)?.clone();
         if let Some(name) = self.global_bindings.name_for_slot(slot) {
-            runmat_runtime::workspace::session::store_global_named(&name, value.clone());
+            let authority = self.runtime.session_variable_authority();
+            authority.store_global(&name, value.clone())?;
             self.global_seen_revision
-                .insert(slot, runmat_runtime::workspace::session::global_revision());
+                .insert(slot, authority.global_revision()?);
         }
         if let Some(name) = self.persistent_bindings.get(&slot) {
             runmat_runtime::workspace::session::store_persistent_named(

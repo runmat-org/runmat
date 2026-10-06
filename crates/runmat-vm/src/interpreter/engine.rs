@@ -21,6 +21,7 @@ pub fn prepare_workspace_guard(
     let guard = pending_state.map(|pending| {
         let names = pending.names;
         let assigned = pending.assigned;
+        global_aliases.replace_with_snapshot(pending.global_aliases.snapshot());
         let filtered_assigned: HashSet<String> = assigned
             .into_iter()
             .filter(|name| names.contains_key(name))

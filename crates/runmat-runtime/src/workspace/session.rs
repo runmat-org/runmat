@@ -2,7 +2,99 @@ use runmat_thread_local::runmat_thread_local;
 use runmat_value::Value;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
+
+/// Exact, non-owning capability for one Runtime session's variable store.
+/// Executor services retain it across suspension instead of re-resolving an
+/// ambient RuntimeContext which may belong to another invocation.
+#[derive(Clone, Debug)]
+pub struct SessionVariableAuthority {
+    state: Weak<crate::context::RuntimeContextState>,
+}
+
+impl SessionVariableAuthority {
+    pub(crate) fn new(state: &Rc<crate::context::RuntimeContextState>) -> Self {
+        Self {
+            state: Rc::downgrade(state),
+        }
+    }
+
+    fn with_state<R>(
+        &self,
+        operation: impl FnOnce(&SessionVariableState) -> R,
+    ) -> Result<R, crate::RuntimeError> {
+        let state = self.state.upgrade().ok_or_else(session_variables_closed)?;
+        state
+            .session_variables
+            .try_borrow()
+            .map(|variables| operation(&variables))
+            .map_err(session_variables_read_borrow)
+    }
+
+    fn with_state_mut<R>(
+        &self,
+        operation: impl FnOnce(&mut SessionVariableState) -> R,
+    ) -> Result<R, crate::RuntimeError> {
+        let state = self.state.upgrade().ok_or_else(session_variables_closed)?;
+        state
+            .session_variables
+            .try_borrow_mut()
+            .map(|mut variables| operation(&mut variables))
+            .map_err(session_variables_write_borrow)
+    }
+
+    pub fn global_value(&self, name: &str) -> Result<Option<Value>, crate::RuntimeError> {
+        self.with_state(|state| state.global_value(name))
+    }
+
+    pub fn global_names(&self) -> Result<Vec<String>, crate::RuntimeError> {
+        self.with_state(SessionVariableState::global_names)
+    }
+
+    pub fn global_revision(&self) -> Result<GlobalRevision, crate::RuntimeError> {
+        self.with_state(|state| state.global_revision.clone())
+    }
+
+    pub fn declare_global(&self, name: &str) -> Result<Value, crate::RuntimeError> {
+        self.with_state_mut(|state| state.declare_global(name))
+    }
+
+    pub fn store_global(&self, name: &str, value: Value) -> Result<(), crate::RuntimeError> {
+        self.with_state_mut(|state| state.store_global(name, value))
+    }
+
+    pub fn global_slot(&self, slot: usize) -> Result<Option<Value>, crate::RuntimeError> {
+        self.with_state(|state| state.global_slots.get(&slot).cloned())
+    }
+
+    pub fn store_global_slot(&self, slot: usize, value: Value) -> Result<(), crate::RuntimeError> {
+        self.with_state_mut(|state| {
+            state.global_slots.insert(slot, value);
+            state.global_revision = GlobalRevision::default();
+        })
+    }
+}
+
+fn session_variables_closed() -> crate::RuntimeError {
+    crate::runtime_error::semantic_error(
+        "RunMat:Workspace:SessionClosed",
+        "session variable authority is closed",
+    )
+}
+
+fn session_variables_read_borrow(error: std::cell::BorrowError) -> crate::RuntimeError {
+    crate::runtime_error::semantic_error(
+        "RunMat:Workspace:GlobalBorrow",
+        format!("session-global workspace read is reentrant: {error}"),
+    )
+}
+
+fn session_variables_write_borrow(error: std::cell::BorrowMutError) -> crate::RuntimeError {
+    crate::runtime_error::semantic_error(
+        "RunMat:Workspace:GlobalBorrow",
+        format!("session-global workspace mutation is reentrant: {error}"),
+    )
+}
 
 /// Opaque identity for one version of the session global store. Retaining the
 /// token makes equality immune to counter wraparound and state replacement.
@@ -36,6 +128,33 @@ pub struct SessionVariableState {
     persistent_names: HashMap<(String, String), Value>,
 }
 
+impl SessionVariableState {
+    pub(crate) fn global_value(&self, name: &str) -> Option<Value> {
+        self.globals.get(name).cloned()
+    }
+
+    pub(crate) fn global_names(&self) -> Vec<String> {
+        let mut names = self.globals.keys().cloned().collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
+    fn declare_global(&mut self, name: &str) -> Value {
+        if let Some(value) = self.globals.get(name) {
+            return value.clone();
+        }
+        let value = canonical_empty_workspace_value();
+        self.globals.insert(name.to_string(), value.clone());
+        self.global_revision = GlobalRevision::default();
+        value
+    }
+
+    fn store_global(&mut self, name: &str, value: Value) {
+        self.globals.insert(name.to_string(), value);
+        self.global_revision = GlobalRevision::default();
+    }
+}
+
 runmat_thread_local! {
     static LEGACY_SESSION_VARIABLES: RefCell<SessionVariableState> = RefCell::new(SessionVariableState::default());
 }
@@ -55,15 +174,25 @@ fn with_state_mut<R>(operation: impl FnOnce(&mut SessionVariableState) -> R) -> 
 }
 
 pub fn global_names() -> Vec<String> {
-    with_state(|state| {
-        let mut names = state.globals.keys().cloned().collect::<Vec<_>>();
-        names.sort();
-        names
-    })
+    with_state(SessionVariableState::global_names)
 }
 
 pub fn global_value(name: &str) -> Option<Value> {
-    with_state(|state| state.globals.get(name).cloned())
+    with_state(|state| state.global_value(name))
+}
+
+/// Establish a named global and return its current value. A first declaration
+/// initializes the shared value to the canonical empty matrix, so declaring a
+/// global never exposes a stale local value from the declaring frame.
+pub fn declare_global_named(name: &str) -> Value {
+    with_state_mut(|state| state.declare_global(name))
+}
+
+fn canonical_empty_workspace_value() -> Value {
+    Value::Tensor(
+        runmat_value::Tensor::new(Vec::new(), vec![0, 0])
+            .expect("the canonical empty workspace shape is valid"),
+    )
 }
 
 /// Revision of the session's named global store. Native frames use this to
@@ -78,10 +207,7 @@ pub fn global_revision() -> GlobalRevision {
 /// bytecode, and browser hosts can therefore share one session global without
 /// agreeing on a frame layout.
 pub fn store_global_named(name: &str, value: Value) {
-    with_state_mut(|state| {
-        state.globals.insert(name.to_string(), value);
-        state.global_revision = GlobalRevision::default();
-    });
+    with_state_mut(|state| state.store_global(name, value));
 }
 
 pub fn roots() -> Vec<Value> {

@@ -2,7 +2,7 @@
 
 use super::{compile_dynamic_workspace_eval, FunctionRegistry};
 use crate::interpreter::api::InterpreterOutcome;
-use crate::interpreter::runner::interpret_with_vars_in_context;
+use crate::interpreter::runner::interpret_with_workspace_in_context;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
@@ -44,6 +44,25 @@ pub async fn evaluate_session_source_in_context(
         assigned.insert(name);
         values.push(value);
     }
+    let global_aliases = runmat_runtime::workspace::bindings::FrameGlobalBindings::default();
+    for name in
+        runmat_runtime::context::RuntimeWorkspaceService::base_global_binding_names(&projection)?
+    {
+        let Some(value) = runtime.session_global_value(&name)? else {
+            continue;
+        };
+        let slot = if let Some(slot) = names.get(&name).copied() {
+            values[slot] = value;
+            slot
+        } else {
+            let slot = values.len();
+            names.insert(name.clone(), slot);
+            values.push(value);
+            slot
+        };
+        assigned.insert(name.clone());
+        global_aliases.declare_named(slot, name);
+    }
     let Some((bytecode, result_slot)) = compile_dynamic_workspace_eval(
         "source evaluation",
         &source,
@@ -62,21 +81,24 @@ pub async fn evaluate_session_source_in_context(
         .clone()
         .with_workspace(projection.clone());
     let execution_runtime = runtime.with_service_ports(services);
-    let _pending_workspace = crate::runtime::workspace::push_pending_workspace(names, assigned);
-    let outcome = interpret_with_vars_in_context(
+    let admission = crate::runtime::workspace::workspace_admission_with_global_bindings(
+        names,
+        assigned,
+        global_aliases,
+    );
+    let execution = interpret_with_workspace_in_context(
         &bytecode,
         &mut values,
         Some(&source_label),
         execution_runtime,
+        Some(admission),
     )
     .await;
-    let _ = crate::runtime::workspace::take_updated_workspace_state();
-    let _ = crate::runtime::workspace::take_updated_workspace_assigned_report();
 
     if projection.has_pending_changes()? {
         projection.publish()?;
     }
-    let InterpreterOutcome::Completed(completion) = outcome?;
+    let InterpreterOutcome::Completed(completion) = execution.outcome?;
     if requested_outputs == 0 {
         return Ok(runmat_value::ValueSequence::empty());
     }

@@ -113,6 +113,20 @@ impl BaseWorkspaceProjectionService {
         <Self as RuntimeWorkspaceService>::clear(self)
     }
 
+    pub fn bind_global(&self, name: &str) -> Result<(), RuntimeError> {
+        self.with_live_projection_mut(|projection| {
+            projection.bind_global(name);
+            Ok(())
+        })
+    }
+
+    pub fn unbind_global(&self, name: &str) -> Result<(), RuntimeError> {
+        self.with_live_projection_mut(|projection| {
+            projection.unbind_global(name);
+            Ok(())
+        })
+    }
+
     /// Publish all ordered mutations admitted since the preceding safepoint.
     pub fn publish(&self) -> Result<BaseWorkspaceCommit, RuntimeError> {
         let mut state = self
@@ -268,6 +282,36 @@ impl RuntimeWorkspaceService for BaseWorkspaceProjectionService {
 
     fn workspace_revision(&self) -> Result<Option<WorkspaceRevision>, RuntimeError> {
         self.revision().map(Some)
+    }
+
+    fn base_global_binding_names(&self) -> Result<Vec<String>, RuntimeError> {
+        self.with_live_projection(|projection| {
+            let mut names = projection
+                .global_names()
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            names.sort();
+            names
+        })
+    }
+
+    fn is_base_global_binding(&self, name: &str) -> Result<bool, RuntimeError> {
+        self.with_live_projection(|projection| projection.is_global(name))
+    }
+
+    fn bind_base_global(&self, name: &str) -> Result<(), RuntimeError> {
+        self.bind_global(name)
+    }
+
+    fn unbind_base_global(&self, name: &str) -> Result<(), RuntimeError> {
+        self.unbind_global(name)
+    }
+
+    fn assign_base_local(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
+        self.with_live_projection_mut(|projection| {
+            projection.unbind_global(name);
+            projection.assign(name, value)
+        })
     }
 
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError> {

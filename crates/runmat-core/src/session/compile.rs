@@ -1467,9 +1467,15 @@ impl RunMatSession {
         }
 
         // Populate with existing values based on the variable mapping
+        let global_names = self.session_global_binding_names()?;
         for (var_name, &new_var_id) in updated_var_mapping {
             if new_var_id < new_variable_array.len() {
-                if let Some(value) = workspace.lookup(var_name)? {
+                let value = if global_names.contains(var_name) {
+                    self.runtime_context.session_global_value(var_name)?
+                } else {
+                    workspace.lookup(var_name)?
+                };
+                if let Some(value) = value {
                     if debug_trace {
                         debug!(
                             var_name,

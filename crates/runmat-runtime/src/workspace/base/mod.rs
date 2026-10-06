@@ -7,6 +7,7 @@ mod commit;
 mod delta;
 mod error;
 mod journal;
+mod logical;
 mod owner;
 mod projection;
 mod projection_service;
@@ -16,6 +17,7 @@ mod values;
 
 pub use delta::{WorkspaceChange, WorkspaceChangeKind, WorkspaceDelta};
 pub use error::BaseWorkspaceError;
+pub use logical::{assign_logical_base_value, lookup_logical_base_value};
 pub use owner::{
     BaseWorkspaceCommit, BaseWorkspaceOwner, BaseWorkspaceReconciliation, BaseWorkspaceSnapshot,
 };

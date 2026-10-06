@@ -1,11 +1,10 @@
 use crate::bytecode::{Bytecode, FunctionRegistry, Instr};
 use crate::interpreter::api::InterpreterOutcome;
 use crate::interpreter::errors::mex;
-use crate::interpreter::runner::interpret_with_vars_in_context;
 use crate::interpreter::stack::pop_args;
 use crate::runtime::workspace::{
     replace_workspace_target_vars_and_state, workspace_assign_target, workspace_target_snapshot,
-    WorkspaceTarget, WorkspaceValueSnapshot,
+    WorkspaceAssignedReport, WorkspaceTarget, WorkspaceValueSnapshot,
 };
 use runmat_hir::{CallableIdentity, FunctionId, QualifiedName, SymbolName};
 use runmat_parser::{parse_with_options, CompatMode, ParserOptions};
@@ -661,6 +660,7 @@ async fn eval_workspace_source(
         target_vars,
         frame.names.clone(),
         frame.assigned,
+        frame.global_aliases,
         builtin,
         source_label,
         runtime,
@@ -676,8 +676,10 @@ async fn eval_workspace_source(
                     snapshot.vars,
                     snapshot.names,
                     snapshot.assigned,
+                    snapshot.global_aliases,
+                    effects.workspace_report.clone(),
                 )
-                .map_err(|err| mex("DynamicWorkspaceUnavailable", &format!("{builtin}: {err}")))?;
+                .map_err(|err| dynamic_workspace_commit_error(builtin, err))?;
                 result_vars
             } else {
                 vars
@@ -691,13 +693,10 @@ async fn eval_workspace_source(
                         snapshot.vars,
                         snapshot.names,
                         snapshot.assigned,
+                        snapshot.global_aliases,
+                        effects.workspace_report.clone(),
                     )
-                    .map_err(|replace_err| {
-                        mex(
-                            "DynamicWorkspaceUnavailable",
-                            &format!("{builtin}: {replace_err}"),
-                        )
-                    })?;
+                    .map_err(|err| dynamic_workspace_commit_error(builtin, err))?;
                 }
             }
             effects.replay();
@@ -757,6 +756,7 @@ struct DynamicThreadEffects {
     console: Vec<runmat_runtime::console::ConsoleEntry>,
     warnings: Vec<runmat_runtime::warning_store::RuntimeWarning>,
     recent_figures: Vec<u32>,
+    workspace_report: WorkspaceAssignedReport,
 }
 
 impl DynamicThreadEffects {
@@ -772,6 +772,7 @@ async fn interpret_dynamic_workspace_eval(
     mut target_vars: Vec<Value>,
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
+    global_aliases: HashMap<usize, runmat_runtime::workspace::bindings::FrameGlobalBinding>,
     _builtin: &'static str,
     source_label: String,
     runtime: runmat_runtime::context::RuntimeContext,
@@ -783,14 +784,39 @@ async fn interpret_dynamic_workspace_eval(
     ),
     RuntimeError,
 > {
-    let _pending_workspace =
-        crate::runtime::workspace::push_transactional_pending_workspace(names, assigned);
-    let outcome =
-        interpret_with_vars_in_context(&bytecode, &mut target_vars, Some(&source_label), runtime)
-            .await;
-    let updated_workspace = crate::runtime::workspace::take_updated_workspace_state();
-    let _ = crate::runtime::workspace::take_updated_workspace_assigned_report();
-    Ok((outcome, updated_workspace, DynamicThreadEffects::default()))
+    let admission =
+        crate::runtime::workspace::transactional_workspace_admission_with_global_bindings(
+            names,
+            assigned,
+            runmat_runtime::workspace::bindings::FrameGlobalBindings::from_snapshot(global_aliases),
+        );
+    let execution = crate::interpreter::runner::interpret_with_workspace_in_context(
+        &bytecode,
+        &mut target_vars,
+        Some(&source_label),
+        runtime,
+        Some(admission),
+    )
+    .await;
+    let (updated_workspace, workspace_report) = execution
+        .workspace
+        .map(|completion| (Some(completion.state), completion.assigned))
+        .unwrap_or_default();
+    Ok((
+        execution.outcome,
+        updated_workspace,
+        DynamicThreadEffects {
+            workspace_report,
+            ..DynamicThreadEffects::default()
+        },
+    ))
+}
+
+fn dynamic_workspace_commit_error(builtin: &str, source: RuntimeError) -> RuntimeError {
+    runmat_runtime::build_runtime_error(format!("{builtin}: {source}"))
+        .with_identifier("RunMat:DynamicWorkspaceUnavailable")
+        .with_source(source)
+        .build()
 }
 
 fn compile_dynamic_workspace_eval(

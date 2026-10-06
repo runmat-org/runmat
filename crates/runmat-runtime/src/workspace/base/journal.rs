@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeSet, HashSet, VecDeque};
 
 use super::delta::WorkspaceChangeData;
 use super::values::RootedWorkspaceEntries;
@@ -50,9 +50,10 @@ impl WorkspaceJournal {
             .changes()
             .iter()
             .map(|change| match change.data() {
-                WorkspaceChangeData::Assign { name, .. } | WorkspaceChangeData::Remove { name } => {
-                    WorkspaceImpact::Name(name.clone())
-                }
+                WorkspaceChangeData::Assign { name, .. }
+                | WorkspaceChangeData::Remove { name }
+                | WorkspaceChangeData::BindGlobal { name }
+                | WorkspaceChangeData::UnbindGlobal { name } => WorkspaceImpact::Name(name.clone()),
                 WorkspaceChangeData::Clear => WorkspaceImpact::Clear,
             })
             .collect::<Vec<_>>();
@@ -77,6 +78,7 @@ impl WorkspaceJournal {
         revision: WorkspaceRevision,
         current: WorkspaceRevision,
         entries: &RootedWorkspaceEntries,
+        global_bindings: &HashSet<String>,
     ) -> Result<BaseWorkspaceReconciliation, BaseWorkspaceError> {
         if revision > current {
             return Err(BaseWorkspaceError::FutureRevision {
@@ -84,7 +86,7 @@ impl WorkspaceJournal {
                 current: current.get(),
             });
         }
-        Ok(self.reconcile_known(revision, current, entries))
+        Ok(self.reconcile_known(revision, current, entries, global_bindings))
     }
 
     pub(super) fn reconcile_known(
@@ -92,6 +94,7 @@ impl WorkspaceJournal {
         revision: WorkspaceRevision,
         current: WorkspaceRevision,
         entries: &RootedWorkspaceEntries,
+        global_bindings: &HashSet<String>,
     ) -> BaseWorkspaceReconciliation {
         if revision == current {
             return BaseWorkspaceReconciliation::UpToDate { revision };
@@ -100,6 +103,7 @@ impl WorkspaceJournal {
             return BaseWorkspaceReconciliation::Reset(BaseWorkspaceSnapshot::new(
                 current,
                 entries.clone(),
+                global_bindings.clone(),
             ));
         }
 
@@ -128,6 +132,11 @@ impl WorkspaceJournal {
             changes.clear();
         }
         for name in names {
+            if global_bindings.contains(&name) {
+                changes.bind_global(name);
+                continue;
+            }
+            changes.unbind_global(name.clone());
             match entries.get(&name) {
                 Some(entry) => changes.push_assign_entry(name, entry.clone()),
                 None if !clear => changes.remove(name),

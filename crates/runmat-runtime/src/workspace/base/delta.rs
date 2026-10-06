@@ -19,6 +19,12 @@ pub(super) enum WorkspaceChangeData {
     Remove {
         name: String,
     },
+    BindGlobal {
+        name: String,
+    },
+    UnbindGlobal {
+        name: String,
+    },
     Clear,
 }
 
@@ -46,16 +52,19 @@ impl WorkspaceChange {
     pub fn kind(&self) -> WorkspaceChangeKind {
         match &self.0 {
             WorkspaceChangeData::Assign { .. } => WorkspaceChangeKind::Assign,
-            WorkspaceChangeData::Remove { .. } => WorkspaceChangeKind::Remove,
+            WorkspaceChangeData::Remove { .. }
+            | WorkspaceChangeData::BindGlobal { .. }
+            | WorkspaceChangeData::UnbindGlobal { .. } => WorkspaceChangeKind::Remove,
             WorkspaceChangeData::Clear => WorkspaceChangeKind::Clear,
         }
     }
 
     pub fn name(&self) -> Option<&str> {
         match &self.0 {
-            WorkspaceChangeData::Assign { name, .. } | WorkspaceChangeData::Remove { name } => {
-                Some(name)
-            }
+            WorkspaceChangeData::Assign { name, .. }
+            | WorkspaceChangeData::Remove { name }
+            | WorkspaceChangeData::BindGlobal { name }
+            | WorkspaceChangeData::UnbindGlobal { name } => Some(name),
             WorkspaceChangeData::Clear => None,
         }
     }
@@ -63,7 +72,10 @@ impl WorkspaceChange {
     pub fn value(&self) -> Option<&Value> {
         match &self.0 {
             WorkspaceChangeData::Assign { entry, .. } => Some(entry.value()),
-            WorkspaceChangeData::Remove { .. } | WorkspaceChangeData::Clear => None,
+            WorkspaceChangeData::Remove { .. }
+            | WorkspaceChangeData::BindGlobal { .. }
+            | WorkspaceChangeData::UnbindGlobal { .. }
+            | WorkspaceChangeData::Clear => None,
         }
     }
 
@@ -114,6 +126,26 @@ impl WorkspaceDelta {
 
     pub fn clear(&mut self) {
         self.changes.push(WorkspaceChange::clear());
+    }
+
+    /// Bind a base-workspace name to the separate session-global value store.
+    /// The canonical base owner records this alongside removing any local
+    /// value so both namespace changes share one ordered revision.
+    pub fn bind_global(&mut self, name: impl Into<String>) {
+        self.changes
+            .push(WorkspaceChange(WorkspaceChangeData::BindGlobal {
+                name: name.into(),
+            }));
+    }
+
+    /// Remove a base-workspace global binding and any hidden local value.
+    /// A later local assignment must be explicit; stale projections cannot
+    /// leave a value that resurfaces when the binding is cleared.
+    pub fn unbind_global(&mut self, name: impl Into<String>) {
+        self.changes
+            .push(WorkspaceChange(WorkspaceChangeData::UnbindGlobal {
+                name: name.into(),
+            }));
     }
 
     pub fn is_empty(&self) -> bool {
