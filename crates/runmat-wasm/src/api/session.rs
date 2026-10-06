@@ -71,6 +71,9 @@ use crate::wire::value::{integer_json_value, MAX_DATA_PREVIEW};
 #[wasm_bindgen]
 pub struct RunMatWasm {
     pub(crate) session: RefCell<RunMatSession>,
+    in_flight_session: Cell<bool>,
+    #[cfg(target_arch = "wasm32")]
+    local_tasks: RefCell<std::rc::Rc<runmat_runtime::context::BrowserLocalTaskSupervisor>>,
     config: RefCell<SessionConfig>,
     gpu_status: GpuStatus,
     disposed: Cell<bool>,
@@ -79,6 +82,42 @@ pub struct RunMatWasm {
     telemetry_sink: Option<Arc<dyn TelemetrySink>>,
     package_cache: Option<Arc<dyn runmat_package_cache::CacheBackend>>,
     execution_service: std::rc::Rc<BrowserExecutionService>,
+}
+
+struct InFlightSession<'a> {
+    host: &'a RunMatWasm,
+    session: Option<RunMatSession>,
+}
+
+impl std::ops::Deref for InFlightSession<'_> {
+    type Target = RunMatSession;
+
+    fn deref(&self) -> &Self::Target {
+        self.session.as_ref().expect("in-flight session is owned")
+    }
+}
+
+impl std::ops::DerefMut for InFlightSession<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.session.as_mut().expect("in-flight session is owned")
+    }
+}
+
+impl Drop for InFlightSession<'_> {
+    fn drop(&mut self) {
+        if let Some(mut session) = self.session.take() {
+            if self.host.disposed.get() {
+                session.cancel_execution();
+                session.shutdown_local_tasks();
+                session.clear_variables();
+                // The moved session is terminal. Never replace the disposed
+                // placeholder with an owner whose callbacks could resume.
+            } else {
+                *self.host.session.borrow_mut() = session;
+            }
+        }
+        self.host.in_flight_session.set(false);
+    }
 }
 
 pub(crate) struct WasmInterruptGuard<'a> {
@@ -135,8 +174,13 @@ impl RunMatWasm {
         package_cache: Option<Arc<dyn runmat_package_cache::CacheBackend>>,
         execution_service: std::rc::Rc<BrowserExecutionService>,
     ) -> Self {
+        #[cfg(target_arch = "wasm32")]
+        let local_tasks = RefCell::new(session.browser_local_task_supervisor());
         Self {
             session: RefCell::new(session),
+            in_flight_session: Cell::new(false),
+            #[cfg(target_arch = "wasm32")]
+            local_tasks,
             config: RefCell::new(config),
             gpu_status,
             disposed: Cell::new(false),
@@ -152,6 +196,18 @@ impl RunMatWasm {
             return Err(js_error("RunMat session has been disposed"));
         }
         Ok(())
+    }
+
+    fn take_session(&self) -> Result<InFlightSession<'_>, JsValue> {
+        self.ensure_not_disposed()?;
+        if self.in_flight_session.replace(true) {
+            return Err(js_error("RunMat session already has an in-flight request"));
+        }
+        let session = std::mem::take(&mut *self.session.borrow_mut());
+        Ok(InFlightSession {
+            host: self,
+            session: Some(session),
+        })
     }
 }
 
@@ -836,6 +892,7 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = executeRequest)]
     pub async fn execute_request_js(&self, request_value: JsValue) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
         let request_payload: ExecuteRequestPayload = serde_wasm_bindgen::from_value(request_value)
             .map_err(|err| js_error(&format!("executeRequest payload parse failed: {err}")))?;
         let source_for_telemetry = match &request_payload.source {
@@ -890,10 +947,7 @@ impl RunMatWasm {
             slot: &self.active_interrupt,
         };
 
-        let mut session = {
-            let mut slot = self.session.borrow_mut();
-            std::mem::take(&mut *slot)
-        };
+        let mut session = self.take_session()?;
 
         let mut request = runmat_core::abi::ExecutionRequest::for_source(
             match request_payload.source {
@@ -945,7 +999,7 @@ impl RunMatWasm {
         if error_namespace_override.is_some() {
             session.set_error_namespace(self.config.borrow().error_namespace.clone());
         }
-        *self.session.borrow_mut() = session;
+        drop(session);
         let payload = match exec_response.result {
             Ok(outcome) => {
                 if !retain_figures
@@ -1216,6 +1270,12 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = resetSession)]
     pub fn reset_session(&self) -> Result<(), JsValue> {
+        self.ensure_not_disposed()?;
+        if self.in_flight_session.get() {
+            return Err(js_error(
+                "Cannot reset a RunMat session during an in-flight request",
+            ));
+        }
         wasm_registry::register_all();
         let builtin_count = runmat_builtins::builtin_functions().len();
         log::warn!("RunMat wasm: builtins registered ({builtin_count})");
@@ -1251,6 +1311,8 @@ impl RunMatWasm {
             });
             session.set_telemetry_sink(self.telemetry_sink.clone());
         }
+        #[cfg(target_arch = "wasm32")]
+        *self.local_tasks.borrow_mut() = session.browser_local_task_supervisor();
         let mut slot = self.session.borrow_mut();
         *slot = session;
         let has_stdin_handler = JS_STDIN_HANDLER.with(|s| s.borrow().is_some());
@@ -1429,13 +1491,10 @@ impl RunMatWasm {
         {
             let target = parse_materialize_target(selector)?;
             let opts = parse_materialize_options(options)?;
-            let mut session = {
-                let mut slot = self.session.borrow_mut();
-                std::mem::take(&mut *slot)
-            };
+            let mut session = self.take_session()?;
 
             let materialize_result = session.materialize_variable(target, opts).await;
-            *self.session.borrow_mut() = session;
+            drop(session);
 
             let value = materialize_result
                 .map_err(|err| js_error(&format!("materializeVariable failed: {err}")))?;
@@ -1478,12 +1537,9 @@ impl RunMatWasm {
         self.ensure_not_disposed()?;
         let mode = parse_workspace_export_mode(include_variables.as_deref());
 
-        let mut session = {
-            let mut slot = self.session.borrow_mut();
-            std::mem::take(&mut *slot)
-        };
+        let mut session = self.take_session()?;
         let result = session.export_workspace_state(mode).await;
-        *self.session.borrow_mut() = session;
+        drop(session);
 
         result.map_err(|err| js_error(&format!("Failed to export workspace state: {err}")))
     }
@@ -1763,11 +1819,20 @@ impl RunMatWasm {
         if self.disposed.replace(true) {
             return;
         }
-        {
+        if let Some(active) = self.active_interrupt.borrow().as_ref() {
+            active.cancel(runmat_execution::CancellationReason::Shutdown);
+        }
+        #[cfg(target_arch = "wasm32")]
+        self.local_tasks.borrow().shutdown();
+        if !self.in_flight_session.get() {
             let mut session = self.session.borrow_mut();
             session.cancel_execution();
             session.shutdown_local_tasks();
             session.clear_variables();
+        } else {
+            // `take_session` leaves a fresh placeholder in this slot. Its
+            // unrelated task owner must be terminal too.
+            self.session.borrow().shutdown_local_tasks();
         }
         #[cfg(target_arch = "wasm32")]
         {

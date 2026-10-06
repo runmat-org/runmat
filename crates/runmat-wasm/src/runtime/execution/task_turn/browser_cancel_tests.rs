@@ -141,3 +141,41 @@ async fn same_browser_event_loop_cancel_interrupts_running_tsne() {
     )
     .await;
 }
+
+#[wasm_bindgen_test(async)]
+async fn dispose_while_public_execution_is_pending_never_restores_its_task_owner() {
+    let runtime = Rc::new(
+        crate::init_runmat(JsValue::NULL)
+            .await
+            .expect("initialize browser runtime"),
+    );
+    let original_owner = runtime.session.borrow().browser_local_task_supervisor();
+    let request = json!({
+        "source": { "kind": "text", "name": "dispose-pending.m", "text": "pause(1); completed = 1;" },
+        "compatibility": "runmat"
+    })
+    .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+    .expect("encode execution request");
+    let mut execution = Box::pin(runtime.execute_request_js(request.clone()));
+    futures::future::poll_fn(|context| match execution.as_mut().poll(context) {
+        Poll::Pending => Poll::Ready(()),
+        Poll::Ready(result) => panic!("execution must suspend before disposal: {result:?}"),
+    })
+    .await;
+
+    runtime.dispose();
+    let _ = execution
+        .await
+        .expect("in-flight request returns a structured result");
+    assert!(
+        !Rc::ptr_eq(
+            &original_owner,
+            &runtime.session.borrow().browser_local_task_supervisor()
+        ),
+        "disposed in-flight session must not replace its placeholder"
+    );
+    assert!(
+        runtime.execute_request_js(request).await.is_err(),
+        "disposed host cannot admit another execution"
+    );
+}

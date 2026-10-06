@@ -173,6 +173,15 @@ impl RunMatSession {
         self.local_tasks.clone()
     }
 
+    /// Browser host disposal retains this exact owner while the session is
+    /// temporarily moved out for an asynchronous JavaScript request.
+    #[cfg(target_arch = "wasm32")]
+    pub fn browser_local_task_supervisor(
+        &self,
+    ) -> std::rc::Rc<runmat_runtime::context::BrowserLocalTaskSupervisor> {
+        self.local_tasks.clone()
+    }
+
     /// Stop and release local callback jobs before host disposal. Idempotent;
     /// subsequent scheduling reports a stable closed-session error.
     pub fn shutdown_local_tasks(&self) {
