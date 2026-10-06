@@ -200,7 +200,7 @@ fn encode(
         ),
         Value::BoundFunctionHandle {
             name,
-            function,
+            function: _,
             authority,
             source_role,
             source_file,

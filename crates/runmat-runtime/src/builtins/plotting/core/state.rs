@@ -5,7 +5,7 @@ use runmat_plot::plots::{
     TextStyle,
 };
 use runmat_thread_local::runmat_thread_local;
-use runmat_value::{Tensor, Value};
+use runmat_value::Tensor;
 use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
@@ -25,6 +25,9 @@ use super::web::current_plot_theme_config;
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::{BuiltinResult, RuntimeError};
+
+#[path = "state/callbacks.rs"]
+pub(crate) mod callbacks;
 
 #[path = "state/colorbar.rs"]
 mod colorbar;
@@ -698,7 +701,24 @@ pub enum FunctionSurfaceFunctionRef {
     MethodFunctionHandle(String),
     /// Retain the actual callable, including its exact definition owner and
     /// captured environment, rather than reconstructing it from display data.
-    OwnedCallable(Value),
+    OwnedCallable(callbacks::PlotCallableToken),
+}
+
+fn release_function_ref(function: &FunctionSurfaceFunctionRef) {
+    if let FunctionSurfaceFunctionRef::OwnedCallable(token) = function {
+        callbacks::release(*token);
+    }
+}
+
+fn release_function_state(function: &FunctionSurfaceFunctionState) {
+    match function {
+        FunctionSurfaceFunctionState::Explicit(function) => release_function_ref(function),
+        FunctionSurfaceFunctionState::Parametric { x, y, z } => {
+            release_function_ref(x);
+            release_function_ref(y);
+            release_function_ref(z);
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -4940,10 +4960,20 @@ fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) 
         PlotChildHandleState::Heatmap(heatmap) => heatmap.figure != handle,
         PlotChildHandleState::Binscatter(binscatter) => binscatter.figure != handle,
         PlotChildHandleState::FunctionSurface(function_surface) => {
-            function_surface.figure != handle
+            if function_surface.figure == handle {
+                release_function_state(&function_surface.function);
+                false
+            } else {
+                true
+            }
         }
         PlotChildHandleState::FunctionContour(function_contour) => {
-            function_contour.figure != handle
+            if function_contour.figure == handle {
+                release_function_ref(&function_contour.function);
+                false
+            } else {
+                true
+            }
         }
         PlotChildHandleState::Area(area) => area.figure != handle,
         PlotChildHandleState::Text(text) => text.figure != handle,
@@ -5087,6 +5117,17 @@ pub fn reset_recent_figures() {
 pub fn reset_plot_state() {
     {
         let mut reg = registry();
+        for child in reg.plot_children.values() {
+            match child {
+                PlotChildHandleState::FunctionSurface(surface) => {
+                    release_function_state(&surface.function);
+                }
+                PlotChildHandleState::FunctionContour(contour) => {
+                    release_function_ref(&contour.function);
+                }
+                _ => {}
+            }
+        }
         *reg = PlotRegistry::default();
     }
     reset_recent_figures();
@@ -5880,6 +5921,18 @@ mod tests {
     #[cfg(test)]
     pub(crate) fn reset_for_tests() {
         let mut reg = registry();
+        for child in reg.plot_children.values() {
+            match child {
+                PlotChildHandleState::FunctionSurface(surface) => {
+                    release_function_state(&surface.function);
+                }
+                PlotChildHandleState::FunctionContour(contour) => {
+                    release_function_ref(&contour.function);
+                }
+                _ => {}
+            }
+        }
+        reg.plot_children.clear();
         reg.figures.clear();
         reg.current = FigureHandle::default();
         reg.next_handle = FigureHandle::default().next();
