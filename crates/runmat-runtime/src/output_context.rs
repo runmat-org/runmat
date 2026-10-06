@@ -49,3 +49,21 @@ pub fn requested_output_count() -> Option<usize> {
 fn active_projection() -> Option<Rc<RefCell<InvocationOutputProjection>>> {
     crate::context::legacy::active().map(|context| Rc::clone(context.output_projection()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn direct_guards_remove_their_exact_out_of_order_overlay() {
+        let first = push_output_count(1);
+        let second = push_output_count(2);
+        assert_eq!(requested_output_count(), Some(2));
+
+        drop(first);
+        assert_eq!(requested_output_count(), Some(2));
+        drop(second);
+        assert_eq!(requested_output_count(), None);
+    }
+}

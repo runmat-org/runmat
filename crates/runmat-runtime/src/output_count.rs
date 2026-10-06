@@ -109,4 +109,17 @@ mod tests {
         drop(outer);
         assert_eq!(current_output_scope(), InvocationOutputScope::Unscoped);
     }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn direct_guards_remove_their_exact_out_of_order_overlay() {
+        let first = push_output_count(Some(1));
+        let second = push_output_count(Some(2));
+        assert_eq!(current_output_scope(), InvocationOutputScope::Requested(2));
+
+        drop(first);
+        assert_eq!(current_output_scope(), InvocationOutputScope::Requested(2));
+        drop(second);
+        assert_eq!(current_output_scope(), InvocationOutputScope::Unscoped);
+    }
 }

@@ -1,4 +1,4 @@
-use super::call_builtin_async_with_outputs_in_context;
+use super::{call_builtin_async_in_context, call_builtin_async_with_outputs_in_context};
 use crate::builtin::{RuntimeBuiltinBinding, RuntimeBuiltinInvocation};
 use crate::context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts};
 use crate::execution::RuntimeExecutionService;
@@ -16,7 +16,11 @@ use std::task::{Context, Poll};
 const NAME: &str = "__output_projection_pending_fixture";
 
 struct CallControl {
-    reached: oneshot::Sender<(Option<usize>, Option<usize>, Option<usize>)>,
+    reached: oneshot::Sender<(
+        Option<usize>,
+        crate::output_count::InvocationOutputScope,
+        Option<usize>,
+    )>,
     release: oneshot::Receiver<()>,
     completed: Rc<Cell<usize>>,
     presentation_outputs: usize,
@@ -39,15 +43,16 @@ fn pending_output_fixture(
     Box::pin(async move {
         let entry = (
             requested_outputs,
-            crate::output_count::current_output_count(),
+            crate::output_count::current_output_scope(),
             crate::output_context::requested_output_count(),
         );
         let _ = control.reached.send(entry);
         control.release.await.expect("test release");
-        assert_eq!(
-            crate::output_count::current_output_count(),
-            requested_outputs
+        let expected_scope = requested_outputs.map_or(
+            crate::output_count::InvocationOutputScope::Implicit,
+            crate::output_count::InvocationOutputScope::Requested,
         );
+        assert_eq!(crate::output_count::current_output_scope(), expected_scope);
         assert_eq!(
             crate::output_context::requested_output_count(),
             Some(control.presentation_outputs)
@@ -82,12 +87,16 @@ fn runtime() -> RuntimeContext {
 
 fn controlled_call(
     runtime: &RuntimeContext,
-    requested_outputs: usize,
+    requested_outputs: Option<usize>,
     presentation_outputs: usize,
     completed: Rc<Cell<usize>>,
 ) -> (
     Pin<Box<impl Future<Output = Result<Value, crate::RuntimeError>>>>,
-    oneshot::Receiver<(Option<usize>, Option<usize>, Option<usize>)>,
+    oneshot::Receiver<(
+        Option<usize>,
+        crate::output_count::InvocationOutputScope,
+        Option<usize>,
+    )>,
     oneshot::Sender<()>,
 ) {
     let (reached_tx, reached_rx) = oneshot::channel();
@@ -104,8 +113,12 @@ fn controlled_call(
     let call_context = runtime.clone();
     let future = selected.scope(async move {
         let _presentation = crate::output_context::push_output_count(presentation_outputs);
-        call_builtin_async_with_outputs_in_context(&call_context, NAME, &[], requested_outputs)
-            .await
+        match requested_outputs {
+            Some(count) => {
+                call_builtin_async_with_outputs_in_context(&call_context, NAME, &[], count).await
+            }
+            None => call_builtin_async_in_context(&call_context, NAME, &[]).await,
+        }
     });
     (Box::pin(future), reached_rx, release_tx)
 }
@@ -120,19 +133,27 @@ fn pending_sibling_builtin_calls_keep_exact_output_projections() {
     let runtime = runtime();
     let completed = Rc::new(Cell::new(0));
     let (mut first, mut first_reached, first_release) =
-        controlled_call(&runtime, 1, 1, Rc::clone(&completed));
+        controlled_call(&runtime, Some(1), 1, Rc::clone(&completed));
     let (mut second, mut second_reached, second_release) =
-        controlled_call(&runtime, 2, 2, Rc::clone(&completed));
+        controlled_call(&runtime, Some(2), 2, Rc::clone(&completed));
 
     assert!(poll_once(first.as_mut()).is_pending());
     assert_eq!(
         first_reached.try_recv().unwrap(),
-        Some((Some(1), Some(1), Some(1)))
+        Some((
+            Some(1),
+            crate::output_count::InvocationOutputScope::Requested(1),
+            Some(1)
+        ))
     );
     assert!(poll_once(second.as_mut()).is_pending());
     assert_eq!(
         second_reached.try_recv().unwrap(),
-        Some((Some(2), Some(2), Some(2)))
+        Some((
+            Some(2),
+            crate::output_count::InvocationOutputScope::Requested(2),
+            Some(2)
+        ))
     );
 
     drop(first);
@@ -152,11 +173,15 @@ fn pending_sibling_builtin_calls_keep_exact_output_projections() {
     assert_eq!(crate::output_context::requested_output_count(), None);
 
     let (mut next, mut next_reached, next_release) =
-        controlled_call(&runtime, 1, 3, Rc::clone(&completed));
+        controlled_call(&runtime, Some(1), 3, Rc::clone(&completed));
     assert!(poll_once(next.as_mut()).is_pending());
     assert_eq!(
         next_reached.try_recv().unwrap(),
-        Some((Some(1), Some(1), Some(3)))
+        Some((
+            Some(1),
+            crate::output_count::InvocationOutputScope::Requested(1),
+            Some(3)
+        ))
     );
     next_release.send(()).unwrap();
     assert!(matches!(
@@ -167,5 +192,49 @@ fn pending_sibling_builtin_calls_keep_exact_output_projections() {
     assert_eq!(crate::output_count::current_output_count(), None);
     assert_eq!(crate::output_context::requested_output_count(), None);
 
+    CONTROLS.with(|controls| assert!(controls.borrow().is_empty()));
+}
+
+#[test]
+fn pending_implicit_output_scope_stays_distinct_from_sibling_and_unscoped_calls() {
+    let runtime = runtime();
+    let completed = Rc::new(Cell::new(0));
+    let (mut implicit, mut implicit_reached, implicit_release) =
+        controlled_call(&runtime, None, 4, Rc::clone(&completed));
+    let (mut requested, mut requested_reached, requested_release) =
+        controlled_call(&runtime, Some(2), 2, Rc::clone(&completed));
+
+    assert!(poll_once(implicit.as_mut()).is_pending());
+    assert_eq!(
+        implicit_reached.try_recv().unwrap(),
+        Some((
+            None,
+            crate::output_count::InvocationOutputScope::Implicit,
+            Some(4)
+        ))
+    );
+    assert!(poll_once(requested.as_mut()).is_pending());
+    assert_eq!(
+        requested_reached.try_recv().unwrap(),
+        Some((
+            Some(2),
+            crate::output_count::InvocationOutputScope::Requested(2),
+            Some(2)
+        ))
+    );
+
+    drop(requested);
+    drop(requested_release);
+    implicit_release.send(()).unwrap();
+    assert!(matches!(
+        poll_once(implicit.as_mut()),
+        Poll::Ready(Ok(Value::Num(0.0)))
+    ));
+    assert_eq!(completed.get(), 1);
+    assert_eq!(
+        crate::output_count::current_output_scope(),
+        crate::output_count::InvocationOutputScope::Unscoped
+    );
+    assert_eq!(crate::output_context::requested_output_count(), None);
     CONTROLS.with(|controls| assert!(controls.borrow().is_empty()));
 }
