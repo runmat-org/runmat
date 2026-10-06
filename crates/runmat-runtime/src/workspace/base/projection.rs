@@ -66,10 +66,10 @@ impl BaseWorkspaceProjection {
     /// reconciliation, and new executor/effect admission must pass this check.
     pub fn ensure_effect_authority(&self) -> Result<(), BaseWorkspaceError> {
         let owner = self.owner.upgrade().ok_or(BaseWorkspaceError::Closed)?;
-        owner
+        let state = owner
             .try_borrow()
-            .map_err(|_| BaseWorkspaceError::BorrowConflict)?
-            .ensure_open()
+            .map_err(|_| BaseWorkspaceError::BorrowConflict)?;
+        state.ensure_open()
     }
 
     pub fn has_pending_changes(&self) -> bool {

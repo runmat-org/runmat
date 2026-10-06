@@ -149,7 +149,7 @@ pub async fn timer_startat_builtin(
         .map(|pair| numeric_scalar(&pair.value, "startat"))
         .transpose()?
         .filter(|seconds| *seconds > 0.0)
-        .map(|seconds| duration_property(seconds, "StartDelay"))
+        .map(|seconds| lifecycle::duration_property(seconds, "StartDelay"))
         .transpose()?;
     start_timer_values(&runtime, &value, delay).await?;
     Ok(Value::Num(0.0))
