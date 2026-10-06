@@ -187,6 +187,57 @@ fn stacked_axes_selection_remaps_overlay_closure() {
 }
 
 #[test]
+fn many_full_axes_keep_one_global_plot_order() {
+    const AXES: usize = 64;
+    let mut figure = Figure::new();
+    figure.set_subplot_grid(8, 8);
+    for axes in (0..AXES).rev() {
+        figure.add_line_plot_on_axes(line(axes as f64), axes);
+    }
+    let projected = project_figure_for_persistence(
+        &figure,
+        &FigurePersistenceSelection::Hierarchy {
+            include_super_title: false,
+            axes: (0..AXES)
+                .map(|source_axes_index| FigureAxesPersistenceSelection {
+                    source_axes_index,
+                    kind: FigureAxesSelectionKind::FullAxes,
+                })
+                .collect(),
+        },
+    )
+    .expect("many-axes projection");
+
+    assert_eq!(projected.figure.len(), AXES);
+    let expected_axes = (0..AXES).rev().collect::<Vec<_>>();
+    assert_eq!(
+        projected.figure.plot_axes_indices(),
+        expected_axes.as_slice()
+    );
+    assert_eq!(
+        projected
+            .remap
+            .plots
+            .iter()
+            .map(|entry| entry.source)
+            .collect::<Vec<_>>(),
+        (0..AXES).collect::<Vec<_>>()
+    );
+
+    let full = project_figure_for_persistence(&figure, &FigurePersistenceSelection::FullFigure)
+        .expect("full-figure projection");
+    assert_eq!(full.figure.plot_axes_indices(), expected_axes.as_slice());
+    assert_eq!(
+        full.remap
+            .plots
+            .iter()
+            .map(|entry| entry.source)
+            .collect::<Vec<_>>(),
+        (0..AXES).collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn nonexplicit_grid_and_explicit_positions_preserve_effective_geometry() {
     let mut figure = Figure::new();
     figure.set_subplot_grid(2, 2);

@@ -219,24 +219,36 @@ fn project_axes_metadata(
         color_order: source.color_order.clone(),
         color_limits: source.color_limits,
         axes_style: source.axes_style.clone(),
-        title_style: selected(FigureDecoration::Title)
-            .then(|| source.title_style.clone())
-            .unwrap_or_default(),
-        subtitle_style: selected(FigureDecoration::Subtitle)
-            .then(|| source.subtitle_style.clone())
-            .unwrap_or_default(),
-        x_label_style: selected(FigureDecoration::XLabel)
-            .then(|| source.x_label_style.clone())
-            .unwrap_or_default(),
-        y_label_style: selected(FigureDecoration::YLabel)
-            .then(|| source.y_label_style.clone())
-            .unwrap_or_default(),
-        z_label_style: selected(FigureDecoration::ZLabel)
-            .then(|| source.z_label_style.clone())
-            .unwrap_or_default(),
-        legend_style: selected(FigureDecoration::Legend)
-            .then(|| source.legend_style.clone())
-            .unwrap_or_default(),
+        title_style: if selected(FigureDecoration::Title) {
+            source.title_style.clone()
+        } else {
+            Default::default()
+        },
+        subtitle_style: if selected(FigureDecoration::Subtitle) {
+            source.subtitle_style.clone()
+        } else {
+            Default::default()
+        },
+        x_label_style: if selected(FigureDecoration::XLabel) {
+            source.x_label_style.clone()
+        } else {
+            Default::default()
+        },
+        y_label_style: if selected(FigureDecoration::YLabel) {
+            source.y_label_style.clone()
+        } else {
+            Default::default()
+        },
+        z_label_style: if selected(FigureDecoration::ZLabel) {
+            source.z_label_style.clone()
+        } else {
+            Default::default()
+        },
+        legend_style: if selected(FigureDecoration::Legend) {
+            source.legend_style.clone()
+        } else {
+            Default::default()
+        },
         world_text_annotations: annotations,
     };
     validate_source_layout(figure, plan.source, &projected)?;

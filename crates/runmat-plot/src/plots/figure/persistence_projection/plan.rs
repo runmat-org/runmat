@@ -80,17 +80,13 @@ impl ProjectionPlan {
             validate_members(source, source_axes, accumulated)?;
         }
 
+        let mut plots_by_axes = plots_by_axes(source);
         let axes = axes
             .into_iter()
             .enumerate()
             .map(|(destination, (source_axes, accumulated))| {
                 let plots = if accumulated.full {
-                    source
-                        .plot_axes_indices
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(plot, axes)| (*axes == source_axes).then_some(plot))
-                        .collect()
+                    std::mem::take(&mut plots_by_axes[source_axes])
                 } else {
                     accumulated.plots.into_iter().collect()
                 };
@@ -127,8 +123,9 @@ impl ProjectionPlan {
 }
 
 fn full_figure_plan(source: &Figure) -> ProjectionPlan {
+    let plots_by_axes = plots_by_axes(source);
     let mut axes = Vec::with_capacity(source.axes_metadata.len());
-    for source_axes in 0..source.axes_metadata.len() {
+    for (source_axes, plots) in plots_by_axes.into_iter().enumerate() {
         axes.push(AxesPlan {
             source: source_axes,
             destination: source_axes,
@@ -138,12 +135,7 @@ fn full_figure_plan(source: &Figure) -> ProjectionPlan {
                 .world_text_annotations
                 .len())
                 .collect(),
-            plots: source
-                .plot_axes_indices
-                .iter()
-                .enumerate()
-                .filter_map(|(plot, axes)| (*axes == source_axes).then_some(plot))
-                .collect(),
+            plots,
         });
     }
     ProjectionPlan {
@@ -151,6 +143,16 @@ fn full_figure_plan(source: &Figure) -> ProjectionPlan {
         include_super_title: true,
         axes,
     }
+}
+
+fn plots_by_axes(source: &Figure) -> Vec<Vec<usize>> {
+    let mut grouped = vec![Vec::new(); source.axes_metadata.len()];
+    for (plot, &axes) in source.plot_axes_indices.iter().enumerate() {
+        if let Some(plots) = grouped.get_mut(axes) {
+            plots.push(plot);
+        }
+    }
+    grouped
 }
 
 fn merge_container(target: &mut AxesAccumulator, selected: &FigureAxesContainerSelection) {
