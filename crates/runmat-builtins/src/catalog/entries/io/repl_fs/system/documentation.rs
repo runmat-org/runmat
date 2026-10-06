@@ -21,7 +21,7 @@ pub(in super::super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
     summary: "Run a native host command and return its exit status and complete output.",
     description: "`system(command)` runs a shell command on a native host. With two outputs it returns a double status and a character row containing complete standard output followed by complete standard error. An optional `'-echo'` also sends the collected text to the RunMat console.",
     keywords: &["system", "shell", "command", "process"],
-    related: &["ispc", "ismac", "isunix"],
+    related: &[],
     sections: &[
         BuiltinDocumentationSection {
             heading: "Supported forms",
@@ -57,6 +57,21 @@ pub(in super::super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
         label: "MATLAB system reference",
         target: BuiltinDocumentationLinkTarget::External(
             "https://www.mathworks.com/help/matlab/ref/system.html",
+        ),
+    }, BuiltinDocumentationLink {
+        label: "MATLAB ispc reference",
+        target: BuiltinDocumentationLinkTarget::External(
+            "https://www.mathworks.com/help/matlab/ref/ispc.html",
+        ),
+    }, BuiltinDocumentationLink {
+        label: "MATLAB ismac reference",
+        target: BuiltinDocumentationLinkTarget::External(
+            "https://www.mathworks.com/help/matlab/ref/ismac.html",
+        ),
+    }, BuiltinDocumentationLink {
+        label: "MATLAB isunix reference",
+        target: BuiltinDocumentationLinkTarget::External(
+            "https://www.mathworks.com/help/matlab/ref/isunix.html",
         ),
     }],
     media: &[],
