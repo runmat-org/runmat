@@ -23,7 +23,11 @@ fn assert_hot(setup: &str, source: &str, expected: &[(&str, Value)]) {
             assert!(outcome.error.is_none(), "{:?}", outcome.error);
             native_calls += usize::from(outcome.used_jit);
             for (name, value) in expected {
-                assert_eq!(session.get_variables().get(*name), Some(value), "{name}");
+                assert_eq!(
+                    session.get_variables().unwrap().get(*name),
+                    Some(value),
+                    "{name}"
+                );
             }
         }
         assert!(

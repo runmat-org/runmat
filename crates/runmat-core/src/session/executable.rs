@@ -95,6 +95,7 @@ impl RunMatSession {
     pub(super) fn prepare_tiered_interactive(
         &self,
         unit: &crate::ExecutableUnit,
+        workspace_projection: &runmat_runtime::workspace::BaseWorkspaceProjection,
     ) -> Option<(
         runmat_native_executor::execute::NativeWorkspaceInput,
         Option<runmat_jit::tiering::RepresentationProfile>,
@@ -111,10 +112,9 @@ impl RunMatSession {
             log::debug!(target: "runmat_core::native_tiering", "native interactive admission skipped reason=no_script_entrypoint");
             return None;
         }
-        let values = self
-            .workspace_values
+        let values = workspace_projection
             .iter()
-            .map(|(name, value)| (name.clone(), value.clone()))
+            .map(|(name, value)| (name.to_string(), value.clone()))
             .collect::<BTreeMap<_, _>>();
         let local_names = unit
             .entrypoint_workspace_bindings()

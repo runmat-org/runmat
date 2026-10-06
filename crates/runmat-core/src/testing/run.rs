@@ -154,7 +154,7 @@ mod tests {
     #[test]
     fn function_test_executes_exact_discovered_procedure_without_workspace_publication() {
         let mut session = RunMatSession::with_options(false, false).unwrap();
-        let before = session.workspace_snapshot();
+        let before = session.workspace_snapshot().unwrap();
         let run = futures::executor::block_on(session.run_test_snapshot(
             &snapshot(
                 "tests/arithmeticTest.m",
@@ -170,7 +170,7 @@ mod tests {
             TerminalDisposition::Passed,
             "{run:#?}"
         );
-        let after = session.workspace_snapshot();
+        let after = session.workspace_snapshot().unwrap();
         assert_eq!(after.version, before.version);
         assert_eq!(
             after

@@ -121,7 +121,12 @@ impl RuntimeWorkspaceService for BaseWorkspaceService {
     }
 }
 
-pub(crate) fn base_workspace_error_to_runtime(error: BaseWorkspaceError) -> RuntimeError {
+/// Preserve a typed base-workspace failure at a Runtime error boundary.
+///
+/// Execution hosts use this adapter when they operate directly on a canonical
+/// owner or one of its projections. Keeping the mapping here prevents hosts
+/// from copying identifiers or erasing the original rooting/transient cause.
+pub fn base_workspace_error_to_runtime(error: BaseWorkspaceError) -> RuntimeError {
     match error {
         BaseWorkspaceError::Rooting(source) => {
             let message = format!("could not retain a base workspace value: {source}");

@@ -81,12 +81,11 @@ pub struct RunMatSession {
     verbose: bool,
     /// Execution statistics
     stats: ExecutionStats,
-    /// Current variable array for bytecode execution
-    variable_array: Vec<Value>,
     /// Current workspace bindings with stable ABI identity and current VM slot.
     workspace_bindings: HashMap<String, SessionWorkspaceBinding>,
-    /// Persistent workspace values keyed by variable name
-    workspace_values: HashMap<String, Value>,
+    /// Canonical, rooted base-workspace state for this session. Executors use
+    /// invocation-local slot projections and publish ordered mutations here.
+    base_workspace: runmat_runtime::workspace::BaseWorkspaceOwner,
     /// Stable ABI identity for this interactive workspace.
     abi_workspace_handle: crate::abi::WorkspaceHandle,
     /// Source identity for the active execution request (if source-scoped).
@@ -149,7 +148,6 @@ pub struct RunMatSession {
     pub(crate) telemetry_platform: TelemetryPlatformInfo,
     pub(crate) telemetry_sink: Option<Arc<dyn TelemetrySink>>,
     workspace_preview_tokens: HashMap<Uuid, WorkspaceMaterializeTicket>,
-    workspace_version: u64,
     emit_fusion_plan: bool,
     compat_mode: CompatMode,
     top_level_await_enabled: bool,
@@ -278,6 +276,9 @@ impl Drop for ActiveExecutionGuard {
 
 impl Drop for RunMatSession {
     fn drop(&mut self) {
+        if let Err(error) = self.base_workspace.close() {
+            tracing::warn!(%error, "could not revoke base workspace during session shutdown");
+        }
         self.local_tasks.shutdown();
         #[cfg(not(target_arch = "wasm32"))]
         if let Err(error) = self.mex_runtime.shutdown(self.runtime_context.clone()) {

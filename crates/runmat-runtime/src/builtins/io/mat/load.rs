@@ -136,12 +136,11 @@ impl LoadWorkspaceTarget {
         let Some(service) = runtime.and_then(|runtime| runtime.service_ports().workspace()) else {
             return Ok(Self::Facade);
         };
-        if let Some(owner) = service.base_workspace_owner() {
-            return owner
-                .begin_projection()
-                .map(Self::Canonical)
-                .map_err(crate::workspace::base_workspace_error_to_runtime)
-                .map_err(load_workspace_flow);
+        if let Some(projection) = service
+            .begin_workspace_projection()
+            .map_err(load_workspace_flow)?
+        {
+            return Ok(Self::Canonical(projection));
         }
         Ok(Self::Service(service.clone()))
     }

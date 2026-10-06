@@ -1291,11 +1291,12 @@ impl RunMatSession {
     }
 
     pub(crate) fn prepare_variable_array_for_execution(
-        &mut self,
+        &self,
         bytecode: &runmat_vm::Bytecode,
         updated_var_mapping: &HashMap<String, usize>,
+        workspace: &runmat_runtime::workspace::BaseWorkspaceProjection,
         debug_trace: bool,
-    ) {
+    ) -> Vec<Value> {
         // Create a new variable array of the correct size
         let max_var_id = updated_var_mapping.values().copied().max().unwrap_or(0);
         let required_len = std::cmp::max(bytecode.var_count, max_var_id + 1);
@@ -1310,7 +1311,7 @@ impl RunMatSession {
         // Populate with existing values based on the variable mapping
         for (var_name, &new_var_id) in updated_var_mapping {
             if new_var_id < new_variable_array.len() {
-                if let Some(value) = self.workspace_values.get(var_name) {
+                if let Some(value) = workspace.get(var_name) {
                     if debug_trace {
                         debug!(
                             var_name,
@@ -1331,8 +1332,7 @@ impl RunMatSession {
             }
         }
 
-        // Update our variable array and mapping
-        self.variable_array = new_variable_array;
+        new_variable_array
     }
 }
 

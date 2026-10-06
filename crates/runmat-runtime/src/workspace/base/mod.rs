@@ -20,7 +20,7 @@ pub use owner::{
 };
 pub use projection::BaseWorkspaceProjection;
 pub use revision::WorkspaceRevision;
-pub(crate) use service::base_workspace_error_to_runtime;
+pub use service::base_workspace_error_to_runtime;
 pub use service::BaseWorkspaceService;
 
 #[cfg(test)]

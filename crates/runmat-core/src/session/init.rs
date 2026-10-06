@@ -36,7 +36,13 @@ impl RunMatSession {
         let placement = std::rc::Rc::new(runmat_accelerate::placement::PlacementSession::default());
         let parallel_services = crate::parallel_runtime::CoreParallelServices::new();
         let local_tasks = std::rc::Rc::new(SessionLocalTaskSupervisor::new());
+        let base_workspace = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+        let base_workspace_service = std::rc::Rc::new(
+            runmat_runtime::workspace::BaseWorkspaceService::new(base_workspace.clone()),
+        );
         let runtime_services = runmat_runtime::context::RuntimeServicePorts::default()
+            .with_workspace(base_workspace_service.clone())
+            .with_base_workspace(base_workspace_service)
             .with_local_tasks(local_tasks.submission_port(runtime_context.local_identity()))
             .with_call(std::rc::Rc::new(runmat_runtime::context::RuntimeCallRouter))
             .with_http(super::http_host::default_http_service())
@@ -114,9 +120,8 @@ impl RunMatSession {
         let session = Self {
             verbose,
             stats: ExecutionStats::default(),
-            variable_array: Vec::new(),
             workspace_bindings: HashMap::new(),
-            workspace_values: HashMap::new(),
+            base_workspace,
             abi_workspace_handle: crate::abi::WorkspaceHandle(Uuid::new_v4()),
             active_source_identity: None,
             function_registry: runmat_vm::FunctionRegistry::default(),
@@ -156,7 +161,6 @@ impl RunMatSession {
             telemetry_platform: TelemetryPlatformInfo::default(),
             telemetry_sink: None,
             workspace_preview_tokens: HashMap::new(),
-            workspace_version: 0,
             emit_fusion_plan: false,
             compat_mode: CompatMode::Matlab,
             top_level_await_enabled: true,

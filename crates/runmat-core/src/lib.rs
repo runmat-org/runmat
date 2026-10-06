@@ -56,7 +56,7 @@ pub fn execute_text_request_for_testing(
     );
     let response = futures::executor::block_on(session.execute_request(request));
     let outcome = response.result?;
-    let workspace = session.workspace_snapshot();
+    let workspace = session.workspace_snapshot().map_err(RunError::Runtime)?;
     let warnings = outcome
         .diagnostics
         .iter()

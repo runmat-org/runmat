@@ -13,6 +13,14 @@ fn workspace_runtime_error(error: RuntimeError) -> anyhow::Error {
 }
 
 impl RunMatSession {
+    pub(crate) fn base_workspace_snapshot(
+        &self,
+    ) -> std::result::Result<runmat_runtime::workspace::BaseWorkspaceSnapshot, RuntimeError> {
+        self.base_workspace
+            .snapshot()
+            .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)
+    }
+
     pub fn workspace_handle(&self) -> crate::abi::WorkspaceHandle {
         self.abi_workspace_handle
     }
@@ -46,11 +54,15 @@ impl RunMatSession {
             .collect()
     }
 
-    pub fn clear_variables(&mut self) {
-        self.variable_array.clear();
+    pub fn clear_variables(&mut self) -> std::result::Result<(), RuntimeError> {
+        let mut delta = runmat_runtime::workspace::WorkspaceDelta::new();
+        delta.clear();
+        self.base_workspace
+            .apply(delta)
+            .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)?;
         self.workspace_bindings.clear();
-        self.workspace_values.clear();
         self.workspace_preview_tokens.clear();
+        Ok(())
     }
 
     pub async fn export_workspace_state(
@@ -61,12 +73,15 @@ impl RunMatSession {
             return Ok(None);
         }
 
-        let mut entries: Vec<(String, Value)> = Vec::with_capacity(self.workspace_values.len());
-        for (name, value) in &self.workspace_values {
+        let snapshot = self
+            .base_workspace_snapshot()
+            .map_err(workspace_runtime_error)?;
+        let mut entries = Vec::with_capacity(snapshot.len());
+        for (name, value) in snapshot.iter() {
             let gathered = gather_if_needed_async(value)
                 .await
                 .map_err(workspace_runtime_error)?;
-            entries.push((name.clone(), gathered));
+            entries.push((name.to_string(), gathered));
         }
 
         if entries.is_empty() && matches!(mode, WorkspaceExportMode::Auto) {
@@ -90,32 +105,39 @@ impl RunMatSession {
             runmat_runtime::execution::validate_storable_value(value)
                 .map_err(workspace_runtime_error)?;
         }
-        self.clear_variables();
+        let mut delta = runmat_runtime::workspace::WorkspaceDelta::new();
+        delta.clear();
+        for (name, value) in &entries {
+            delta
+                .assign(name.clone(), value.clone())
+                .map_err(base_workspace_error)?;
+        }
+        self.base_workspace
+            .apply(delta)
+            .map_err(base_workspace_error)?;
 
-        for (index, (name, value)) in entries.into_iter().enumerate() {
+        self.workspace_bindings.clear();
+        for (index, (name, _)) in entries.into_iter().enumerate() {
             self.bind_workspace_slot(name.clone(), index);
-            self.variable_array.push(value.clone());
-            self.workspace_values.insert(name, value);
         }
 
         self.workspace_preview_tokens.clear();
-        self.workspace_version = self.workspace_version.wrapping_add(1);
         Ok(())
     }
 
-    pub fn workspace_snapshot(&mut self) -> WorkspaceSnapshot {
-        let mut entries: Vec<WorkspaceEntry> = self
-            .workspace_values
+    pub fn workspace_snapshot(&mut self) -> std::result::Result<WorkspaceSnapshot, RuntimeError> {
+        let snapshot = self.base_workspace_snapshot()?;
+        let mut entries: Vec<WorkspaceEntry> = snapshot
             .iter()
             .map(|(name, value)| workspace_entry(name, value))
             .collect();
         entries.sort_by(|a, b| a.name.cmp(&b.name));
 
-        WorkspaceSnapshot {
+        Ok(WorkspaceSnapshot {
             full: true,
-            version: self.workspace_version,
+            version: snapshot.revision().get(),
             values: self.attach_workspace_preview_tokens(entries),
-        }
+        })
     }
 
     /// Materialize a workspace variable for inspection (optionally identified by preview token).
@@ -133,9 +155,9 @@ impl RunMatSession {
                 .ok_or_else(|| anyhow::anyhow!("Unknown workspace preview token"))?,
         };
         let value = self
-            .workspace_values
-            .get(&name)
-            .cloned()
+            .base_workspace
+            .lookup(&name)
+            .map_err(base_workspace_error)?
             .ok_or_else(|| anyhow::anyhow!("Variable '{name}' not found in workspace"))?;
 
         let is_gpu = matches!(value, Value::GpuTensor(_));
@@ -204,22 +226,29 @@ impl RunMatSession {
     }
 
     /// Get the current persistent workspace values keyed by source name.
-    pub fn get_variables(&self) -> &HashMap<String, Value> {
-        &self.workspace_values
+    pub fn get_variables(&self) -> std::result::Result<HashMap<String, Value>, RuntimeError> {
+        let snapshot = self.base_workspace_snapshot()?;
+        Ok(snapshot
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.clone()))
+            .collect())
     }
 
     pub(crate) fn build_workspace_snapshot(
         &mut self,
         entries: Vec<WorkspaceEntry>,
         full: bool,
-    ) -> WorkspaceSnapshot {
-        self.workspace_version = self.workspace_version.wrapping_add(1);
-        let version = self.workspace_version;
-        WorkspaceSnapshot {
+    ) -> std::result::Result<WorkspaceSnapshot, RuntimeError> {
+        let version = self
+            .base_workspace
+            .revision()
+            .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)?
+            .get();
+        Ok(WorkspaceSnapshot {
             full,
             version,
             values: self.attach_workspace_preview_tokens(entries),
-        }
+        })
     }
 
     fn attach_workspace_preview_tokens(
@@ -241,6 +270,12 @@ impl RunMatSession {
         }
         values
     }
+}
+
+fn base_workspace_error(error: runmat_runtime::workspace::BaseWorkspaceError) -> anyhow::Error {
+    workspace_runtime_error(runmat_runtime::workspace::base_workspace_error_to_runtime(
+        error,
+    ))
 }
 
 fn source_binding_def_path(source_name: &str) -> runmat_hir::DefPath {

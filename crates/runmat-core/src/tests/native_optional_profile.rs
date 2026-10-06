@@ -25,7 +25,7 @@ fn generic_native_executes_complete_workspace_beyond_profile_value_bound() {
             .collect::<String>();
         let result = execute_text_request_for_testing(&mut session, &seed).unwrap();
         assert!(result.error.is_none(), "{:?}", result.error);
-        assert!(session.get_variables().len() >= 65);
+        assert!(session.get_variables().unwrap().len() >= 65);
         session.set_native_tiering_config_for_testing(config(64 * 1024));
         let source = "v0 = v0 + 1; assert(v64 == 64);";
         let mut native = 0;
@@ -35,8 +35,14 @@ fn generic_native_executes_complete_workspace_beyond_profile_value_bound() {
             native += usize::from(result.used_jit);
         }
         assert!(native >= 2, "actual generic native execution is required");
-        assert_eq!(session.get_variables().get("v0"), Some(&Value::Num(4.0)));
-        assert_eq!(session.get_variables().get("v64"), Some(&Value::Num(64.0)));
+        assert_eq!(
+            session.get_variables().unwrap().get("v0"),
+            Some(&Value::Num(4.0))
+        );
+        assert_eq!(
+            session.get_variables().unwrap().get("v64"),
+            Some(&Value::Num(64.0))
+        );
         assert_eq!(session.generic_native_cache_counts(), (1, 1));
         assert_eq!(session.specialized_native_version_count_for_testing(), 0);
         let snapshot = session.native_tiering_snapshot_for_testing();

@@ -11828,6 +11828,28 @@ fn run_error_commits_script_mutations_before_the_error() {
 }
 
 #[test]
+fn top_level_error_preserves_prior_base_workspace_assignment() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let outcome = execute_text_request(
+        &mut session,
+        "published_before_error = 73; error('RunMat:test:boom', 'boom');",
+    )
+    .expect("runtime failure is reported in the execution outcome");
+
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RunMat:test:boom"));
+    assert_eq!(
+        session
+            .get_variables()
+            .unwrap()
+            .get("published_before_error"),
+        Some(&runmat_value::Value::Num(73.0))
+    );
+}
+
+#[test]
 fn run_missing_file_and_output_errors_are_catchable() {
     let _cwd_lock = cwd_lock();
     let temp = tempfile::TempDir::new().expect("tempdir");
@@ -14710,7 +14732,7 @@ fn parfor_has_a_deterministic_serial_execution_fallback() {
     )
     .expect("execute parfor through serial scheduler fallback");
     assert_eq!(
-        session.get_variables().get("total"),
+        session.get_variables().unwrap().get("total"),
         Some(&runmat_value::Value::Num(10.0))
     );
 }
@@ -14734,7 +14756,7 @@ fn spmd_executes_in_an_isolated_rank_context_and_retains_composite_outputs() {
     )
     .expect("execute compiler-bound SPMD region");
 
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     let Some(runmat_value::Value::Composite(index)) = variables.get("workerIndex") else {
         panic!(
             "SPMD worker index must leave a Composite in the driver workspace: {:?}",
@@ -14761,11 +14783,11 @@ fn modern_spmd_point_to_point_surface_executes_through_typed_bytecode() {
     for name in ["received", "source", "tag", "exchanged", "total"] {
         assert!(
             matches!(
-                session.get_variables().get(name),
+                session.get_variables().unwrap().get(name),
                 Some(runmat_value::Value::Composite(_))
             ),
             "{name} must be retained as a compiler-declared Composite output: {:?}",
-            session.get_variables()
+            session.get_variables().unwrap()
         );
     }
     execute_text_request(
@@ -14773,7 +14795,7 @@ fn modern_spmd_point_to_point_surface_executes_through_typed_bytecode() {
         "receivedValue = received{1}; sourceValue = source{1}; tagValue = tag{1}; exchangedValue = exchanged{1}; totalValue = total{1};",
     )
     .expect("read retained Composite entries through explicit driver indexing");
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     assert_eq!(
         variables.get("receivedValue"),
         Some(&runmat_value::Value::Int(runmat_value::IntValue::U64(
@@ -14818,11 +14840,11 @@ fn modern_and_legacy_spmd_aggregate_surfaces_use_runtime_language_semantics() {
     for name in ["modernCat", "modernReduce", "legacyCat", "legacyReduce"] {
         assert!(
             matches!(
-                session.get_variables().get(name),
+                session.get_variables().unwrap().get(name),
                 Some(runmat_value::Value::Composite(_))
             ),
             "{name} must be retained as a Composite output: {:?}",
-            session.get_variables()
+            session.get_variables().unwrap()
         );
     }
     execute_text_request(
@@ -14830,7 +14852,7 @@ fn modern_and_legacy_spmd_aggregate_surfaces_use_runtime_language_semantics() {
         "modernCatValue = modernCat{1}; modernReduceValue = modernReduce{1}; legacyCatValue = legacyCat{1}; legacyReduceValue = legacyReduce{1};",
     )
     .expect("read aggregate Composite entries");
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     assert_eq!(
         variables.get("modernCatValue"),
         Some(&runmat_value::Value::Tensor(
@@ -14874,11 +14896,11 @@ fn local_multi_rank_spmd_preserves_rank_order_and_collective_results() {
     for name in ["labNumber", "joined", "total"] {
         assert!(
             matches!(
-                session.get_variables().get(name),
+                session.get_variables().unwrap().get(name),
                 Some(runmat_value::Value::Composite(_))
             ),
             "{name} must be retained as a compiler-declared Composite output: {:?}",
-            session.get_variables()
+            session.get_variables().unwrap()
         );
     }
     execute_text_request(
@@ -14886,7 +14908,7 @@ fn local_multi_rank_spmd_preserves_rank_order_and_collective_results() {
         "firstRank = labNumber{1}; secondRank = labNumber{2}; thirdRank = labNumber{3}; joinedValue = joined{1}; totalValue = total{1};",
     )
     .expect("read rank-ordered multi-lab Composite entries");
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     assert_eq!(
         variables.get("firstRank"),
         Some(&runmat_value::Value::Num(1.0))
@@ -14925,7 +14947,7 @@ fn spmd_context_names_share_one_rank_and_size_contract() {
     )
     .expect("execute compatible SPMD context names");
 
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     for (name, expected) in [
         ("serialIndex", 1.0),
         ("serialSize", 1.0),
@@ -15017,7 +15039,7 @@ fn distributed_values_preserve_typed_local_storage_through_compiler_lowering() {
         "source = uint64([1, 9007199254740993]); value = distributed(source); local = getLocalPart(value);",
     )
     .expect("execute compiler-bound distributed operations");
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     assert!(matches!(
         variables.get("value"),
         Some(runmat_value::Value::Distributed(_))
@@ -15071,7 +15093,7 @@ fn codistributor_factory_and_codistributed_inspection_use_canonical_runtime_valu
         "defaultCodist = codistributor(); blockCodist = codistributor('2dbc', uint32([1, 1]), uint64(8)); completeCodist = codistributor1d(uint32(1), uint64(4), uint64([4, 1])); defaultComplete = isComplete(defaultCodist); complete = isComplete(completeCodist); plain = iscodistributed(uint16(7)); value = distributed(uint16([1, 2])); distributedFlag = iscodistributed(value);",
     )
     .expect("execute codistributor factory and handle inspection surface");
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     assert!(matches!(
         variables.get("defaultCodist"),
         Some(runmat_value::Value::Object(object)) if object.class_name.is(runmat_types::StaticClassIdentity::new("codistributor1d"))
@@ -15106,7 +15128,7 @@ fn compatible_codistributed_client_construction_preserves_exact_indices() {
         "source = uint64([1, 9007199254740993]); value = codistributed(source); local = getLocalPart(value); indices = globalIndices(value, uint32(2), uint32(1)); [first, last] = globalIndices(value, uint32(2), uint32(1)); codist = getCodistributor(value);",
     )
     .expect("execute compatible client codistributed construction");
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     assert_eq!(variables.get("local"), variables.get("source"));
     assert_eq!(
         variables.get("indices"),
@@ -15141,7 +15163,7 @@ fn cooperative_codistributed_build_keeps_partition_payloads_worker_owned() {
         "pool = parpool(2); spmd(2); if spmdIndex() == 1; local = uint64([1, 2]); else; local = uint64([3, 4]); end; codist = codistributor1d(uint32(2), uint64([2, 2]), uint64([1, 4])); value = codistributed.build(local, codist); part = getLocalPart(value); indices = globalIndices(value, uint32(2)); end; assembled = gather(value); part1 = part{1}; part2 = part{2}; indices1 = indices{1}; indices2 = indices{2};",
     )
     .expect("build a codistributed value from worker-local partitions");
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     assert!(matches!(
         variables.get("value"),
         Some(runmat_value::Value::Distributed(_))
@@ -15196,7 +15218,7 @@ fn cooperative_codistributed_construction_selects_the_typed_source_mode() {
         "codistributed construction diagnostics: {:?}",
         outcome.diagnostics
     );
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     for (name, expected) in [
         ("replicatedValue", vec![1, 9_007_199_254_740_993]),
         ("secondValue", vec![21, 22]),
@@ -15224,7 +15246,7 @@ fn two_dimensional_global_indices_use_the_authoritative_block_cyclic_layout() {
         "pool = parpool(4); source = uint64(reshape(1:16, 4, 4)); original = distributed(source); codist = codistributor2dbc(uint32([2, 2]), uint64(1), 'row', uint64([4, 4])); value = redistribute(original, codist); rows1 = globalIndices(value, uint32(1), uint32(1)); columns1 = globalIndices(value, uint32(2), uint32(1)); rows2 = globalIndices(value, uint32(1), uint32(2)); columns2 = globalIndices(value, uint32(2), uint32(2));",
     )
     .expect("inspect exact block-cyclic global indices");
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     for (name, expected) in [
         ("rows1", vec![1, 3]),
         ("columns1", vec![1, 3]),
@@ -15254,7 +15276,7 @@ fn global_indices_preserve_empty_partition_endpoints() {
     )
     .expect("inspect an empty distributed partition");
     assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     assert_eq!(
         variables.get("indices"),
         Some(&runmat_value::Value::Tensor(
@@ -15283,7 +15305,7 @@ fn distributed_builtin_policy_maps_admitted_operations_and_materializes_gather()
         "source = int16([-32768, 2]); distributedSource = distributed(source); mapped = abs(distributedSource); mappedAgain = abs(distributedSource); materialized = gather(mapped);",
     )
     .expect("execute catalog-admitted distributed builtin operations");
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     let Some(runmat_value::Value::Distributed(source)) = variables.get("distributedSource") else {
         panic!("distributedSource must retain a distributed handle");
     };
@@ -15325,7 +15347,7 @@ fn distributed_builtin_mapping_preserves_each_requested_log2_output() {
         "source = single([1, -3]); distributedSource = distributed(source); [fraction, exponent] = log2(distributedSource); gatheredFraction = gather(fraction); gatheredExponent = gather(exponent);",
     )
     .expect("execute two-output distributed log2");
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     let Some(runmat_value::Value::Distributed(fraction)) = variables.get("fraction") else {
         panic!("fraction must retain a distributed handle");
     };
@@ -15362,7 +15384,7 @@ fn distributed_numeric_limit_like_preserves_class_without_materializing_the_prot
         "floatingSource = distributed(single([1, 2])); floatingLimit = realmax(like=floatingSource); gatheredFloating = gather(floatingLimit); integerSource = distributed(uint64([1, 2])); integerLimit = intmax(like=integerSource); gatheredInteger = gather(integerLimit);",
     )
     .expect("execute distributed numeric limit like forms");
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     let Some(runmat_value::Value::Distributed(floating)) = variables.get("floatingLimit") else {
         panic!("floating limit must retain a distributed handle");
     };
@@ -15525,7 +15547,7 @@ fn parallel_pool_and_future_surface_uses_the_session_execution_service() {
     )
     .expect("execute pool-backed future");
 
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     assert!(matches!(
         variables.get("pool"),
         Some(runmat_value::Value::Pool(_))
@@ -15580,7 +15602,7 @@ fn loose_source_parallel_submissions_keep_the_core_program_environment() {
     )
     .expect("submit a loose-source asynchronous call");
         assert_eq!(
-            session.get_variables().get("answer"),
+            session.get_variables().unwrap().get("answer"),
             Some(&runmat_value::Value::Num(5.0))
         );
         let asynchronous = service.submitted_revisions();
@@ -15638,7 +15660,7 @@ fn fetch_outputs_preserves_multiple_requested_outputs() {
     )
     .expect("fetch multiple future outputs");
 
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     assert_eq!(
         variables.get("sumValue"),
         Some(&runmat_value::Value::Num(7.0))
@@ -15658,7 +15680,7 @@ fn parfeval_without_explicit_pool_and_fetch_next_use_typed_future_state() {
     )
     .expect("fetch future results in completion order");
 
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     assert_eq!(
         variables.get("beforeRead"),
         Some(&runmat_value::Value::Bool(false))
@@ -15695,7 +15717,7 @@ fn parfeval_on_all_returns_one_aggregate_future() {
     )
     .expect("execute one invocation per pool worker");
 
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     assert_eq!(
         variables.get("workerCount"),
         Some(&runmat_value::Value::Num(2.0))
@@ -15728,7 +15750,7 @@ fn fetch_outputs_can_return_nonuniform_future_arrays_as_cells() {
     )
     .expect("fetch nonuniform outputs and schedule on the automatic pool");
 
-    let variables = session.get_variables();
+    let variables = session.get_variables().unwrap();
     let answers = match variables.get("answers") {
         Some(runmat_value::Value::Cell(answers)) => answers,
         other => panic!("expected a cell array, got {other:?}"),
@@ -15855,7 +15877,7 @@ fn deterministic_interactive_tiering_commits_workspace_transactionally() {
         .expect("cold interactive execution");
     assert!(!first.used_jit);
     assert_eq!(
-        session.get_variables().get("counter"),
+        session.get_variables().unwrap().get("counter"),
         Some(&runmat_value::Value::Num(41.0))
     );
 
@@ -15865,7 +15887,7 @@ fn deterministic_interactive_tiering_commits_workspace_transactionally() {
         .expect("native interactive execution");
     assert!(second.used_jit || third.used_jit);
     assert_eq!(
-        session.get_variables().get("counter"),
+        session.get_variables().unwrap().get("counter"),
         Some(&runmat_value::Value::Num(43.0))
     );
     assert_eq!(session.generic_native_cache_counts(), (1, 1));
@@ -15889,15 +15911,15 @@ fn deterministic_interactive_tiering_preserves_clear_removals() {
             .expect("clear execution");
         used_native |= outcome.used_jit;
         assert!(
-            !session.get_variables().contains_key("doomed"),
+            !session.get_variables().unwrap().contains_key("doomed"),
             "clear outcome: {outcome:#?}; workspace: {:?}; cache: {:?}",
-            session.get_variables(),
+            session.get_variables().unwrap(),
             session.generic_native_cache_counts()
         );
     }
     assert!(used_native);
     assert_eq!(
-        session.get_variables().get("survivor"),
+        session.get_variables().unwrap().get("survivor"),
         Some(&runmat_value::Value::Num(3.0))
     );
 }
@@ -15925,7 +15947,7 @@ fn deterministic_interactive_tiering_preserves_expression_display_and_ans() {
     }
     assert!(used_native);
     assert_eq!(
-        session.get_variables().get("ans"),
+        session.get_variables().unwrap().get("ans"),
         Some(&runmat_value::Value::Num(42.0))
     );
 }
@@ -15952,7 +15974,7 @@ fn deterministic_interactive_tiering_exposes_the_complete_workspace_to_dynamic_b
         used_native |= outcome.used_jit;
         if outcome.used_jit {
             assert_eq!(
-                session.get_variables().get("workspace_visibility"),
+                session.get_variables().unwrap().get("workspace_visibility"),
                 Some(&runmat_value::Value::Num(1.0))
             );
         }
@@ -15980,7 +16002,7 @@ fn deterministic_interactive_tiering_never_commits_a_failed_native_workspace() {
             .iter()
             .any(|diagnostic| diagnostic.message.to_ascii_lowercase().contains("assert")));
         assert_eq!(
-            session.get_variables().get("counter"),
+            session.get_variables().unwrap().get("counter"),
             Some(&runmat_value::Value::Num(0.0))
         );
     }
@@ -16010,7 +16032,7 @@ fn deterministic_interactive_tiering_invalidates_redefined_session_functions() {
             .expect("invoke first helper");
         used_native |= outcome.used_jit;
         assert_eq!(
-            session.get_variables().get("answer"),
+            session.get_variables().unwrap().get("answer"),
             Some(&runmat_value::Value::Num(2.0)),
             "{outcome:#?}"
         );
@@ -16025,7 +16047,7 @@ fn deterministic_interactive_tiering_invalidates_redefined_session_functions() {
     .expect("redefine helper");
     execute_text_request(&mut session, "answer = hotHelper(1);").expect("invoke redefined helper");
     assert_eq!(
-        session.get_variables().get("answer"),
+        session.get_variables().unwrap().get("answer"),
         Some(&runmat_value::Value::Num(11.0))
     );
     assert_eq!(
