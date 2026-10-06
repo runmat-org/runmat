@@ -1,8 +1,8 @@
 use super::*;
 use runmat_types::{
     BuiltinId, CallRequest, CallableFact, CallableIdentity, CapabilityRequirement, CapabilitySet,
-    DynamicReason, EffectKind, LiteralContext, LiteralValue, OutputSelection, RequestedOutputCount,
-    ValueFact, ValueKindFact,
+    CellFact, DynamicReason, EffectKind, LiteralContext, LiteralValue, OutputSelection,
+    RequestedOutputCount, ValueFact, ValueKindFact,
 };
 
 fn request(arguments: Vec<ValueFact>, literals: Vec<LiteralValue>) -> CallRequest {
@@ -162,4 +162,36 @@ fn known_builtin_callback_adds_transitive_effects_and_find_stays_noncallback() {
     let found = inference::find(&request(Vec::new(), Vec::new()), &TIMERFIND);
     assert!(!found.effects.0.contains(&EffectKind::HostCallback));
     assert!(!found.effects.0.contains(&EffectKind::Clock));
+}
+
+#[test]
+fn lifecycle_callback_cycles_and_cell_extras_remain_bounded_and_dynamic() {
+    for identity in ["__runmat_timer_start", "__runmat_timer_wait"] {
+        let callback = callback(
+            Some(CallableIdentity::Builtin(BuiltinId(identity.into()))),
+            CapabilitySet::default(),
+        );
+        let callback_cell = ValueFact::scalar(ValueKindFact::Cell(CellFact {
+            element: Box::new(ValueFact::unknown(DynamicReason::RuntimeValue)),
+            elements: vec![callback, ValueFact::scalar(ValueKindFact::String)],
+            elements_complete: true,
+        }));
+        let constructed = inference::constructor(
+            &request(
+                vec![ValueFact::scalar(ValueKindFact::String), callback_cell],
+                vec![LiteralValue::String("TimerFcn".into())],
+            ),
+            &TIMER,
+        );
+        let started = inference::start(
+            &request(vec![constructed.outputs[0].clone()], Vec::new()),
+            &START,
+        );
+        assert!(started.effects.0.contains(&EffectKind::Unknown));
+        assert!(started.effects.0.contains(&EffectKind::HostCallback));
+        assert!(started
+            .capabilities
+            .0
+            .contains(&CapabilityRequirement::HostRuntime));
+    }
 }

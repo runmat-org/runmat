@@ -201,10 +201,17 @@ fn infer_callback_effects(receiver: &ValueFact, phase: CallbackPhase, result: &m
             continue;
         };
         let callback = match &callback.kind {
-            ValueKindFact::Cell(cell) => cell
-                .elements
-                .first()
-                .or_else(|| (!cell.elements_complete).then_some(cell.element.as_ref())),
+            ValueKindFact::Cell(cell) => {
+                // Extra cell arguments can change a callback's catalog route.
+                // Without evaluating that route here, keep the entire call
+                // dynamically effectful rather than dropping those facts.
+                if cell.elements.len() > 1 || !cell.elements_complete {
+                    result.effects.0.insert(EffectKind::Unknown);
+                }
+                cell.elements
+                    .first()
+                    .or_else(|| (!cell.elements_complete).then_some(cell.element.as_ref()))
+            }
             _ => Some(callback),
         };
         let Some(callback) = callback else { continue };
@@ -214,25 +221,20 @@ fn infer_callback_effects(receiver: &ValueFact, phase: CallbackPhase, result: &m
                     .capabilities
                     .0
                     .extend(callable.capabilities.0.iter().copied());
-                let known_builtin = matches!(
-                    &callable.identity,
-                    Some(CallableIdentity::Builtin(identity))
-                        if crate::builtin_catalog_entry_by_name(&identity.0).is_some()
-                );
-                if known_builtin {
-                    let inferred = crate::infer_callable_call(
-                        callable,
-                        &CallRequest {
-                            arguments: vec![
-                                timer_fact(),
-                                ValueFact::unknown(DynamicReason::RuntimeValue),
-                            ],
-                            literals: LiteralContext::default(),
-                            outputs: OutputSelection::new(RequestedOutputCount::Exactly(0)),
-                        },
-                    );
-                    result.effects.0.extend(inferred.effects.0);
-                    result.capabilities.0.extend(inferred.capabilities.0);
+                if let Some(CallableIdentity::Builtin(identity)) = &callable.identity {
+                    if let Some(entry) = crate::builtin_catalog_entry_by_name(&identity.0) {
+                        // Project the declared contract once. Recursive
+                        // argument-dependent inference can re-enter this
+                        // timer (or a mutually recursive timer) indefinitely.
+                        result.effects.0.extend(entry.contract.effect_set().0);
+                        result
+                            .capabilities
+                            .0
+                            .extend(entry.contract.capability_set().0);
+                        result.effects.0.insert(EffectKind::Unknown);
+                    } else {
+                        result.effects.0.insert(EffectKind::Unknown);
+                    }
                 } else {
                     result.effects.0.insert(EffectKind::Unknown);
                 }
