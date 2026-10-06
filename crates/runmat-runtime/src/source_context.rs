@@ -148,6 +148,13 @@ pub struct RuntimeSourceRef {
 }
 
 impl RuntimeSourceRef {
+    /// Stable semantic content of this issued source. This is not a portable
+    /// source identity: only the complete reference may authorize a lookup in
+    /// its issuing runtime (or an admitted fork).
+    pub fn semantic_content_revision(self) -> Digest {
+        self.content
+    }
+
     pub fn resolve_in(self, runtime: &crate::context::RuntimeContext) -> Option<SourceId> {
         let sources = runtime.state().source.borrow();
         let authority = sources.issued_authorities.get(&self.id).copied()?;

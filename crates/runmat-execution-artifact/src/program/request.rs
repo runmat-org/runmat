@@ -10,6 +10,13 @@ use serde::{Deserialize, Serialize};
 use super::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
 use crate::{ArtifactError, ArtifactResult};
 
+fn contract_error(error: runmat_execution::ContractError) -> ArtifactError {
+    match error {
+        runmat_execution::ContractError::Limit { .. } => ArtifactError::Limit(error.to_string()),
+        _ => ArtifactError::Invalid(error.to_string()),
+    }
+}
+
 pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V5: u16 = 5;
 pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V6: u16 = 6;
 /// V7 makes failure-frame source IDs program ordinals, never worker-local IDs.
@@ -95,7 +102,7 @@ impl ProgramExecutionInputs {
         for argument in &self.arguments {
             argument
                 .validate(ValueLimits::default())
-                .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+                .map_err(contract_error)?;
         }
         Ok(())
     }
@@ -186,7 +193,7 @@ impl ProgramExecutionRequest {
         for argument in &self.arguments {
             argument
                 .validate_for_program_sources(ValueLimits::default(), artifact.source_map.as_ref())
-                .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+                .map_err(contract_error)?;
         }
         Ok(artifact)
     }
@@ -305,7 +312,7 @@ impl ProgramExecutionResponse {
                 for output in outputs.iter().flatten() {
                     output
                         .validate_for_program_sources(source_map)
-                        .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+                        .map_err(contract_error)?;
                 }
                 Ok(())
             }
@@ -319,7 +326,7 @@ impl ProgramExecutionResponse {
             }
             Self::RuntimeFailure { failure } => failure
                 .validate_for_program_sources(source_map)
-                .map_err(|error| ArtifactError::Invalid(error.to_string())),
+                .map_err(contract_error),
         }
     }
 }
@@ -331,7 +338,7 @@ fn validate_output_payloads(
     for output in outputs {
         output
             .validate_for_program_sources(ValueLimits::default(), source_map)
-            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+            .map_err(contract_error)?;
     }
     Ok(())
 }
@@ -356,7 +363,7 @@ fn validate_externalized_success(
     for object in result_objects {
         ValuePayload::Object(Box::new(object.clone()))
             .validate(ValueLimits::default())
-            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+            .map_err(contract_error)?;
         if object.kind != ValueRefKind::ResultObject
             || object.resident_fence.is_some()
             || !value_ids.insert(object.id)
@@ -391,6 +398,24 @@ mod tests {
 
     use super::*;
     use crate::ExecutableForm;
+
+    #[test]
+    fn contract_failure_categories_survive_artifact_admission() {
+        assert!(matches!(
+            contract_error(runmat_execution::ContractError::Limit {
+                field: "frames",
+                limit: 4,
+            }),
+            ArtifactError::Limit(_)
+        ));
+        assert!(matches!(
+            contract_error(runmat_execution::ContractError::Invalid {
+                field: "source",
+                reason: "out of map".into(),
+            }),
+            ArtifactError::Invalid(_)
+        ));
+    }
 
     fn request() -> ProgramExecutionRequest {
         let revision = ProgramRevision::new(
