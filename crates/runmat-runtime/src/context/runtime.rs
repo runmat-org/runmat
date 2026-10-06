@@ -448,6 +448,15 @@ impl RuntimeContext {
             child
         };
         *child.state.source.borrow_mut() = self.state.source.borrow().fork_snapshot();
+        let mut child = child;
+        if let Some(sources) = &self.program_sources {
+            child.program_sources = Some(Rc::new(sources.fork_snapshot()));
+            child.source_current = Some(Rc::new(RefCell::new(
+                self.source_current
+                    .as_ref()
+                    .and_then(|current| current.borrow().clone()),
+            )));
+        }
         *child.state.call.borrow_mut() = self.state.call.borrow().clone();
         *child.state.classes.borrow_mut() = self.state.classes.borrow().clone();
         *child.state.session_variables.borrow_mut() = self.state.session_variables.borrow().clone();

@@ -86,6 +86,15 @@ impl ProgramSourceBinding {
     pub(crate) fn get(&self, ordinal: runmat_types::ProgramSourceId) -> Option<SourceId> {
         self.sources.get(&ordinal).copied()
     }
+
+    /// A worker owns copied source records in its SourceState catalog. Its
+    /// projection therefore retains no lease on the parent's source issuer.
+    pub(crate) fn fork_snapshot(&self) -> Self {
+        Self {
+            sources: self.sources.clone(),
+            _leases: Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -746,6 +755,76 @@ mod lease_tests {
         );
         let child_lease = lease_source_context_in_context(&child, "child", None, "new").unwrap();
         assert_ne!(child_lease.source_id(), id);
+    }
+
+    #[test]
+    fn parallel_lab_keeps_program_projection_after_parent_invocation_retires() {
+        let session = runtime();
+        let selected = session
+            .clone()
+            .with_program_sources([
+                ProgramSourceRecord {
+                    ordinal: runmat_types::ProgramSourceId(0),
+                    name: Arc::from("main.m"),
+                    fullpath_name: None,
+                    text: Arc::from("main source"),
+                },
+                ProgramSourceRecord {
+                    ordinal: runmat_types::ProgramSourceId(1),
+                    name: Arc::from("helper.m"),
+                    fullpath_name: None,
+                    text: Arc::from("helper source"),
+                },
+            ])
+            .unwrap();
+        let primary = selected
+            .program_source_id(runmat_types::ProgramSourceId(0))
+            .unwrap();
+        let companion = selected
+            .program_source_id(runmat_types::ProgramSourceId(1))
+            .unwrap();
+        let current = replace_current_source_id_in_context(&selected, Some(companion));
+        let child = selected.fork_parallel_lab(RuntimeServicePorts::default());
+        drop(current);
+        drop(selected);
+        assert!(source_info_in_context(&session, primary).is_none());
+        assert!(source_info_in_context(&session, companion).is_none());
+        assert_eq!(
+            child.program_source_id(runmat_types::ProgramSourceId(0)),
+            Some(primary)
+        );
+        assert_eq!(
+            child.program_source_id(runmat_types::ProgramSourceId(1)),
+            Some(companion)
+        );
+        assert_eq!(
+            source_info_in_context(&child, primary)
+                .unwrap()
+                .text
+                .as_ref(),
+            "main source"
+        );
+        assert_eq!(
+            source_info_in_context(&child, companion)
+                .unwrap()
+                .text
+                .as_ref(),
+            "helper source"
+        );
+        assert_eq!(
+            child
+                .source_current()
+                .unwrap()
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .text
+                .as_ref(),
+            "helper source"
+        );
+        let later = lease_source_context_in_context(&child, "later", None, "other").unwrap();
+        assert_ne!(later.source_id(), primary);
+        assert_ne!(later.source_id(), companion);
     }
 
     #[test]
