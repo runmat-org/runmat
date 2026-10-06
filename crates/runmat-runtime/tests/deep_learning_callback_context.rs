@@ -31,10 +31,10 @@ fn selected_callback(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltin
                 .map(|size| size as usize)
                 .collect();
             let count = dimensions.iter().product();
-            return Ok(ValueSequence::single(Value::Tensor(
+            return ValueSequence::single(Value::Tensor(
                 Tensor::new(vec![0.25; count], dimensions).expect("fixture initializer shape"),
             ))
-            .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?);
+            .map_err(runmat_runtime::sequence::sequence_error_to_runtime);
         }
         match outputs {
             Some(2) => ValueSequence::comma_separated(vec![Value::Num(23.0), Value::Num(29.0)])
