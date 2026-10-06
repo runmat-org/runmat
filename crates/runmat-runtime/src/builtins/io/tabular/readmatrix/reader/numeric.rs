@@ -2,6 +2,21 @@ use super::super::output::integer_element_dtype;
 use super::*;
 use std::borrow::Cow;
 
+mod diagnostic;
+use diagnostic::NumericTokenDiagnostic;
+
+fn invalid_numeric_token(token: &str, line: usize, column: usize) -> RuntimeError {
+    let diagnostic = NumericTokenDiagnostic::new(token, line, column);
+    match diagnostic.try_render() {
+        Ok(message) => readmatrix_error_with(&READMATRIX_ERROR_NON_NUMERIC_TOKEN, message),
+        Err(source) => readmatrix_error_with_source(
+            &READMATRIX_ERROR_TENSOR_BUILD,
+            "readmatrix: unable to allocate numeric token diagnostic",
+            source,
+        ),
+    }
+}
+
 pub(super) fn parse_numeric_token(
     token: &str,
     options: &ReadMatrixOptions,
@@ -39,15 +54,9 @@ pub(super) fn parse_numeric_token(
     {
         return Ok(f64::NEG_INFINITY);
     }
-    normalized.parse::<f64>().map_err(|_| {
-        readmatrix_error_with(
-            &READMATRIX_ERROR_NON_NUMERIC_TOKEN,
-            format!(
-                "readmatrix: unable to parse numeric value '{}' on line {} column {}",
-                inner, line_number, column_number
-            ),
-        )
-    })
+    normalized
+        .parse::<f64>()
+        .map_err(|_| invalid_numeric_token(inner, line_number, column_number))
 }
 
 pub(super) fn validate_numeric_token(
@@ -120,15 +129,7 @@ pub(in crate::builtins::io::tabular::readmatrix) fn parse_integer_numeric_token(
     {
         return Ok(integer_scalar_from_f64(dtype, f64::NEG_INFINITY));
     }
-    let invalid = || {
-        readmatrix_error_with(
-            &READMATRIX_ERROR_NON_NUMERIC_TOKEN,
-            format!(
-                "readmatrix: unable to parse numeric value '{}' on line {} column {}",
-                inner, line_number, column_number
-            ),
-        )
-    };
+    let invalid = || invalid_numeric_token(inner, line_number, column_number);
     if normalized.chars().any(|ch| matches!(ch, '.' | 'e' | 'E')) {
         return normalized
             .parse::<f64>()
