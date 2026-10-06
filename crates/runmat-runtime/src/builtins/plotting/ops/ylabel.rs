@@ -33,13 +33,8 @@ pub fn ylabel_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     }
     let command = parse_numeric_text_command("ylabel", &args)
         .map_err(|error| annotation_error("ylabel", &YLABEL_ERROR_INVALID_ARGUMENT, error))?;
-    set_ylabel_for_axes(
-        command.target.0,
-        command.target.1,
-        &command.text,
-        command.style,
-    )
-    .map_err(|err| {
+    let target = command.resolve_target();
+    set_ylabel_for_axes(target.0, target.1, &command.text, command.style).map_err(|err| {
         annotation_error(
             "ylabel",
             &YLABEL_ERROR_INTERNAL,

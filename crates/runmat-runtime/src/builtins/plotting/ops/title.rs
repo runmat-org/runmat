@@ -21,13 +21,8 @@ pub fn title_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     )?;
     let command = parse_numeric_text_command("title", &args)
         .map_err(|error| annotation_error("title", &TITLE_ERROR_INVALID_ARGUMENT, error))?;
-    set_figure_title_for_axes(
-        command.target.0,
-        command.target.1,
-        &command.text,
-        command.style,
-    )
-    .map_err(|err| {
+    let target = command.resolve_target();
+    set_figure_title_for_axes(target.0, target.1, &command.text, command.style).map_err(|err| {
         annotation_error(
             "title",
             &TITLE_ERROR_INTERNAL,

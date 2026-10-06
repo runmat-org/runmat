@@ -15,9 +15,17 @@ use super::handles::numeric_handle_scalar;
 
 #[derive(Clone, Debug)]
 pub struct TextCommand {
-    pub target: (FigureHandle, usize),
+    target: Option<(FigureHandle, usize)>,
     pub text: String,
     pub style: TextStyle,
+}
+
+impl TextCommand {
+    /// The implicit current axes is selected only after text and style
+    /// validation has completed without an error.
+    pub fn resolve_target(&self) -> (FigureHandle, usize) {
+        self.target.unwrap_or_else(current_axes_target)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -85,7 +93,7 @@ pub fn parse_text_command(builtin: &'static str, args: &[Value]) -> BuiltinResul
             format!("{builtin}: expected text input"),
         ));
     }
-    let (target, rest) = split_axes_target(builtin, args)?;
+    let (target, rest) = split_axes_target_deferred(builtin, args)?;
     if rest.is_empty() {
         return Err(plotting_error(
             builtin,
@@ -124,9 +132,9 @@ pub fn parse_numeric_text_command(
             .first()
             .is_some_and(|value| format_numeric_text(value).is_some());
     let (target, rest) = if args.len() == 1 || numeric_text_form {
-        (current_axes_target(), args)
+        (None, args)
     } else {
-        split_axes_target(builtin, args)?
+        split_axes_target_deferred(builtin, args)?
     };
     if rest.is_empty() {
         return Err(plotting_error(

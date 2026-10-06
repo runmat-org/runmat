@@ -33,13 +33,8 @@ pub fn xlabel_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     }
     let command = parse_numeric_text_command("xlabel", &args)
         .map_err(|error| annotation_error("xlabel", &XLABEL_ERROR_INVALID_ARGUMENT, error))?;
-    set_xlabel_for_axes(
-        command.target.0,
-        command.target.1,
-        &command.text,
-        command.style,
-    )
-    .map_err(|err| {
+    let target = command.resolve_target();
+    set_xlabel_for_axes(target.0, target.1, &command.text, command.style).map_err(|err| {
         annotation_error(
             "xlabel",
             &XLABEL_ERROR_INTERNAL,

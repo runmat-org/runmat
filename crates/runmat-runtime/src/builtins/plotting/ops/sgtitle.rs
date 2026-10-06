@@ -64,6 +64,7 @@ pub(super) fn sgtitle_impl(
         })?;
     let style = parse_text_style_pairs(builtin, &rest[1..])
         .map_err(|error| annotation_error(builtin, invalid, error))?;
+    let target = target.unwrap_or_else(current_figure_handle);
     set_sg_title_for_figure(target, &text, style)
         .map_err(|err| annotation_error(builtin, internal, map_figure_error(builtin, err)))
 }
@@ -71,7 +72,7 @@ pub(super) fn sgtitle_impl(
 fn split_figure_target<'a>(
     builtin: &'static str,
     args: &'a [Value],
-) -> crate::BuiltinResult<(FigureHandle, &'a [Value])> {
+) -> crate::BuiltinResult<(Option<FigureHandle>, &'a [Value])> {
     // Only attempt handle detection when there is a subsequent argument to serve as title text.
     // Without this guard, `sgtitle(42)` would be misread as targeting figure 42 with no text,
     // making it impossible to use a numeric value as title text when that figure exists.
@@ -79,7 +80,7 @@ fn split_figure_target<'a>(
         if let Some(first) = args.first() {
             if let Some(handle) = try_parse_figure_target(first) {
                 if figure_handle_exists(handle) {
-                    return Ok((handle, &args[1..]));
+                    return Ok((Some(handle), &args[1..]));
                 }
                 return Err(plotting_error(
                     builtin,
@@ -88,7 +89,7 @@ fn split_figure_target<'a>(
             }
         }
     }
-    Ok((current_figure_handle(), args))
+    Ok((None, args))
 }
 
 /// Converts a finite scalar number to a title string, matching MATLAB's behaviour of
@@ -100,6 +101,10 @@ fn try_parse_figure_target(value: &Value) -> Option<FigureHandle> {
     }
     Some(FigureHandle::from(scalar.round() as u32))
 }
+
+#[cfg(test)]
+#[path = "sgtitle/preflight_tests.rs"]
+mod preflight_tests;
 
 #[cfg(test)]
 mod tests {

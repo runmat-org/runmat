@@ -57,7 +57,6 @@ pub(crate) fn reference_line_builtin(
         .map_err(|error| annotation_error(builtin, invalid, error))?;
     let options = parse_reference_line_options(builtin, &args[1..])
         .map_err(|error| annotation_error(builtin, invalid, error))?;
-    let figure_handle = crate::builtins::plotting::current_figure_handle();
     let mut lines = coords
         .iter()
         .map(|&value| {
@@ -76,6 +75,8 @@ pub(crate) fn reference_line_builtin(
         })
         .collect::<BuiltinResult<Vec<_>>>()
         .map_err(|error| annotation_error(builtin, invalid, error))?;
+
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
 
     let plot_indices = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let plot_indices_slot = std::rc::Rc::clone(&plot_indices);

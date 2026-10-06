@@ -32,13 +32,8 @@ pub fn subtitle_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     }
     let command = parse_text_command("subtitle", &args)
         .map_err(|error| annotation_error("subtitle", &SUBTITLE_ERROR_INVALID_ARGUMENT, error))?;
-    set_figure_subtitle_for_axes(
-        command.target.0,
-        command.target.1,
-        &command.text,
-        command.style,
-    )
-    .map_err(|err| {
+    let target = command.resolve_target();
+    set_figure_subtitle_for_axes(target.0, target.1, &command.text, command.style).map_err(|err| {
         annotation_error(
             "subtitle",
             &SUBTITLE_ERROR_INTERNAL,
