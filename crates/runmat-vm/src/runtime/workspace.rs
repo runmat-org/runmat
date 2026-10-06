@@ -210,13 +210,13 @@ pub struct WorkspaceStateGuard {
 
 impl Drop for WorkspaceStateGuard {
     fn drop(&mut self) {
-        with_stack_mut(self.owner, |stack| {
-            if let Some(frame) = stack.pop() {
-                frame.lifecycle.set(WorkspaceFrameLifecycle::Closed);
-                frame.delegate.borrow_mut().take();
-                if !frame.publish_on_drop {
-                    return;
-                }
+        let retired_delegate = with_stack_mut(self.owner, |stack| {
+            let Some(frame) = stack.pop() else {
+                return None;
+            };
+            frame.lifecycle.set(WorkspaceFrameLifecycle::Closed);
+            let retired_delegate = frame.delegate.borrow_mut().take();
+            if frame.publish_on_drop {
                 let ws = frame.state;
                 let removed_ids = ws.removed_slots_this_execution.keys().copied().collect();
                 let removed_names = ws.removed_slots_this_execution.values().cloned().collect();
@@ -242,7 +242,9 @@ impl Drop for WorkspaceStateGuard {
                     );
                 });
             }
+            retired_delegate
         });
+        drop(retired_delegate);
     }
 }
 

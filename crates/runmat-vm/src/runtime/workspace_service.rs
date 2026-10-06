@@ -85,7 +85,8 @@ impl Drop for VmWorkspaceService {
         if self.lifecycle.get() == WorkspaceFrameLifecycle::Pending {
             release_pending_workspace_service_frame(self.runtime, self.frame);
             self.lifecycle.set(WorkspaceFrameLifecycle::Closed);
-            self.delegate.borrow_mut().take();
+            let retired_delegate = self.delegate.borrow_mut().take();
+            drop(retired_delegate);
         }
     }
 }
