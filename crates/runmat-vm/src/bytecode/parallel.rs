@@ -116,6 +116,14 @@ impl Bytecode {
         manifest
             .validate()
             .map_err(|error| format!("{}: {}", error.path, error.message))?;
+        let compiled_functions = mir.functions.keys().copied().collect::<BTreeSet<_>>();
+        for function in manifest_function_owners(manifest)? {
+            if !compiled_functions.contains(&function) {
+                return Err(format!(
+                    "parallel metadata belongs to function {function:?} outside the compiled assembly"
+                ));
+            }
+        }
         let mir_parfor_regions = mir
             .bodies
             .values()
@@ -208,17 +216,13 @@ impl Bytecode {
         self.spmd_regions.clear();
         self.distributed_values.clear();
         self.collective_contracts.clear();
-        for function in self.function_registry.functions.values_mut() {
-            function.parfor_regions.clear();
-            function.spmd_regions.clear();
-            function.distributed_values.clear();
-            function.collective_contracts.clear();
-        }
-        for function in self.bound_functions.values_mut() {
-            function.parfor_regions.clear();
-            function.spmd_regions.clear();
-            function.distributed_values.clear();
-            function.collective_contracts.clear();
+        for function in &compiled_functions {
+            if let Some(bytecode) = self.function_registry.functions.get_mut(function) {
+                clear_parallel_metadata(bytecode);
+            }
+            if let Some(bytecode) = self.bound_functions.get_mut(function) {
+                clear_parallel_metadata(bytecode);
+            }
         }
 
         for region in mapped_parfor {
@@ -378,6 +382,42 @@ impl Bytecode {
             .or_else(|| self.bound_functions.get(&function))
             .map(|function| &function.resume_points)
     }
+}
+
+fn clear_parallel_metadata(function: &mut crate::FunctionBytecode) {
+    function.parfor_regions.clear();
+    function.spmd_regions.clear();
+    function.distributed_values.clear();
+    function.collective_contracts.clear();
+}
+
+fn manifest_function_owners(
+    manifest: &ParallelManifest,
+) -> Result<BTreeSet<runmat_hir::FunctionId>, String> {
+    manifest
+        .parfor_regions
+        .iter()
+        .map(|contract| contract.id.0.function)
+        .chain(
+            manifest
+                .spmd_regions
+                .iter()
+                .map(|contract| contract.id.0.function),
+        )
+        .chain(
+            manifest
+                .distributed_values
+                .iter()
+                .map(|contract| contract.id.function),
+        )
+        .chain(
+            manifest
+                .collectives
+                .iter()
+                .map(|contract| contract.id.region.0.function),
+        )
+        .map(program_function_id)
+        .collect()
 }
 
 fn map_parfor_region(
@@ -576,4 +616,102 @@ fn program_point(
         position: u32::try_from(position)
             .map_err(|_| "parallel position exceeds its portable schema".to_string())?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{FunctionBytecode, FunctionRegistry, VmAssemblyLayout};
+    use runmat_types::{
+        CollectiveId, CollectiveOperation, RegionId, SpmdContract, SpmdLabRequirement,
+    };
+    use std::collections::HashMap;
+
+    fn retained_collective(function: ProgramFunctionId) -> CollectiveContract {
+        CollectiveContract {
+            id: CollectiveId {
+                region: ParallelRegionId(RegionId {
+                    function,
+                    ordinal: 0,
+                }),
+                ordinal: 0,
+            },
+            operation: CollectiveOperation::Probe,
+            input: None,
+            output: None,
+            root: None,
+            source: None,
+            destination: None,
+            tag: None,
+            dimension: None,
+            reducer: None,
+        }
+    }
+
+    #[test]
+    fn parallel_installation_preserves_functions_outside_the_compiled_assembly() {
+        let mut retained = FunctionBytecode {
+            function: runmat_hir::FunctionId(7),
+            ..FunctionBytecode::default()
+        };
+        retained
+            .collective_contracts
+            .push(retained_collective(ProgramFunctionId(7)));
+        let expected = retained.collective_contracts.clone();
+        let mut bytecode = Bytecode::empty();
+        bytecode.layout = Some(VmAssemblyLayout {
+            functions: HashMap::new(),
+            entrypoints: HashMap::new(),
+            storage_bindings: HashMap::new(),
+        });
+        bytecode.function_registry = FunctionRegistry::new(HashMap::from([(
+            runmat_hir::FunctionId(7),
+            retained.clone(),
+        )]));
+        bytecode
+            .bound_functions
+            .insert(runmat_hir::FunctionId(7), retained);
+
+        bytecode
+            .install_parallel_regions(&MirAssembly::default(), &ParallelManifest::empty())
+            .unwrap();
+
+        assert_eq!(
+            bytecode.function_registry.functions[&runmat_hir::FunctionId(7)].collective_contracts,
+            expected
+        );
+        assert_eq!(
+            bytecode.bound_functions[&runmat_hir::FunctionId(7)].collective_contracts,
+            expected
+        );
+
+        let foreign_region = ParallelRegionId(RegionId {
+            function: ProgramFunctionId(7),
+            ordinal: 0,
+        });
+        let error = bytecode
+            .install_parallel_regions(
+                &MirAssembly::default(),
+                &ParallelManifest {
+                    schema_version: runmat_types::PARALLEL_MANIFEST_SCHEMA_VERSION,
+                    parfor_regions: Vec::new(),
+                    spmd_regions: vec![SpmdContract {
+                        id: foreign_region,
+                        labs: SpmdLabRequirement::Default,
+                        captures: Vec::new(),
+                        outputs: Vec::new(),
+                        effects: Default::default(),
+                        capabilities: Default::default(),
+                    }],
+                    distributed_values: Vec::new(),
+                    collectives: Vec::new(),
+                },
+            )
+            .expect_err("foreign parallel ownership must fail before mutation");
+        assert!(error.contains("outside the compiled assembly"));
+        assert_eq!(
+            bytecode.function_registry.functions[&runmat_hir::FunctionId(7)].collective_contracts,
+            expected
+        );
+    }
 }

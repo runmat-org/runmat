@@ -1983,7 +1983,10 @@ mod function_registry_tests {
             .insert(FunctionId(7), function.clone());
 
         bytecode
-            .install_regions(std::slice::from_ref(&contract))
+            .install_regions(
+                std::slice::from_ref(&contract),
+                &std::collections::BTreeSet::from([FunctionId(7)]),
+            )
             .unwrap();
 
         assert_eq!(bytecode.regions.len(), 1);
@@ -2020,7 +2023,10 @@ mod function_registry_tests {
             .functions
             .insert(FunctionId(7), function);
         bytecode
-            .install_regions(std::slice::from_ref(&contract))
+            .install_regions(
+                std::slice::from_ref(&contract),
+                &std::collections::BTreeSet::from([FunctionId(7)]),
+            )
             .unwrap();
         bytecode
             .function_registry
@@ -2031,7 +2037,10 @@ mod function_registry_tests {
             .remove(&contract.exits[0]);
 
         bytecode
-            .install_regions(std::slice::from_ref(&contract))
+            .install_regions(
+                std::slice::from_ref(&contract),
+                &std::collections::BTreeSet::from([FunctionId(7)]),
+            )
             .unwrap();
 
         assert!(bytecode.regions.is_empty());
@@ -2042,6 +2051,52 @@ mod function_registry_tests {
             .unwrap()
             .regions
             .is_empty());
+    }
+
+    #[test]
+    fn region_installation_preserves_functions_outside_the_compiled_assembly() {
+        let contract = region_contract();
+        let mut retained = test_function(7, "retained_region_owner", "");
+        retained.resume_points.insert(contract.entry, 5);
+        retained.resume_points.insert(contract.exits[0], 11);
+        retained.regions.push(crate::BytecodeRegion {
+            id: contract.id,
+            entry: crate::BytecodeRegionBoundary {
+                point: contract.entry,
+                pc: 5,
+            },
+            exits: vec![crate::BytecodeRegionBoundary {
+                point: contract.exits[0],
+                pc: 11,
+            }],
+        });
+        let expected = retained.regions.clone();
+        let mut bytecode = Bytecode::empty();
+        bytecode.function_registry =
+            FunctionRegistry::new(HashMap::from([(FunctionId(7), retained.clone())]));
+        bytecode.bound_functions.insert(FunctionId(7), retained);
+
+        bytecode
+            .install_regions(&[], &std::collections::BTreeSet::from([FunctionId(8)]))
+            .unwrap();
+
+        assert_eq!(
+            bytecode.function_registry.functions[&FunctionId(7)].regions,
+            expected
+        );
+        assert_eq!(bytecode.bound_functions[&FunctionId(7)].regions, expected);
+
+        let error = bytecode
+            .install_regions(
+                std::slice::from_ref(&contract),
+                &std::collections::BTreeSet::from([FunctionId(8)]),
+            )
+            .expect_err("foreign region ownership must fail before mutation");
+        assert!(error.contains("outside the compiled assembly"));
+        assert_eq!(
+            bytecode.function_registry.functions[&FunctionId(7)].regions,
+            expected
+        );
     }
 }
 

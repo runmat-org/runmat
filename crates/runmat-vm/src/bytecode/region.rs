@@ -1,5 +1,6 @@
 use runmat_types::{ProgramPointId, RegionContract, RegionId};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 use super::program::Bytecode;
 
@@ -33,7 +34,11 @@ impl Bytecode {
     /// empty-stack VM boundaries in this bytecode product. Regions are
     /// optional optimization candidates; a composed or transformed product
     /// that cannot represent one must execute normally without it.
-    pub fn install_regions(&mut self, contracts: &[RegionContract]) -> Result<(), String> {
+    pub fn install_regions(
+        &mut self,
+        contracts: &[RegionContract],
+        compiled_functions: &BTreeSet<runmat_hir::FunctionId>,
+    ) -> Result<(), String> {
         let mut contracts = contracts.iter().collect::<Vec<_>>();
         contracts.sort_by_key(|contract| contract.id);
         if contracts.windows(2).any(|pair| pair[0].id == pair[1].id) {
@@ -48,6 +53,12 @@ impl Bytecode {
                 usize::try_from(contract.id.function.0)
                     .map_err(|_| "region function identity exceeds this target".to_string())?,
             );
+            if !compiled_functions.contains(&function) {
+                return Err(format!(
+                    "region {:?} belongs to a function outside the compiled assembly",
+                    contract.id
+                ));
+            }
             // Region contracts describe this executable's MIR assembly. Prefer
             // its immutable layout over the composed session registry: a
             // persisted function may legitimately reuse a unit-local function
@@ -75,11 +86,13 @@ impl Bytecode {
         }
 
         self.regions = mapped.iter().map(|(_, region)| region.clone()).collect();
-        for function in self.function_registry.functions.values_mut() {
-            function.regions.clear();
-        }
-        for function in self.bound_functions.values_mut() {
-            function.regions.clear();
+        for function in compiled_functions {
+            if let Some(bytecode) = self.function_registry.functions.get_mut(function) {
+                bytecode.regions.clear();
+            }
+            if let Some(bytecode) = self.bound_functions.get_mut(function) {
+                bytecode.regions.clear();
+            }
         }
         for (function, region) in mapped {
             if let Some(bytecode) = self.function_registry.functions.get_mut(&function) {
