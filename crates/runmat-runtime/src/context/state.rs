@@ -122,10 +122,23 @@ impl Drop for RuntimeContextState {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug)]
 pub(crate) struct SourceState {
     pub current: Option<SourceInfo>,
     pub catalog: HashMap<SourceId, SourceInfo>,
+    pub(crate) leased_catalog: HashMap<SourceId, crate::source_context::LeasedSource>,
+    pub(crate) next_issued_id: Option<usize>,
+}
+
+impl Default for SourceState {
+    fn default() -> Self {
+        Self {
+            current: None,
+            catalog: HashMap::new(),
+            leased_catalog: HashMap::new(),
+            next_issued_id: Some(0),
+        }
+    }
 }
 
 #[derive(Default, Clone)]

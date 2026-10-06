@@ -2,6 +2,7 @@ use runmat_thread_local::runmat_thread_local;
 use runmat_types::SourceId;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -10,6 +11,147 @@ pub struct SourceInfo {
     pub name: Arc<str>,
     pub fullpath_name: Option<Arc<str>>,
     pub text: Arc<str>,
+}
+
+#[derive(Debug)]
+pub(crate) struct LeasedSource {
+    owner: Weak<LeaseInner>,
+}
+
+impl LeasedSource {
+    fn live_info(&self) -> Option<SourceInfo> {
+        self.owner.upgrade().map(|owner| owner.info.clone())
+    }
+}
+
+fn resolved_source_info(source: &crate::context::SourceState, id: SourceId) -> Option<SourceInfo> {
+    let leased = source
+        .leased_catalog
+        .get(&id)
+        .and_then(LeasedSource::live_info);
+    // An untyped foreground import can use the same integer, but it cannot
+    // decide which source an issued lease denotes. Fail closed rather than
+    // attributing either caller's span to the other's text.
+    if leased.is_some() && source.catalog.contains_key(&id) {
+        return None;
+    }
+    leased.or_else(|| source.catalog.get(&id).cloned())
+}
+
+#[derive(Debug)]
+struct LeaseInner {
+    info: SourceInfo,
+    state: Weak<crate::context::RuntimeContextState>,
+}
+
+impl Drop for LeaseInner {
+    fn drop(&mut self) {
+        let Some(state) = self.state.upgrade() else {
+            return;
+        };
+        let Some(id) = self.info.source_id else {
+            return;
+        };
+        let mut sources = state.source.borrow_mut();
+        if sources
+            .leased_catalog
+            .get(&id)
+            .is_some_and(|entry| entry.owner.as_ptr() == self as *const LeaseInner)
+        {
+            sources.leased_catalog.remove(&id);
+        }
+    }
+}
+
+/// Session-issued provenance. Clones retain text; the last clone retires only
+/// this record, never an unrelated foreground catalog or later source.
+#[derive(Clone, Debug)]
+pub struct RuntimeSourceLease(Rc<LeaseInner>);
+
+impl RuntimeSourceLease {
+    pub fn source_id(&self) -> SourceId {
+        self.0
+            .info
+            .source_id
+            .expect("issued source has an identity")
+    }
+
+    pub fn source_info(&self) -> SourceInfo {
+        self.0.info.clone()
+    }
+}
+
+impl crate::context::SourceEvaluationProvenance for RuntimeSourceLease {
+    fn source_id(&self) -> SourceId {
+        RuntimeSourceLease::source_id(self)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SourceIdExhausted;
+
+impl std::fmt::Display for SourceIdExhausted {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("source identity space is exhausted")
+    }
+}
+
+impl std::error::Error for SourceIdExhausted {}
+
+impl crate::context::SourceState {
+    fn issue_id(&mut self) -> Result<SourceId, SourceIdExhausted> {
+        loop {
+            let next = self.next_issued_id.ok_or(SourceIdExhausted)?;
+            self.next_issued_id = next.checked_add(1);
+            let id = SourceId(next);
+            if !self.catalog.contains_key(&id) && !self.leased_catalog.contains_key(&id) {
+                return Ok(id);
+            }
+        }
+    }
+
+    /// A fork gets a provenance snapshot, not a copy of the parent's lease
+    /// authority. Expired leases contribute neither records nor retained text.
+    pub(crate) fn fork_snapshot(&self) -> Self {
+        let mut snapshot = Self::default();
+        snapshot.current = self.current.clone();
+        snapshot.catalog = self.catalog.clone();
+        for (id, entry) in &self.leased_catalog {
+            if let Some(info) = entry.live_info() {
+                if snapshot.catalog.remove(id).is_none() {
+                    snapshot.catalog.insert(*id, info);
+                }
+            }
+        }
+        snapshot
+    }
+}
+
+/// Issue source identity in the selected session. Raw imported numeric IDs do
+/// not advance the issuer; an occupied numeric slot is skipped without reuse.
+pub fn lease_source_context_in_context(
+    runtime: &crate::context::RuntimeContext,
+    name: impl Into<Arc<str>>,
+    fullpath_name: Option<Arc<str>>,
+    text: impl Into<Arc<str>>,
+) -> Result<RuntimeSourceLease, SourceIdExhausted> {
+    let id = runtime.state().source.borrow_mut().issue_id()?;
+    let inner = Rc::new(LeaseInner {
+        info: SourceInfo {
+            source_id: Some(id),
+            name: name.into(),
+            fullpath_name,
+            text: text.into(),
+        },
+        state: Rc::downgrade(runtime.state()),
+    });
+    runtime.state().source.borrow_mut().leased_catalog.insert(
+        id,
+        LeasedSource {
+            owner: Rc::downgrade(&inner),
+        },
+    );
+    Ok(RuntimeSourceLease(inner))
 }
 
 runmat_thread_local! {
@@ -85,7 +227,10 @@ pub fn replace_current_source_context(
 
 pub fn replace_current_source_id(source_id: Option<SourceId>) -> SourceContextGuard {
     if let Some(state) = active_state() {
-        let next = source_id.and_then(|id| state.source.borrow().catalog.get(&id).cloned());
+        let next = source_id.and_then(|id| {
+            let source = state.source.borrow();
+            resolved_source_info(&source, id)
+        });
         let prev = std::mem::replace(&mut state.source.borrow_mut().current, next);
         SourceContextGuard {
             prev,
@@ -177,9 +322,18 @@ pub fn current_source_info() -> Option<SourceInfo> {
 
 pub fn source_info(source_id: SourceId) -> Option<SourceInfo> {
     if let Some(state) = active_state() {
-        return state.source.borrow().catalog.get(&source_id).cloned();
+        let source = state.source.borrow();
+        return resolved_source_info(&source, source_id);
     }
     SOURCE_CATALOG.with(|catalog| catalog.borrow().get(&source_id).cloned())
+}
+
+pub fn source_info_in_context(
+    runtime: &crate::context::RuntimeContext,
+    source_id: SourceId,
+) -> Option<SourceInfo> {
+    let source = runtime.state().source.borrow();
+    resolved_source_info(&source, source_id)
 }
 
 /// Seed a newly-created standalone runtime context from the ambient source
@@ -218,4 +372,120 @@ fn catalog_entries(
             )
         })
         .collect()
+}
+
+#[cfg(test)]
+mod lease_tests {
+    use super::*;
+    use crate::context::{RuntimeContext, RuntimeServicePorts};
+    use crate::execution::RuntimeExecutionService;
+
+    fn runtime() -> RuntimeContext {
+        RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+    }
+
+    #[test]
+    fn imported_large_ids_cannot_poison_the_session_issuer() {
+        let runtime = runtime();
+        runtime.state().source.borrow_mut().catalog.insert(
+            SourceId(usize::MAX - 1),
+            SourceInfo {
+                source_id: Some(SourceId(usize::MAX - 1)),
+                name: Arc::from("imported"),
+                fullpath_name: None,
+                text: Arc::from("old"),
+            },
+        );
+        let first = lease_source_context_in_context(&runtime, "first", None, "one").unwrap();
+        let second = lease_source_context_in_context(&runtime, "second", None, "two").unwrap();
+        assert_eq!(first.source_id(), SourceId(0));
+        assert_eq!(second.source_id(), SourceId(1));
+        assert_eq!(
+            source_info_in_context(&runtime, SourceId(usize::MAX - 1))
+                .unwrap()
+                .text
+                .as_ref(),
+            "old"
+        );
+    }
+
+    #[test]
+    fn exhausted_issuer_never_wraps_or_reuses_retired_identity() {
+        let runtime = runtime();
+        runtime.state().source.borrow_mut().next_issued_id = Some(usize::MAX);
+        let last = lease_source_context_in_context(&runtime, "last", None, "last text")
+            .expect("final representable identity");
+        assert_eq!(last.source_id(), SourceId(usize::MAX));
+        drop(last);
+        assert!(matches!(
+            lease_source_context_in_context(&runtime, "extra", None, "no"),
+            Err(SourceIdExhausted)
+        ));
+    }
+
+    #[test]
+    fn interleaved_foreground_guards_do_not_remove_leased_sources() {
+        let runtime = runtime();
+        let _scope = runtime.enter();
+        let first = lease_source_context_in_context(&runtime, "first", None, "one").unwrap();
+        let guard = replace_source_catalog_with_fullpaths(vec![(
+            SourceId(5),
+            "foreground".into(),
+            None,
+            "statement".into(),
+        )]);
+        let second = lease_source_context_in_context(&runtime, "second", None, "two").unwrap();
+        drop(guard);
+        assert_eq!(source_info(first.source_id()).unwrap().text.as_ref(), "one");
+        assert_eq!(
+            source_info(second.source_id()).unwrap().text.as_ref(),
+            "two"
+        );
+        drop(first);
+        assert!(source_info(SourceId(0)).is_none());
+        assert_eq!(
+            source_info(second.source_id()).unwrap().text.as_ref(),
+            "two"
+        );
+    }
+
+    #[test]
+    fn colliding_raw_import_cannot_relabel_a_live_issued_source() {
+        let runtime = runtime();
+        let lease =
+            lease_source_context_in_context(&runtime, "issued", None, "issued text").unwrap();
+        let _scope = runtime.enter();
+        let guard = replace_source_catalog_with_fullpaths(vec![(
+            lease.source_id(),
+            "untrusted".into(),
+            None,
+            "untrusted text".into(),
+        )]);
+        assert!(source_info(lease.source_id()).is_none());
+        assert_eq!(lease.source_info().text.as_ref(), "issued text");
+        drop(guard);
+        assert_eq!(
+            source_info(lease.source_id()).unwrap().text.as_ref(),
+            "issued text"
+        );
+    }
+
+    #[test]
+    fn lease_retirement_keeps_cloned_text_and_fork_snapshot_is_independent() {
+        let runtime = runtime();
+        let lease =
+            lease_source_context_in_context(&runtime, "callback", None, "retained").unwrap();
+        let id = lease.source_id();
+        let retained = lease.source_info();
+        let child = runtime.fork_parallel_lab(RuntimeServicePorts::default());
+        drop(lease);
+        assert!(source_info_in_context(&runtime, id).is_none());
+        assert_eq!(retained.text.as_ref(), "retained");
+        assert_eq!(
+            source_info_in_context(&child, id).unwrap().text.as_ref(),
+            "retained"
+        );
+        let child_lease = lease_source_context_in_context(&child, "child", None, "new").unwrap();
+        assert_ne!(child_lease.source_id(), id);
+    }
 }

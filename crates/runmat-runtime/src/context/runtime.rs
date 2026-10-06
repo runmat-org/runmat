@@ -418,7 +418,7 @@ impl RuntimeContext {
         } else {
             child
         };
-        *child.state.source.borrow_mut() = self.state.source.borrow().clone();
+        *child.state.source.borrow_mut() = self.state.source.borrow().fork_snapshot();
         *child.state.call.borrow_mut() = self.state.call.borrow().clone();
         *child.state.classes.borrow_mut() = self.state.classes.borrow().clone();
         *child.state.session_variables.borrow_mut() = self.state.session_variables.borrow().clone();
