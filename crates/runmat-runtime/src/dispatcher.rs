@@ -10,6 +10,8 @@ use std::cell::RefCell;
 mod provenance;
 #[path = "dispatcher/owned_gather.rs"]
 mod owned_gather;
+#[path = "dispatcher/workspace_effect.rs"]
+mod workspace_effect;
 
 pub use owned_gather::gather_if_needed_owned_async;
 
@@ -445,8 +447,9 @@ pub(crate) async fn try_call_builtin_async_with_outputs(
     output_count: usize,
     context: Option<&crate::context::RuntimeContext>,
 ) -> Result<Option<Value>, RuntimeError> {
+    let fence = workspace_effect::PostCallWorkspaceEffectFence::capture(context);
     let context = context.cloned();
-    match &context {
+    let result = match &context {
         Some(context) => {
             context
                 .scope(try_call_builtin_async_impl(
@@ -458,7 +461,8 @@ pub(crate) async fn try_call_builtin_async_with_outputs(
                 .await
         }
         None => try_call_builtin_async_impl(name, args, Some(output_count), None).await,
-    }
+    };
+    fence.finish_optional(result)
 }
 
 async fn try_distributed_builtin(
@@ -1068,14 +1072,16 @@ pub async fn call_builtin_async_in_context(
     name: &str,
     args: &[Value],
 ) -> Result<Value, RuntimeError> {
-    context
+    let fence = workspace_effect::PostCallWorkspaceEffectFence::capture(Some(context));
+    let result = context
         .scope(call_builtin_async_impl(
             name,
             args,
             None,
             Some(context.clone()),
         ))
-        .await
+        .await;
+    fence.finish(result)
 }
 
 /// Direct embedding call with no session binding authority. Use the
@@ -1094,14 +1100,16 @@ pub async fn call_builtin_async_with_outputs_in_context(
     args: &[Value],
     output_count: usize,
 ) -> Result<Value, RuntimeError> {
-    context
+    let fence = workspace_effect::PostCallWorkspaceEffectFence::capture(Some(context));
+    let result = context
         .scope(call_builtin_async_impl(
             name,
             args,
             Some(output_count),
             Some(context.clone()),
         ))
-        .await
+        .await;
+    fence.finish(result)
 }
 
 /// Invoke the implementation already selected for this invocation. Re-resolving
@@ -1112,34 +1120,39 @@ pub(crate) async fn call_selected_builtin_async_with_outputs(
     output_count: usize,
     context: Option<crate::context::RuntimeContext>,
 ) -> Result<Value, RuntimeError> {
-    let name = binding.identity.builtin.name;
-    let _output_guard = crate::output_count::push_output_count(Some(output_count));
-    if let Some(result) =
-        try_distributed_builtin(name, args, Some(output_count), context.as_ref()).await?
-    {
-        return Ok(result);
+    let fence = workspace_effect::PostCallWorkspaceEffectFence::capture(context.as_ref());
+    let result = async move {
+        let name = binding.identity.builtin.name;
+        let _output_guard = crate::output_count::push_output_count(Some(output_count));
+        if let Some(result) =
+            try_distributed_builtin(name, args, Some(output_count), context.as_ref()).await?
+        {
+            return Ok(result);
+        }
+        if let Some(result) =
+            try_call_registered_instance_method(name, args, Some(output_count), context.as_ref())
+                .await?
+        {
+            return compatibility_checked_builtin_result(name, args, result);
+        }
+        let prepared = preparation::prepare_selected(
+            SelectedBindingOrigin::CanonicalOrScoped,
+            name,
+            args,
+            context.as_ref(),
+        )
+        .await?;
+        let result = selected_execution::execute(
+            SelectedImplementation::Canonical(binding.implementation),
+            prepared.as_deref().unwrap_or(args),
+            context,
+            Some(output_count),
+        )
+        .await?;
+        compatibility_checked_builtin_result(name, args, result)
     }
-    if let Some(result) =
-        try_call_registered_instance_method(name, args, Some(output_count), context.as_ref())
-            .await?
-    {
-        return compatibility_checked_builtin_result(name, args, result);
-    }
-    let prepared = preparation::prepare_selected(
-        SelectedBindingOrigin::CanonicalOrScoped,
-        name,
-        args,
-        context.as_ref(),
-    )
-    .await?;
-    let result = selected_execution::execute(
-        SelectedImplementation::Canonical(binding.implementation),
-        prepared.as_deref().unwrap_or(args),
-        context,
-        Some(output_count),
-    )
-    .await?;
-    compatibility_checked_builtin_result(name, args, result)
+    .await;
+    fence.finish(result)
 }
 
 fn should_retry_with_gpu_gather(err: &RuntimeError, args: &[Value]) -> bool {

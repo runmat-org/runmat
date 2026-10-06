@@ -104,6 +104,18 @@ fn global_deoptimization_refreshes_only_the_alias_not_a_shared_ssa_operand() {
 }
 
 fn omitted_input_state() -> HostState {
+    omitted_input_state_with(
+        RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        )),
+        None,
+    )
+}
+
+fn omitted_input_state_with(
+    runtime: RuntimeContext,
+    workspace: Option<crate::execute::workspace::NativeWorkspaceInput>,
+) -> HostState {
     let point = ProgramPointId {
         function: ProgramFunctionId(0),
         block: 0,
@@ -170,9 +182,7 @@ fn omitted_input_state() -> HostState {
         function,
         arguments: vec![],
         requested_outputs: 0,
-        runtime: RuntimeContext::new(Rc::new(
-            runmat_runtime::execution::RuntimeExecutionService::new(),
-        )),
+        runtime,
         program_capture: None,
         captures: vec![],
         deoptimization: Default::default(),
@@ -180,7 +190,7 @@ fn omitted_input_state() -> HostState {
         coverage_sites: Default::default(),
         osr_point: None,
         optimized_regions: Default::default(),
-        workspace: None,
+        workspace,
     })
     .unwrap()
     .0
@@ -300,6 +310,108 @@ fn suspended_call_completion_reconciles_workspace_on_success_and_error() {
             }
             assert_eq!(state.assignment_root(0, false).unwrap(), Value::Num(42.0));
             assert!(state.missing_input_locals.is_empty());
+            assert!(!state.workspace.as_ref().unwrap().needs_reconciliation());
+        }
+    });
+}
+
+#[test]
+fn suspended_contextual_call_reconciles_a_new_canonical_revision() {
+    runmat_gc::gc_test_context(|| {
+        for fail in [false, true] {
+            let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+            let mut initial = runmat_runtime::workspace::WorkspaceDelta::new();
+            initial.assign("x", Value::Num(1.0)).unwrap();
+            owner.apply(initial).unwrap();
+            let foreground = Rc::new(
+                runmat_runtime::workspace::BaseWorkspaceProjectionService::new(
+                    owner.begin_projection().unwrap(),
+                ),
+            );
+            let canonical: Rc<dyn runmat_runtime::context::RuntimeWorkspaceService> = foreground;
+            let runtime = RuntimeContext::new(Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            ));
+            let ports = runtime.service_ports().clone().with_workspace(canonical);
+            let runtime = runtime.with_service_ports(ports);
+            let workspace = crate::execute::workspace::NativeWorkspaceInput {
+                values: std::collections::BTreeMap::from([("x".into(), Value::Num(1.0))]),
+                local_names: std::collections::BTreeMap::from([(BindingId(0), "x".into())]),
+                bindings: vec![crate::execute::workspace::NativeWorkspaceBinding {
+                    binding: BindingId(0),
+                    name: "x".into(),
+                }],
+                global_bindings: Vec::new(),
+            };
+            let mut state = omitted_input_state_with(runtime, Some(workspace));
+
+            let request = runmat_runtime::native::NativeSiteRequest {
+                function: 0,
+                block: 0,
+                position: 0,
+                phase: runmat_runtime::native::NativeSitePhase::RVALUE,
+                ordinal: 0,
+                reserved: 0,
+            };
+            let call_runtime = state.runtime.clone();
+            let reached = Rc::new(std::cell::Cell::new(false));
+            let reached_call = Rc::clone(&reached);
+            let (release, gate) = futures::channel::oneshot::channel::<()>();
+            state.pending_call = Some(crate::execute::call_suspension::PendingCall {
+                continuation: 1,
+                generation: 1,
+                request,
+                embedded: None,
+                retained_roots: Vec::new(),
+                future: Box::pin(async move {
+                    reached_call.set(true);
+                    gate.await.map_err(|_| {
+                        runmat_runtime::runtime_error::semantic_error(
+                            "WorkspaceRevisionFixture",
+                            "checkpoint gate was abandoned",
+                        )
+                    })?;
+                    runmat_runtime::call_builtin_async_in_context(
+                        &call_runtime,
+                        "plus",
+                        &[Value::Num(1.0), Value::Num(2.0)],
+                    )
+                    .await?;
+                    if fail {
+                        Err(runmat_runtime::runtime_error::semantic_error(
+                            "WorkspaceRevisionFixture",
+                            "failure after canonical reconciliation",
+                        )
+                        .into())
+                    } else {
+                        Ok(crate::execute::call_suspension::CallCompletion::Values(
+                            vec![],
+                        ))
+                    }
+                }),
+            });
+            let mut completion =
+                Box::pin(crate::execute::call_suspension::complete(&mut state, 1, 1));
+            let mut context = std::task::Context::from_waker(futures::task::noop_waker_ref());
+            assert!(matches!(
+                std::future::Future::poll(completion.as_mut(), &mut context),
+                std::task::Poll::Pending
+            ));
+            assert!(reached.get(), "native call reached its suspension gate");
+
+            let mut callback = owner.begin_projection().unwrap();
+            callback.assign("x", Value::Num(42.0)).unwrap();
+            callback.publish().unwrap();
+            release.send(()).expect("resume suspended native call");
+            let result = futures::executor::block_on(completion.as_mut());
+            drop(completion);
+            if fail {
+                assert!(matches!(result, Err(NativeExecutorError::Runtime(error))
+                    if error.identifier() == Some("RunMat:WorkspaceRevisionFixture")));
+            } else {
+                assert_eq!(result.unwrap(), request);
+            }
+            assert_eq!(state.assignment_root(0, false).unwrap(), Value::Num(42.0));
             assert!(!state.workspace.as_ref().unwrap().needs_reconciliation());
         }
     });

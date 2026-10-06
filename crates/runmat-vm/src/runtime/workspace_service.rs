@@ -562,6 +562,7 @@ mod tests {
         let runtime = runtime.with_service_ports(ports);
         let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
 
+        let call_runtime = runtime.clone();
         futures::executor::block_on(workspace_scope(runtime, &service, async {
             let mut values = vec![Value::Num(1.0)];
             let guard = super::super::workspace::set_workspace_state(
@@ -571,11 +572,34 @@ mod tests {
                 FrameGlobalBindings::default(),
             );
             assert_eq!(service.try_lookup("x").unwrap(), Some(Value::Num(1.0)));
-            assert_eq!(service.try_lookup("x").unwrap(), Some(Value::Num(1.0)));
             assert_eq!(delegate.snapshots.get(), 1);
+            assert_eq!(
+                runmat_runtime::call_builtin_async_in_context(
+                    &call_runtime,
+                    "plus",
+                    &[Value::Num(1.0), Value::Num(2.0)],
+                )
+                .await
+                .unwrap(),
+                Value::Num(3.0)
+            );
+            assert_eq!(
+                delegate.snapshots.get(),
+                1,
+                "an unchanged post-call revision must not rematerialize the frame"
+            );
 
             base_service.assign("x", Value::Num(3.0)).unwrap();
-            assert_eq!(service.try_lookup("x").unwrap(), Some(Value::Num(3.0)));
+            runmat_runtime::call_builtin_async_in_context(
+                &call_runtime,
+                "plus",
+                &[Value::Num(3.0), Value::Num(4.0)],
+            )
+            .await
+            .unwrap();
+            super::super::workspace::reconcile_workspace_vars(&mut values);
+            assert_eq!(values[0], Value::Num(3.0));
+            assert_eq!(service.lookup("x"), Some(Value::Num(3.0)));
             assert_eq!(delegate.snapshots.get(), 2);
             drop(guard);
         }));
