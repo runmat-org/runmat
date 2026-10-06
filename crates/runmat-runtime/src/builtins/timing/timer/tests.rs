@@ -1,9 +1,12 @@
 use super::*;
 use crate::context::{
-    RuntimeLocalTaskSupervisor, RuntimeServiceFuture, RuntimeServicePorts, RuntimeTimingService,
+    RuntimeLocalTaskSupervisor, RuntimeServiceFuture, RuntimeServicePorts,
+    RuntimeSourceEvaluationService, RuntimeTimingService, SessionSourceEvaluation,
+    SourceEvaluationProvenance,
 };
 use crate::execution::RuntimeExecutionService;
 use futures::executor::block_on;
+use runmat_types::SourceId;
 use runmat_value::{CharArray, IntegerStorage, Tensor};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -11,6 +14,45 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 struct TestClock(Arc<Mutex<Duration>>);
+
+#[derive(Debug)]
+struct TestSourceProvenance(SourceId);
+
+impl SourceEvaluationProvenance for TestSourceProvenance {
+    fn source_id(&self) -> SourceId {
+        self.0
+    }
+}
+
+struct RecordingSourceEvaluator(Arc<Mutex<Vec<String>>>);
+
+impl RuntimeSourceEvaluationService for RecordingSourceEvaluator {
+    fn capture_session_source(
+        &self,
+        runtime: &RuntimeContext,
+        source: Arc<str>,
+        source_label: Arc<str>,
+        requested_outputs: usize,
+    ) -> BuiltinResult<SessionSourceEvaluation> {
+        assert_eq!(requested_outputs, 0);
+        Ok(SessionSourceEvaluation::capture(
+            runtime,
+            source,
+            Rc::new(TestSourceProvenance(SourceId(91))),
+            source_label,
+            requested_outputs,
+        ))
+    }
+
+    fn evaluate_session_source(
+        &self,
+        _: RuntimeContext,
+        request: SessionSourceEvaluation,
+    ) -> RuntimeServiceFuture<BuiltinResult<crate::sequence::ValueSequence>> {
+        self.0.lock().unwrap().push(request.source().to_string());
+        Box::pin(async { Ok(crate::sequence::ValueSequence::empty()) })
+    }
+}
 
 impl RuntimeTimingService for TestClock {
     fn monotonic_elapsed(&self) -> Duration {
@@ -63,6 +105,13 @@ fn test_runtime() -> RuntimeContext {
 
 fn test_supervisor() -> Rc<RuntimeLocalTaskSupervisor> {
     TEST_SESSION.with(|session| session.borrow().as_ref().expect("test session").1.clone())
+}
+
+fn install_timer_invoker(
+    invoker: Option<Arc<crate::user_functions::FunctionInvoker>>,
+) -> crate::user_functions::FunctionInvokerGuard {
+    let _scope = test_runtime().enter();
+    crate::user_functions::install_semantic_function_invoker(invoker)
 }
 
 async fn timer_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -171,8 +220,8 @@ fn timer_start_runs_function_callback_and_updates_state() {
     reset_timer_state_for_tests();
     let calls = Arc::new(Mutex::new(0usize));
     let invoker_calls = calls.clone();
-    let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-        move |_function, args, requested_outputs| {
+    let _guard =
+        install_timer_invoker(Some(Arc::new(move |_function, args, requested_outputs| {
             assert_eq!(requested_outputs, 0);
             let args = args.to_vec();
             let invoker_calls = Arc::clone(&invoker_calls);
@@ -189,8 +238,7 @@ fn timer_start_runs_function_callback_and_updates_state() {
                 *invoker_calls.lock().unwrap() += 1;
                 Ok(crate::sequence::ValueSequence::empty())
             })
-        },
-    )));
+        })));
     let timer = block_on(timer_builtin(vec![
         Value::String("TimerFcn".into()),
         Value::BoundFunctionHandle {
@@ -226,7 +274,7 @@ fn timer_stop_claims_stop_callback_once_and_wait_does_not_stop() {
     reset_timer_state_for_tests();
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
     let recorded = calls.clone();
-    let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+    let _guard = install_timer_invoker(Some(Arc::new(
         move |function, _args, _requested_outputs| {
             let recorded = recorded.clone();
             let name = format!("{function:?}");
@@ -267,7 +315,7 @@ fn fixed_rate_drop_counts_missed_slots_without_executing_them() {
     let calls = Arc::new(Mutex::new(0usize));
     let callback_calls = calls.clone();
     let callback_clock = clock.clone();
-    let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+    let _guard = install_timer_invoker(Some(Arc::new(
         move |_function, _args, _requested_outputs| {
             let calls = callback_calls.clone();
             let clock = callback_clock.clone();
@@ -304,6 +352,308 @@ fn fixed_rate_drop_counts_missed_slots_without_executing_them() {
     assert_eq!(*calls.lock().unwrap(), 2);
     assert_eq!(numeric_property(&handle, "TasksExecuted").unwrap(), 2.0);
     assert_eq!(*clock.lock().unwrap(), Duration::from_millis(300));
+}
+
+#[test]
+fn fixed_delay_and_fixed_spacing_use_distinct_callback_anchors() {
+    let _lock = TIMER_TEST_LOCK.lock().unwrap();
+    for (mode, expected) in [
+        ("fixedDelay", Duration::from_millis(250)),
+        ("fixedSpacing", Duration::from_millis(350)),
+    ] {
+        let clock = Arc::new(Mutex::new(Duration::ZERO));
+        reset_timer_state_for_tests_with_clock(Some(clock.clone()));
+        let calls = Arc::new(Mutex::new(0usize));
+        let callback_calls = calls.clone();
+        let callback_clock = clock.clone();
+        let _guard = install_timer_invoker(Some(Arc::new(
+            move |_function, _args, _requested_outputs| {
+                let calls = callback_calls.clone();
+                let clock = callback_clock.clone();
+                Box::pin(async move {
+                    let mut count = calls.lock().unwrap();
+                    *count += 1;
+                    if *count == 1 {
+                        *clock.lock().unwrap() += Duration::from_millis(250);
+                    }
+                    Ok(crate::sequence::ValueSequence::empty())
+                })
+            },
+        )));
+        let timer = block_on(timer_builtin(vec![
+            Value::String("TimerFcn".into()),
+            Value::BoundFunctionHandle {
+                name: "tick".into(),
+                function: 1,
+            },
+            Value::String("ExecutionMode".into()),
+            Value::String(mode.into()),
+            Value::String("Period".into()),
+            Value::Num(0.1),
+            Value::String("TasksToExecute".into()),
+            Value::Num(2.0),
+        ]))
+        .expect("timer");
+        block_on(timer_start_builtin(timer.clone())).expect("start");
+        block_on(timer_wait_builtin(timer)).expect("wait");
+        assert_eq!(*calls.lock().unwrap(), 2, "{mode}");
+        assert_eq!(*clock.lock().unwrap(), expected, "{mode}");
+    }
+}
+
+#[test]
+fn fixed_rate_queue_runs_due_work_and_error_reports_backlog() {
+    let _lock = TIMER_TEST_LOCK.lock().unwrap();
+    for (busy, expected_calls, expected_error) in [
+        ("queue", 4usize, None),
+        ("error", 1usize, Some("RunMat:timer:CallbackFailed")),
+    ] {
+        let clock = Arc::new(Mutex::new(Duration::ZERO));
+        reset_timer_state_for_tests_with_clock(Some(clock.clone()));
+        let calls = Arc::new(Mutex::new(0usize));
+        let callback_calls = calls.clone();
+        let callback_clock = clock.clone();
+        let _guard = install_timer_invoker(Some(Arc::new(
+            move |_function, _args, _requested_outputs| {
+                let calls = callback_calls.clone();
+                let clock = callback_clock.clone();
+                Box::pin(async move {
+                    let mut count = calls.lock().unwrap();
+                    *count += 1;
+                    if *count == 1 {
+                        *clock.lock().unwrap() += Duration::from_millis(250);
+                    }
+                    Ok(crate::sequence::ValueSequence::empty())
+                })
+            },
+        )));
+        let timer = block_on(timer_builtin(vec![
+            Value::String("TimerFcn".into()),
+            Value::BoundFunctionHandle {
+                name: "tick".into(),
+                function: 1,
+            },
+            Value::String("ExecutionMode".into()),
+            Value::String("fixedRate".into()),
+            Value::String("BusyMode".into()),
+            Value::String(busy.into()),
+            Value::String("Period".into()),
+            Value::Num(0.1),
+            Value::String("TasksToExecute".into()),
+            Value::Num(4.0),
+        ]))
+        .expect("timer");
+        block_on(timer_start_builtin(timer.clone())).expect("start");
+        let result = block_on(timer_wait_builtin(timer.clone()));
+        assert_eq!(
+            result
+                .err()
+                .and_then(|error| error.identifier().map(str::to_string))
+                .as_deref(),
+            expected_error,
+            "{busy}"
+        );
+        assert_eq!(*calls.lock().unwrap(), expected_calls, "{busy}");
+        let Value::HandleObject(handle) = timer else {
+            panic!("timer handle");
+        };
+        assert_eq!(string_property(&handle, "Running").unwrap(), "off");
+    }
+}
+
+#[test]
+fn reentrant_stop_and_restart_cannot_let_stale_generation_turn_running_off() {
+    let _lock = TIMER_TEST_LOCK.lock().unwrap();
+    reset_timer_state_for_tests();
+    let runtime = test_runtime();
+    let calls = Rc::new(std::cell::Cell::new(0usize));
+    let callback_calls = calls.clone();
+    let callback_runtime = runtime.clone();
+    let invoker: Rc<crate::user_functions::FunctionInvoker> =
+        Rc::new(move |_function, args, requested_outputs| {
+            assert_eq!(requested_outputs, 0);
+            let handle = args[0].clone();
+            let calls = callback_calls.clone();
+            let runtime = callback_runtime.clone();
+            Box::pin(async move {
+                let count = calls.get() + 1;
+                calls.set(count);
+                if count == 1 {
+                    super::timer_stop_builtin(Some(runtime.clone()), handle.clone()).await?;
+                    super::timer_start_builtin(Some(runtime), handle).await?;
+                }
+                Ok(crate::sequence::ValueSequence::empty())
+            })
+        });
+    let scope = runtime.enter();
+    let _guard = crate::user_functions::install_local_semantic_function_invoker(invoker);
+    drop(scope);
+    let timer = block_on(timer_builtin(vec![
+        Value::String("TimerFcn".into()),
+        Value::BoundFunctionHandle {
+            name: "tick".into(),
+            function: 1,
+        },
+    ]))
+    .expect("timer");
+    block_on(timer_start_builtin(timer.clone())).expect("first start");
+    block_on(timer_wait_builtin(timer.clone())).expect("wait follows restarted generation");
+    assert_eq!(calls.get(), 2);
+    let Value::HandleObject(handle) = timer else {
+        panic!("timer handle");
+    };
+    assert_eq!(string_property(&handle, "Running").unwrap(), "off");
+}
+
+#[test]
+fn deleting_a_pending_timer_cancels_its_child_without_late_callback() {
+    let _lock = TIMER_TEST_LOCK.lock().unwrap();
+    reset_timer_state_for_tests();
+    let calls = Arc::new(Mutex::new(0usize));
+    let recorded = calls.clone();
+    let _guard = install_timer_invoker(Some(Arc::new(
+        move |_function, _args, _requested_outputs| {
+            let recorded = recorded.clone();
+            Box::pin(async move {
+                *recorded.lock().unwrap() += 1;
+                Ok(crate::sequence::ValueSequence::empty())
+            })
+        },
+    )));
+    let timer = block_on(timer_builtin(vec![
+        Value::String("TimerFcn".into()),
+        Value::BoundFunctionHandle {
+            name: "tick".into(),
+            function: 1,
+        },
+        Value::String("StartDelay".into()),
+        Value::Num(3_600.0),
+    ]))
+    .expect("timer");
+    block_on(timer_start_builtin(timer.clone())).expect("start");
+    let host = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test reactor");
+    host.block_on(test_supervisor().drive_until(async {
+        tokio::task::yield_now().await;
+    }))
+    .expect("poll timer sleep pending");
+    let Value::HandleObject(handle) = timer.clone() else {
+        panic!("timer handle");
+    };
+    assert_eq!(string_property(&handle, "Running").unwrap(), "on");
+    block_on(timer_delete_builtin(timer)).expect("delete");
+    assert!(!crate::is_handle_valid(&handle));
+    assert_eq!(*calls.lock().unwrap(), 0);
+    test_supervisor().shutdown();
+    assert_eq!(*calls.lock().unwrap(), 0);
+}
+
+#[test]
+fn failed_timer_callback_delivers_original_exception_then_stop_once() {
+    let _lock = TIMER_TEST_LOCK.lock().unwrap();
+    reset_timer_state_for_tests();
+    let order = Arc::new(Mutex::new(Vec::<&'static str>::new()));
+    let recorded = order.clone();
+    let _guard = install_timer_invoker(Some(Arc::new(move |function, args, requested_outputs| {
+        assert_eq!(requested_outputs, 0);
+        let recorded = recorded.clone();
+        let args = args.to_vec();
+        Box::pin(async move {
+            match function {
+                1 => {
+                    recorded.lock().unwrap().push("timer");
+                    Err(crate::build_runtime_error("tick failed")
+                        .with_identifier("RunMat:TimerTest:Tick")
+                        .build())
+                }
+                2 => {
+                    recorded.lock().unwrap().push("error");
+                    let Value::Struct(event) = &args[1] else {
+                        panic!("error event");
+                    };
+                    assert_eq!(
+                        event.fields.get("Type"),
+                        Some(&Value::String("ErrorFcn".into()))
+                    );
+                    let Some(Value::Struct(data)) = event.fields.get("Data") else {
+                        panic!("error data");
+                    };
+                    let Some(Value::MException(exception)) = data.fields.get("Error") else {
+                        panic!("exact exception payload");
+                    };
+                    assert_eq!(exception.identifier, "RunMat:TimerTest:Tick");
+                    assert_eq!(exception.message, "tick failed");
+                    Ok(crate::sequence::ValueSequence::empty())
+                }
+                3 => {
+                    recorded.lock().unwrap().push("stop");
+                    Ok(crate::sequence::ValueSequence::empty())
+                }
+                _ => panic!("unexpected timer callback"),
+            }
+        })
+    })));
+    let timer = block_on(timer_builtin(vec![
+        Value::String("TimerFcn".into()),
+        Value::BoundFunctionHandle {
+            name: "tick".into(),
+            function: 1,
+        },
+        Value::String("ErrorFcn".into()),
+        Value::BoundFunctionHandle {
+            name: "failed".into(),
+            function: 2,
+        },
+        Value::String("StopFcn".into()),
+        Value::BoundFunctionHandle {
+            name: "done".into(),
+            function: 3,
+        },
+    ]))
+    .expect("timer");
+    block_on(timer_start_builtin(timer.clone())).expect("start");
+    let error = block_on(timer_wait_builtin(timer.clone())).expect_err("callback error");
+    assert_eq!(error.identifier(), Some("RunMat:TimerTest:Tick"));
+    assert_eq!(&*order.lock().unwrap(), &["timer", "error", "stop"]);
+    block_on(timer_stop_builtin(timer)).expect("idempotent stop");
+    assert_eq!(&*order.lock().unwrap(), &["timer", "error", "stop"]);
+}
+
+#[test]
+fn text_callback_uses_executor_source_port_and_missing_port_rejects_before_running() {
+    let _lock = TIMER_TEST_LOCK.lock().unwrap();
+    reset_timer_state_for_tests();
+    let unsupported = block_on(timer_builtin(vec![
+        Value::String("TimerFcn".into()),
+        Value::String("answer = 42;".into()),
+    ]))
+    .expect("text timer");
+    block_on(timer_start_builtin(unsupported.clone())).expect_err("missing source service");
+    let Value::HandleObject(handle) = unsupported else {
+        panic!("timer handle");
+    };
+    assert_eq!(string_property(&handle, "Running").unwrap(), "off");
+
+    let supervisor = Rc::new(RuntimeLocalTaskSupervisor::new());
+    let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+    let owner = runtime.local_identity();
+    let recorded = Arc::new(Mutex::new(Vec::new()));
+    let ports = RuntimeServicePorts::default()
+        .with_local_tasks(supervisor.submission_port(owner))
+        .with_source_evaluation(Rc::new(RecordingSourceEvaluator(recorded.clone())));
+    let runtime = runtime.with_service_ports(ports);
+    TEST_SESSION.with(|session| *session.borrow_mut() = Some((runtime, supervisor)));
+    let timer = block_on(timer_builtin(vec![
+        Value::String("TimerFcn".into()),
+        Value::String("answer = 42;".into()),
+    ]))
+    .expect("text timer");
+    block_on(timer_start_builtin(timer.clone())).expect("admit text callback");
+    assert!(recorded.lock().unwrap().is_empty());
+    block_on(timer_wait_builtin(timer)).expect("evaluate source callback");
+    assert_eq!(&*recorded.lock().unwrap(), &["answer = 42;"]);
 }
 
 #[test]
@@ -385,7 +735,7 @@ fn timer_tasks_to_execute_preserves_typed_integer_storage_exactly() {
     reset_timer_state_for_tests();
     let calls = Arc::new(Mutex::new(0usize));
     let invoker_calls = calls.clone();
-    let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+    let _guard = install_timer_invoker(Some(Arc::new(
         move |_function, _args, _requested_outputs| {
             let invoker_calls = Arc::clone(&invoker_calls);
             Box::pin(async move {

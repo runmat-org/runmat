@@ -17,6 +17,7 @@ async fn browser_start_returns_before_callback_and_wait_joins_it() {
     );
     let calls = Arc::new(Mutex::new(0usize));
     let recorded = calls.clone();
+    let scope = runtime.enter();
     let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         move |_function, _args, requested_outputs| {
             assert_eq!(requested_outputs, 0);
@@ -27,6 +28,7 @@ async fn browser_start_returns_before_callback_and_wait_joins_it() {
             })
         },
     )));
+    drop(scope);
     let timer = timer_builtin(
         Some(runtime.clone()),
         vec![

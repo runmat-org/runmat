@@ -9,6 +9,7 @@ use crate::builtins::timing::timer::property::{
 };
 use crate::RuntimeError;
 use runmat_value::HandleRef;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TimerPhase {
@@ -33,7 +34,7 @@ pub(crate) struct TimerRecord {
     pub(crate) visibility: TimerVisibility,
     pub(crate) lease: Option<RuntimeLocalTaskLease>,
     pub(crate) stop_claimed: bool,
-    pub(crate) terminal_error: Option<RuntimeError>,
+    pub(crate) terminal_error: Option<Arc<RuntimeError>>,
 }
 
 #[derive(Default)]
@@ -141,7 +142,7 @@ impl TimerSessionState {
         &mut self,
         handle: &HandleRef,
         generation: u64,
-        error: Option<RuntimeError>,
+        error: Option<Arc<RuntimeError>>,
     ) -> Option<bool> {
         let Some(entry) = self.record_mut(handle) else {
             return None;
@@ -175,7 +176,7 @@ impl TimerSessionState {
         Some((lease, call_stop))
     }
 
-    pub(crate) fn take_terminal_error(&mut self, handle: &HandleRef) -> Option<RuntimeError> {
+    pub(crate) fn take_terminal_error(&mut self, handle: &HandleRef) -> Option<Arc<RuntimeError>> {
         self.record_mut(handle)?.terminal_error.take()
     }
 
