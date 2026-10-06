@@ -165,6 +165,9 @@ impl RuntimeError {
                 context: original.context.clone(),
                 gpu_gather_retry: original.gpu_gather_retry,
                 failure_origin: original.failure_origin,
+                // The source retains the original charge. These copied
+                // presentation fields require independent allocation authority.
+                retained_diagnostic_allocation: None,
             },
         }
     }
