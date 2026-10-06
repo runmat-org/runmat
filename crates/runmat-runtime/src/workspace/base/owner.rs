@@ -127,6 +127,12 @@ pub(super) struct BaseWorkspaceState {
     pub(super) journal: WorkspaceJournal,
 }
 
+impl Default for BaseWorkspaceOwner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BaseWorkspaceOwner {
     pub fn new() -> Self {
         Self::with_history_limit(DEFAULT_HISTORY_CHANGE_LIMIT)
