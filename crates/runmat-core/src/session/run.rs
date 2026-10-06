@@ -104,10 +104,10 @@ async fn load_dynamic_function(
                 .build()))
         }
     };
-    let path = selected.path;
-    let path_origin = selected.origin;
+    let path = selected.path().to_path_buf();
     Some(
         async move {
+            let path_origin = selected.origin();
             let source_text =
                 runmat_runtime::builtins::io::repl_fs::pcode::read_source_text_async(&path)
                     .await
@@ -149,7 +149,7 @@ async fn load_dynamic_function(
                 .unwrap_or_else(|poison| poison.into_inner())
                 .get(&path)
                 .filter(|entry| {
-                    entry.matches_selection(&source_text, project_revision.as_ref(), &path_origin)
+                    entry.matches_selection(&source_text, project_revision.as_ref(), path_origin)
                 })
                 .cloned();
             let (registry, source_map) = if let Some(entry) = cached {
@@ -200,7 +200,7 @@ async fn load_dynamic_function(
                         path_name.as_ref(),
                         &source_text,
                         project_handoff.as_ref(),
-                        &path_origin,
+                        path_origin,
                     )
                     .map_err(|error| {
                         build_runtime_error(error)
@@ -214,7 +214,7 @@ async fn load_dynamic_function(
                         &companion,
                         primary_statement_count,
                         project_handoff.as_ref(),
-                        &path_origin,
+                        path_origin,
                     )
                     .map_err(|error| {
                         build_runtime_error(error)
@@ -311,7 +311,7 @@ async fn load_dynamic_function(
                         DynamicFunctionCacheEntry {
                             source_text,
                             project_revision,
-                            path_origin,
+                            path_origin: (*path_origin).clone(),
                             registry: Arc::clone(&registry),
                             source_map: Arc::clone(&source_map),
                         },
