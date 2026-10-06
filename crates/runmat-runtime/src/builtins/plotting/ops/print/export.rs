@@ -179,6 +179,33 @@ mod tests {
         dropped: Arc<AtomicBool>,
     }
 
+    struct TerminalStage {
+        cancel: CancellationSource,
+        failure: bool,
+    }
+
+    #[async_trait(?Send)]
+    impl fs::FsStagedOutput for TerminalStage {
+        async fn write_chunk(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            Ok(bytes.len())
+        }
+        async fn flush_and_sync(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+        async fn publish(self: Box<Self>) -> Result<(), FsPublicationFailure> {
+            self.cancel
+                .cancel(runmat_execution::CancellationReason::User);
+            if self.failure {
+                Err(FsPublicationFailure::not_published(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "publication rejected",
+                )))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
     impl Drop for PendingStage {
         fn drop(&mut self) {
             self.dropped.store(true, Ordering::SeqCst);
@@ -346,5 +373,42 @@ mod tests {
         );
         assert!(dropped.load(Ordering::SeqCst));
         assert_eq!(polls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn terminal_png_publication_outcome_wins_simultaneous_cancel() {
+        for failure in [false, true] {
+            let source = CancellationSource::new();
+            let runtime = RuntimeContext::with_cancellation(
+                Rc::new(crate::execution::RuntimeExecutionService::new()),
+                source.token(),
+            );
+            let result = block_on(staged_file::publish(
+                Some(&runtime),
+                BUILTIN_NAME,
+                Box::new(TerminalStage {
+                    cancel: source,
+                    failure,
+                }),
+            ));
+            match (failure, result) {
+                (
+                    false,
+                    Err(StagedFileError::PublicationInterrupted(
+                        error,
+                        FsPublicationDisposition::Published,
+                    )),
+                ) => {
+                    assert!(error
+                        .identifier()
+                        .is_some_and(|id| id.ends_with(":Cancelled")));
+                }
+                (true, Err(StagedFileError::Publication(cause))) => {
+                    assert_eq!(cause.disposition(), FsPublicationDisposition::NotPublished);
+                    assert_eq!(cause.io_error().kind(), io::ErrorKind::PermissionDenied);
+                }
+                _ => panic!("provider terminal outcome must win cancellation"),
+            }
+        }
     }
 }
