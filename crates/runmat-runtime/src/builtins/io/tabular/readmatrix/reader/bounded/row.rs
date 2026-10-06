@@ -254,10 +254,8 @@ fn append_utf8_chunk(
             (text, &candidate[valid..])
         }
         Err(source) => {
-            return Err(readmatrix_error_with_source(
-                &READMATRIX_ERROR_IO_READ,
-                "readmatrix: file contains bytes that are invalid for Encoding 'utf-8'",
-                source,
+            return Err(FixedReaderDiagnostic::invalid_utf8_with_source(
+                source, diagnostic,
             ));
         }
     };

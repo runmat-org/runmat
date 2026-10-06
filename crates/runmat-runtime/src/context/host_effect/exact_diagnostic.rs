@@ -26,9 +26,30 @@ impl ExactHostEffectDiagnosticStrings {
         builtin: &str,
         claim: HostEffectLiveAllocationClaim,
     ) -> Result<Self, HostEffectAllocationError> {
+        Self::render_with_extra_bytes(
+            authorized_bytes,
+            message_bytes,
+            message,
+            identifier,
+            builtin,
+            0,
+            claim,
+        )
+    }
+
+    fn render_with_extra_bytes(
+        authorized_bytes: usize,
+        message_bytes: usize,
+        message: impl fmt::Display,
+        identifier: &str,
+        builtin: &str,
+        extra_bytes: usize,
+        claim: HostEffectLiveAllocationClaim,
+    ) -> Result<Self, HostEffectAllocationError> {
         let total = message_bytes
             .checked_add(identifier.len())
             .and_then(|bytes| bytes.checked_add(builtin.len()))
+            .and_then(|bytes| bytes.checked_add(extra_bytes))
             .ok_or(HostEffectAllocationError::Overflow)?;
         if total != authorized_bytes {
             return Err(HostEffectAllocationError::ExceedsStageEnvelope);
@@ -61,6 +82,42 @@ impl ExactHostEffectDiagnosticStrings {
             .with_builtin(self.builtin)
             .with_retained_diagnostic_allocation(self.claim.into_diagnostic_retention())
             .build()
+    }
+
+    /// The concrete `Utf8Error` has no dynamic payload. Reserve its actual
+    /// compiled Box layout along with the strings and preserve its typed cause.
+    pub(crate) fn render_with_utf8_source(
+        authorized_bytes: usize,
+        message: &'static str,
+        identifier: &str,
+        builtin: &str,
+        source: std::str::Utf8Error,
+        claim: HostEffectLiveAllocationClaim,
+    ) -> Result<crate::RuntimeError, HostEffectAllocationError> {
+        let layout = Layout::new::<std::str::Utf8Error>();
+        if layout.size() == 0 {
+            return Err(HostEffectAllocationError::InvalidInvocation);
+        }
+        let strings = Self::render_with_extra_bytes(
+            authorized_bytes,
+            message.len(),
+            message,
+            identifier,
+            builtin,
+            layout.size(),
+            claim,
+        )?;
+        let pointer = NonNull::new(unsafe { alloc(layout) })
+            .ok_or(HostEffectAllocationError::AllocationFailed)?;
+        // SAFETY: the checked, unique global allocation has exactly the
+        // layout of Utf8Error. Box takes over its matching deallocation.
+        let boxed = unsafe {
+            pointer.as_ptr().cast::<std::str::Utf8Error>().write(source);
+            Box::from_raw(pointer.as_ptr().cast::<std::str::Utf8Error>())
+        };
+        let mut error = strings.into_error();
+        error.source = Some(boxed);
+        Ok(error)
     }
 }
 
@@ -202,6 +259,23 @@ mod tests {
         assert!(matches!(
             ExactHostEffectDiagnosticStrings::render(4, 2, TooShort, "i", "b", claim),
             Err(HostEffectAllocationError::InvalidInvocation)
+        ));
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    }
+
+    #[test]
+    fn utf8_source_layout_mismatch_refunds_before_box_or_text_escapes() {
+        let ledger = ManagedHostEffectLedger::new(256);
+        let stage = ledger.reserve_stage(256).expect("stage");
+        let claim = stage
+            .reserve_live_exact_claim(HostEffectLiveAllocationKind::Diagnostic, 4)
+            .expect("claim");
+        let source = std::str::from_utf8(b"\xff").unwrap_err();
+        assert!(matches!(
+            ExactHostEffectDiagnosticStrings::render_with_utf8_source(
+                4, "a", "i", "b", source, claim,
+            ),
+            Err(HostEffectAllocationError::ExceedsStageEnvelope)
         ));
         assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
     }

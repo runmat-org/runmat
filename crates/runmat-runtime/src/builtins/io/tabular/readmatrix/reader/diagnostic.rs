@@ -1,6 +1,6 @@
 //! Fixed late reader failures that can be charged before the opened-source scan.
 
-use super::{admission, readmatrix_error_with, BUILTIN_NAME};
+use super::{admission, readmatrix_error_with, readmatrix_error_with_source, BUILTIN_NAME};
 use crate::context::host_effect::{
     ExactHostEffectDiagnosticStrings, HostEffectAllocationError, HostEffectLiveAllocationClaim,
     HostEffectReceipt, HostEffectStagePermit,
@@ -100,6 +100,37 @@ impl FixedReaderDiagnostic {
         })();
         result.unwrap_or_else(|source| admission::allocation_error(BUILTIN_NAME, source))
     }
+
+    pub(in crate::builtins::io::tabular::readmatrix::reader) fn invalid_utf8_with_source(
+        source: std::str::Utf8Error,
+        reservation: Option<&dyn DiagnosticReservation>,
+    ) -> RuntimeError {
+        let (descriptor, message) = Self::InvalidUtf8.parts();
+        let Some(reservation) = reservation else {
+            return readmatrix_error_with_source(descriptor, message, source);
+        };
+        let result = (|| {
+            let identifier = descriptor
+                .identifier
+                .ok_or(HostEffectAllocationError::InvalidInvocation)?;
+            let total = message
+                .len()
+                .checked_add(identifier.len())
+                .and_then(|bytes| bytes.checked_add(BUILTIN_NAME.len()))
+                .and_then(|bytes| bytes.checked_add(std::mem::size_of::<std::str::Utf8Error>()))
+                .ok_or(HostEffectAllocationError::Overflow)?;
+            let claim = reservation.reserve_diagnostic_claim(total)?;
+            ExactHostEffectDiagnosticStrings::render_with_utf8_source(
+                total,
+                message,
+                identifier,
+                BUILTIN_NAME,
+                source,
+                claim,
+            )
+        })();
+        result.unwrap_or_else(|source| admission::allocation_error(BUILTIN_NAME, source))
+    }
 }
 
 pub(in crate::builtins::io::tabular::readmatrix::reader) fn maximum_fixed_diagnostic_bytes(
@@ -113,10 +144,16 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) fn maximum_fixed_diagno
         FixedReaderDiagnostic::ChunkOverflow,
     ] {
         let (descriptor, message) = kind.parts();
+        let source_bytes = if matches!(kind, FixedReaderDiagnostic::InvalidUtf8) {
+            std::mem::size_of::<std::str::Utf8Error>()
+        } else {
+            0
+        };
         let bytes = message
             .len()
             .checked_add(descriptor.identifier?.len())?
-            .checked_add(BUILTIN_NAME.len())?;
+            .checked_add(BUILTIN_NAME.len())?
+            .checked_add(source_bytes)?;
         maximum = maximum.max(bytes);
     }
     Some(maximum)
@@ -193,5 +230,27 @@ mod tests {
                     >= message.len() + descriptor.identifier.unwrap().len() + BUILTIN_NAME.len()
             );
         }
+    }
+
+    #[test]
+    fn cancelled_utf8_source_reservation_returns_typed_allocation_failure() {
+        struct Cancelled;
+        impl DiagnosticReservation for Cancelled {
+            fn reserve_diagnostic_claim(
+                &self,
+                _bytes: usize,
+            ) -> Result<HostEffectLiveAllocationClaim, HostEffectAllocationError> {
+                Err(HostEffectAllocationError::Cancelled)
+            }
+        }
+
+        let utf8 = std::str::from_utf8(b"\xff").unwrap_err();
+        let error = FixedReaderDiagnostic::invalid_utf8_with_source(utf8, Some(&Cancelled));
+        assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+        assert!(error
+            .source
+            .as_deref()
+            .is_some_and(|source| source.is::<HostEffectAllocationError>()));
+        assert!(error.retained_diagnostic_allocation.is_none());
     }
 }

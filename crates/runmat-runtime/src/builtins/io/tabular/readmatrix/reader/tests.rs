@@ -151,6 +151,62 @@ fn staged_scan_incomplete_utf8_owns_fixed_error_until_last_drop() {
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn staged_scan_invalid_utf8_retains_exact_typed_source_and_charge() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let bytes = b"1,\xff";
+    let (_restore, selected) = selected_path(bytes);
+    let mut source = block_on(selected.open_bounded_input())
+        .expect("bounded source")
+        .expect("memory snapshot");
+    let ledger = ManagedHostEffectLedger::new(4096);
+    let stage = ledger.reserve_stage(4096).expect("diagnostic stage");
+    let diagnostic = TestDiagnosticStage(stage.clone());
+    let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
+    let error = block_on(bounded::scan_utf8(
+        &mut source,
+        &mut cooperation,
+        &selected,
+        &ReadMatrixOptions::default(),
+        bounded::ScanResources {
+            line: Some(crate::context::host_effect::ExactHostEffectBytes::test_buffer(bytes.len())),
+            samples: Some(
+                crate::context::host_effect::ExactHostEffectBytes::test_buffer(bytes.len()),
+            ),
+            field: Some(
+                crate::context::host_effect::ExactHostEffectBytes::test_buffer(bytes.len()),
+            ),
+            diagnostic: Some(&diagnostic),
+        },
+    ))
+    .expect_err("invalid UTF-8 has an exact typed parse cause");
+    assert_eq!(
+        error.message(),
+        "readmatrix: file contains bytes that are invalid for Encoding 'utf-8'"
+    );
+    assert_eq!(error.identifier(), READMATRIX_ERROR_IO_READ.identifier);
+    assert!(error
+        .source
+        .as_deref()
+        .is_some_and(|source| source.is::<std::str::Utf8Error>()));
+    assert!(error.retained_diagnostic_allocation.is_some());
+    let payload = error.message.capacity()
+        + error.identifier.as_ref().unwrap().capacity()
+        + error.context.builtin.as_ref().unwrap().capacity()
+        + std::mem::size_of::<std::str::Utf8Error>();
+    assert_eq!(
+        ledger.snapshot().live_claimed_bytes,
+        (payload + stage.live_claim_metadata_bytes()) as u64
+    );
+    drop(diagnostic);
+    drop(stage);
+    assert!(ledger.snapshot().live_reserved_bytes > 0);
+    drop(error);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
 #[derive(Debug)]
 struct ExactOutputTestPermit(Arc<AtomicUsize>);
 
