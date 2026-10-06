@@ -5,8 +5,8 @@
 //! native stack space for name resolution or forwarded feval execution.
 
 use super::{
-    execute_resolved_callable, function_unavailable_error, try_execute_resolved_callable,
-    CallableDescriptor, CallableMetadata, CallableTarget,
+    function_unavailable_error, resolved_execution, CallableDescriptor, CallableMetadata,
+    CallableTarget,
 };
 use crate::context::RuntimeContext;
 use crate::RuntimeError;
@@ -143,14 +143,14 @@ fn resolved(
     metadata: CallableMetadata,
     fallback_policy: runmat_types::CallableFallbackPolicy,
 ) -> ExecutionFuture<'_, ValueSequence> {
-    Box::pin(execute_resolved_callable(
+    resolved_execution::execute(
         runtime,
         identity,
         args,
         requested_outputs,
         metadata,
         fallback_policy,
-    ))
+    )
 }
 
 #[inline(never)]
@@ -162,14 +162,14 @@ fn try_resolved(
     metadata: CallableMetadata,
     fallback_policy: runmat_types::CallableFallbackPolicy,
 ) -> ExecutionFuture<'_, Option<ValueSequence>> {
-    Box::pin(try_execute_resolved_callable(
+    resolved_execution::try_execute(
         runtime,
         identity,
         args,
         requested_outputs,
+        metadata,
         fallback_policy,
-        metadata.function_input_callsite,
-    ))
+    )
 }
 
 #[inline(never)]
