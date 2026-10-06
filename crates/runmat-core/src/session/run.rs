@@ -149,7 +149,7 @@ async fn load_dynamic_function(
                 .unwrap_or_else(|poison| poison.into_inner())
                 .get(&path)
                 .filter(|entry| {
-                    entry.source_text == source_text && entry.project_revision == project_revision
+                    entry.matches_selection(&source_text, project_revision.as_ref(), &path_origin)
                 })
                 .cloned();
             let (registry, source_map) = if let Some(entry) = cached {
@@ -311,6 +311,7 @@ async fn load_dynamic_function(
                         DynamicFunctionCacheEntry {
                             source_text,
                             project_revision,
+                            path_origin,
                             registry: Arc::clone(&registry),
                             source_map: Arc::clone(&source_map),
                         },

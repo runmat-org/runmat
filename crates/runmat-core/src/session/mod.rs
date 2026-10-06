@@ -235,8 +235,61 @@ struct WorkspaceMaterializeTicket {
 struct DynamicFunctionCacheEntry {
     source_text: String,
     project_revision: Option<runmat_package::ProjectRevision>,
+    path_origin: runmat_runtime::builtins::common::path_search::FileCandidateOrigin,
     registry: Arc<runmat_vm::FunctionRegistry>,
     source_map: Arc<crate::ExecutableSourceMap>,
+}
+
+impl DynamicFunctionCacheEntry {
+    fn matches_selection(
+        &self,
+        source_text: &str,
+        project_revision: Option<&runmat_package::ProjectRevision>,
+        origin: &runmat_runtime::builtins::common::path_search::FileCandidateOrigin,
+    ) -> bool {
+        self.source_text == source_text
+            && self.project_revision.as_ref() == project_revision
+            && &self.path_origin == origin
+    }
+}
+
+#[cfg(test)]
+mod dynamic_source_cache_tests {
+    use super::*;
+    use runmat_runtime::builtins::common::path_search::FileCandidateOrigin;
+
+    #[test]
+    fn physical_path_cache_does_not_reuse_another_selected_search_authority() {
+        let selected = FileCandidateOrigin::SearchRoot {
+            ordinal: 0,
+            access_root: PathBuf::from("/workspace"),
+            relative: PathBuf::from("same.m"),
+        };
+        let entry = DynamicFunctionCacheEntry {
+            source_text: "function y = same(); y = 1; end".into(),
+            project_revision: None,
+            path_origin: selected.clone(),
+            registry: Arc::new(runmat_vm::FunctionRegistry::default()),
+            source_map: Arc::new(crate::ExecutableSourceMap::default()),
+        };
+        assert!(entry.matches_selection(&entry.source_text, None, &selected));
+        assert!(!entry.matches_selection(
+            &entry.source_text,
+            None,
+            &FileCandidateOrigin::SearchRoot {
+                ordinal: 1,
+                access_root: PathBuf::from("/workspace"),
+                relative: PathBuf::from("same.m"),
+            }
+        ));
+        assert!(!entry.matches_selection(
+            &entry.source_text,
+            None,
+            &FileCandidateOrigin::Direct {
+                spelling: PathBuf::from("/workspace/same.m"),
+            }
+        ));
+    }
 }
 
 #[cfg(test)]
