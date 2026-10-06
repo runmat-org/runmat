@@ -1360,6 +1360,11 @@ mod tests {
             ],
             0,
         );
+        let expected_validation_error = RuntimeError::new(
+            bytecode
+                .validate_catch_scope_metadata()
+                .expect_err("fixture has invalid catch metadata"),
+        );
         let mut vars = Vec::new();
         let state = Box::new(InterpreterState::new_in_context(
             bytecode,
@@ -1397,7 +1402,7 @@ mod tests {
         let Poll::Ready(Err(error)) = Future::poll(future.as_mut(), &mut context) else {
             panic!("invalid catch metadata must reject on first poll");
         };
-        assert!(error.message().contains("lexical catch metadata"));
+        assert_eq!(error.message(), expected_validation_error.message());
     }
 
     #[test]
