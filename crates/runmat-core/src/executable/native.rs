@@ -436,16 +436,21 @@ mod tests {
     use futures::executor::block_on;
 
     use super::AotObjectDataOptions;
-    use crate::{execute_text_request, ExecutableSource, RunMatSession};
+    use crate::{execute_text_request_for_testing, ExecutableSource, RunMatSession};
 
     #[test]
     fn native_entrypoint_projects_compiler_identity_without_rewriting_portable_origin() {
         let mut session = RunMatSession::with_options(false, false).expect("session init");
-        execute_text_request(
+        let seed = execute_text_request_for_testing(
             &mut session,
             "seed = 0;\nfunction y = nativeIdentitySeed(x)\ny = x;\nend",
         )
         .expect("publish preceding session definition");
+        assert!(
+            seed.error.is_none(),
+            "preceding session definition must publish without a diagnostic error: {:?}",
+            seed.error
+        );
         let unit = block_on(session.compile_executable_unit(
             ExecutableSource::new(
                 "native-identity@1",
