@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn load_constant_routes_through_unboxed_immediate_poll_state() {
+fn immediate_instructions_run_only_when_polled_without_boxing() {
     let instruction = Instr::LoadConst(7.0);
     let bytecode = crate::bytecode::Bytecode::empty();
     let registry = crate::bytecode::FunctionRegistry::default();
@@ -81,4 +81,34 @@ fn load_constant_routes_through_unboxed_immediate_poll_state() {
     let unpolled = immediate_future!(&dropped_instruction);
     drop(unpolled);
     assert_eq!(stack, vec![Value::Num(7.0)]);
+
+    let enter_try = Instr::EnterTry {
+        scope: 3,
+        catch_pc: 11,
+        catch_var: Some(2),
+    };
+    let unpolled = immediate_future!(&enter_try);
+    drop(unpolled);
+    assert!(
+        try_stack.is_empty(),
+        "dropping must not enter the try scope"
+    );
+
+    let mut future = immediate_future!(&enter_try);
+    let mut context = Context::from_waker(std::task::Waker::noop());
+    assert!(matches!(
+        Pin::new(&mut future).poll(&mut context),
+        Poll::Ready(Ok(Some(DispatchHandled::Generic(
+            DispatchDecision::FallThrough
+        ))))
+    ));
+    drop(future);
+    assert_eq!(
+        try_stack,
+        vec![crate::interpreter::state::ActiveTryHandler {
+            scope: 3,
+            catch_pc: 11,
+            catch_var: Some(2),
+        }]
+    );
 }

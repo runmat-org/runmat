@@ -10,6 +10,7 @@ use runmat_execution::{
 };
 use runmat_value::{Value, ValueSequence};
 use std::cell::RefCell;
+use std::future::Future;
 use std::num::NonZeroU64;
 
 struct PendingFirstTurn {
@@ -224,11 +225,11 @@ fn property_replacement_fences_queued_old_claim_and_reuses_bounded_slot() {
         NonZeroUsize::new(2).unwrap(),
         NonZeroUsize::new(1).unwrap(),
     );
-    let selected = base.with_service_ports(
-        base.service_ports()
-            .clone()
-            .with_graphics_callback_queue(owner.downgrade()),
-    );
+    let ports = base
+        .service_ports()
+        .clone()
+        .with_graphics_callback_queue(owner.downgrade());
+    let selected = base.with_service_ports(ports);
     let old_calls = Rc::new(Cell::new(0));
     let old_callback: Rc<GraphicsCallbackResponder> = {
         let old_calls = old_calls.clone();
@@ -321,11 +322,11 @@ fn replaced_callback_destructor_can_retire_another_property() {
         NonZeroUsize::new(2).unwrap(),
         NonZeroUsize::new(2).unwrap(),
     );
-    let selected = base.with_service_ports(
-        base.service_ports()
-            .clone()
-            .with_graphics_callback_queue(owner.downgrade()),
-    );
+    let ports = base
+        .service_ports()
+        .clone()
+        .with_graphics_callback_queue(owner.downgrade());
+    let selected = base.with_service_ports(ports);
     let callback: Rc<GraphicsCallbackResponder> =
         Rc::new(|_| Box::pin(async { Ok(GraphicsCallbackResult::Completed) }));
     let other = owner
@@ -410,11 +411,11 @@ fn direct_registration_drop_releases_map_before_callback_destructor() {
         NonZeroUsize::new(2).unwrap(),
         NonZeroUsize::new(2).unwrap(),
     );
-    let selected = base.with_service_ports(
-        base.service_ports()
-            .clone()
-            .with_graphics_callback_queue(queue.downgrade()),
-    );
+    let ports = base
+        .service_ports()
+        .clone()
+        .with_graphics_callback_queue(queue.downgrade());
+    let selected = base.with_service_ports(ports);
     let other: Rc<GraphicsCallbackResponder> =
         Rc::new(|_| Box::pin(async { Ok(GraphicsCallbackResult::Completed) }));
     let other_ingress = queue
@@ -470,11 +471,11 @@ fn retired_figure_property_roots_prune_before_numeric_reuse() {
         NonZeroUsize::new(1).unwrap(),
         NonZeroUsize::new(1).unwrap(),
     );
-    let selected = base.with_service_ports(
-        base.service_ports()
-            .clone()
-            .with_graphics_callback_queue(owner.downgrade()),
-    );
+    let ports = base
+        .service_ports()
+        .clone()
+        .with_graphics_callback_queue(owner.downgrade());
+    let selected = base.with_service_ports(ports);
     let callback: Rc<GraphicsCallbackResponder> =
         Rc::new(|_| Box::pin(async { Ok(GraphicsCallbackResult::Suppress(false)) }));
     let kind = GraphicsCallbackKind::PanButtonDownFilter;
