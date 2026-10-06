@@ -92,10 +92,10 @@ impl ProgramSourceTable {
             source
                 .and_then(runmat_vm::BytecodeSourceRef::program)
                 .is_some_and(|ordinal| {
-                    self.source_map
-                        .entries()
-                        .iter()
-                        .any(|entry| entry.source_id == ordinal)
+                    usize::try_from(ordinal.0)
+                        .ok()
+                        .and_then(|index| self.source_map.entries().get(index))
+                        .is_some_and(|entry| entry.source_id == ordinal)
                 })
         };
         if !contains(bytecode.source_id) {
