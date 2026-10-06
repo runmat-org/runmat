@@ -1,6 +1,7 @@
 use super::{ContextFuture, RuntimeContextGuard, RuntimeContextState, RuntimeServicePorts};
 use crate::execution::RuntimeExecutionServices;
 use runmat_execution::cancellation::{CancellationSource, CancellationToken};
+use runmat_value::Value;
 use std::cell::RefCell;
 use std::future::Future;
 use std::rc::Rc;
@@ -159,6 +160,18 @@ impl RuntimeContext {
     /// Values and foreign registries must retain only a weak copy.
     pub(crate) fn session_lease(&self) -> std::sync::Weak<()> {
         Arc::downgrade(&self.state.session_lease)
+    }
+
+    pub(crate) fn retain_plot_callback(&self, slot: u64, value: Value) {
+        self.state.plot_callbacks.borrow_mut().insert(slot, value);
+    }
+
+    pub(crate) fn plot_callback(&self, slot: u64) -> Option<Value> {
+        self.state.plot_callbacks.borrow().get(&slot).cloned()
+    }
+
+    pub(crate) fn release_plot_callback(&self, slot: u64) {
+        self.state.plot_callbacks.borrow_mut().remove(&slot);
     }
 
     /// Invalidate only this session's staged host-effect invocations when its

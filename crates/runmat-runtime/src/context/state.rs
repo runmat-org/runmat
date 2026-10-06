@@ -53,6 +53,9 @@ pub struct RuntimeContextState {
     pub(crate) test_services: RefCell<Vec<crate::testing::RuntimeTestServices>>,
     pub(crate) test_contexts: RefCell<Vec<std::rc::Rc<RefCell<crate::testing::ContextState>>>>,
     pub(crate) constructor_receivers: RefCell<Vec<Value>>,
+    /// Plot scene records retain opaque tokens; callable values and GC roots
+    /// remain in their issuing session and disappear at session teardown.
+    pub(crate) plot_callbacks: RefCell<HashMap<u64, Value>>,
     pub(crate) events: RefCell<crate::EventRegistry>,
     pub(crate) runmat_extensions_enabled: Cell<bool>,
     pub(crate) language_mode: Cell<super::RuntimeLanguageMode>,
@@ -90,6 +93,7 @@ impl RuntimeContextState {
             test_services: RefCell::new(Vec::new()),
             test_contexts: RefCell::new(Vec::new()),
             constructor_receivers: RefCell::new(Vec::new()),
+            plot_callbacks: RefCell::new(HashMap::new()),
             events: RefCell::new(crate::EventRegistry::default()),
             runmat_extensions_enabled: Cell::new(false),
             language_mode: Cell::new(super::RuntimeLanguageMode::Matlab),

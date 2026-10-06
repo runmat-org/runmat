@@ -3626,7 +3626,7 @@ fn get_function_surface_property(
                 function_surface.figure,
                 function_surface.axes_index,
             );
-            insert_function_surface_metadata(&mut st, function_surface);
+            insert_function_surface_metadata(&mut st, function_surface, builtin)?;
             st.insert("XData", surface_x_data_value(&surface));
             st.insert("YData", surface_y_data_value(&surface));
             st.insert("ZData", surface_z_data_value(&surface));
@@ -3656,7 +3656,7 @@ fn get_function_surface_property(
         Some("children") => Ok(handles_value(Vec::new())),
         Some("function") => match &function_surface.function {
             super::state::FunctionSurfaceFunctionState::Explicit(function) => {
-                Ok(function_surface_function_value(function))
+                function_surface_function_value(function, builtin)
             }
             super::state::FunctionSurfaceFunctionState::Parametric { .. } => Err(plotting_error(
                 builtin,
@@ -3667,7 +3667,7 @@ fn get_function_surface_property(
         },
         Some("xfunction") => match &function_surface.function {
             super::state::FunctionSurfaceFunctionState::Parametric { x, .. } => {
-                Ok(function_surface_function_value(x))
+                function_surface_function_value(x, builtin)
             }
             super::state::FunctionSurfaceFunctionState::Explicit(_) => Err(plotting_error(
                 builtin,
@@ -3676,7 +3676,7 @@ fn get_function_surface_property(
         },
         Some("yfunction") => match &function_surface.function {
             super::state::FunctionSurfaceFunctionState::Parametric { y, .. } => {
-                Ok(function_surface_function_value(y))
+                function_surface_function_value(y, builtin)
             }
             super::state::FunctionSurfaceFunctionState::Explicit(_) => Err(plotting_error(
                 builtin,
@@ -3685,7 +3685,7 @@ fn get_function_surface_property(
         },
         Some("zfunction") => match &function_surface.function {
             super::state::FunctionSurfaceFunctionState::Parametric { z, .. } => {
-                Ok(function_surface_function_value(z))
+                function_surface_function_value(z, builtin)
             }
             super::state::FunctionSurfaceFunctionState::Explicit(_) => Err(plotting_error(
                 builtin,
@@ -3720,7 +3720,8 @@ fn get_function_surface_property(
 fn insert_function_surface_metadata(
     st: &mut StructValue,
     function_surface: &super::state::FunctionSurfaceHandleState,
-) {
+    builtin: &'static str,
+) -> BuiltinResult<()> {
     st.insert(
         "MeshDensity",
         Value::Num(function_surface.mesh_density as f64),
@@ -3735,18 +3736,25 @@ fn insert_function_surface_metadata(
     );
     match &function_surface.function {
         super::state::FunctionSurfaceFunctionState::Explicit(function) => {
-            st.insert("Function", function_surface_function_value(function));
+            st.insert(
+                "Function",
+                function_surface_function_value(function, builtin)?,
+            );
         }
         super::state::FunctionSurfaceFunctionState::Parametric { x, y, z } => {
-            st.insert("XFunction", function_surface_function_value(x));
-            st.insert("YFunction", function_surface_function_value(y));
-            st.insert("ZFunction", function_surface_function_value(z));
+            st.insert("XFunction", function_surface_function_value(x, builtin)?);
+            st.insert("YFunction", function_surface_function_value(y, builtin)?);
+            st.insert("ZFunction", function_surface_function_value(z, builtin)?);
         }
     }
+    Ok(())
 }
 
-fn function_surface_function_value(function: &super::state::FunctionSurfaceFunctionRef) -> Value {
-    match function {
+fn function_surface_function_value(
+    function: &super::state::FunctionSurfaceFunctionRef,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    Ok(match function {
         super::state::FunctionSurfaceFunctionRef::FunctionHandle(name) => {
             Value::FunctionHandle(name.clone())
         }
@@ -3756,8 +3764,10 @@ fn function_surface_function_value(function: &super::state::FunctionSurfaceFunct
         super::state::FunctionSurfaceFunctionRef::MethodFunctionHandle(name) => {
             Value::MethodFunctionHandle(name.clone())
         }
-        super::state::FunctionSurfaceFunctionRef::OwnedCallable(value) => value.clone(),
-    }
+        super::state::FunctionSurfaceFunctionRef::OwnedCallable(token) => {
+            return super::state::callbacks::resolve(*token, builtin);
+        }
+    })
 }
 
 fn get_function_contour_property(
@@ -3786,7 +3796,7 @@ fn get_function_contour_property(
             );
             st.insert(
                 "Function",
-                function_surface_function_value(&function_contour.function),
+                function_surface_function_value(&function_contour.function, builtin)?,
             );
             st.insert(
                 "MeshDensity",
@@ -3814,7 +3824,7 @@ fn get_function_contour_property(
             function_contour.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("function") => Ok(function_surface_function_value(&function_contour.function)),
+        Some("function") => function_surface_function_value(&function_contour.function, builtin),
         Some("meshdensity") => Ok(Value::Num(function_contour.mesh_density as f64)),
         Some("xrange") => Ok(tensor_from_vec(vec![
             function_contour.x_range.0,
