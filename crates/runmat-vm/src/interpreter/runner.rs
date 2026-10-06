@@ -1620,18 +1620,25 @@ async fn interpret_function_with_counts_in_context(
     missing_input_slots: HashSet<usize>,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<Vec<Value>, RuntimeError> {
+    let (runtime, workspace_activation) =
+        crate::runtime::workspace_service::VmWorkspaceService::install(runtime, None);
+    let frame = workspace_activation.frame();
     let runtime = with_default_acceleration_service(runtime);
-    runtime
-        .scope(interpret_function_with_counts_in_context_inner(
-            bytecode,
-            vars,
-            name,
-            out_count,
-            in_count,
-            missing_input_slots,
-            runtime.clone(),
-        ))
-        .await
+    let result = workspace_activation
+        .scope(
+            runtime.scope(interpret_function_with_counts_in_context_inner(
+                bytecode,
+                vars,
+                name,
+                out_count,
+                in_count,
+                missing_input_slots,
+                runtime.clone(),
+            )),
+        )
+        .await;
+    let _ = crate::runtime::workspace::take_workspace_completion(frame);
+    result
 }
 
 async fn interpret_function_with_counts_in_context_inner(
@@ -1682,7 +1689,8 @@ mod native_metadata_tests;
 #[cfg(test)]
 mod tests {
     use super::{
-        interpret_resume_in_context, interpret_with_vars, output_sequence, run_interpreter_inner,
+        interpret_function_with_counts_in_context, interpret_resume_in_context,
+        interpret_with_vars, output_sequence, run_interpreter_inner,
     };
     use crate::bytecode::program::Bytecode;
     use crate::bytecode::Instr;
@@ -1732,6 +1740,46 @@ mod tests {
             sequence.into_values(),
             vec![Value::Num(1.0), Value::Num(2.0)]
         );
+    }
+
+    #[test]
+    fn nested_function_interpreter_reserves_and_activates_its_exact_workspace_frame() {
+        let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let (runtime, activation) =
+            crate::runtime::workspace_service::VmWorkspaceService::install(runtime, None);
+        let mut child = Bytecode::with_instructions(
+            vec![Instr::LoadConst(2.0), Instr::StoreVar(0), Instr::Return],
+            1,
+        );
+        child.var_names.insert(0, "local".to_string());
+
+        block_on(activation.scope(runtime.scope(async {
+            let mut outer = vec![Value::Num(1.0)];
+            let _outer_guard = crate::runtime::workspace::set_transient_workspace_state(
+                std::collections::HashMap::from([("outer".to_string(), 0)]),
+                std::collections::HashSet::from(["outer".to_string()]),
+                &mut outer,
+                runmat_runtime::workspace::bindings::FrameGlobalBindings::default(),
+            );
+            let result = interpret_function_with_counts_in_context(
+                &child,
+                vec![Value::Num(0.0)],
+                "nested_workspace_test",
+                0,
+                0,
+                std::collections::HashSet::new(),
+                runtime.clone(),
+            )
+            .await
+            .expect("nested interpreter should own an exact child workspace frame");
+            assert_eq!(result[0], Value::Num(2.0));
+            assert_eq!(
+                crate::runtime::workspace::workspace_lookup("outer"),
+                Some(Value::Num(1.0))
+            );
+        })));
     }
 
     #[test]
