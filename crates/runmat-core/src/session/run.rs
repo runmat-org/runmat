@@ -763,18 +763,17 @@ impl RunMatSession {
             Some(input),
         );
 
+        let source = self.canonical_interactive_source(input)?;
         let mut prepared = self.compile_input(input)?;
-        let source = crate::ExecutableSource::new(
-            format!("interactive:{}", self.abi_workspace_handle.0),
-            self.current_source_name(),
-            input,
-        );
         let revision = crate::ExecutableRevision::derive(
             &source,
             self.runtime_context.program_revision().cloned(),
             crate::program_environment(self.compat_mode),
         );
-        let source_map = self.executable_source_map(&source);
+        let source_map = prepared
+            .portable_source_map
+            .take()
+            .expect("the canonical frontend always retains its program source table");
         prepared
             .attach_function_origins(&revision.program_revision, &source_map)
             .map_err(|error| {
@@ -791,11 +790,11 @@ impl RunMatSession {
             mir,
             analysis,
             bytecode,
+            portable_source_map: _,
             function_registry_after_success,
             current_function_ids: _,
             next_semantic_function_id_after_success,
         } = prepared;
-        #[cfg(not(target_arch = "wasm32"))]
         let interactive_unit = {
             crate::ExecutableUnit::new(
                 source.clone(),
@@ -813,42 +812,32 @@ impl RunMatSession {
                 )
             })?
         };
-        #[cfg(not(target_arch = "wasm32"))]
         let analysis = interactive_unit.analysis();
-        #[cfg(not(target_arch = "wasm32"))]
-        let mut bytecode = interactive_unit.bytecode().clone();
-        #[cfg(target_arch = "wasm32")]
-        let mut bytecode = {
-            let mut bytecode = bytecode;
-            bytecode
-                .install_parallel_regions(&mir, &analysis.parallel)
+        let execution_runtime =
+            interactive_unit
+                .bind_runtime_sources(self.runtime_context.clone().with_program_revision(Some(
+                    interactive_unit.revision().program_revision.clone(),
+                )))
                 .map_err(|error| {
                     RunError::Runtime(
                         build_runtime_error(error)
-                            .with_identifier("RunMat:ExecutableProduct")
+                            .with_identifier("RunMat:ExecutableSourceIdentity")
                             .build(),
                     )
                 })?;
-            bytecode
-        };
-        let source_catalog_entries = self
-            .source_pool
-            .entries()
-            .map(|(source_id, source)| {
-                (
-                    source_id,
-                    source.name.to_string(),
-                    source.fullpath_name.as_ref().map(ToString::to_string),
-                    source.text.to_string(),
+        let mut bytecode = interactive_unit
+            .runtime_bytecode(&execution_runtime)
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableSourceIdentity")
+                        .build(),
                 )
-            })
-            .collect::<Vec<_>>();
-        let _source_catalog_guard =
-            runmat_runtime::source_context::replace_source_catalog_with_fullpaths(
-                source_catalog_entries,
-            );
-        let _source_id_guard =
-            runmat_runtime::source_context::replace_current_source_id(bytecode.source_id);
+            })?;
+        let _source_id_guard = runmat_runtime::source_context::replace_current_source_id_in_context(
+            &execution_runtime,
+            bytecode.source_id,
+        );
         if self.verbose {
             debug!("AST: {ast:?}");
         }
@@ -1005,7 +994,13 @@ impl RunMatSession {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some((workspace, profile)) = tiered_interactive.as_ref() {
             match self
-                .invoke_tiered_interactive(&interactive_unit, workspace, profile.as_ref())
+                .invoke_tiered_interactive(
+                    &interactive_unit,
+                    &execution_runtime,
+                    &bytecode.function_registry,
+                    workspace,
+                    profile.as_ref(),
+                )
                 .await
             {
                 Ok(Some(native)) => {
@@ -1104,15 +1099,8 @@ impl RunMatSession {
                 }
             }
 
-            #[cfg(not(target_arch = "wasm32"))]
-            let execution_runtime = self
-                .runtime_context
-                .clone()
-                .with_program_revision(Some(interactive_unit.revision().program_revision.clone()));
-            #[cfg(target_arch = "wasm32")]
-            let execution_runtime = self.runtime_context.clone();
             match self
-                .interpret_with_context(&execution_bytecode, execution_runtime)
+                .interpret_with_context(&execution_bytecode, execution_runtime.clone())
                 .await
             {
                 Ok(runmat_vm::InterpreterOutcome::Completed(completion)) => {

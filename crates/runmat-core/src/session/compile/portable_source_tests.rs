@@ -54,3 +54,59 @@ fn changed_reachable_source_text_changes_portable_identity() {
     };
     assert_ne!(compile(&mut session, 1), compile(&mut session, 2));
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn pending_source_lease_coexists_with_interpreted_and_native_unit_invocations() {
+    let mut session = crate::RunMatSession::with_options(false, false).expect("session");
+    let held = runmat_runtime::source_context::lease_source_context_in_context(
+        &session.runtime_context,
+        "<eval>",
+        None,
+        "pending = 99;",
+    )
+    .expect("session source lease");
+    let unit = futures::executor::block_on(session.compile_executable_unit(
+        crate::ExecutableSource::new("fixture", "answer.m", "function y = answer(); y = 7; end\n"),
+        None,
+    ))
+    .expect("unit");
+    let invocation = crate::ProcedureInvocation {
+        target: crate::ProcedureTarget::Function("answer".into()),
+        arguments: Vec::new(),
+        requested_outputs: 1,
+    };
+    let expected =
+        runmat_value::ValueSequence::single(runmat_value::Value::Num(7.0)).expect("one output");
+    let established = futures::executor::block_on(session.invoke_executable(
+        &unit,
+        invocation.clone(),
+        &crate::InvocationControl::default(),
+    ))
+    .expect("interpreted or tiered execution");
+    assert_eq!(established, expected);
+    let native = futures::executor::block_on(session.invoke_executable(
+        &unit,
+        invocation,
+        &crate::InvocationControl::default().force_generic_native(),
+    ))
+    .expect("native execution");
+    assert_eq!(native, expected);
+    assert_eq!(
+        runmat_runtime::source_context::source_info_in_context(
+            &session.runtime_context,
+            held.source_id(),
+        )
+        .expect("pending eval source remains live")
+        .text
+        .as_ref(),
+        "pending = 99;"
+    );
+    let held_id = held.source_id();
+    drop(held);
+    assert!(runmat_runtime::source_context::source_info_in_context(
+        &session.runtime_context,
+        held_id,
+    )
+    .is_none());
+}

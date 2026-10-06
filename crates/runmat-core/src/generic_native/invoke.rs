@@ -29,6 +29,7 @@ pub(crate) struct NativeInvocation<'a> {
     pub arguments: Vec<Value>,
     pub requested_outputs: usize,
     pub runtime: runmat_runtime::context::RuntimeContext,
+    pub runtime_functions: &'a runmat_vm::FunctionRegistry,
     pub workspace: Option<runmat_native_executor::execute::NativeWorkspaceInput>,
 }
 
@@ -43,6 +44,7 @@ pub(crate) async fn invoke(
         arguments,
         requested_outputs,
         runtime,
+        runtime_functions,
         workspace,
     } = invocation;
     runmat_vm::prepare_native_execution_metadata(unit.bytecode())?;
@@ -54,7 +56,7 @@ pub(crate) async fn invoke(
         })
         .transpose()?
         .unwrap_or(published.entrypoint);
-    let registry = Arc::new(unit.functions().clone());
+    let registry = Arc::new(runtime_functions.clone());
     let native_functions = unit
         .mir()
         .bodies

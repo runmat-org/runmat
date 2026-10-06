@@ -19,6 +19,81 @@ pub struct ExecutableUnit {
 }
 
 impl ExecutableUnit {
+    /// Bind immutable program ordinals to fresh session-issued provenance for
+    /// one invocation. The returned context retains every lease while pending.
+    pub(crate) fn bind_runtime_sources(
+        &self,
+        runtime: runmat_runtime::context::RuntimeContext,
+    ) -> Result<runmat_runtime::context::RuntimeContext, String> {
+        self.source_map.validate_content_revisions()?;
+        let records = self
+            .source_map
+            .entries()
+            .iter()
+            .map(|entry| {
+                let ordinal = u32::try_from(entry.source_id)
+                    .map(runmat_types::ProgramSourceId)
+                    .map_err(|_| "program source ordinal exceeds portable identity".to_string())?;
+                Ok(runmat_runtime::source_context::ProgramSourceRecord {
+                    ordinal,
+                    name: std::sync::Arc::from(entry.display_name.as_str()),
+                    fullpath_name: entry.full_path.as_deref().map(std::sync::Arc::<str>::from),
+                    text: std::sync::Arc::from(entry.text.as_str()),
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let runtime = runtime
+            .with_program_sources(records)
+            .map_err(|error| error.to_string())?;
+        for metadata in self.mir.functions.values() {
+            if runtime.program_source_id(metadata.source).is_none() {
+                return Err(format!(
+                    "MIR function source ordinal {} is absent from the invocation binding",
+                    metadata.source.0
+                ));
+            }
+        }
+        Ok(runtime)
+    }
+
+    fn runtime_source_id(
+        runtime: &runmat_runtime::context::RuntimeContext,
+        source: runmat_types::SourceId,
+    ) -> Option<runmat_types::SourceId> {
+        let ordinal = u32::try_from(source.0)
+            .ok()
+            .map(runmat_types::ProgramSourceId)?;
+        runtime.program_source_id(ordinal)
+    }
+
+    pub(crate) fn runtime_bytecode(
+        &self,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<runmat_vm::Bytecode, String> {
+        let mut bytecode = self.bytecode().clone();
+        bytecode.source_id = bytecode
+            .source_id
+            .map(|source| {
+                Self::runtime_source_id(runtime, source)
+                    .ok_or_else(|| format!("entrypoint source ordinal {} is absent", source.0))
+            })
+            .transpose()?;
+        bytecode
+            .function_registry
+            .project_current_source_ids(|source| Self::runtime_source_id(runtime, source))
+            .map_err(|source| format!("function source ordinal {} is absent", source.0))?;
+        for body in bytecode.bound_functions.values_mut() {
+            body.source_id = body
+                .source_id
+                .map(|source| {
+                    Self::runtime_source_id(runtime, source)
+                        .ok_or_else(|| format!("bound source ordinal {} is absent", source.0))
+                })
+                .transpose()?;
+        }
+        Ok(bytecode)
+    }
+
     pub(crate) fn new(
         source: ExecutableSource,
         revision: ExecutableRevision,
@@ -27,6 +102,26 @@ impl ExecutableUnit {
         analysis: runmat_mir::analysis::AnalysisStore,
         mut bytecode: runmat_vm::Bytecode,
     ) -> Result<Self, String> {
+        source_map.validate_content_revisions()?;
+        let source_count = source_map.entries().len();
+        if bytecode
+            .source_id
+            .is_some_and(|source| source.0 >= source_count)
+            || bytecode.function_registry.functions.values().any(|body| {
+                body.source_id
+                    .is_some_and(|source| source.0 >= source_count)
+            })
+            || bytecode.bound_functions.values().any(|body| {
+                body.source_id
+                    .is_some_and(|source| source.0 >= source_count)
+            })
+            || mir
+                .functions
+                .values()
+                .any(|metadata| metadata.source.0 as usize >= source_count)
+        {
+            return Err("executable references a source ordinal outside its source map".into());
+        }
         let region_contracts = analysis
             .regions
             .iter()
