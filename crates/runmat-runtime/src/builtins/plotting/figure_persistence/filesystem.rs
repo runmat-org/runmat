@@ -6,6 +6,10 @@ use std::sync::{Arc, Weak};
 
 use runmat_filesystem::{self as fs, CapturedFsResourceLease, FsProvider, FsStagedOutput};
 
+use super::errors::{persistence_error, persistence_error_with_source};
+use super::{ERROR_IMPORT, ERROR_IO, MAX_FIGURE_ARCHIVE_BYTES};
+use crate::BuiltinResult;
+
 pub(super) struct FigureFsPath {
     provider: Arc<dyn FsProvider>,
     path: PathBuf,

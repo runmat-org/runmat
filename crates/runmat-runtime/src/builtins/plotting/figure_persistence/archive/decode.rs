@@ -6,7 +6,7 @@ mod inflate;
 use header::*;
 use inflate::decompress_payload;
 
-pub(super) async fn decode_figure_bundle(
+pub(in super::super) async fn decode_figure_bundle(
     runtime: Option<&crate::context::RuntimeContext>,
     bytes: &[u8],
     builtin: &'static str,

@@ -5,6 +5,7 @@ pub(super) use decode::decode_figure_bundle;
 pub(super) use encode::encode_figure_bundle;
 
 use super::*;
+use runmat_builtins::BuiltinErrorDescriptor;
 
 pub(super) const FLAG_COMPRESSED: u8 = 1;
 

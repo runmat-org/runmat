@@ -1,7 +1,7 @@
 use super::support::validate_load_outputs;
 use super::*;
 
-pub(super) async fn execute_openfig(
+pub(in super::super) async fn execute_openfig(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     args: Vec<Value>,
@@ -86,7 +86,7 @@ fn apply_open_visibility(
     Ok(())
 }
 
-pub(super) async fn execute_hgload(
+pub(in super::super) async fn execute_hgload(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     args: Vec<Value>,

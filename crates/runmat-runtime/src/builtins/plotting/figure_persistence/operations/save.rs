@@ -1,7 +1,7 @@
 use super::support::{reject_resident_persistence_arguments, validate_status_output};
 use super::*;
 
-pub(super) async fn execute_saveas(
+pub(in super::super) async fn execute_saveas(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     args: Vec<Value>,
@@ -49,7 +49,7 @@ async fn execute_saveas_in_context(
     Ok(true)
 }
 
-pub(super) async fn execute_savefig(
+pub(in super::super) async fn execute_savefig(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     args: Vec<Value>,
@@ -89,7 +89,7 @@ async fn execute_savefig_in_context(
     Ok(true)
 }
 
-pub(super) async fn execute_hgsave(
+pub(in super::super) async fn execute_hgsave(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     args: Vec<Value>,

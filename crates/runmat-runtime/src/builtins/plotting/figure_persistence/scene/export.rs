@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) async fn save_figures(
+pub(in super::super) async fn save_figures(
     runtime: Option<&crate::context::RuntimeContext>,
     selected: &FigureFsPath,
     figures: &[FigureHandle],
@@ -55,7 +55,7 @@ pub(super) async fn save_figures(
 }
 
 #[cfg(feature = "plot-core")]
-pub(super) async fn export_figure_snapshot(
+pub(in super::super) async fn export_figure_snapshot(
     figure: &runmat_plot::plots::Figure,
     builtin: &'static str,
 ) -> BuiltinResult<Vec<u8>> {
@@ -90,7 +90,7 @@ pub(super) async fn export_figure_snapshot(
 }
 
 #[cfg(feature = "plot-core")]
-pub(super) async fn render_png(
+pub(in super::super) async fn render_png(
     handle: FigureHandle,
     width: u32,
     height: u32,
@@ -109,7 +109,7 @@ pub(super) async fn render_png(
 }
 
 #[cfg(not(feature = "plot-core"))]
-pub(super) async fn render_png(
+pub(in super::super) async fn render_png(
     _handle: FigureHandle,
     _width: u32,
     _height: u32,

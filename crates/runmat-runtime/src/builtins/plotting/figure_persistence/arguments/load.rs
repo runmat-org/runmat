@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn parse_openfig_args(
+pub(in super::super) fn parse_openfig_args(
     args: &[Value],
     builtin: &'static str,
 ) -> BuiltinResult<OpenFigRequest> {
@@ -47,7 +47,7 @@ pub(super) fn parse_openfig_args(
     })
 }
 
-pub(super) fn parse_hgload_args(
+pub(in super::super) fn parse_hgload_args(
     args: &[Value],
 ) -> BuiltinResult<(OpenFigRequest, Option<StructValue>)> {
     if args.is_empty() || args.len() > 2 {

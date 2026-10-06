@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn parse_saveas_args(args: &[Value]) -> BuiltinResult<SaveAsRequest> {
+pub(in super::super) fn parse_saveas_args(args: &[Value]) -> BuiltinResult<SaveAsRequest> {
     if args.len() < 2 || args.len() > 3 {
         return Err(persistence_error(
             &ERROR_INVALID_ARGUMENT,
@@ -29,7 +29,7 @@ pub(super) fn parse_saveas_args(args: &[Value]) -> BuiltinResult<SaveAsRequest> 
     })
 }
 
-pub(super) fn parse_savefig_args(
+pub(in super::super) fn parse_savefig_args(
     args: &[Value],
     builtin: &'static str,
 ) -> BuiltinResult<SaveFigRequest> {

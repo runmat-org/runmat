@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) async fn open_figures(
+pub(in super::super) async fn open_figures(
     runtime: Option<&crate::context::RuntimeContext>,
     selected: &FigureFsPath,
     request: &OpenFigRequest,
@@ -36,7 +36,7 @@ pub(super) async fn open_figures(
     }
 }
 
-pub(super) struct ImportedFigureBatch {
+pub(in super::super) struct ImportedFigureBatch {
     handles: Vec<FigureHandle>,
     previous_current: Option<FigureHandle>,
     committed: bool,
@@ -52,11 +52,11 @@ impl ImportedFigureBatch {
         }
     }
 
-    pub(super) fn handles(&self) -> &[FigureHandle] {
+    pub(in super::super) fn handles(&self) -> &[FigureHandle] {
         &self.handles
     }
 
-    pub(super) fn commit(mut self) -> Vec<FigureHandle> {
+    pub(in super::super) fn commit(mut self) -> Vec<FigureHandle> {
         self.committed = true;
         std::mem::take(&mut self.handles)
     }
@@ -77,7 +77,7 @@ impl Drop for ImportedFigureBatch {
 }
 
 #[cfg(feature = "plot-core")]
-pub(super) async fn prepare_figure(
+pub(in super::super) async fn prepare_figure(
     bytes: &[u8],
     builtin: &'static str,
 ) -> BuiltinResult<runmat_plot::plots::Figure> {

@@ -3,7 +3,7 @@ use crate::execution::staged_file::{StagedCpuCooperation, StagedWriteCooperation
 use flate2::{write::ZlibEncoder, Compression};
 use std::io::Write;
 
-pub(super) async fn encode_figure_bundle(
+pub(in super::super) async fn encode_figure_bundle(
     runtime: Option<&crate::context::RuntimeContext>,
     payloads: &[Vec<u8>],
     profile: FigureArchiveProfile,
