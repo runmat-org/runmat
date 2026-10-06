@@ -1,4 +1,5 @@
 use super::*;
+use crate::RuntimeError;
 use std::sync::atomic::AtomicBool;
 
 struct Reserved {
