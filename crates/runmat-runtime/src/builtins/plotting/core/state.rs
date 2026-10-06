@@ -704,13 +704,13 @@ pub enum FunctionSurfaceFunctionRef {
     OwnedCallable(callbacks::PlotCallableToken),
 }
 
-fn release_function_ref(function: &FunctionSurfaceFunctionRef) {
+pub(crate) fn release_function_ref(function: &FunctionSurfaceFunctionRef) {
     if let FunctionSurfaceFunctionRef::OwnedCallable(token) = function {
-        callbacks::release(*token);
+        callbacks::release(token);
     }
 }
 
-fn release_function_state(function: &FunctionSurfaceFunctionState) {
+pub(crate) fn release_function_state(function: &FunctionSurfaceFunctionState) {
     match function {
         FunctionSurfaceFunctionState::Explicit(function) => release_function_ref(function),
         FunctionSurfaceFunctionState::Parametric { x, y, z } => {

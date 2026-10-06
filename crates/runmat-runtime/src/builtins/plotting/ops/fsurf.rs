@@ -963,6 +963,7 @@ fn linspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
 
 fn render_fsurf(surface: SurfacePlot, parsed: &ParsedFsurf) -> BuiltinResult<f64> {
     apply_axes_target(parsed.target_axes, BUILTIN_NAME)?;
+    let function_state = function_surface_state(&parsed.function)?;
     let mut surface = Some(surface);
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
@@ -986,6 +987,7 @@ fn render_fsurf(surface: SurfacePlot, parsed: &ParsedFsurf) -> BuiltinResult<f64
         },
     );
     let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+        super::state::release_function_state(&function_state);
         return render_result.map(|_| f64::NAN);
     };
     let handle = register_function_surface_handle(
@@ -995,7 +997,7 @@ fn render_fsurf(surface: SurfacePlot, parsed: &ParsedFsurf) -> BuiltinResult<f64
         parsed.mesh_density,
         (parsed.domain.x_min, parsed.domain.x_max),
         (parsed.domain.y_min, parsed.domain.y_max),
-        function_surface_state(&parsed.function),
+        function_state,
     );
     if let Err(err) = render_result {
         if crate::builtins::plotting::state::presentation_unavailable(&err) {
@@ -1006,21 +1008,34 @@ fn render_fsurf(surface: SurfacePlot, parsed: &ParsedFsurf) -> BuiltinResult<f64
     Ok(handle)
 }
 
-fn function_surface_state(function: &SurfaceFunction) -> FunctionSurfaceFunctionState {
+fn function_surface_state(
+    function: &SurfaceFunction,
+) -> BuiltinResult<FunctionSurfaceFunctionState> {
     match function {
-        SurfaceFunction::Explicit(function) => {
-            FunctionSurfaceFunctionState::Explicit(function_surface_ref(function))
+        SurfaceFunction::Explicit(function) => Ok(FunctionSurfaceFunctionState::Explicit(
+            function_surface_ref(function, BUILTIN_NAME)?,
+        )),
+        SurfaceFunction::Parametric { x, y, z } => {
+            let x = function_surface_ref(x, BUILTIN_NAME)?;
+            let y = function_surface_ref(y, BUILTIN_NAME).map_err(|error| {
+                super::state::release_function_ref(&x);
+                error
+            })?;
+            let z = function_surface_ref(z, BUILTIN_NAME).map_err(|error| {
+                super::state::release_function_ref(&x);
+                super::state::release_function_ref(&y);
+                error
+            })?;
+            Ok(FunctionSurfaceFunctionState::Parametric { x, y, z })
         }
-        SurfaceFunction::Parametric { x, y, z } => FunctionSurfaceFunctionState::Parametric {
-            x: function_surface_ref(x),
-            y: function_surface_ref(y),
-            z: function_surface_ref(z),
-        },
     }
 }
 
-pub(crate) fn function_surface_ref(function: &Value) -> FunctionSurfaceFunctionRef {
-    match function {
+pub(crate) fn function_surface_ref(
+    function: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<FunctionSurfaceFunctionRef> {
+    Ok(match function {
         Value::FunctionHandle(name) => FunctionSurfaceFunctionRef::FunctionHandle(name.clone()),
         Value::ExternalFunctionHandle(name) => {
             FunctionSurfaceFunctionRef::ExternalFunctionHandle(name.clone())
@@ -1031,10 +1046,11 @@ pub(crate) fn function_surface_ref(function: &Value) -> FunctionSurfaceFunctionR
         Value::BoundFunctionHandle { .. } | Value::Closure(_) => {
             FunctionSurfaceFunctionRef::OwnedCallable(super::state::callbacks::retain(
                 function.clone(),
-            ))
+                builtin,
+            )?)
         }
         _ => FunctionSurfaceFunctionRef::FunctionHandle("<invalid>".into()),
-    }
+    })
 }
 
 #[cfg(test)]
@@ -1394,6 +1410,34 @@ mod tests {
         assert!((z[2][2] - 3.0).abs() < 1.0e-12);
         clear_figure(Some(current_figure_handle())).expect("clear callback scene");
         assert_eq!(super::state::callbacks::direct_root_count(), prior_roots);
+    }
+
+    #[test]
+    fn sibling_session_clear_revokes_scene_callback_without_owning_its_value() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        let _ = clear_figure(None);
+        let _invoker = with_test_function(|x, y| x + y);
+        let first = crate::user_functions::test_support::exact_fixture_runtime();
+        let second = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let handle = block_on(first.scope(fsurf_builtin(vec![
+            test_bound("surface", 1),
+            Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 1.0], vec![1, 4]).unwrap()),
+            Value::String("MeshDensity".into()),
+            Value::Num(3.0),
+        ])))
+        .expect("first session surface");
+        assert_eq!(first.plot_callback_root_count(), 1);
+        {
+            let _active = second.enter();
+            let error = get_builtin(vec![Value::Num(handle), Value::String("Function".into())])
+                .expect_err("sibling cannot observe original callable");
+            assert!(error.message().contains("another or ended session"));
+            clear_figure(Some(current_figure_handle())).expect("sibling clears shared scene");
+        }
+        assert_eq!(first.plot_callback_root_count(), 0);
     }
 
     #[test]

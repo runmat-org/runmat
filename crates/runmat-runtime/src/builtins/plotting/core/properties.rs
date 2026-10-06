@@ -3765,7 +3765,7 @@ fn function_surface_function_value(
             Value::MethodFunctionHandle(name.clone())
         }
         super::state::FunctionSurfaceFunctionRef::OwnedCallable(token) => {
-            return super::state::callbacks::resolve(*token, builtin);
+            return super::state::callbacks::resolve(token, builtin);
         }
     })
 }

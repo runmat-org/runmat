@@ -1037,6 +1037,7 @@ fn linspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
 
 fn render_fcontour(sampled: SampledFcontour, parsed: &ParsedFcontour) -> BuiltinResult<f64> {
     apply_axes_target(parsed.target_axes, BUILTIN_NAME)?;
+    let function_ref = function_surface_ref(&parsed.function, BUILTIN_NAME)?;
     let mut contour = Some(sampled.contour);
     let mut fill = sampled.fill;
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -1064,6 +1065,7 @@ fn render_fcontour(sampled: SampledFcontour, parsed: &ParsedFcontour) -> Builtin
         },
     );
     let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+        super::state::release_function_ref(&function_ref);
         return render_result.map(|_| f64::NAN);
     };
     let handle = register_function_contour_handle(
@@ -1073,7 +1075,7 @@ fn render_fcontour(sampled: SampledFcontour, parsed: &ParsedFcontour) -> Builtin
         parsed.mesh_density,
         (parsed.domain.x_min, parsed.domain.x_max),
         (parsed.domain.y_min, parsed.domain.y_max),
-        function_surface_ref(&parsed.function),
+        function_ref,
         parsed.fill,
     );
     if let Err(err) = render_result {

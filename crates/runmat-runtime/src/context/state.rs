@@ -55,7 +55,8 @@ pub struct RuntimeContextState {
     pub(crate) constructor_receivers: RefCell<Vec<Value>>,
     /// Plot scene records retain opaque tokens; callable values and GC roots
     /// remain in their issuing session and disappear at session teardown.
-    pub(crate) plot_callbacks: RefCell<HashMap<u64, Value>>,
+    pub(crate) plot_callbacks:
+        RefCell<HashMap<u64, crate::builtins::plotting::state::callbacks::PlotCallbackRoot>>,
     pub(crate) events: RefCell<crate::EventRegistry>,
     pub(crate) runmat_extensions_enabled: Cell<bool>,
     pub(crate) language_mode: Cell<super::RuntimeLanguageMode>,

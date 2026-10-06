@@ -1,7 +1,6 @@
 use super::{ContextFuture, RuntimeContextGuard, RuntimeContextState, RuntimeServicePorts};
 use crate::execution::RuntimeExecutionServices;
 use runmat_execution::cancellation::{CancellationSource, CancellationToken};
-use runmat_value::Value;
 use std::cell::RefCell;
 use std::future::Future;
 use std::rc::Rc;
@@ -162,16 +161,31 @@ impl RuntimeContext {
         Arc::downgrade(&self.state.session_lease)
     }
 
-    pub(crate) fn retain_plot_callback(&self, slot: u64, value: Value) {
-        self.state.plot_callbacks.borrow_mut().insert(slot, value);
+    pub(crate) fn retain_plot_callback(
+        &self,
+        slot: u64,
+        root: crate::builtins::plotting::state::callbacks::PlotCallbackRoot,
+    ) {
+        let mut callbacks = self.state.plot_callbacks.borrow_mut();
+        callbacks.retain(|_, root| root.live.load(Ordering::Acquire));
+        callbacks.insert(slot, root);
     }
 
-    pub(crate) fn plot_callback(&self, slot: u64) -> Option<Value> {
-        self.state.plot_callbacks.borrow().get(&slot).cloned()
+    pub(crate) fn plot_callback(&self, slot: u64) -> Option<runmat_value::Value> {
+        let mut callbacks = self.state.plot_callbacks.borrow_mut();
+        callbacks.retain(|_, root| root.live.load(Ordering::Acquire));
+        callbacks.get(&slot).map(|root| root.value.clone())
     }
 
     pub(crate) fn release_plot_callback(&self, slot: u64) {
         self.state.plot_callbacks.borrow_mut().remove(&slot);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn plot_callback_root_count(&self) -> usize {
+        let mut callbacks = self.state.plot_callbacks.borrow_mut();
+        callbacks.retain(|_, root| root.live.load(Ordering::Acquire));
+        callbacks.len()
     }
 
     /// Invalidate only this session's staged host-effect invocations when its
