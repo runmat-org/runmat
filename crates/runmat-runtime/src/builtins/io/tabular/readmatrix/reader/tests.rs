@@ -194,7 +194,7 @@ fn staged_scan_invalid_utf8_retains_exact_typed_source_and_charge() {
         .is_some_and(|source| source.is::<std::str::Utf8Error>()));
     assert!(error.retained_diagnostic_allocation.is_some());
     let payload = error.message.capacity()
-        + error.identifier.as_ref().unwrap().capacity()
+        + error.identifier.as_ref().map_or(0, String::capacity)
         + error.context.builtin.as_ref().unwrap().capacity()
         + std::mem::size_of::<std::str::Utf8Error>();
     assert_eq!(

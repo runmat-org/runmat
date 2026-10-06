@@ -79,12 +79,10 @@ impl FixedReaderDiagnostic {
             return readmatrix_error_with(descriptor, message);
         };
         let result = (|| {
-            let identifier = descriptor
-                .identifier
-                .ok_or(HostEffectAllocationError::InvalidInvocation)?;
+            let identifier = descriptor.identifier;
             let total = message
                 .len()
-                .checked_add(identifier.len())
+                .checked_add(identifier.map_or(0, str::len))
                 .and_then(|bytes| bytes.checked_add(BUILTIN_NAME.len()))
                 .ok_or(HostEffectAllocationError::Overflow)?;
             let claim = reservation.reserve_diagnostic_claim(total)?;
@@ -110,12 +108,10 @@ impl FixedReaderDiagnostic {
             return readmatrix_error_with_source(descriptor, message, source);
         };
         let result = (|| {
-            let identifier = descriptor
-                .identifier
-                .ok_or(HostEffectAllocationError::InvalidInvocation)?;
+            let identifier = descriptor.identifier;
             let total = message
                 .len()
-                .checked_add(identifier.len())
+                .checked_add(identifier.map_or(0, str::len))
                 .and_then(|bytes| bytes.checked_add(BUILTIN_NAME.len()))
                 .and_then(|bytes| bytes.checked_add(std::mem::size_of::<std::str::Utf8Error>()))
                 .ok_or(HostEffectAllocationError::Overflow)?;
@@ -151,7 +147,7 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) fn maximum_fixed_diagno
         };
         let bytes = message
             .len()
-            .checked_add(descriptor.identifier?.len())?
+            .checked_add(descriptor.identifier.map_or(0, str::len))?
             .checked_add(BUILTIN_NAME.len())?
             .checked_add(source_bytes)?;
         maximum = maximum.max(bytes);
@@ -200,7 +196,7 @@ mod tests {
             assert!(error.source.is_none());
             assert!(error.retained_diagnostic_allocation.is_some());
             let payload = error.message.capacity()
-                + error.identifier.as_ref().unwrap().capacity()
+                + error.identifier.as_ref().map_or(0, String::capacity)
                 + error.context.builtin.as_ref().unwrap().capacity();
             assert_eq!(
                 ledger.snapshot().live_claimed_bytes,
@@ -227,7 +223,9 @@ mod tests {
             let (descriptor, message) = kind.parts();
             assert!(
                 maximum
-                    >= message.len() + descriptor.identifier.unwrap().len() + BUILTIN_NAME.len()
+                    >= message.len()
+                        + descriptor.identifier.map_or(0, str::len)
+                        + BUILTIN_NAME.len()
             );
         }
     }

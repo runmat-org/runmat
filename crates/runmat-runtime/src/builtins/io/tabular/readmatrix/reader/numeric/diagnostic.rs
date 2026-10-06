@@ -40,7 +40,11 @@ impl<'a> NumericTokenDiagnostic<'a> {
             .checked_add(decimal_digits(coordinate))?
             .checked_add(COLUMN.len())?
             .checked_add(decimal_digits(coordinate))?
-            .checked_add(READMATRIX_ERROR_NON_NUMERIC_TOKEN.identifier?.len())?
+            .checked_add(
+                READMATRIX_ERROR_NON_NUMERIC_TOKEN
+                    .identifier
+                    .map_or(0, str::len),
+            )?
             .checked_add(BUILTIN.len())
     }
 
@@ -81,11 +85,9 @@ impl<'a> NumericTokenDiagnostic<'a> {
         let message_bytes = self
             .requested_text_bytes()
             .ok_or(HostEffectAllocationError::Overflow)?;
-        let identifier = READMATRIX_ERROR_NON_NUMERIC_TOKEN
-            .identifier
-            .ok_or(HostEffectAllocationError::InvalidInvocation)?;
+        let identifier = READMATRIX_ERROR_NON_NUMERIC_TOKEN.identifier;
         let total = message_bytes
-            .checked_add(identifier.len())
+            .checked_add(identifier.map_or(0, str::len))
             .and_then(|bytes| bytes.checked_add(BUILTIN.len()))
             .ok_or(HostEffectAllocationError::Overflow)?;
         let claim = reservation.reserve_diagnostic_claim(total)?;
@@ -200,7 +202,7 @@ mod tests {
             assert!(error.source.is_none());
             assert!(error.retained_diagnostic_allocation.is_some());
             let payload = error.message.capacity()
-                + error.identifier.as_ref().unwrap().capacity()
+                + error.identifier.as_ref().map_or(0, String::capacity)
                 + error.context.builtin.as_ref().unwrap().capacity();
             assert_eq!(
                 ledger.snapshot().live_claimed_bytes,
@@ -220,7 +222,9 @@ mod tests {
         let actual = NumericTokenDiagnostic::new("αbad", 1, 1)
             .requested_text_bytes()
             .unwrap()
-            + READMATRIX_ERROR_NON_NUMERIC_TOKEN.identifier.unwrap().len()
+            + READMATRIX_ERROR_NON_NUMERIC_TOKEN
+                .identifier
+                .map_or(0, str::len)
             + BUILTIN.len();
         assert!(NumericTokenDiagnostic::maximum_total_bytes(opened_extent).unwrap() >= actual);
     }
