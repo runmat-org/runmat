@@ -3,62 +3,16 @@ mod support;
 
 use futures::channel::oneshot;
 use futures::future::{select, Either};
-use runmat_runtime::builtin::RuntimeBuiltinBinding;
-use runmat_runtime::context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts};
+use runmat_runtime::context::RuntimeContext;
 use runmat_value::Value;
-use std::cell::RefCell;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::Context;
 
-struct GatedSin {
-    gate: Rc<RefCell<Option<oneshot::Receiver<()>>>>,
-    reached: Rc<RefCell<Option<oneshot::Sender<()>>>>,
-}
-
-impl RuntimeBuiltinService for GatedSin {
-    fn bindings_by_name(&self, name: &str) -> Vec<RuntimeBuiltinBinding> {
-        if name != "sin" {
-            return Vec::new();
-        }
-        let entry = runmat_builtins::builtin_catalog_primary_entry_by_name(name)
-            .expect("canonical sin catalog entry");
-        let gate = Rc::clone(&self.gate);
-        let reached = Rc::clone(&self.reached);
-        vec![RuntimeBuiltinBinding::new(
-            runmat_builtins::BuiltinBindingIdentity {
-                builtin: entry.identity,
-                variant: "default",
-            },
-            move |_| {
-                let pending = gate.borrow_mut().take().expect("no gate invocation replay");
-                let reached = reached.borrow_mut().take().expect("no handler replay");
-                Box::pin(async move {
-                    reached.send(()).expect("reached receiver remains live");
-                    pending
-                        .await
-                        .map_err(|_| runmat_runtime::RuntimeError::new("sin gate abandoned"))?;
-                    Ok(Value::Num(0.0))
-                })
-            },
-        )]
-    }
-}
-
-fn runtime_with_gate(
-    base: RuntimeContext,
-) -> (RuntimeContext, oneshot::Sender<()>, oneshot::Receiver<()>) {
-    let (sender, receiver) = oneshot::channel();
-    let (reached_sender, reached_receiver) = oneshot::channel();
-    let runtime = base.with_service_ports(RuntimeServicePorts::default().with_builtin(Rc::new(
-        GatedSin {
-            gate: Rc::new(RefCell::new(Some(receiver))),
-            reached: Rc::new(RefCell::new(Some(reached_sender))),
-        },
-    )));
-    (runtime, sender, reached_receiver)
-}
+#[path = "invocation_arity/gated_sin.rs"]
+mod gated_sin;
+use gated_sin::runtime_with_gate;
 
 fn expect_handler_reached<F: Future>(future: Pin<&mut F>, reached: oneshot::Receiver<()>) {
     match futures::executor::block_on(select(reached, future)) {
