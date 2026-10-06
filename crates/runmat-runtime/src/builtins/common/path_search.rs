@@ -222,8 +222,24 @@ pub enum FileCandidateOrigin {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FileCandidate {
-    pub path: PathBuf,
-    pub origin: FileCandidateOrigin,
+    path: PathBuf,
+    origin: FileCandidateOrigin,
+}
+
+impl FileCandidate {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn origin(&self) -> &FileCandidateOrigin {
+        &self.origin
+    }
+
+    /// Transfer the already selected paired authority to its consumer. The
+    /// candidate can only be constructed by this resolver's captured search.
+    pub fn into_parts(self) -> (PathBuf, FileCandidateOrigin) {
+        (self.path, self.origin)
+    }
 }
 
 pub fn file_candidates_with_origin(
