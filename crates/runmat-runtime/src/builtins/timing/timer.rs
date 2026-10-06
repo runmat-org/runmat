@@ -254,6 +254,16 @@ async fn set_timer_property_object(
             ),
         ));
     }
+    let property = canonical_property_name(property_name)?;
+    if running_is_on(&object) && property.frozen_while_running() {
+        return Err(timer_error(
+            &TIMER_ERROR_INVALID_PROPERTY,
+            format!(
+                "timer: property '{}' cannot be changed while Running is on",
+                property.name()
+            ),
+        ));
+    }
     let args =
         prepare_timer_property_pairs(&[Value::String(property_name.to_string()), value], false)
             .await?;
