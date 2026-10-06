@@ -77,7 +77,10 @@ fn infer(
         } else {
             !matches!(
                 argument.kind,
-                ValueKindFact::Numeric(_) | ValueKindFact::Unknown
+                ValueKindFact::Numeric(NumericFact {
+                    domain: NumericDomain::Real,
+                    ..
+                }) | ValueKindFact::Unknown
             )
         };
         let invalid_shape = if selector {

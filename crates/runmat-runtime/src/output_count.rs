@@ -6,7 +6,7 @@ use std::rc::Rc;
 use crate::context::output_projection::{InvocationOutputProjection, RequestedOutputToken};
 
 mod validation;
-pub(crate) use validation::validate_fixed_outputs;
+pub(crate) use validation::{validate_fixed_form_outputs, validate_fixed_outputs};
 
 runmat_thread_local! {
     static OUTPUT_COUNT_PROJECTION: RefCell<InvocationOutputProjection> =

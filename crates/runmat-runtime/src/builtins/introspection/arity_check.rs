@@ -1,7 +1,8 @@
 use runmat_builtins::{
-    BuiltinErrorDescriptor, NARGINCHK_ERROR_ARGUMENT_INVALID, NARGINCHK_ERROR_BOUNDS_INVALID,
-    NARGINCHK_ERROR_CONTEXT_UNAVAILABLE, NARGINCHK_ERROR_NOT_ENOUGH_INPUTS,
-    NARGINCHK_ERROR_TOO_MANY_INPUTS, NARGOUTCHK_ERROR_ARGUMENT_INVALID,
+    BuiltinErrorDescriptor, NARGINCHK_DESCRIPTOR, NARGINCHK_ERROR_ARGUMENT_INVALID,
+    NARGINCHK_ERROR_BOUNDS_INVALID, NARGINCHK_ERROR_CONTEXT_UNAVAILABLE,
+    NARGINCHK_ERROR_NOT_ENOUGH_INPUTS, NARGINCHK_ERROR_TOO_MANY_INPUTS,
+    NARGINCHK_ERROR_TOO_MANY_OUTPUTS, NARGOUTCHK_DESCRIPTOR, NARGOUTCHK_ERROR_ARGUMENT_INVALID,
     NARGOUTCHK_ERROR_BOUNDS_INVALID, NARGOUTCHK_ERROR_CONTEXT_UNAVAILABLE,
     NARGOUTCHK_ERROR_NOT_ENOUGH_OUTPUTS, NARGOUTCHK_ERROR_TOO_MANY_OUTPUTS,
 };
@@ -178,8 +179,17 @@ fn validate_arg_count(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn dispatch_narginchk_in_context(
     runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    dispatch_narginchk_with_outputs(runtime, None, args)
+}
+
+fn dispatch_narginchk_with_outputs(
+    runtime: Option<&crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
     args: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     let builtin = NARGINCHK_BUILTIN_NAME;
@@ -188,6 +198,13 @@ pub(crate) fn dispatch_narginchk_in_context(
         builtin,
         &NARGINCHK_ERROR_NOT_ENOUGH_INPUTS,
         &NARGINCHK_ERROR_TOO_MANY_INPUTS,
+    )?;
+    crate::output_count::validate_fixed_form_outputs(
+        &NARGINCHK_DESCRIPTOR,
+        &NARGINCHK_ERROR_TOO_MANY_OUTPUTS,
+        builtin,
+        args.len(),
+        requested_outputs,
     )?;
     let (actual_inputs, _) = runtime
         .and_then(|runtime| runtime.invocation_arity())
@@ -208,7 +225,7 @@ pub(crate) fn dispatch_narginchk_in_context(
     if !max.permits(actual_inputs) {
         return Err(descriptor_error(builtin, &NARGINCHK_ERROR_TOO_MANY_INPUTS));
     }
-    Ok(Value::Num(0.0))
+    Ok(Value::OutputList(Vec::new()))
 }
 
 pub fn dispatch_nargoutchk(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -217,6 +234,14 @@ pub fn dispatch_nargoutchk(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
 pub fn dispatch_nargoutchk_in_context(
     runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    dispatch_nargoutchk_with_outputs(runtime, None, args)
+}
+
+fn dispatch_nargoutchk_with_outputs(
+    runtime: Option<&crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
     args: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     let builtin = NARGOUTCHK_BUILTIN_NAME;
@@ -230,6 +255,13 @@ pub fn dispatch_nargoutchk_in_context(
             },
         ));
     }
+    crate::output_count::validate_fixed_form_outputs(
+        &NARGOUTCHK_DESCRIPTOR,
+        &NARGOUTCHK_ERROR_TOO_MANY_OUTPUTS,
+        builtin,
+        args.len(),
+        requested_outputs,
+    )?;
     let (min, max) = validate_bounds(
         &args,
         builtin,
@@ -251,10 +283,11 @@ pub fn dispatch_nargoutchk_in_context(
                 &NARGOUTCHK_ERROR_ARGUMENT_INVALID,
             ));
         }
-        return Ok(legacy_nargout_result(
-            arity_violation(actual_outputs, min, max),
-            structured,
-        ));
+        return Ok(if requested_outputs == Some(0) {
+            Value::OutputList(Vec::new())
+        } else {
+            legacy_nargout_result(arity_violation(actual_outputs, min, max), structured)
+        });
     }
     let (_, actual_outputs) = runtime
         .and_then(|runtime| runtime.invocation_arity())
@@ -275,33 +308,37 @@ pub fn dispatch_nargoutchk_in_context(
         }
         None => {}
     }
-    Ok(Value::Num(0.0))
+    Ok(Value::OutputList(Vec::new()))
 }
 
 #[runmat_macros::runtime_builtin(
     name = "narginchk",
     binding_variant = "default",
     context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::introspection::arity_check"
 )]
 pub fn narginchk_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
     args: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    dispatch_narginchk_in_context(runtime.as_ref(), args)
+    dispatch_narginchk_with_outputs(runtime.as_ref(), requested_outputs, args)
 }
 
 #[runmat_macros::runtime_builtin(
     name = "nargoutchk",
     binding_variant = "default",
     context = true,
+    requested_outputs = true,
     builtin_path = "crate::builtins::introspection::arity_check"
 )]
 pub fn nargoutchk_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
     args: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    dispatch_nargoutchk_in_context(runtime.as_ref(), args)
+    dispatch_nargoutchk_with_outputs(runtime.as_ref(), requested_outputs, args)
 }
 
 #[cfg(test)]
@@ -317,12 +354,100 @@ mod tests {
     }
 
     #[test]
+    fn selected_dispatcher_admits_each_form_requested_output_count() {
+        use crate::dispatcher::{
+            call_builtin_async_in_context, call_builtin_async_with_outputs_in_context,
+        };
+        let runtime = runtime_with_arity(1, 1);
+        let bounds = [Value::Num(0.0), Value::Num(2.0)];
+        for name in [NARGINCHK_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME] {
+            let discarded = futures::executor::block_on(
+                call_builtin_async_with_outputs_in_context(&runtime, name, &bounds, 0),
+            )
+            .expect("zero-output form is discarded");
+            assert_eq!(discarded, Value::OutputList(Vec::new()));
+            let implicit =
+                futures::executor::block_on(call_builtin_async_in_context(&runtime, name, &bounds))
+                    .expect("implicit statement form");
+            assert_eq!(implicit, Value::OutputList(Vec::new()));
+            let error = futures::executor::block_on(call_builtin_async_with_outputs_in_context(
+                &runtime, name, &bounds, 1,
+            ))
+            .expect_err("zero-output form cannot be assigned");
+            assert_eq!(error.identifier(), Some("RunMat:TooManyOutputs"));
+        }
+
+        for (arguments, expected_struct) in [
+            (
+                vec![Value::Num(0.0), Value::Num(1.0), Value::Num(2.0)],
+                false,
+            ),
+            (
+                vec![
+                    Value::Num(0.0),
+                    Value::Num(1.0),
+                    Value::Num(2.0),
+                    Value::from("struct"),
+                ],
+                true,
+            ),
+        ] {
+            let one = futures::executor::block_on(call_builtin_async_with_outputs_in_context(
+                &runtime,
+                NARGOUTCHK_BUILTIN_NAME,
+                &arguments,
+                1,
+            ))
+            .expect("legacy result");
+            assert_eq!(matches!(one, Value::Struct(_)), expected_struct);
+            let discarded =
+                futures::executor::block_on(call_builtin_async_with_outputs_in_context(
+                    &runtime,
+                    NARGOUTCHK_BUILTIN_NAME,
+                    &arguments,
+                    0,
+                ))
+                .expect("discarded legacy result");
+            assert_eq!(discarded, Value::OutputList(Vec::new()));
+            let error = futures::executor::block_on(call_builtin_async_with_outputs_in_context(
+                &runtime,
+                NARGOUTCHK_BUILTIN_NAME,
+                &arguments,
+                2,
+            ))
+            .expect_err("legacy form has one output");
+            assert_eq!(error.identifier(), Some("RunMat:TooManyOutputs"));
+        }
+    }
+
+    #[test]
+    fn form_output_admission_precedes_bounds_and_function_context() {
+        let script = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+        .with_invocation_arity(crate::context::RuntimeInvocationArity::Script);
+        let bad_bounds = vec![Value::Num(-1.0), Value::Num(0.0)];
+        for (name, args) in [
+            (NARGINCHK_BUILTIN_NAME, bad_bounds.clone()),
+            (NARGOUTCHK_BUILTIN_NAME, bad_bounds),
+        ] {
+            let error = futures::executor::block_on(
+                crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                    &script, name, &args, 1,
+                ),
+            )
+            .expect_err("requested result is rejected before bound inspection");
+            assert_eq!(error.identifier(), Some("RunMat:TooManyOutputs"));
+        }
+    }
+
+    #[test]
     fn narginchk_uses_runtime_call_count_context() {
         let runtime = runtime_with_arity(2, 1);
         let value =
             dispatch_narginchk_in_context(Some(&runtime), vec![Value::Num(1.0), Value::Num(2.0)])
                 .expect("narginchk succeeds");
-        assert_eq!(value, Value::Num(0.0));
+        assert_eq!(value, Value::OutputList(Vec::new()));
     }
 
     #[test]
@@ -331,7 +456,7 @@ mod tests {
         let value =
             dispatch_nargoutchk_in_context(Some(&runtime), vec![Value::Num(1.0), Value::Num(1.0)])
                 .expect("nargoutchk succeeds");
-        assert_eq!(value, Value::Num(0.0));
+        assert_eq!(value, Value::OutputList(Vec::new()));
     }
 
     #[test]
@@ -414,7 +539,7 @@ mod tests {
         second_sender.send(()).expect("second call remains live");
         assert!(matches!(
             second_future.as_mut().poll(&mut context),
-            Poll::Ready(Ok(Value::Num(0.0)))
+            Poll::Ready(Ok(Value::OutputList(values))) if values.is_empty()
         ));
         assert_eq!(parent.invocation_arity(), None);
     }
@@ -432,7 +557,7 @@ mod tests {
             vec![Value::Tensor(min), Value::Tensor(max)],
         )
         .expect("narginchk succeeds");
-        assert_eq!(value, Value::Num(0.0));
+        assert_eq!(value, Value::OutputList(Vec::new()));
 
         assert_eq!(
             parse_finite_arity_bound(
@@ -457,6 +582,26 @@ mod tests {
     }
 
     #[test]
+    fn positive_single_infinity_is_an_admitted_maximum() {
+        let runtime = runtime_with_arity(1, 1);
+        let positive_single_infinity = Value::Tensor(
+            Tensor::from_f32(vec![f32::INFINITY], vec![1, 1]).expect("single scalar"),
+        );
+        for name in [NARGINCHK_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME] {
+            let value = futures::executor::block_on(
+                crate::dispatcher::call_builtin_async_with_outputs_in_context(
+                    &runtime,
+                    name,
+                    &[Value::Num(0.0), positive_single_infinity.clone()],
+                    0,
+                ),
+            )
+            .expect("single positive infinity admits an unbounded max");
+            assert_eq!(value, Value::OutputList(Vec::new()));
+        }
+    }
+
+    #[test]
     fn arity_checks_accept_every_documented_integer_class() {
         let runtime = runtime_with_arity(1, 1);
         let cases = [
@@ -476,7 +621,7 @@ mod tests {
                     vec![Value::Int(min.clone()), Value::Int(max.clone())]
                 )
                 .expect("documented integer narginchk bounds"),
-                Value::Num(0.0)
+                Value::OutputList(Vec::new())
             );
             assert_eq!(
                 dispatch_nargoutchk_in_context(
@@ -484,7 +629,7 @@ mod tests {
                     vec![Value::Int(min.clone()), Value::Int(max.clone())]
                 )
                 .expect("documented integer nargoutchk bounds"),
-                Value::Num(0.0)
+                Value::OutputList(Vec::new())
             );
             let text = dispatch_nargoutchk(vec![
                 Value::Int(min.clone()),

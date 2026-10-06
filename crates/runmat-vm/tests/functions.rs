@@ -1966,6 +1966,64 @@ fn nargoutchk_reports_too_many_outputs() {
 }
 
 #[test]
+fn compiled_arity_builtin_handles_enforce_form_outputs_after_intrinsic_retirement() {
+    for (name, source) in [
+        (
+            "narginchk",
+            r#"
+            y = guarded(1);
+            function y = guarded(x)
+                checker = @narginchk;
+                y = checker(0, 2);
+            end
+            "#,
+        ),
+        (
+            "nargoutchk",
+            r#"
+            y = guarded(1);
+            function y = guarded(x)
+                checker = @nargoutchk;
+                y = checker(0, 2);
+            end
+            "#,
+        ),
+        (
+            "nargoutchk legacy",
+            r#"
+            [a, b] = guarded();
+            function [a, b] = guarded()
+                checker = @nargoutchk;
+                [a, b] = checker(0, 1, 2);
+            end
+            "#,
+        ),
+    ] {
+        let error = execute_source_result(source).expect_err(name);
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:TooManyOutputs"),
+            "{name}: {}",
+            error.message()
+        );
+    }
+
+    let values = execute_source(
+        r#"
+        y = guarded(7);
+        function y = guarded(x)
+            checker = @narginchk;
+            checker(1, 1);
+            checker = @nargoutchk;
+            checker(1, 1);
+            y = x;
+        end
+        "#,
+    );
+    assert!(has_num(&values, 7.0));
+}
+
+#[test]
 fn arity_check_helpers_report_invalid_bounds() {
     let err = execute_source_result(
         r#"

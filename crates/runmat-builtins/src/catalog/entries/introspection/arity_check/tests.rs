@@ -43,6 +43,8 @@ fn current_function_forms_are_zero_output_with_known_and_unknown_bounds() {
             .bindings
             .iter()
             .any(|binding| binding.variant == "default"));
+        let assigned = infer(&request(bounds.clone(), vec![], 1), entry);
+        assert!(!assigned.diagnostics.is_empty());
     }
 }
 
@@ -65,6 +67,43 @@ fn invalid_bound_and_residency_are_rejected_without_invented_output() {
         let result = infer(&request, entry);
         assert!(result.outputs.is_empty());
         assert!(result.diagnostics.len() >= 2);
+    }
+}
+
+#[test]
+fn known_complex_bounds_reject_while_unknown_bounds_remain_conservative() {
+    let complex = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Complex,
+    }));
+    for (entry, infer) in [
+        (
+            &NARGINCHK_CATALOG_ENTRY,
+            inference::infer_narginchk as fn(&CallRequest, &BuiltinCatalogEntry) -> CallInference,
+        ),
+        (&NARGOUTCHK_CATALOG_ENTRY, inference::infer_nargoutchk),
+    ] {
+        for position in 0..2 {
+            let mut arguments = vec![scalar_numeric(), scalar_numeric()];
+            arguments[position] = complex.clone();
+            let result = infer(&request(arguments, vec![], 0), entry);
+            assert!(result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.argument == Some(position)));
+        }
+        let result = infer(
+            &request(
+                vec![
+                    ValueFact::unknown(DynamicReason::RuntimeValue),
+                    scalar_numeric(),
+                ],
+                vec![],
+                0,
+            ),
+            entry,
+        );
+        assert!(result.diagnostics.is_empty());
     }
 }
 
@@ -226,7 +265,11 @@ fn canonical_contract_preserves_all_legacy_forms_and_error_identifiers() {
     assert!(NARGOUTCHK_DESCRIPTOR.signatures[0].outputs.is_empty());
     assert_eq!(NARGOUTCHK_DESCRIPTOR.signatures[1].outputs.len(), 1);
     assert_eq!(NARGOUTCHK_DESCRIPTOR.signatures[2].outputs.len(), 1);
-    assert_eq!(NARGINCHK_ERRORS.len(), 5);
+    assert_eq!(NARGINCHK_ERRORS.len(), 6);
+    assert_eq!(
+        NARGINCHK_ERROR_TOO_MANY_OUTPUTS.identifier,
+        Some("RunMat:TooManyOutputs")
+    );
     assert_eq!(NARGOUTCHK_ERRORS.len(), 5);
     assert_eq!(
         NARGINCHK_ERROR_CONTEXT_UNAVAILABLE.identifier,

@@ -44,6 +44,46 @@ pub(crate) fn validate_fixed_outputs(
     Err(builder.build())
 }
 
+/// Validate the selected fixed-arity form against the canonical descriptor.
+/// A context-free Rust embedding call has no requested-output authority.
+pub(crate) fn validate_fixed_form_outputs(
+    descriptor: &'static BuiltinDescriptor,
+    error: &'static BuiltinErrorDescriptor,
+    builtin: &str,
+    input_count: usize,
+    requested_outputs: Option<usize>,
+) -> crate::BuiltinResult<()> {
+    let Some(requested) = requested_outputs else {
+        return Ok(());
+    };
+    if descriptor.output_mode != BuiltinOutputMode::Fixed {
+        return Ok(());
+    }
+    let matching = descriptor
+        .signatures
+        .iter()
+        .filter(|signature| signature.inputs.len() == input_count);
+    if matching.clone().any(|signature| {
+        signature
+            .outputs
+            .iter()
+            .any(|output| output.arity == BuiltinParamArity::Variadic)
+    }) {
+        return Ok(());
+    }
+    let Some(maximum) = matching.map(|signature| signature.outputs.len()).max() else {
+        return Ok(());
+    };
+    if requested <= maximum {
+        return Ok(());
+    }
+    let mut builder = crate::build_runtime_error(error.message).with_builtin(builtin);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    Err(builder.build())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,6 +174,38 @@ mod tests {
         }
         let _guard = super::super::push_output_count(Some(3));
         assert!(validate_fixed_outputs(&OVERLOADED, &ERROR, "output_test").is_err());
+    }
+
+    #[test]
+    fn fixed_form_bound_uses_matching_input_arity_not_global_maximum() {
+        const OVERLOADED: BuiltinDescriptor = BuiltinDescriptor {
+            signatures: &[
+                BuiltinSignatureDescriptor {
+                    label: "output_test()",
+                    inputs: &[],
+                    outputs: &[],
+                },
+                BuiltinSignatureDescriptor {
+                    label: "value = output_test(option)",
+                    inputs: &[OUTPUT],
+                    outputs: &[OUTPUT],
+                },
+            ],
+            ..FIXED
+        };
+        assert!(
+            validate_fixed_form_outputs(&OVERLOADED, &ERROR, "output_test", 0, Some(0)).is_ok()
+        );
+        assert!(
+            validate_fixed_form_outputs(&OVERLOADED, &ERROR, "output_test", 1, Some(1)).is_ok()
+        );
+        assert!(
+            validate_fixed_form_outputs(&OVERLOADED, &ERROR, "output_test", 0, Some(1)).is_err()
+        );
+        assert!(
+            validate_fixed_form_outputs(&OVERLOADED, &ERROR, "output_test", 1, Some(2)).is_err()
+        );
+        assert!(validate_fixed_form_outputs(&OVERLOADED, &ERROR, "output_test", 0, None).is_ok());
     }
 
     #[test]

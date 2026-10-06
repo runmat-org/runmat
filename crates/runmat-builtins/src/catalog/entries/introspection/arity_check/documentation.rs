@@ -31,12 +31,12 @@ pub(super) const NARGINCHK_DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("narginchk"), slug: Some("narginchk"),
     summary: "Validate the number of inputs supplied to the current function.",
-    description: "`narginchk(minArgs,maxArgs)` throws when the selected function received fewer than `minArgs` or more than `maxArgs` inputs. It produces no output.",
+    description: "`narginchk(minArgs,maxArgs)` throws when the selected function received fewer than `minArgs` or more than `maxArgs` inputs. It produces no output; requesting a result reports `RunMat:TooManyOutputs`.",
     keywords: &["narginchk", "function arguments", "arity", "validation"],
     related: &["nargoutchk", "nargin"],
     sections: &[
         BuiltinDocumentationSection { heading: "Bounds and context", paragraphs: &[
-            "`minArgs` accepts a nonnegative scalar single, double, or any of the eight integer classes. `maxArgs` accepts the same classes and positive double infinity for an unbounded maximum. Integer storage is read exactly, without floating conversion; out-of-range counts reject rather than round or saturate.",
+            "`minArgs` accepts a nonnegative scalar single, double, or any of the eight integer classes. `maxArgs` accepts the same classes and positive single or double infinity for an unbounded maximum. Integer storage is read exactly, without floating conversion; out-of-range counts reject rather than round or saturate.",
             "The current invocation's function input count is required. A top-level script or context-free embedding call has no function-call arity and reports `RunMat:NarginchkContextUnavailable` after argument-count admission.",
             "Interactive resident bounds are not documented and reject before provider access. The check is host-only and performs no provider operation or callback.",
         ] },
@@ -76,9 +76,9 @@ pub(super) const NARGOUTCHK_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumen
     related: &["narginchk", "nargout"],
     sections: &[
         BuiltinDocumentationSection { heading: "Forms and results", paragraphs: &[
-            "The two-input form uses the selected function invocation's requested output count and produces no output. A script or context-free embedding has no function output count and reports `RunMat:NargoutchkContextUnavailable` after its bounds are admitted.",
-            "`msg = nargoutchk(minArgs,maxArgs,numArgs)` returns character message text on a violation and an empty 0-by-0 character array otherwise. With a fourth `'struct'` selector it returns a structure with `message` and `identifier` fields on a violation and an empty structure otherwise.",
-            "`minArgs`, `maxArgs`, and legacy `numArgs` accept scalar single, double, or any of the eight integer classes. Positive double infinity is allowed only for `maxArgs`. Exact integer storage is compared without floating conversion; out-of-range counts reject rather than round or saturate.",
+            "The two-input form uses the selected function invocation's requested output count and produces no output; requesting a result reports `RunMat:TooManyOutputs`. A script or context-free embedding has no function output count and reports `RunMat:NargoutchkContextUnavailable` after its bounds are admitted.",
+            "`msg = nargoutchk(minArgs,maxArgs,numArgs)` returns character message text on a violation and an empty 0-by-0 character array otherwise. With a fourth `'struct'` selector it returns a structure with `message` and `identifier` fields on a violation and an empty structure otherwise. These legacy forms return at most one result; a discarded call produces no result.",
+            "`minArgs`, `maxArgs`, and legacy `numArgs` accept scalar single, double, or any of the eight integer classes. Positive single or double infinity is allowed only for `maxArgs`. Exact integer storage is compared without floating conversion; out-of-range counts reject rather than round or saturate.",
             "Interactive resident controls are not documented and reject before provider access. These forms are host-only and perform no provider operation or callback.",
         ] },
     ],

@@ -110,12 +110,19 @@ pub const NARGINCHK_ERROR_CONTEXT_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinE
     when: "The runtime dispatcher is invoked without VM function-call context.",
     message: "narginchk: function call context is unavailable",
 };
-pub const NARGINCHK_ERRORS: [BuiltinErrorDescriptor; 5] = [
+pub const NARGINCHK_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NARGINCHK.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:TooManyOutputs"),
+    when: "A caller requests a result from the zero-output narginchk form.",
+    message: "narginchk: too many output arguments",
+};
+pub const NARGINCHK_ERRORS: [BuiltinErrorDescriptor; 6] = [
     NARGINCHK_ERROR_NOT_ENOUGH_INPUTS,
     NARGINCHK_ERROR_TOO_MANY_INPUTS,
     NARGINCHK_ERROR_ARGUMENT_INVALID,
     NARGINCHK_ERROR_BOUNDS_INVALID,
     NARGINCHK_ERROR_CONTEXT_UNAVAILABLE,
+    NARGINCHK_ERROR_TOO_MANY_OUTPUTS,
 ];
 pub const NARGINCHK_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &NARGINCHK_SIGNATURES,
@@ -133,7 +140,7 @@ pub const NARGOUTCHK_ERROR_NOT_ENOUGH_OUTPUTS: BuiltinErrorDescriptor = BuiltinE
 pub const NARGOUTCHK_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.NARGOUTCHK.TOO_MANY_OUTPUTS",
     identifier: Some("RunMat:TooManyOutputs"),
-    when: "The current function was called with more requested outputs than the upper bound.",
+    when: "The current function exceeds maxArgs or the caller requests more results than the selected form returns.",
     message: "nargoutchk: too many output arguments",
 };
 pub const NARGOUTCHK_ERROR_ARGUMENT_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
