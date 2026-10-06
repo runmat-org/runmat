@@ -1,3 +1,4 @@
+use super::ENTRIES;
 use super::*;
 use crate::*;
 use runmat_types::*;
