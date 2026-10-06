@@ -86,7 +86,59 @@ try {
         /aot_source_failure\.m:\d+:\d+/u,
         "standalone error must render the admitted source file and position before its lease retires"
     );
-    console.log("linked AOT source, callback, re-invocation, and error witnesses passed");
+
+    // These are linked programs, not a VM-only binding check: the two-argument
+    // forms must consume no result even inside a one-result function.
+    const aritySuccess = compile("aot_arity_zero_result", [
+        "function result = aot_arity_zero_result()",
+        "  narginchk(0, 0);",
+        "  nargoutchk(1, 1);",
+        "  result = 7;",
+        "end",
+        ""
+    ].join("\n"));
+    const aritySuccessResult = invoke(aritySuccess);
+    assert.equal(aritySuccessResult.status, 0, `linked zero-result checks failed:\n${aritySuccessResult.stderr}`);
+    assert.equal(aritySuccessResult.stdout.trim(), "7", "zero-result checks changed the function result");
+
+    for (const [name, builtin] of [
+        ["aot_arity_nargin_bad_output", "narginchk"],
+        ["aot_arity_nargout_bad_output", "nargoutchk"]
+    ]) {
+        const executable = compile(name, [
+            `function result = ${name}()`,
+            `  check = @${builtin};`,
+            "  result = check(0, 1);",
+            "end",
+            ""
+        ].join("\n"));
+        const attempted = invoke(executable);
+        assert.notEqual(attempted.status, 0, `${builtin} must reject an assigned result from its two-argument form`);
+        assert.match(attempted.stderr, /RunMat:TooManyOutputs/u, `${builtin} lost its output error identifier`);
+    }
+
+    const legacyText = compile("aot_arity_legacy_text", [
+        "function message = aot_arity_legacy_text()",
+        "  message = nargoutchk(2, 2, 1);",
+        "end",
+        ""
+    ].join("\n"));
+    const textResult = invoke(legacyText);
+    assert.equal(textResult.status, 0, `linked legacy text form failed:\n${textResult.stderr}`);
+    assert.match(textResult.stdout, /Not enough output arguments\./u);
+
+    const legacyStruct = compile("aot_arity_legacy_struct", [
+        "function identifier = aot_arity_legacy_struct()",
+        "  result = nargoutchk(0, 1, 2, 'struct');",
+        "  identifier = result.identifier;",
+        "end",
+        ""
+    ].join("\n"));
+    const structResult = invoke(legacyStruct);
+    assert.equal(structResult.status, 0, `linked legacy struct form failed:\n${structResult.stderr}`);
+    assert.match(structResult.stdout, /MATLAB:nargoutchk:tooManyOutputs/u);
+
+    console.log("linked AOT source, callback, re-invocation, error, and arity witnesses passed");
 } finally {
     rmSync(directory, { recursive: true, force: true });
 }
