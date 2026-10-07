@@ -106,7 +106,7 @@ mod tests {
                 let output =
                     transform_complex_tensor(input, None, Some(1), direction, "fft-shape-test")
                         .unwrap();
-                assert_eq!(output.shape, vec![1, 1]);
+                assert_eq!(output.shape(), [1, 1]);
                 let ComplexStorage::F64(data) = output.complex_storage() else {
                     panic!("native double")
                 };
@@ -118,7 +118,7 @@ mod tests {
                 let output =
                     transform_complex_tensor(input, None, Some(1), direction, "fft-shape-test")
                         .unwrap();
-                assert_eq!(output.shape, shape);
+                assert_eq!(output.shape(), shape);
             }
         }
     }

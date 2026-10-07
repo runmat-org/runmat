@@ -644,7 +644,7 @@ pub(crate) mod tests {
         };
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, sequential.shape);
+                assert_eq!(out.shape(), sequential.shape());
                 for (lhs, rhs) in out
                     .materialize_f64()
                     .iter()
@@ -669,7 +669,7 @@ pub(crate) mod tests {
         .expect("fft2");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![4, 4]);
+                assert_eq!(out.shape(), [4, 4]);
                 assert_eq!(out.materialize_f64().len(), 16);
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -685,7 +685,7 @@ pub(crate) mod tests {
         let result =
             fft2_builtin(Value::Tensor(tensor.clone()), vec![Value::Tensor(size)]).expect("fft2");
         match result {
-            Value::ComplexTensor(out) => assert_eq!(out.shape, vec![4, 2]),
+            Value::ComplexTensor(out) => assert_eq!(out.shape(), [4, 2]),
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }
@@ -699,7 +699,7 @@ pub(crate) mod tests {
         let result = fft2_builtin(Value::Tensor(tensor), vec![Value::Tensor(size)]).expect("fft2");
 
         match result {
-            Value::ComplexTensor(out) => assert_eq!(out.shape, vec![4, 2]),
+            Value::ComplexTensor(out) => assert_eq!(out.shape(), [4, 2]),
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }
@@ -713,7 +713,7 @@ pub(crate) mod tests {
         let result =
             fft2_builtin(Value::Tensor(tensor.clone()), vec![Value::Tensor(empty)]).expect("fft2");
         match result {
-            Value::ComplexTensor(out) => assert_eq!(out.shape, tensor.shape),
+            Value::ComplexTensor(out) => assert_eq!(out.shape(), tensor.shape()),
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }
@@ -730,7 +730,7 @@ pub(crate) mod tests {
         .expect("fft2");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![0, 3]);
+                assert_eq!(out.shape(), [0, 3]);
                 assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -744,14 +744,14 @@ pub(crate) mod tests {
             let tensor = Tensor::new((0..8).map(|v| v as f64).collect(), vec![2, 4]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let gpu = fft2_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("fft2 gpu");
             let cpu = fft2_builtin(Value::Tensor(tensor), Vec::new()).expect("fft2 cpu");
             let g = value_to_host_complex(gpu);
             let c = value_to_host_complex(cpu);
-            assert_eq!(g.shape, c.shape);
+            assert_eq!(g.shape(), c.shape());
             let tol = 1e-10;
             for (lhs, rhs) in g.materialize_f64().iter().zip(c.materialize_f64().iter()) {
                 assert!(approx_eq(*lhs, *rhs, tol), "{lhs:?} vs {rhs:?}");
@@ -800,7 +800,7 @@ pub(crate) mod tests {
         )
         .expect("fft2");
         match result {
-            Value::ComplexTensor(out) => assert_eq!(out.shape, vec![2, 4]),
+            Value::ComplexTensor(out) => assert_eq!(out.shape(), [2, 4]),
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }
@@ -868,7 +868,7 @@ pub(crate) mod tests {
         let tensor_cpu = tensor.clone();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_value =
@@ -876,7 +876,7 @@ pub(crate) mod tests {
         let cpu_value = fft2_builtin(Value::Tensor(tensor_cpu), Vec::new()).expect("fft2 cpu");
         let gpu_ct = value_to_host_complex(gpu_value);
         let cpu_ct = value_to_host_complex(cpu_value);
-        assert_eq!(gpu_ct.shape, cpu_ct.shape);
+        assert_eq!(gpu_ct.shape(), cpu_ct.shape());
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

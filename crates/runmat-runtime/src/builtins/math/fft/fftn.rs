@@ -438,8 +438,8 @@ fn parse_fftn_sizes(args: &[Value], input_rank: usize) -> BuiltinResult<Option<V
 
 fn fftn_input_rank(value: &Value) -> usize {
     let rank = match value {
-        Value::Tensor(tensor) => tensor.shape.len(),
-        Value::ComplexTensor(tensor) => tensor.shape.len(),
+        Value::Tensor(tensor) => tensor.shape().len(),
+        Value::ComplexTensor(tensor) => tensor.shape().len(),
         Value::LogicalArray(array) => array.shape.len(),
         Value::GpuTensor(handle) => handle.shape().len(),
         _ => 2,
@@ -454,7 +454,7 @@ fn validate_size_vector_shape(value: &Value) -> BuiltinResult<()> {
             || (shape.len() == 2 && (shape[0] == 1 || shape[1] == 1))
     };
     match value {
-        Value::Tensor(tensor) if !vector_shape(&tensor.shape) => Err(fftn_error_with_detail(
+        Value::Tensor(tensor) if !vector_shape(tensor.shape()) => Err(fftn_error_with_detail(
             &FFTN_ERROR_INVALID_SIZE,
             "SIZE must be a row or column vector",
         )),
@@ -518,7 +518,7 @@ mod tests {
         let b = fft_complex_tensor(a, None, Some(2)).unwrap();
         let expect = fft_complex_tensor(b, None, Some(3)).unwrap();
 
-        assert_eq!(got.shape, expect.shape);
+        assert_eq!(got.shape(), expect.shape());
         for (lhs, rhs) in got
             .materialize_f64()
             .iter()

@@ -296,7 +296,7 @@ pub fn restore_complex_gpu_result(
     if !valid_provider_fft_output(
         provider,
         &output,
-        &tensor.shape,
+        tensor.shape(),
         GpuTensorStorage::ComplexInterleaved,
         precision,
     ) {
@@ -347,7 +347,7 @@ pub fn restore_real_gpu_result(
     if !valid_provider_fft_output(
         provider,
         &output,
-        &tensor.shape,
+        tensor.shape(),
         GpuTensorStorage::Real,
         precision,
     ) {
@@ -444,7 +444,7 @@ pub fn value_to_complex_tensor(value: Value, builtin: &str) -> BuiltinResult<Com
 
 /// Convert a real-valued tensor into a `ComplexTensor`.
 pub fn tensor_to_complex_tensor(tensor: Tensor, builtin: &str) -> BuiltinResult<ComplexTensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = match tensor
         .into_numeric_storage()
         .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?
@@ -468,7 +468,7 @@ pub fn tensor_to_complex_tensor(tensor: Tensor, builtin: &str) -> BuiltinResult<
 }
 
 pub fn complex_tensor_to_real_value(tensor: ComplexTensor, builtin: &str) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = match tensor.into_complex_storage() {
         ComplexStorage::F64(values) => {
             NumericStorage::F64(values.into_iter().map(|(real, _)| real).collect())
@@ -769,14 +769,16 @@ pub fn transform_complex_tensor(
     } else {
         NumericDType::F64
     };
-    let origin_rank = tensor.shape.len();
-    if crate::builtins::common::shape::is_scalar_shape(&tensor.shape) {
-        tensor.shape = crate::builtins::common::shape::normalize_scalar_shape(&tensor.shape);
-        tensor.rows = tensor.shape.first().copied().unwrap_or(1);
-        tensor.cols = tensor.shape.get(1).copied().unwrap_or(1);
+    let origin_rank = tensor.shape().len();
+    if crate::builtins::common::shape::is_scalar_shape(tensor.shape()) {
+        let normalized_shape =
+            crate::builtins::common::shape::normalize_scalar_shape(tensor.shape());
+        tensor
+            .reshape_in_place(normalized_shape)
+            .map_err(|error| builtin_error(builtin, error))?;
     }
 
-    let mut shape = tensor.shape.clone();
+    let mut shape = tensor.shape().to_vec();
     let dim_index = match dimension {
         Some(0) => {
             return Err(builtin_error(
@@ -893,7 +895,7 @@ pub fn transform_nd_complex_tensor(
 ) -> BuiltinResult<ComplexTensor> {
     let axis_count = sizes
         .map(|v| v.len())
-        .unwrap_or_else(|| tensor.shape.len().max(1));
+        .unwrap_or_else(|| tensor.shape().len().max(1));
     for axis in 0..axis_count {
         let len = sizes.and_then(|v| v.get(axis).copied());
         tensor = transform_complex_tensor(tensor, len, Some(axis + 1), direction, builtin)?;
@@ -1295,7 +1297,7 @@ fn dims_from_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
             Ok(vec![rounded as usize])
         }
         Value::Tensor(tensor) => {
-            if !is_vector_shape(&tensor.shape) && !tensor.is_empty() {
+            if !is_vector_shape(tensor.shape()) && !tensor.is_empty() {
                 return Err(builtin_error(
                     builtin,
                     format!("{builtin}: dimension vectors must be row or column vectors"),

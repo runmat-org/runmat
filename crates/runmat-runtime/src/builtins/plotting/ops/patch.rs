@@ -572,7 +572,9 @@ fn value_matches_coordinate_values(x: &Value, y: &Value, value: &Value) -> bool 
     ) else {
         return false;
     };
-    tensor.rows == x.rows && tensor.cols == x.cols && tensor.rows == y.rows && tensor.cols == y.cols
+    let dimensions = patch_tensor_dimensions(tensor.shape());
+    dimensions == patch_tensor_dimensions(x.shape())
+        && dimensions == patch_tensor_dimensions(y.shape())
 }
 
 fn value_matches_coordinate_shape(opts: &PatchOptions, value: &Value) -> bool {
@@ -582,7 +584,9 @@ fn value_matches_coordinate_shape(opts: &PatchOptions, value: &Value) -> bool {
     let Ok(tensor) = Tensor::try_from(value) else {
         return false;
     };
-    tensor.rows == x.rows && tensor.cols == x.cols && tensor.rows == y.rows && tensor.cols == y.cols
+    let dimensions = patch_tensor_dimensions(tensor.shape());
+    dimensions == patch_tensor_dimensions(x.shape())
+        && dimensions == patch_tensor_dimensions(y.shape())
 }
 
 fn is_color_literal(value: &Value) -> bool {
@@ -592,8 +596,7 @@ fn is_color_literal(value: &Value) -> bool {
     let Ok(tensor) = Tensor::try_from(value) else {
         return false;
     };
-    tensor.rows == 1
-        && tensor.cols == 3
+    patch_tensor_dimensions(tensor.shape()) == (1, 3)
         && parse_color_value(&LineStyleParseOptions::generic(BUILTIN_NAME), value).is_ok()
 }
 
@@ -735,7 +738,7 @@ fn patch_data_from_tensor(tensor: &Tensor) -> NumericPlotData {
         .clone()
         .into_numeric_storage()
         .expect("numeric tensor storage");
-    NumericPlotData::new(storage, tensor.shape.clone()).expect("validated patch source data")
+    NumericPlotData::new(storage, tensor.shape().to_vec()).expect("validated patch source data")
 }
 
 pub(super) fn split_coordinate_group_columns(
@@ -761,9 +764,10 @@ pub(super) fn split_coordinate_group_columns(
     // square matrices deterministically column-grouped.
     let matrix = coordinates.iter().find(|tensor| !is_vector_tensor(tensor));
     let (polygon_length, polygon_count) = if let Some(matrix) = matrix {
+        let matrix_dimensions = patch_tensor_dimensions(matrix.shape());
         for tensor in &coordinates {
             if is_vector_tensor(tensor) {
-                if tensor.len() != matrix.rows {
+                if tensor.len() != matrix_dimensions.0 {
                     return Err(plotting_error(
                         context,
                         format!(
@@ -771,14 +775,14 @@ pub(super) fn split_coordinate_group_columns(
                         ),
                     ));
                 }
-            } else if tensor.rows != matrix.rows || tensor.cols != matrix.cols {
+            } else if patch_tensor_dimensions(tensor.shape()) != matrix_dimensions {
                 return Err(plotting_error(
                     context,
                     format!("{context}: coordinate matrices must have the same size"),
                 ));
             }
         }
-        (matrix.rows, matrix.cols)
+        matrix_dimensions
     } else {
         if coordinates.iter().any(|tensor| tensor.len() != first.len()) {
             return Err(plotting_error(
@@ -797,10 +801,11 @@ pub(super) fn split_coordinate_group_columns(
         Some(numeric_tensor_for_plot(color.clone(), context)?)
     };
     let split_color = color.as_ref().is_some_and(|tensor| {
+        let (rows, cols) = patch_tensor_dimensions(tensor.shape());
         let rgb_triplet = is_rgb_triplet_tensor(tensor);
         polygon_count > 1
-            && tensor.cols == polygon_count
-            && (tensor.rows == polygon_length || tensor.rows == 1)
+            && cols == polygon_count
+            && (rows == polygon_length || rows == 1)
             && !rgb_triplet
     });
 
@@ -871,10 +876,11 @@ fn tensor_column_value(
     column: usize,
     context: &'static str,
 ) -> BuiltinResult<Value> {
+    let rows = patch_tensor_dimensions(tensor.shape()).0;
     let start = column
-        .checked_mul(tensor.rows)
+        .checked_mul(rows)
         .ok_or_else(|| plotting_error(context, format!("{context}: column offset overflow")))?;
-    let end = start + tensor.rows;
+    let end = start + rows;
     macro_rules! column_storage {
         ($storage:expr, $variant:ident) => {
             NumericStorage::$variant($storage[start..end].to_vec())
@@ -896,7 +902,7 @@ fn tensor_column_value(
         NumericStorage::U32(values) => column_storage!(values, U32),
         NumericStorage::U64(values) => column_storage!(values, U64),
     };
-    Tensor::from_numeric_storage(storage, vec![tensor.rows, 1])
+    Tensor::from_numeric_storage(storage, vec![rows, 1])
         .map(Value::Tensor)
         .map_err(|error| plotting_error(context, format!("{context}: {error}")))
 }
@@ -955,18 +961,19 @@ fn apply_edge_color(opts: &mut PatchOptions, value: &Value) -> BuiltinResult<()>
 }
 
 fn vertices_from_tensor(tensor: &Tensor) -> BuiltinResult<Vec<Vec3>> {
-    if tensor.cols != 2 && tensor.cols != 3 {
+    let (rows, cols) = patch_tensor_dimensions(tensor.shape());
+    if cols != 2 && cols != 3 {
         return Err(patch_invalid(
             "patch: Vertices must be an N-by-2 or N-by-3 matrix",
         ));
     }
     let values = tensor_helpers::tensor_values_f64(tensor);
-    let mut out = Vec::with_capacity(tensor.rows);
-    for row in 0..tensor.rows {
+    let mut out = Vec::with_capacity(rows);
+    for row in 0..rows {
         let x = values[row];
-        let y = values[row + tensor.rows];
-        let z = if tensor.cols >= 3 {
-            values[row + 2 * tensor.rows]
+        let y = values[row + rows];
+        let z = if cols >= 3 {
+            values[row + 2 * rows]
         } else {
             0.0
         };
@@ -976,15 +983,16 @@ fn vertices_from_tensor(tensor: &Tensor) -> BuiltinResult<Vec<Vec3>> {
 }
 
 fn faces_from_tensor(tensor: &Tensor) -> BuiltinResult<Vec<Vec<usize>>> {
-    if tensor.rows == 0 || tensor.cols == 0 {
+    let (rows, cols) = patch_tensor_dimensions(tensor.shape());
+    if rows == 0 || cols == 0 {
         return Err(patch_invalid("patch: Faces must not be empty"));
     }
     let values = tensor_helpers::tensor_values_f64(tensor);
-    let mut faces = Vec::with_capacity(tensor.rows);
-    for row in 0..tensor.rows {
+    let mut faces = Vec::with_capacity(rows);
+    for row in 0..rows {
         let mut face = Vec::new();
-        for col in 0..tensor.cols {
-            let value = values[row + col * tensor.rows];
+        for col in 0..cols {
+            let value = values[row + col * rows];
             if value.is_nan() {
                 continue;
             }
@@ -1042,13 +1050,14 @@ fn vertices_faces_from_xyz(opts: &PatchOptions) -> BuiltinResult<(Vec<Vec3>, Vec
         }
         return Ok((vertices, vec![face]));
     }
-    if x.rows != y.rows || x.cols != y.cols {
+    let (rows, cols) = patch_tensor_dimensions(x.shape());
+    if patch_tensor_dimensions(y.shape()) != (rows, cols) {
         return Err(patch_invalid(
             "patch: XData and YData must have the same size",
         ));
     }
     if let Some(z) = &opts.z_data {
-        if z.rows != x.rows || z.cols != x.cols {
+        if patch_tensor_dimensions(z.shape()) != (rows, cols) {
             return Err(patch_invalid(
                 "patch: ZData must have the same size as XData and YData",
             ));
@@ -1059,10 +1068,10 @@ fn vertices_faces_from_xyz(opts: &PatchOptions) -> BuiltinResult<(Vec<Vec3>, Vec
     let x_values = tensor_helpers::tensor_values_f64(x);
     let y_values = tensor_helpers::tensor_values_f64(y);
     let z_values = opts.z_data.as_ref().map(tensor_helpers::tensor_values_f64);
-    for col in 0..x.cols {
+    for col in 0..cols {
         let mut face = Vec::new();
-        for row in 0..x.rows {
-            let idx = row + col * x.rows;
+        for row in 0..rows {
+            let idx = row + col * rows;
             let xv = x_values[idx];
             let yv = y_values[idx];
             let zv = z_values.as_ref().map(|z| z[idx]).unwrap_or(0.0);
@@ -1080,7 +1089,21 @@ fn vertices_faces_from_xyz(opts: &PatchOptions) -> BuiltinResult<(Vec<Vec3>, Vec
 }
 
 fn is_vector_tensor(tensor: &Tensor) -> bool {
-    tensor.rows == 1 || tensor.cols == 1
+    let (rows, cols) = patch_tensor_dimensions(tensor.shape());
+    rows == 1 || cols == 1
+}
+
+/// Matrix geometry used by patch coordinates and indexed face data.
+///
+/// Patch treats rank-one numeric inputs as row vectors and rank-zero inputs as
+/// empty geometry; this projection is distinct from Tensor's general matrix
+/// accessors and is part of the plotting admission contract.
+fn patch_tensor_dimensions(shape: &[usize]) -> (usize, usize) {
+    match shape {
+        [] => (0, 0),
+        [cols] => (1, *cols),
+        [rows, cols, ..] => (*rows, *cols),
+    }
 }
 
 pub(super) fn is_property_name(value: &Value) -> bool {
@@ -1156,6 +1179,30 @@ mod tests {
         assert_eq!(plot.vertices().len(), 3);
         assert!(plot.vertices().iter().all(|vertex| vertex.z == 0.0));
         assert_eq!(plot.face_color(), Vec4::new(1.0, 0.0, 0.0, 1.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn patch_rank_geometry_keeps_row_vectors_and_empty_rank_zero_data() {
+        assert_eq!(patch_tensor_dimensions(&[]), (0, 0));
+        assert_eq!(patch_tensor_dimensions(&[3]), (1, 3));
+
+        let x = Tensor::new(vec![0.0, 1.0, 0.0], vec![3]).expect("rank-one x");
+        let y = Tensor::new(vec![0.0, 0.0, 1.0], vec![3]).expect("rank-one y");
+        let color = Tensor::new(vec![1.0, 0.0, 0.0], vec![3]).expect("rank-one color");
+        let plot = parse_patch_plot(vec![
+            Value::Tensor(x),
+            Value::Tensor(y),
+            Value::Tensor(color),
+        ])
+        .expect("rank-one coordinates and RGB row");
+        assert_eq!(plot.vertices().len(), 3);
+        assert!(plot.vertices().iter().all(|vertex| vertex.z == 0.0));
+        assert_eq!(plot.face_color(), Vec4::new(1.0, 0.0, 0.0, 1.0));
+
+        let rank_zero = Tensor::new(vec![1.0], vec![]).expect("rank-zero faces");
+        let error = faces_from_tensor(&rank_zero).expect_err("rank-zero faces are empty geometry");
+        assert_eq!(error.identifier(), PATCH_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]
@@ -1284,10 +1331,10 @@ mod tests {
                 .expect("patch Vertices");
 
         assert!(
-            matches!(retained_faces, Value::Tensor(tensor) if tensor.shape == vec![1, 3] && tensor.integer_storage() == Some(&faces))
+            matches!(retained_faces, Value::Tensor(tensor) if tensor.shape() == [1, 3] && tensor.integer_storage() == Some(&faces))
         );
         assert!(
-            matches!(retained_vertices, Value::Tensor(tensor) if tensor.shape == vec![3, 2] && tensor.integer_storage() == Some(&vertices))
+            matches!(retained_vertices, Value::Tensor(tensor) if tensor.shape() == [3, 2] && tensor.integer_storage() == Some(&vertices))
         );
     }
 

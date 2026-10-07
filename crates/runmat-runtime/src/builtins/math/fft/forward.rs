@@ -567,7 +567,7 @@ pub(crate) mod tests {
         let result = fft_host(Value::Tensor(tensor), None, None).expect("fft");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![4]);
+                assert_eq!(ct.shape(), [4]);
                 let expected = [(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)];
                 for (idx, val) in ct.materialize_f64().iter().enumerate() {
                     assert!(
@@ -589,7 +589,7 @@ pub(crate) mod tests {
         let result = fft_host(Value::Tensor(tensor), None, None).expect("fft");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![1, 4]);
+                assert_eq!(ct.shape(), [1, 4]);
                 let expected = [(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)];
                 for (idx, val) in ct.materialize_f64().iter().enumerate() {
                     assert!(
@@ -611,7 +611,7 @@ pub(crate) mod tests {
         let result = fft_host(Value::Tensor(tensor), None, None).expect("fft");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![2, 3]);
+                assert_eq!(ct.shape(), [2, 3]);
                 let expected = [
                     (5.0, 0.0),
                     (-3.0, 0.0),
@@ -636,7 +636,7 @@ pub(crate) mod tests {
             fft_host(Value::Tensor(tensor), Some(5), None).expect("fft with explicit length");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![5]);
+                assert_eq!(ct.shape(), [5]);
                 assert!(approx_eq(ct.materialize_f64()[0], (6.0, 0.0), 1e-12));
                 assert_eq!(ct.materialize_f64().len(), 5);
             }
@@ -658,7 +658,7 @@ pub(crate) mod tests {
         .expect("fft with empty length");
         let base_ct = value_as_complex_tensor(baseline);
         let result_ct = value_as_complex_tensor(result);
-        assert_eq!(base_ct.shape, result_ct.shape);
+        assert_eq!(base_ct.shape(), result_ct.shape());
         assert_eq!(
             base_ct.materialize_f64().len(),
             result_ct.materialize_f64().len()
@@ -686,7 +686,7 @@ pub(crate) mod tests {
             fft_host(Value::Tensor(tensor), Some(2), None).expect("fft with truncation length");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![2]);
+                assert_eq!(ct.shape(), [2]);
                 let expected = [(3.0, 0.0), (-1.0, 0.0)];
                 for (idx, val) in ct.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(*val, expected[idx], 1e-12));
@@ -703,7 +703,7 @@ pub(crate) mod tests {
         let result = fft_host(Value::Tensor(tensor), Some(0), None).expect("fft with zero length");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![0]);
+                assert_eq!(ct.shape(), [0]);
                 assert!(ct.materialize_f64().is_empty());
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -727,7 +727,7 @@ pub(crate) mod tests {
             .process(&mut expected);
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![3]);
+                assert_eq!(ct.shape(), [3]);
                 assert_eq!(ct.materialize_f64().len(), 3);
                 for (idx, val) in ct.materialize_f64().iter().enumerate() {
                     let exp = expected[idx];
@@ -745,7 +745,7 @@ pub(crate) mod tests {
         let result = fft_host(Value::Tensor(tensor), None, Some(2)).expect("fft along dimension 2");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![1, 4]);
+                assert_eq!(ct.shape(), [1, 4]);
                 let expected = [(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)];
                 for (idx, val) in ct.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(*val, expected[idx], 1e-12));
@@ -764,7 +764,7 @@ pub(crate) mod tests {
             fft_host(Value::Tensor(tensor), None, Some(3)).expect("fft with extra dimension");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![1, 4, 1]);
+                assert_eq!(ct.shape(), [1, 4, 1]);
                 assert_eq!(ct.materialize_f64().len(), original.materialize_f64().len());
                 for (idx, (re, im)) in ct.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(
@@ -787,7 +787,7 @@ pub(crate) mod tests {
             .expect("fft with padded third dimension");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![1, 4, 4]);
+                assert_eq!(ct.shape(), [1, 4, 4]);
                 let mut expected = Vec::with_capacity(16);
                 for _depth in 0..4 {
                     for &value in &original.materialize_f64() {
@@ -916,14 +916,14 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let gpu = fft_builtin_sync(Value::GpuTensor(handle.clone()), Vec::new()).expect("fft");
             let cpu = fft_builtin_sync(Value::Tensor(tensor), Vec::new()).expect("fft");
             let gpu_host = value_as_complex_tensor(gpu);
             let cpu_host = value_as_complex_tensor(cpu);
-            assert_eq!(gpu_host.shape, cpu_host.shape);
+            assert_eq!(gpu_host.shape(), cpu_host.shape());
             for (a, b) in gpu_host
                 .materialize_f64()
                 .iter()
@@ -947,7 +947,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let gpu = fft_builtin_sync(
@@ -959,7 +959,7 @@ pub(crate) mod tests {
                 .expect("fft cpu");
             let gpu_host = value_as_complex_tensor(gpu);
             let cpu_host = value_as_complex_tensor(cpu);
-            assert_eq!(gpu_host.shape, cpu_host.shape);
+            assert_eq!(gpu_host.shape(), cpu_host.shape());
             for (a, b) in gpu_host
                 .materialize_f64()
                 .iter()
@@ -983,7 +983,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new((1..=18).map(|v| v as f64).collect(), vec![2, 3, 3]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let args = vec![Value::Int(IntValue::I32(7)), Value::Int(IntValue::I32(2))];
@@ -992,7 +992,7 @@ pub(crate) mod tests {
             let cpu = fft_builtin_sync(Value::Tensor(tensor), args).expect("fft cpu");
             let gpu_host = value_as_complex_tensor(gpu);
             let cpu_host = value_as_complex_tensor(cpu);
-            assert_eq!(gpu_host.shape, cpu_host.shape);
+            assert_eq!(gpu_host.shape(), cpu_host.shape());
             for (a, b) in gpu_host
                 .materialize_f64()
                 .iter()
@@ -1020,7 +1020,7 @@ pub(crate) mod tests {
             let tensor_cpu = tensor.clone();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let gpu =
@@ -1032,7 +1032,7 @@ pub(crate) mod tests {
                 runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,
                 runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
             };
-            assert_eq!(gpu_ct.shape, cpu_ct.shape);
+            assert_eq!(gpu_ct.shape(), cpu_ct.shape());
             for (a, b) in gpu_ct
                 .materialize_f64()
                 .iter()

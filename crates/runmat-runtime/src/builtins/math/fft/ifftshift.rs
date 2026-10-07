@@ -284,11 +284,11 @@ async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
 
     match value {
         Value::Tensor(tensor) => {
-            let dims = compute_ifftshift_dims(&tensor.shape, dims_arg)?;
+            let dims = compute_ifftshift_dims(tensor.shape(), dims_arg)?;
             Ok(ifftshift_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::ComplexTensor(ct) => {
-            let dims = compute_ifftshift_dims(&ct.shape, dims_arg)?;
+            let dims = compute_ifftshift_dims(ct.shape(), dims_arg)?;
             Ok(ifftshift_complex_tensor(ct, &dims).map(Value::ComplexTensor)?)
         }
         Value::LogicalArray(array) => {
@@ -302,7 +302,7 @@ async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
                     format!("complex tensor construction failed: {source}"),
                 )
             })?;
-            let dims = compute_ifftshift_dims(&tensor.shape, dims_arg)?;
+            let dims = compute_ifftshift_dims(tensor.shape(), dims_arg)?;
             Ok(ifftshift_complex_tensor(tensor, &dims).map(|result| {
                 if result.materialize_f64().len() == 1 {
                     let (r, i) = result.materialize_f64()[0];
@@ -319,7 +319,7 @@ async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
                     format!("scalar/tensor conversion failed: {detail}"),
                 )
             })?;
-            let dims = compute_ifftshift_dims(&tensor.shape, dims_arg)?;
+            let dims = compute_ifftshift_dims(tensor.shape(), dims_arg)?;
             Ok(ifftshift_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => {
@@ -366,7 +366,7 @@ fn ifftshift_uses_multi_dimension_extension(value: &Value) -> bool {
 }
 
 fn ifftshift_tensor(tensor: Tensor, dims: &[usize]) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor.into_numeric_storage().map_err(|source| {
         ifftshift_error_with_detail(
             &IFFTSHIFT_ERROR_INTERNAL,
@@ -385,7 +385,7 @@ fn ifftshift_tensor(tensor: Tensor, dims: &[usize]) -> BuiltinResult<Tensor> {
 }
 
 fn ifftshift_complex_tensor(tensor: ComplexTensor, dims: &[usize]) -> BuiltinResult<ComplexTensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor.into_complex_storage();
     let plan = build_shift_plan(&shape, dims, ShiftKind::Ifft);
     if storage.is_empty() || plan.is_noop() {
@@ -662,7 +662,7 @@ pub(crate) mod tests {
         let result = ifftshift_builtin(Value::Tensor(tensor), Vec::new()).expect("ifftshift");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![8, 1]);
+                assert_eq!(out.shape(), [8, 1]);
                 assert_eq!(
                     out.materialize_f64(),
                     vec![4.0, 5.0, 6.0, 7.0, 0.0, 1.0, 2.0, 3.0]
@@ -679,7 +679,7 @@ pub(crate) mod tests {
         let result = ifftshift_builtin(Value::Tensor(tensor), Vec::new()).expect("ifftshift");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![5, 1]);
+                assert_eq!(out.shape(), [5, 1]);
                 assert_eq!(out.materialize_f64(), vec![3.0, 4.0, 5.0, 1.0, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -690,7 +690,7 @@ pub(crate) mod tests {
     #[test]
     fn ifftshift_inverts_fftshift() {
         let tensor = Tensor::new((0..7).map(|v| v as f64).collect(), vec![7, 1]).unwrap();
-        let fft_plan = build_shift_plan(&tensor.shape, &[0], ShiftKind::Fft);
+        let fft_plan = build_shift_plan(tensor.shape(), &[0], ShiftKind::Fft);
         let fft_data = apply_shift(
             "ifftshift",
             &tensor.materialize_f64(),
@@ -698,13 +698,13 @@ pub(crate) mod tests {
             &fft_plan.positive,
         )
         .expect("apply_shift");
-        let fft_tensor = Tensor::new(fft_data, tensor.shape.clone()).unwrap();
+        let fft_tensor = Tensor::new(fft_data, tensor.shape().to_vec()).unwrap();
 
         let restored =
             ifftshift_builtin(Value::Tensor(fft_tensor), Vec::new()).expect("ifftshift restore");
         match restored {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![7, 1]);
+                assert_eq!(out.shape(), [7, 1]);
                 assert_eq!(out.materialize_f64(), tensor.materialize_f64());
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -720,7 +720,7 @@ pub(crate) mod tests {
             ifftshift_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("ifftshift");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![2.0, 5.0, 3.0, 6.0, 1.0, 4.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -737,7 +737,7 @@ pub(crate) mod tests {
             .expect("ifftshift");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![2.0, 5.0, 3.0, 6.0, 1.0, 4.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -757,7 +757,7 @@ pub(crate) mod tests {
         .expect("ifftshift");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, tensor.shape);
+                assert_eq!(out.shape(), tensor.shape());
                 assert_eq!(out.materialize_f64(), tensor.materialize_f64());
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -818,13 +818,13 @@ pub(crate) mod tests {
             let tensor = Tensor::new((0..8).map(|v| v as f64).collect(), vec![8, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
                 ifftshift_builtin(Value::GpuTensor(handle), Vec::new()).expect("ifftshift");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![8, 1]);
+            assert_eq!(gathered.shape(), [8, 1]);
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![4.0, 5.0, 6.0, 7.0, 0.0, 1.0, 2.0, 3.0]
@@ -843,7 +843,7 @@ pub(crate) mod tests {
         let result = ifftshift_builtin(Value::ComplexTensor(tensor), Vec::new()).unwrap();
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![4, 1]);
+                assert_eq!(out.shape(), [4, 1]);
                 assert_eq!(
                     out.materialize_f64(),
                     vec![(2.0, 2.0), (3.0, 3.0), (0.0, 0.0), (1.0, 1.0)]
@@ -908,7 +908,7 @@ pub(crate) mod tests {
             .expect("ifftshift");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![4.0, 1.0, 5.0, 2.0, 6.0, 3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -928,7 +928,7 @@ pub(crate) mod tests {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
         let handle = provider.upload(&view).expect("upload");
@@ -939,7 +939,7 @@ pub(crate) mod tests {
 
         match cpu {
             Value::Tensor(host) => {
-                assert_eq!(gathered.shape, host.shape);
+                assert_eq!(gathered.shape(), host.shape());
                 assert_eq!(gathered.materialize_f64(), host.materialize_f64());
             }
             other => panic!("expected tensor cpu result, got {other:?}"),

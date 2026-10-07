@@ -983,7 +983,7 @@ pub(crate) mod tests {
             ifft2_builtin(Value::ComplexTensor(spectrum.clone()), Vec::new()).expect("ifft2");
         match value {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, tensor.shape);
+                assert_eq!(out.shape(), tensor.shape());
                 for (idx, (re, im)) in out.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(
                         (*re, *im),
@@ -1008,7 +1008,7 @@ pub(crate) mod tests {
         .expect("ifft2 symmetric");
         match value {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, tensor.shape);
+                assert_eq!(out.shape(), tensor.shape());
                 assert_eq!(out.materialize_f64(), tensor.materialize_f64());
             }
             other => panic!("expected real tensor, got {other:?}"),
@@ -1026,7 +1026,7 @@ pub(crate) mod tests {
         )
         .expect("ifft2 nonsymmetric");
         let result = value_to_complex_tensor(value, "ifft2").expect("complex output");
-        assert_eq!(result.shape, tensor.shape);
+        assert_eq!(result.shape(), tensor.shape());
         for (idx, (re, im)) in result.materialize_f64().iter().enumerate() {
             assert!(approx_eq(
                 (*re, *im),
@@ -1048,7 +1048,7 @@ pub(crate) mod tests {
         )
         .expect("ifft2");
         match value {
-            Value::ComplexTensor(out) => assert_eq!(out.shape, vec![4, 4]),
+            Value::ComplexTensor(out) => assert_eq!(out.shape(), [4, 4]),
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }
@@ -1063,7 +1063,7 @@ pub(crate) mod tests {
         let value = ifft2_builtin(Value::ComplexTensor(spectrum), vec![Value::Tensor(size)])
             .expect("ifft2");
         match value {
-            Value::ComplexTensor(out) => assert_eq!(out.shape, vec![4, 2]),
+            Value::ComplexTensor(out) => assert_eq!(out.shape(), [4, 2]),
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }
@@ -1079,7 +1079,7 @@ pub(crate) mod tests {
             .expect("ifft2");
 
         match value {
-            Value::ComplexTensor(out) => assert_eq!(out.shape, vec![4, 2]),
+            Value::ComplexTensor(out) => assert_eq!(out.shape(), [4, 2]),
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }
@@ -1099,7 +1099,7 @@ pub(crate) mod tests {
         .expect("ifft2");
         match value {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, tensor.shape);
+                assert_eq!(out.shape(), tensor.shape());
                 for (idx, (re, im)) in out.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(
                         (*re, *im),
@@ -1134,7 +1134,7 @@ pub(crate) mod tests {
         )
         .expect("documented logical M and N");
         let result = value_to_complex_tensor(result, "ifft2").expect("complex scalar result");
-        assert_eq!(result.shape, vec![1, 1]);
+        assert_eq!(result.shape(), [1, 1]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1169,7 +1169,7 @@ pub(crate) mod tests {
         match value {
             Value::ComplexTensor(out) => {
                 assert!(out.materialize_f64().is_empty());
-                assert_eq!(out.shape, vec![0, 0]);
+                assert_eq!(out.shape(), [0, 0]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
         }
@@ -1189,7 +1189,7 @@ pub(crate) mod tests {
             let second = crate::builtins::math::fft::ifft::tests::upload_complex_spectrum(
                 provider,
                 &words,
-                &spectrum.shape,
+                spectrum.shape(),
             );
 
             let gpu =
@@ -1199,7 +1199,7 @@ pub(crate) mod tests {
 
             let g = value_to_host_complex(gpu);
             let c = value_to_host_complex(cpu);
-            assert_eq!(g.shape, c.shape);
+            assert_eq!(g.shape(), c.shape());
             for (lhs, rhs) in g.materialize_f64().iter().zip(c.materialize_f64().iter()) {
                 assert!(approx_eq(*lhs, *rhs, 1e-10), "{lhs:?} vs {rhs:?}");
             }
@@ -1223,7 +1223,7 @@ pub(crate) mod tests {
         )
         .expect("ifft2");
         match value {
-            Value::ComplexTensor(out) => assert_eq!(out.shape, vec![5, 2]),
+            Value::ComplexTensor(out) => assert_eq!(out.shape(), [5, 2]),
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }
@@ -1288,7 +1288,7 @@ pub(crate) mod tests {
         let second = crate::builtins::math::fft::ifft::tests::upload_complex_spectrum(
             provider,
             &words,
-            &spectrum.shape,
+            spectrum.shape(),
         );
 
         let gpu_val =
@@ -1297,7 +1297,7 @@ pub(crate) mod tests {
 
         let gpu_ct = value_to_host_complex(gpu_val);
         let cpu_ct = value_to_host_complex(cpu_val);
-        assert_eq!(gpu_ct.shape, cpu_ct.shape);
+        assert_eq!(gpu_ct.shape(), cpu_ct.shape());
 
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,

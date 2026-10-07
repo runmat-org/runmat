@@ -726,7 +726,7 @@ pub(crate) mod tests {
                     .into_iter()
                     .map(|re| (re, 0.0))
                     .collect(),
-                t.shape,
+                t.shape().to_vec(),
             )
             .unwrap(),
             Value::Num(n) => HostComplexTensor::new(vec![(n, 0.0)], vec![1, 1]).unwrap(),
@@ -779,7 +779,7 @@ pub(crate) mod tests {
         let result = ifft_host(Value::ComplexTensor(spectrum), None, None, false).expect("ifft");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![4]);
+                assert_eq!(ct.shape(), [4]);
                 let expected = [(1.0, 0.0), (2.0, 0.0), (3.0, 0.0), (4.0, 0.0)];
                 for (idx, actual) in ct.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(*actual, expected[idx], 1e-12));
@@ -801,7 +801,7 @@ pub(crate) mod tests {
             ifft_host(Value::ComplexTensor(spectrum), None, None, true).expect("ifft symmetric");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![4]);
+                assert_eq!(t.shape(), [4]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
             }
             other => panic!("expected real tensor, got {other:?}"),
@@ -816,7 +816,7 @@ pub(crate) mod tests {
             .expect("ifft zero length");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![0]);
+                assert_eq!(ct.shape(), [0]);
                 assert!(ct.materialize_f64().is_empty());
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -828,8 +828,8 @@ pub(crate) mod tests {
     fn ifft_dimension_argument_recovers_matrix() {
         let original = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
         let mut spectrum = Vec::with_capacity(original.materialize_f64().len());
-        let rows = original.shape[0];
-        let cols = original.shape[1];
+        let rows = original.shape()[0];
+        let cols = original.shape()[1];
         for c in 0..cols {
             let mut column = Vec::with_capacity(rows);
             for r in 0..rows {
@@ -847,7 +847,7 @@ pub(crate) mod tests {
         let result = ifft_host(Value::ComplexTensor(freq), None, Some(1), false).expect("ifft dim");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![2, 3]);
+                assert_eq!(ct.shape(), [2, 3]);
                 for (idx, (re, im)) in ct.materialize_f64().iter().enumerate() {
                     assert!(approx_eq(
                         (*re, *im),
@@ -913,7 +913,7 @@ pub(crate) mod tests {
         let result =
             ifft_host(Value::ComplexTensor(spectrum), None, None, symmetric).expect("ifft");
         match result {
-            Value::ComplexTensor(ct) => assert_eq!(ct.shape, vec![4]),
+            Value::ComplexTensor(ct) => assert_eq!(ct.shape(), [4]),
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }
@@ -948,7 +948,7 @@ pub(crate) mod tests {
         let result = ifft_host(Value::ComplexTensor(spectrum), Some(4), None, false).expect("ifft");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![4]);
+                assert_eq!(ct.shape(), [4]);
                 for &(re, im) in &ct.materialize_f64() {
                     assert!((re - 1.0).abs() < 1e-12);
                     assert!(im.abs() < 1e-12);
@@ -976,7 +976,7 @@ pub(crate) mod tests {
         }
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![2]);
+                assert_eq!(ct.shape(), [2]);
                 for ((re, im), expected) in ct.materialize_f64().iter().zip(expected.iter()) {
                     assert!(approx_eq((*re, *im), (expected.re, expected.im), 1e-12));
                 }
@@ -1118,7 +1118,7 @@ pub(crate) mod tests {
             let cpu = ifft_builtin(Value::ComplexTensor(cpu_spectrum), Vec::new()).expect("ifft");
             let gpu_ct = value_as_complex_tensor(gpu);
             let cpu_ct = value_as_complex_tensor(cpu);
-            assert_eq!(gpu_ct.shape, cpu_ct.shape);
+            assert_eq!(gpu_ct.shape(), cpu_ct.shape());
             for (a, b) in gpu_ct
                 .materialize_f64()
                 .iter()
@@ -1150,7 +1150,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(_) | Value::Tensor(_) => {
                     let gathered = test_support::gather(gpu).expect("gather symmetric real");
                     assert_eq!(gathered.materialize_f64().len(), 4);
-                    assert_eq!(gathered.shape.first().copied().unwrap_or(0), 4);
+                    assert_eq!(gathered.shape().first().copied().unwrap_or(0), 4);
                     for (idx, value) in gathered.materialize_f64().iter().enumerate() {
                         assert!((*value - (idx as f64 + 1.0)).abs() < 1e-10);
                     }
@@ -1190,7 +1190,7 @@ pub(crate) mod tests {
                 runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,
                 runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
             };
-            assert_eq!(gpu_ct.shape, cpu_ct.shape);
+            assert_eq!(gpu_ct.shape(), cpu_ct.shape());
             for (a, b) in gpu_ct
                 .materialize_f64()
                 .iter()

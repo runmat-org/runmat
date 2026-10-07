@@ -642,8 +642,8 @@ fn parse_sizes_value(value: &Value) -> BuiltinResult<Vec<usize>> {
 
 fn ifftn_input_rank(value: &Value) -> usize {
     let rank = match value {
-        Value::Tensor(tensor) => tensor.shape.len(),
-        Value::ComplexTensor(tensor) => tensor.shape.len(),
+        Value::Tensor(tensor) => tensor.shape().len(),
+        Value::ComplexTensor(tensor) => tensor.shape().len(),
         Value::LogicalArray(array) => array.shape.len(),
         Value::GpuTensor(handle) => handle.shape().len(),
         _ => 2,
@@ -658,7 +658,7 @@ fn validate_size_vector_shape(value: &Value) -> BuiltinResult<()> {
             || (shape.len() == 2 && (shape[0] == 1 || shape[1] == 1))
     };
     match value {
-        Value::Tensor(tensor) if !vector_shape(&tensor.shape) => Err(ifftn_error_with_detail(
+        Value::Tensor(tensor) if !vector_shape(tensor.shape()) => Err(ifftn_error_with_detail(
             &IFFTN_ERROR_INVALID_SIZE,
             "SIZE must be a row or column vector",
         )),
@@ -713,7 +713,7 @@ mod tests {
         let b = fft_complex_tensor(a, None, Some(2)).unwrap();
         let freq = fft_complex_tensor(b, None, Some(3)).unwrap();
         let back = ifftn_complex_tensor(freq, None).unwrap();
-        assert_eq!(back.shape, vec![2, 2, 2]);
+        assert_eq!(back.shape(), [2, 2, 2]);
         for (idx, (re, im)) in back.materialize_f64().iter().enumerate() {
             assert!((*re - input.materialize_f64()[idx]).abs() < 1e-10);
             assert!(im.abs() < 1e-10);
@@ -735,7 +735,7 @@ mod tests {
         .expect("ifftn symmetric");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2, 2]);
+                assert_eq!(t.shape(), [2, 2, 2]);
                 for (got, expected) in t
                     .materialize_f64()
                     .iter()
@@ -814,7 +814,7 @@ mod tests {
         let source = crate::builtins::math::fft::ifft::tests::upload_complex_spectrum(
             provider,
             &interleaved,
-            &frequency.shape,
+            frequency.shape(),
         );
         let gpu = block_on(ifftn_builtin(Value::GpuTensor(source.clone()), Vec::new()))
             .expect("resident ifftn");
@@ -823,7 +823,7 @@ mod tests {
         let gpu = block_on(crate::dispatcher::gather_if_needed_async(&gpu)).expect("gather result");
         let cpu = value_to_complex_tensor(cpu, BUILTIN_NAME).expect("host complex result");
         let gpu = value_to_complex_tensor(gpu, BUILTIN_NAME).expect("gathered complex result");
-        assert_eq!(gpu.shape, cpu.shape);
+        assert_eq!(gpu.shape(), cpu.shape());
         let tolerance = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-4,
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,
