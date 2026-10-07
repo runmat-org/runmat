@@ -20,9 +20,19 @@ fn map_assignment_shape_error(err: impl std::fmt::Display) -> RuntimeError {
     mex("ShapeMismatch", format!("assignment: {err}"))
 }
 
+fn dense_linear_dimensions(shape: &[usize]) -> (usize, usize) {
+    match shape {
+        [] => (0, 0),
+        [cols] => (1, *cols),
+        [rows, cols, ..] => (*rows, *cols),
+    }
+}
+
 fn is_empty_tensor(value: &Value) -> bool {
-    matches!(value, Value::Tensor(t) if tensor_element_len(t) == 0 || t.rows == 0 || t.cols == 0)
-        || matches!(value, Value::ComplexTensor(t) if complex_tensor_element_len(t) == 0 || t.rows == 0 || t.cols == 0)
+    matches!(value, Value::Tensor(t) if {
+        let (rows, cols) = dense_linear_dimensions(t.shape());
+        tensor_element_len(t) == 0 || rows == 0 || cols == 0
+    }) || matches!(value, Value::ComplexTensor(t) if complex_tensor_element_len(t) == 0 || t.rows() == 0 || t.cols() == 0)
 }
 
 fn integer_storage_scalar(storage: &IntegerStorage) -> IntValue {
@@ -119,18 +129,17 @@ async fn rhs_to_complex_integer_assignment_scalar(
 }
 
 fn delete_tensor_linear(t: Tensor, idx: usize) -> Result<Value, RuntimeError> {
-    let total = t.rows * t.cols;
+    let (rows, cols) = dense_linear_dimensions(t.shape());
+    let total = rows * cols;
     if idx == 0 || idx > total {
         return Err(mex("IndexOutOfBounds", "Index out of bounds"));
     }
-    if !(t.rows == 1 || t.cols == 1) {
+    if !(rows == 1 || cols == 1) {
         return Err(mex(
             "UnsupportedDeletion",
             "Linear deletion is only supported for vectors",
         ));
     }
-    let rows = t.rows;
-    let cols = t.cols;
     let mut storage = t
         .into_numeric_storage()
         .map_err(map_assignment_shape_error)?;
@@ -144,11 +153,11 @@ fn delete_tensor_linear(t: Tensor, idx: usize) -> Result<Value, RuntimeError> {
 }
 
 fn delete_complex_linear(t: ComplexTensor, idx: usize) -> Result<Value, RuntimeError> {
-    let total = t.rows * t.cols;
+    let total = t.rows() * t.cols();
     if idx == 0 || idx > total {
         return Err(mex("IndexOutOfBounds", "Index out of bounds"));
     }
-    if !(t.rows == 1 || t.cols == 1) {
+    if !(t.rows() == 1 || t.cols() == 1) {
         return Err(mex(
             "UnsupportedDeletion",
             "Linear deletion is only supported for vectors",
@@ -156,14 +165,14 @@ fn delete_complex_linear(t: ComplexTensor, idx: usize) -> Result<Value, RuntimeE
     }
     if let Some(storage) = t.integer_storage().cloned() {
         let storage = delete_integer_complex_storage_positions(storage, &[idx - 1]);
-        let shape = deleted_vector_shape(t.rows, t.cols, storage.len());
+        let shape = deleted_vector_shape(t.rows(), t.cols(), storage.len());
         return ComplexTensor::new_integer(storage, shape)
             .map(Value::ComplexTensor)
             .map_err(map_assignment_shape_error);
     }
     let dtype = t.numeric_dtype();
-    let rows = t.rows;
-    let cols = t.cols;
+    let rows = t.rows();
+    let cols = t.cols();
     let mut values = t.materialize_f64();
     values.remove(idx - 1);
     let shape = deleted_vector_shape(rows, cols, values.len());
@@ -248,24 +257,24 @@ pub async fn assign_tensor_scalar(
             let tensor = real_tensor_to_complex(t, "scalar complex promotion")?;
             return assign_complex_scalar(tensor, indices, rhs, false).await;
         }
+        let (rows, cols) = dense_linear_dimensions(t.shape());
         let shape = if idx > total {
-            if !(t.rows == 1 || t.cols == 1) {
+            if !(rows == 1 || cols == 1) {
                 return Err(mex("IndexOutOfBounds", "Index out of bounds"));
             }
-            if t.rows == 1 {
+            if rows == 1 {
                 vec![1, idx]
             } else {
                 vec![idx, 1]
             }
         } else {
-            t.shape.clone()
+            t.shape().to_vec()
         };
         assign_real_tensor_scalar(t, idx - 1, shape, rhs).await
     } else if indices.len() == 2 {
         let i = indices[0];
         let mut j = indices[1];
-        let rows = t.rows;
-        let cols = t.cols;
+        let (rows, cols) = dense_linear_dimensions(t.shape());
         if j == 0 {
             j = 1;
         }
@@ -286,7 +295,7 @@ pub async fn assign_tensor_scalar(
             return assign_complex_scalar(tensor, indices, rhs, false).await;
         }
         let idx = (i - 1) + (j - 1) * rows;
-        let shape = t.shape.clone();
+        let shape = t.shape().to_vec();
         assign_real_tensor_scalar(t, idx, shape, rhs).await
     } else {
         Err(mex(
@@ -498,16 +507,16 @@ pub async fn assign_complex_scalar(
         let val = rhs_to_complex_scalar(rhs).await?;
         t.validate_shape().map_err(map_assignment_shape_error)?;
         let shape = if idx > total {
-            if !(t.rows == 1 || t.cols == 1) {
+            if !(t.rows() == 1 || t.cols() == 1) {
                 return Err(mex("IndexOutOfBounds", "Index out of bounds"));
             }
-            if t.rows == 1 {
+            if t.rows() == 1 {
                 vec![1, idx]
             } else {
                 vec![idx, 1]
             }
         } else {
-            t.shape.clone()
+            t.shape().to_vec()
         };
         t.resize_zeroed_for_shape(shape)
             .map_err(map_assignment_shape_error)?;
@@ -517,8 +526,8 @@ pub async fn assign_complex_scalar(
     } else if indices.len() == 2 {
         let i = indices[0];
         let mut j = indices[1];
-        let rows = t.rows;
-        let cols = t.cols;
+        let rows = t.rows();
+        let cols = t.cols();
         if j == 0 {
             j = 1;
         }
@@ -561,16 +570,16 @@ async fn assign_typed_complex_integer_scalar(
         return Err(mex("IndexOutOfBounds", "Index out of bounds"));
     }
     let shape = if index > total {
-        if !(tensor.rows == 1 || tensor.cols == 1) {
+        if !(tensor.rows() == 1 || tensor.cols() == 1) {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
         }
-        if tensor.rows == 1 {
+        if tensor.rows() == 1 {
             vec![1, index]
         } else {
             vec![index, 1]
         }
     } else {
-        tensor.shape.clone()
+        tensor.shape().to_vec()
     };
     let rhs = rhs_to_complex_integer_assignment_scalar(rhs).await?;
     tensor
@@ -657,7 +666,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(grown.numeric_dtype(), NumericDType::F32);
-        assert_eq!(grown.shape, vec![1, 4]);
+        assert_eq!(grown.shape(), [1, 4]);
         assert_eq!(
             grown.clone().into_numeric_storage(),
             Ok(NumericStorage::F32(vec![
@@ -675,7 +684,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(deleted.numeric_dtype(), NumericDType::F32);
-        assert_eq!(deleted.shape, vec![1, 3]);
+        assert_eq!(deleted.shape(), [1, 3]);
         assert_eq!(
             deleted.into_numeric_storage(),
             Ok(NumericStorage::F32(vec![
@@ -699,7 +708,7 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(grown.numeric_dtype(), NumericDType::F32);
-        assert_eq!(grown.shape, vec![1, 4]);
+        assert_eq!(grown.shape(), [1, 4]);
         assert_eq!(
             grown.as_f32_slice().map(|values| values
                 .iter()
@@ -722,7 +731,7 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(deleted.numeric_dtype(), NumericDType::F32);
-        assert_eq!(deleted.shape, vec![1, 3]);
+        assert_eq!(deleted.shape(), [1, 3]);
         assert_eq!(
             deleted.as_f32_slice().map(|values| values
                 .iter()
@@ -871,7 +880,64 @@ mod tests {
             output.integer_storage(),
             Some(&IntegerStorage::I16(vec![7, 9]))
         );
-        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.shape(), [1, 2]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn dense_rank_zero_and_rank_one_linear_assignment_keep_cached_geometry() {
+        let rank_zero = Tensor::new(vec![7.0], vec![]).expect("rank-zero tensor");
+        let growth = block_on(assign_tensor_scalar(
+            rank_zero.clone(),
+            &[2],
+            &Value::Num(9.0),
+            false,
+        ))
+        .expect_err("rank-zero tensor is not a cached-geometry vector");
+        assert_eq!(growth.identifier(), Some("RunMat:IndexOutOfBounds"));
+
+        let subscript = block_on(assign_tensor_scalar(
+            rank_zero.clone(),
+            &[1, 1],
+            &Value::Num(9.0),
+            false,
+        ))
+        .expect_err("rank-zero cached geometry has no rows");
+        assert_eq!(subscript.identifier(), Some("RunMat:SubscriptOutOfBounds"));
+
+        let deletion = block_on(assign_tensor_scalar(
+            rank_zero.clone(),
+            &[1],
+            &Value::Tensor(Tensor::zeros(vec![0, 0])),
+            true,
+        ))
+        .expect_err("rank-zero cached geometry has no deletable linear index");
+        assert_eq!(deletion.identifier(), Some("RunMat:IndexOutOfBounds"));
+
+        let rank_one = Tensor::new(vec![1.0, 2.0], vec![2]).expect("rank-one tensor");
+        let Value::Tensor(grown) = block_on(assign_tensor_scalar(
+            rank_one,
+            &[3],
+            &Value::Num(9.0),
+            false,
+        ))
+        .expect("rank-one linear growth") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(grown.shape(), [1, 3]);
+        assert_eq!(grown.materialize_f64(), vec![1.0, 2.0, 9.0]);
+
+        let Value::Tensor(deleted) = block_on(assign_tensor_scalar(
+            grown,
+            &[2],
+            &Value::Tensor(rank_zero),
+            true,
+        ))
+        .expect("rank-zero RHS keeps legacy cached-empty deletion admission") else {
+            panic!("expected tensor");
+        };
+        assert_eq!(deleted.shape(), [1, 2]);
+        assert_eq!(deleted.materialize_f64(), vec![1.0, 9.0]);
     }
 
     #[test]
@@ -899,7 +965,7 @@ mod tests {
         else {
             panic!("expected complex tensor");
         };
-        assert_eq!(grown.shape, vec![1, 3]);
+        assert_eq!(grown.shape(), [1, 3]);
         assert_eq!(
             grown.integer_storage(),
             Some(&IntegerComplexStorage {
@@ -1168,27 +1234,36 @@ mod tests {
     }
 
     #[test]
-    fn poisoned_retained_shape_fails_before_rhs_resolution() {
-        let mut tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
-        tensor.shape = vec![3];
+    fn dense_constructor_rejects_invalid_shape_and_assignment_keeps_rhs_error() {
+        let invalid = Tensor::new(vec![1.0, 2.0], vec![3])
+            .expect_err("the value constructor must reject mismatched shape");
+        assert_eq!(
+            map_assignment_shape_error(invalid).identifier(),
+            Some("RunMat:ShapeMismatch")
+        );
+
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
         let error = block_on(assign_tensor_scalar(
-            tensor,
+            tensor.clone(),
             &[1],
             &Value::String("not numeric".into()),
             false,
         ))
-        .expect_err("retained shape must be validated first");
-        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
-        assert!(error
-            .to_string()
-            .contains("double storage length 2 doesn't match shape [3] (3 elements)"));
+        .expect_err("valid value must report the RHS error");
+        assert_eq!(error.identifier(), Some("RunMat:NumericRequired"));
+        assert_eq!(tensor.shape(), [1, 2]);
+        assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]);
     }
 
     #[test]
-    fn poisoned_complex_shape_preserves_rhs_then_shape_error_order() {
-        let mut floating =
-            ComplexTensor::new(vec![(1.0, -1.0)], vec![1, 1]).expect("complex tensor");
-        floating.shape = vec![2];
+    fn complex_constructors_reject_invalid_shapes_and_assignment_keeps_rhs_error() {
+        let invalid_floating = ComplexTensor::new(vec![(1.0, -1.0)], vec![2])
+            .expect_err("the complex value constructor must reject mismatched shape");
+        assert_eq!(
+            map_assignment_shape_error(invalid_floating).identifier(),
+            Some("RunMat:ShapeMismatch")
+        );
+        let floating = ComplexTensor::new(vec![(1.0, -1.0)], vec![1, 1]).expect("complex tensor");
         let rhs_error = block_on(assign_complex_scalar(
             floating.clone(),
             &[1],
@@ -1197,36 +1272,30 @@ mod tests {
         ))
         .expect_err("rhs conversion remains first");
         assert_eq!(rhs_error.identifier(), Some("RunMat:NumericRequired"));
-
-        let shape_error = block_on(assign_complex_scalar(
-            floating,
-            &[1],
-            &Value::Complex(2.0, 3.0),
-            false,
-        ))
-        .expect_err("retained floating shape must be validated");
-        assert_eq!(shape_error.identifier(), Some("RunMat:ShapeMismatch"));
-        assert!(shape_error
-            .to_string()
-            .contains("complex double storage length 1 doesn't match shape [2] (2 elements)"));
+        assert_eq!(floating.shape(), [1, 1]);
+        assert_eq!(floating.materialize_f64(), vec![(1.0, -1.0)]);
 
         let storage =
             IntegerComplexStorage::new(IntegerStorage::U64(vec![1]), IntegerStorage::U64(vec![2]))
                 .expect("paired storage");
-        let mut exact =
-            ComplexTensor::new_integer(storage, vec![1, 1]).expect("integer complex tensor");
-        exact.shape = vec![2];
+        let invalid_exact = ComplexTensor::new_integer(storage.clone(), vec![2])
+            .expect_err("the exact complex value constructor must reject mismatched shape");
+        assert_eq!(
+            map_assignment_shape_error(invalid_exact).identifier(),
+            Some("RunMat:ShapeMismatch")
+        );
+        let exact = ComplexTensor::new_integer(storage.clone(), vec![1, 1])
+            .expect("integer complex tensor");
         let exact_error = block_on(assign_complex_scalar(
-            exact,
+            exact.clone(),
             &[1],
-            &Value::Complex(4.0, 5.0),
+            &Value::String("not numeric".into()),
             false,
         ))
-        .expect_err("retained exact shape must be validated");
-        assert_eq!(exact_error.identifier(), Some("RunMat:ShapeMismatch"));
-        assert!(exact_error
-            .to_string()
-            .contains("complex uint64 storage length 1 doesn't match shape [2] (2 elements)"));
+        .expect_err("valid exact value must report the RHS error");
+        assert_eq!(exact_error.identifier(), Some("RunMat:NumericRequired"));
+        assert_eq!(exact.shape(), [1, 1]);
+        assert_eq!(exact.integer_storage(), Some(&storage));
     }
 
     #[test]
