@@ -204,7 +204,14 @@ fn validate_evidence(
                 | E::ConvergenceStudy
                 | E::ReferenceComparison
         ),
-        C::InterfaceProjection | C::FieldTransfer | C::SignalInterpolation | C::Recovery => {
+        C::Recovery => matches!(
+            criterion.evidence,
+            E::APosterioriEstimator
+                | E::TransferBound
+                | E::ConvergenceStudy
+                | E::ReferenceComparison
+        ),
+        C::InterfaceProjection | C::FieldTransfer | C::SignalInterpolation => {
             matches!(
                 criterion.evidence,
                 E::TransferBound | E::ConvergenceStudy | E::ReferenceComparison
@@ -379,6 +386,27 @@ mod tests {
     use crate::{AccuracyTolerance, AnalysisValidationError, ObservationId, ProcedureStep};
 
     use super::validate_accuracy;
+
+    #[test]
+    fn a_posteriori_recovery_evidence_is_valid_without_relabeling_transfer() {
+        use crate::{ErrorContributionKind as C, RequiredAccuracyEvidence as E};
+        let mut step = ProcedureStep::structural_static("recovery");
+        step.accuracy.criteria[0].evidence = E::APosterioriEstimator;
+        step.accuracy.criteria[0].contribution = C::Recovery;
+        step.accuracy.criteria[0].target = crate::AccuracyTarget::NumericalResult;
+        validate_accuracy(&step).unwrap();
+        for contribution in [
+            C::InterfaceProjection,
+            C::FieldTransfer,
+            C::SignalInterpolation,
+        ] {
+            step.accuracy.criteria[0].contribution = contribution;
+            assert!(matches!(
+                validate_accuracy(&step),
+                Err(AnalysisValidationError::InvalidAccuracyPlan { .. })
+            ));
+        }
+    }
 
     #[test]
     fn experimental_baseline_is_valid() {

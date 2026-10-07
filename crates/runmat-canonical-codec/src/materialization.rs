@@ -36,6 +36,15 @@ pub fn canonical_payload_materialization_resident_bytes_estimate(
     materialization_resident_bytes_estimate(profile, encoded_bytes)
 }
 
+/// Same structural inventory as contiguous profiling, without a joined payload buffer.
+pub fn canonical_chunked_payload_materialization_resident_bytes_estimate<'a>(
+    chunks: impl IntoIterator<Item = &'a [u8]>,
+    control: &dyn crate::CanonicalCodecControl,
+) -> Result<u64, CanonicalCodecError> {
+    let (profile, encoded_bytes) = value::chunked_profile(chunks, control)?;
+    materialization_resident_bytes_estimate(profile, encoded_bytes)
+}
+
 pub(crate) fn materialization_resident_bytes_estimate(
     profile: value::MaterializationProfile,
     encoded_bytes: u64,

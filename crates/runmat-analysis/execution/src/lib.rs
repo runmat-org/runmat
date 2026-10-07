@@ -133,6 +133,11 @@ mod spectral_materialization;
 mod state_publication;
 mod state_transition;
 mod structural;
+mod structural_adaptation;
+pub use structural_adaptation::{
+    evaluate_original_structural_adaptation, StructuralAdaptationNativeIteration,
+    StructuralAdaptationNativeIterationInput, StructuralAdaptationNativeSource,
+};
 mod structural_buckling_study;
 mod structural_modal_frequency_study;
 mod structural_modal_producer;

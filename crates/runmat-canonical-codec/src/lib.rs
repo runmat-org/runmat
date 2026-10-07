@@ -6,6 +6,7 @@
 mod materialization;
 use materialization::materialization_resident_bytes_estimate;
 pub use materialization::{
+    canonical_chunked_payload_materialization_resident_bytes_estimate,
     canonical_payload_materialization_resident_bytes_estimate,
     projected_canonical_materialization_resident_bytes_estimate,
 };

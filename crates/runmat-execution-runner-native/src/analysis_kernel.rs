@@ -120,6 +120,8 @@ mod response_spectrum;
 mod response_spectrum_tests;
 mod state_publication;
 #[cfg(test)]
+mod structural_adaptation_tests;
+#[cfg(test)]
 mod structural_fixture;
 mod structural_linear;
 mod thermal;

@@ -66,3 +66,37 @@ original or unrepresentable projected values reject. Linear midside averaging us
 before addition only when that sum overflows, preserving subnormal means. Compensated accumulation moved unchanged from
 observation internals to shared algebra; partition combination moved unchanged
 into its own observation module. Existing module-size debt ceilings were lowered.
+
+
+## Original native producer closures
+
+The execution bridge now composes an adaptive decision from both original native
+static solve closures: producing host contracts, exact invocation and mesh inputs,
+complete original results, and their numerical receipts. It authenticates the
+transport chunks, checks the original producer input inventory, validates each
+receipt against the original result, and requires the same authored study, step,
+physical model and artifact-access context. The prior target must be the next
+source. The FEA owner evaluates recovery, transfer, constraints, observation and
+shared accuracy; the bridge introduces no numerical operator or scheduler.
+
+A shared codec scanner profiles canonical payloads across borrowed transport
+chunks. Resource sizing no longer gathers every partition before checking its
+decode admission. Contiguous and chunked profiling share one inventory algorithm,
+validate split UTF-8 and scalar headers, reject unsupported/truncated data and
+check cancellation within large strings as well as between chunks. These are
+requested decoder estimates, not measured RSS or whole-task admission.
+
+The native witness performs the original coarse and refined affine Tet4 solves
+through the existing native kernel and filesystem object store. It checks the
+independent stress reference, original result/receipt identities, shared accuracy,
+cold summary revalidation, exact decoder-budget boundary, receipt substitution,
+foreign artifact access and reversed chaining. Reopening the original objects
+from disk verifies source imports after the producing store is closed; this is
+not process-separated producer termination. A summary cannot be independently
+verified without its original sources.
+
+A separately scheduled adaptive worker task, complete evaluation resource plan,
+closed adaptive output/root, atomic semantic publication, durable retry/replay,
+producer termination and remote execution are still pending. The affine witness
+also does not resolve the original cantilever convergence gate, qualify nonlinear
+history transfer or close Stage 11.

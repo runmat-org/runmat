@@ -71,35 +71,51 @@ impl PreparedAnalysisObjects {
     }
 
     pub fn partition_payload(&self, identity: Digest) -> AnalysisBridgeResult<Vec<u8>> {
+        Ok(self
+            .partition_chunks(identity)?
+            .iter()
+            .flat_map(|object| object.bytes.iter().copied())
+            .collect())
+    }
+
+    /// Authenticate one semantic payload without constructing a joined buffer.
+    fn partition_chunks(&self, identity: Digest) -> AnalysisBridgeResult<&[LogicalObject]> {
         let partition = self
             .manifest
             .partitions
             .iter()
-            .find(|partition| partition.logical_identity == identity)
+            .find(|p| p.logical_identity == identity)
             .ok_or_else(|| {
                 AnalysisBridgeError::Invalid(
                     "semantic payload is absent from the prepared numerical object".into(),
                 )
             })?;
-        let start = partition.first_chunk_ordinal as usize + 1;
-        let end = start + partition.chunk_count as usize;
-        if end > self.objects.len() {
-            return Err(AnalysisBridgeError::Identity(
+        let start = usize::try_from(partition.first_chunk_ordinal)
+            .ok()
+            .and_then(|n| n.checked_add(1));
+        let end = start.and_then(|n| n.checked_add(partition.chunk_count as usize));
+        let chunks = start
+            .zip(end)
+            .and_then(|(start, end)| self.objects.get(start..end))
+            .ok_or(AnalysisBridgeError::Identity(
                 "prepared numerical object omits semantic payload chunks",
-            ));
-        }
-        let payload = self.objects[start..end]
+            ))?;
+        let bytes = chunks
             .iter()
-            .flat_map(|object| object.bytes.iter().copied())
-            .collect::<Vec<_>>();
-        if payload.len() as u64 != partition.encoded_length
-            || Digest::sha256(&payload) != partition.payload_digest
+            .try_fold(0u64, |total, object| {
+                total.checked_add(object.bytes.len() as u64)
+            })
+            .ok_or(AnalysisBridgeError::Identity(
+                "prepared semantic payload length overflows",
+            ))?;
+        if bytes != partition.encoded_length
+            || Digest::sha256_parts(chunks.iter().map(|o| &o.bytes)) != partition.payload_digest
         {
             return Err(AnalysisBridgeError::Identity(
                 "prepared semantic payload differs from its descriptor",
             ));
         }
-        Ok(payload)
+        Ok(chunks)
     }
 
     pub fn references(
@@ -171,6 +187,13 @@ pub fn prepared_input_resource_facts_without_resource_plan(
     )
 }
 
+struct ResourceProfileControl;
+impl runmat_canonical_codec::CanonicalCodecControl for ResourceProfileControl {
+    fn is_cancelled(&self) -> bool {
+        runmat_analysis_fea::is_fea_cancelled()
+    }
+}
+
 pub(crate) fn prepared_input_resource_facts_from_refs<'a>(
     inputs: impl Iterator<Item = &'a PreparedAnalysisObjects>,
 ) -> AnalysisBridgeResult<PreparedInputResourceFacts> {
@@ -202,9 +225,9 @@ pub(crate) fn prepared_input_resource_facts_from_refs<'a>(
                 .partitions
                 .iter()
                 .try_fold(total, |partition_total, partition| {
-                    let payload = input.partition_payload(partition.logical_identity)?;
-                    let estimate = runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
-                        &payload,
+                    let chunks = input.partition_chunks(partition.logical_identity)?;
+                    let estimate = runmat_canonical_codec::canonical_chunked_payload_materialization_resident_bytes_estimate(
+                        chunks.iter().map(|object| object.bytes.as_slice()), &ResourceProfileControl,
                     )
                     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
                     partition_total.checked_add(estimate).ok_or_else(|| {
@@ -647,6 +670,60 @@ fn validate_partition_payloads(
 #[cfg(test)]
 mod resource_tests {
     use super::*;
+
+    #[test]
+    fn chunked_input_inventory_preserves_partition_cost_and_rejects_missing_bytes() {
+        let limits = runmat_canonical_codec::CanonicalLimits::new(4096, 100, 256, 8);
+        let payloads = [
+            runmat_canonical_codec::encode_contract(b"left\0", "left", &[0.125; 17], limits)
+                .unwrap(),
+            runmat_canonical_codec::encode_contract(b"right\0", "right", &"é𝄞", limits).unwrap(),
+        ];
+        let expected = payloads
+            .iter()
+            .map(|p| {
+                runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(p)
+                    .unwrap()
+            })
+            .sum::<u64>();
+        for chunk_bytes in [1, 7, 1024] {
+            let objects = prepare_partitioned_analysis_objects(
+                AnalysisNumericalObjectKind::SolverInvocation,
+                Digest::sha256("partitioned-original"),
+                &[
+                    AnalysisPayloadPartition {
+                        logical_identity: Digest::sha256("left"),
+                        payload: &payloads[0],
+                    },
+                    AnalysisPayloadPartition {
+                        logical_identity: Digest::sha256("right"),
+                        payload: &payloads[1],
+                    },
+                ],
+                chunk_bytes,
+                ObjectNamespace::InputValue,
+                ObjectInventoryLimits::default(),
+            )
+            .unwrap();
+            let facts = prepared_input_resource_facts_from_refs(std::iter::once(&objects)).unwrap();
+            assert_eq!(facts.decoded_resident_bytes_admission_budget.0, expected);
+            assert_eq!(
+                facts.encoded_payload_bytes.0,
+                payloads.iter().map(|p| p.len() as u64).sum::<u64>()
+            );
+            let mut missing = objects.clone();
+            missing.objects.pop();
+            assert!(prepared_input_resource_facts_from_refs(std::iter::once(&missing)).is_err());
+            let mut changed = objects.clone();
+            changed.objects[1].bytes[0] ^= 1;
+            assert!(prepared_input_resource_facts_from_refs(std::iter::once(&changed)).is_err());
+            let mut invalid_range = objects;
+            invalid_range.manifest.partitions[0].first_chunk_ordinal = u32::MAX;
+            assert!(
+                prepared_input_resource_facts_from_refs(std::iter::once(&invalid_range)).is_err()
+            );
+        }
+    }
 
     #[test]
     fn rebinding_unpartitioned_identity_preserves_payload_chunks() {
