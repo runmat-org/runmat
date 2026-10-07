@@ -127,7 +127,7 @@ pub(super) fn value_to_single(value: Value) -> BuiltinResult<Value> {
                 .iter()
                 .map(|value| *value as f32)
                 .collect(),
-            tensor.shape.clone(),
+            tensor.shape().to_vec(),
         )
         .map(Value::Tensor)
         .map_err(|err| normalize_internal(format!("normalize: {err}"))),
@@ -143,7 +143,7 @@ pub(super) fn value_to_single(value: Value) -> BuiltinResult<Value> {
                 .iter()
                 .map(|(re, im)| (*re as f32, *im as f32))
                 .collect(),
-            tensor.shape.clone(),
+            tensor.shape().to_vec(),
         )
         .map(Value::ComplexTensor)
         .map_err(|err| normalize_internal(format!("normalize: {err}"))),
@@ -245,7 +245,7 @@ fn real_param_shape(param: &ParamReal, len: usize) -> Vec<usize> {
     match param {
         ParamReal::Computed { shape, .. } => shape.clone(),
         ParamReal::Explicit(tensor) => {
-            normalize_shape_for(&tensor.shape, tensor::tensor_element_len(tensor))
+            normalize_shape_for(tensor.shape(), tensor::tensor_element_len(tensor))
         }
     }
     .shape_fallback(len)
@@ -269,10 +269,10 @@ fn complex_param_shape(param: &ParamComplex, len: usize) -> Vec<usize> {
     match param {
         ParamComplex::Computed { shape, .. } => shape.clone(),
         ParamComplex::ExplicitReal(tensor) => {
-            normalize_shape_for(&tensor.shape, tensor::tensor_element_len(tensor))
+            normalize_shape_for(tensor.shape(), tensor::tensor_element_len(tensor))
         }
         ParamComplex::ExplicitComplex(tensor) => {
-            normalize_shape_for(&tensor.shape, tensor::complex_tensor_element_len(tensor))
+            normalize_shape_for(tensor.shape(), tensor::complex_tensor_element_len(tensor))
         }
     }
     .shape_fallback(len)
@@ -334,7 +334,7 @@ fn real_part_tensor(tensor: &ComplexTensor) -> BuiltinResult<Tensor> {
             .into_iter()
             .map(|value| value.re)
             .collect(),
-        tensor.shape.clone(),
+        tensor.shape().to_vec(),
     )
     .map_err(|err| normalize_internal(format!("normalize: {err}")))
 }

@@ -21,7 +21,7 @@ pub(super) fn preflight_input_geometry(
                 "linkage: condensed distance vector length must be n*(n-1)/2",
             ))
         }
-        Value::Tensor(tensor) => tensor.shape.as_slice(),
+        Value::Tensor(tensor) => tensor.shape(),
         Value::LogicalArray(array) => array.shape.as_slice(),
         Value::GpuTensor(handle) => {
             if handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real {
@@ -79,7 +79,7 @@ pub(super) async fn value_to_tensor(value: Value) -> BuiltinResult<Tensor> {
         .map_err(with_linkage_context)?;
     let tensor = tensor::value_into_tensor_for(NAME, gathered)
         .map_err(|err| invalid(format!("linkage: {err}")))?;
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(invalid(
             "linkage: input must be a numeric vector or 2-D matrix",
         ));

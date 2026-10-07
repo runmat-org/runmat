@@ -50,6 +50,33 @@ fn default_zscore_normalizes_first_non_singleton_dimension() {
     assert_close(out.materialize_f64()[2], 1.0);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn normalize_preserves_rank_zero_and_rank_one_input_boundaries() {
+    let NumericInput::Real { shape, data } =
+        block_on(value_to_input(tensor(vec![7.0], Vec::new()))).unwrap()
+    else {
+        panic!("expected real scalar input");
+    };
+    assert_eq!(shape, vec![1, 1]);
+    assert_eq!(data, vec![7.0]);
+    assert!(matches!(
+        call(tensor(vec![7.0], Vec::new()), Vec::new()).unwrap(),
+        Value::Num(value) if value.is_nan()
+    ));
+
+    let NumericInput::Real { shape, data } =
+        block_on(value_to_input(tensor(vec![1.0, 2.0, 3.0], vec![3]))).unwrap()
+    else {
+        panic!("expected real rank-one input");
+    };
+    assert_eq!(shape, vec![3]);
+    assert_eq!(data, vec![1.0, 2.0, 3.0]);
+    let out = expect_tensor(call(tensor(vec![1.0, 2.0, 3.0], vec![3]), Vec::new()).unwrap());
+    assert_eq!(out.shape(), [3, 1]);
+    assert_eq!(out.materialize_f64(), vec![-1.0, 0.0, 1.0]);
+}
+
 #[test]
 fn normalization_keyword_roles_preserve_public_diagnostics() {
     let input = || tensor(vec![1.0, 2.0, 3.0], vec![3, 1]);
@@ -63,7 +90,7 @@ fn normalization_keyword_roles_preserve_public_diagnostics() {
         ],
     )
     .expect("case-insensitive center and scale tokens");
-    assert_eq!(expect_tensor(accepted).shape, vec![3, 1]);
+    assert_eq!(expect_tensor(accepted).shape(), [3, 1]);
 
     for (arguments, expected) in [
         (vec![Value::from("unknown")], "unsupported method 'unknown'"),
@@ -274,7 +301,7 @@ fn normalize_real_input_shape_uses_typed_integer_storage_not_mirror() {
         )
         .unwrap(),
     );
-    assert_eq!(out.shape, vec![3, 1]);
+    assert_eq!(out.shape(), [3, 1]);
     assert_close(out.materialize_f64()[0], -1.0);
     assert_close(out.materialize_f64()[1], 0.0);
     assert_close(out.materialize_f64()[2], 1.0);
@@ -289,7 +316,7 @@ fn dim_argument_normalizes_rows_independently() {
         )
         .unwrap(),
     );
-    assert_eq!(out.shape, vec![3, 2]);
+    assert_eq!(out.shape(), [3, 2]);
     assert_close(out.materialize_f64()[0], -std::f64::consts::FRAC_1_SQRT_2);
     assert_close(out.materialize_f64()[3], std::f64::consts::FRAC_1_SQRT_2);
 }
@@ -362,9 +389,9 @@ fn center_scale_outputs_can_be_reused() {
     let n = expect_tensor(values[0].clone());
     let c = expect_tensor(values[1].clone());
     let s = expect_tensor(values[2].clone());
-    assert_eq!(n.shape, vec![2, 2]);
-    assert_eq!(c.shape, vec![1, 2]);
-    assert_eq!(s.shape, vec![1, 2]);
+    assert_eq!(n.shape(), [2, 2]);
+    assert_eq!(c.shape(), [1, 2]);
+    assert_eq!(s.shape(), [1, 2]);
     let reused = expect_tensor(
         call(
             tensor(vec![1., 2., 3., 5.], vec![2, 2]),
@@ -469,9 +496,9 @@ fn empty_inputs_preserve_empty_shapes() {
     let n = expect_tensor(values[0].clone());
     let c = expect_tensor(values[1].clone());
     let s = expect_tensor(values[2].clone());
-    assert_eq!(n.shape, vec![0, 3]);
-    assert_eq!(c.shape, vec![0, 1]);
-    assert_eq!(s.shape, vec![0, 1]);
+    assert_eq!(n.shape(), [0, 3]);
+    assert_eq!(c.shape(), [0, 1]);
+    assert_eq!(s.shape(), [0, 1]);
     assert!(n.materialize_f64().is_empty());
     assert!(c.materialize_f64().is_empty());
     assert!(s.materialize_f64().is_empty());
@@ -547,7 +574,7 @@ fn normalize_reuses_typed_complex_integer_center_from_storage() {
     .unwrap() else {
         panic!("expected complex output");
     };
-    assert_eq!(out.shape, vec![2, 1]);
+    assert_eq!(out.shape(), [2, 1]);
     assert_eq!(out.materialize_f64(), vec![(1.0, 1.0), (2.0, 3.0)]);
 }
 

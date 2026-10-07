@@ -13,7 +13,7 @@ pub(in crate::builtins::stats::summary::normalize) async fn value_to_input(
     match value {
         Value::Tensor(tensor) => {
             ensure_exact_integer_tensor(&tensor, "input data")?;
-            let shape = normalize_shape_for(&tensor.shape, tensor::tensor_element_len(&tensor));
+            let shape = normalize_shape_for(tensor.shape(), tensor::tensor_element_len(&tensor));
             Ok(NumericInput::Real {
                 shape,
                 data: tensor::tensor_into_values_f64(tensor),
@@ -23,7 +23,7 @@ pub(in crate::builtins::stats::summary::normalize) async fn value_to_input(
             let tensor = tensor::logical_to_tensor(&logical)
                 .map_err(|err| normalize_internal(format!("normalize: {err}")))?;
             let len = tensor.len();
-            let shape = normalize_shape_for(&tensor.shape, len);
+            let shape = normalize_shape_for(tensor.shape(), len);
             Ok(NumericInput::Real {
                 shape,
                 data: tensor::tensor_into_values_f64(tensor),
@@ -48,7 +48,7 @@ pub(in crate::builtins::stats::summary::normalize) async fn value_to_input(
         Value::ComplexTensor(tensor) => Ok(NumericInput::Complex {
             shape: {
                 ensure_exact_complex_integer_tensor(&tensor, "input data")?;
-                normalize_shape_for(&tensor.shape, tensor::complex_tensor_element_len(&tensor))
+                normalize_shape_for(tensor.shape(), tensor::complex_tensor_element_len(&tensor))
             },
             data: tensor::complex_tensor_into_values_complex64(tensor)
                 .into_iter()

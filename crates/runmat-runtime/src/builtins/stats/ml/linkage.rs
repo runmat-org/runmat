@@ -70,7 +70,13 @@ async fn linkage_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value>
     if let Some(metric) = &options.metric {
         ensure_exact_metric_integer_boundaries(&metric.parameters).await?;
     }
-    let is_condensed_vector = tensor.rows == 1 || tensor.shape.len() == 1;
+    let shape = tensor.shape();
+    let rows = match shape {
+        [] => 0,
+        [_] => 1,
+        [rows, ..] => *rows,
+    };
+    let is_condensed_vector = rows == 1 || shape.len() == 1;
     let (observations, distances) = if is_condensed_vector {
         if options.metric.is_some() {
             return Err(invalid(
@@ -95,13 +101,13 @@ async fn linkage_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value>
         }
         (observations, distances)
     } else {
-        if tensor.shape.len() > 2 || tensor.rows < 2 {
+        if shape.len() > 2 || rows < 2 {
             return Err(invalid(
                 "linkage: X must be a numeric matrix with at least two observations in rows",
             ));
         }
         validate_savememory_for_matrix(&options)?;
-        validate_observation_count(tensor.rows)?;
+        validate_observation_count(rows)?;
         let metric = options.metric.unwrap_or(LinkageMetric {
             kind: DistanceMetricKind::Euclidean,
             parameters: Vec::new(),
@@ -116,7 +122,7 @@ async fn linkage_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value>
         let distances = condensed_distances(MetricCaller::Linkage, &tensor, &metric)?;
         let distances = distances.materialize_f64();
         validate_distances(&distances)?;
-        (tensor.rows, distances)
+        (rows, distances)
     };
     let output = compute_linkage(observations, distances, options.method)?;
     Ok(Value::Tensor(output))

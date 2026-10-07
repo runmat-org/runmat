@@ -24,7 +24,7 @@ fn assert_close(actual: f64, expected: f64) {
 }
 
 fn assert_matrix_close(tensor: &Tensor, rows: &[[f64; 3]]) {
-    assert_eq!(tensor.shape, vec![rows.len(), 3]);
+    assert_eq!(tensor.shape(), [rows.len(), 3]);
     for (row_idx, expected) in rows.iter().enumerate() {
         for col in 0..3 {
             assert_close(
@@ -44,6 +44,24 @@ fn linkage_complete_accepts_condensed_distance_vector() {
         panic!("expected tensor");
     };
     assert_matrix_close(&z, &[[1.0, 2.0, 1.0], [3.0, 4.0, 2.0], [5.0, 6.0, 7.0]]);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn linkage_preserves_rank_one_condensed_input_and_rank_zero_rejection() {
+    let input = Value::Tensor(Tensor::new(vec![1.0, 4.0, 6.0, 5.0, 7.0, 2.0], vec![6]).unwrap());
+    let Value::Tensor(tree) = block_on(linkage_builtin(
+        input,
+        vec![Value::String("complete".into())],
+    ))
+    .unwrap() else {
+        panic!("expected clustering tree tensor");
+    };
+    assert_matrix_close(&tree, &[[1.0, 2.0, 1.0], [3.0, 4.0, 2.0], [5.0, 6.0, 7.0]]);
+
+    let scalar = Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap());
+    let error = block_on(linkage_builtin(scalar, Vec::new())).unwrap_err();
+    assert!(error.contains("input must be a numeric vector or 2-D matrix"));
 }
 
 #[test]
@@ -122,7 +140,7 @@ fn linkage_average_uses_pdist_metric_cell() {
     .unwrap() else {
         panic!("expected tensor");
     };
-    assert_eq!(z.shape, vec![3, 3]);
+    assert_eq!(z.shape(), [3, 3]);
     assert_close(z.materialize_f64()[6], 2.0);
 }
 
@@ -141,7 +159,7 @@ fn linkage_ward_matches_singleton_euclidean_first_merge() {
     else {
         panic!("expected tensor");
     };
-    assert_eq!(z.shape, vec![3, 3]);
+    assert_eq!(z.shape(), [3, 3]);
     assert_close(z.materialize_f64()[6], 2.0);
 }
 

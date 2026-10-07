@@ -168,8 +168,8 @@ async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
 
 fn gpu_array_value_shape(value: &Value) -> Vec<usize> {
     match value {
-        Value::Tensor(tensor) => tensor.shape.clone(),
-        Value::ComplexTensor(tensor) => tensor.shape.clone(),
+        Value::Tensor(tensor) => tensor.shape().to_vec(),
+        Value::ComplexTensor(tensor) => tensor.shape().to_vec(),
         Value::LogicalArray(array) => array.shape.clone(),
         Value::GpuTensor(handle) => handle.shape().to_vec(),
         Value::CharArray(array) => array.shape.clone(),
@@ -623,7 +623,7 @@ fn upload_real_host_value(
                 (cast_integer_storage(&source, dtype)?, vec![1, 1])
             }
             Value::Tensor(tensor) => {
-                let shape = tensor.shape.clone();
+                let shape = tensor.shape().to_vec();
                 let storage = if let Some(storage) = tensor.integer_storage().cloned() {
                     cast_integer_storage(&storage, dtype)?
                 } else {
@@ -643,7 +643,7 @@ fn upload_real_host_value(
             }
             other => {
                 let tensor = coerce_host_value(other)?;
-                let shape = tensor.shape.clone();
+                let shape = tensor.shape().to_vec();
                 let values = tensor::tensor_into_values_f64(tensor);
                 let storage = Tensor::new_with_dtype(values, shape.clone(), dtype.numeric_dtype())
                     .map_err(|err| {
@@ -704,8 +704,7 @@ fn upload_complex_host_value(
     dtype: DataClass,
     protected: &[&GpuTensorHandle],
 ) -> BuiltinResult<PreparedHandle> {
-    let shape = tensor.shape.clone();
-    let storage = tensor.into_complex_storage();
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
     let storage = match dtype {
         DataClass::Double => match storage {
             storage @ ComplexStorage::F64(_) => storage,
@@ -980,7 +979,7 @@ fn cast_tensor(tensor: Tensor, dtype: DataClass) -> BuiltinResult<(Tensor, bool)
     // inputs take the native integer upload path above unless the caller explicitly
     // requested a floating or logical class, in which case this is the deliberate
     // MATLAB-style cast boundary.
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor.into_numeric_storage().map_err(|err| {
         gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_CONVERSION)
     })?;
@@ -1295,12 +1294,48 @@ pub(crate) mod tests {
             let Value::GpuTensor(handle) = result else {
                 panic!("expected gpu tensor");
             };
-            assert_eq!(handle.shape(), tensor.shape);
+            assert_eq!(handle.shape(), tensor.shape());
             assert!(runmat_accelerate_api::handle_is_explicit(&handle));
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather values");
-            assert_eq!(gathered.shape, tensor.shape);
+            assert_eq!(gathered.shape(), tensor.shape());
             assert_eq!(gathered.materialize_f64(), tensor.materialize_f64());
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn gpu_array_preserves_full_rank_zero_and_rank_one_host_geometry() {
+        test_support::with_test_provider(|_| {
+            for (values, shape) in [(vec![7.0], Vec::new()), (vec![2.0, 3.0], vec![2])] {
+                let input = Tensor::new(values.clone(), shape.clone()).expect("host tensor");
+                let Value::GpuTensor(handle) =
+                    call(Value::Tensor(input), Vec::new()).expect("gpuArray upload")
+                else {
+                    panic!("expected gpu tensor");
+                };
+                assert_eq!(handle.shape(), shape);
+                assert!(runmat_accelerate_api::handle_is_explicit(&handle));
+                let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
+                assert_eq!(gathered.shape(), shape);
+                assert_eq!(gathered.materialize_f64(), values);
+            }
+
+            let complex = ComplexTensor::new(vec![(1.5, -2.0)], Vec::new())
+                .expect("rank-zero complex tensor");
+            let Value::GpuTensor(handle) =
+                call(Value::ComplexTensor(complex), Vec::new()).expect("gpuArray complex upload")
+            else {
+                panic!("expected gpu tensor");
+            };
+            assert!(handle.shape().is_empty());
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(&handle),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            let gathered = gather_complex(Value::GpuTensor(handle));
+            assert!(gathered.shape().is_empty());
+            assert_eq!(gathered.materialize_f64(), vec![(1.5, -2.0)]);
         });
     }
 
@@ -1464,7 +1499,7 @@ pub(crate) mod tests {
                 assert!(runmat_accelerate_api::handle_integer_type(&handle).is_none());
                 let gathered =
                     test_support::gather(Value::GpuTensor(handle)).expect("gather uploaded tensor");
-                assert_eq!(gathered.shape, vec![1, 2]);
+                assert_eq!(gathered.shape(), [1, 2]);
                 assert_eq!(gathered.materialize_f64(), expected, "{class_name}");
             }
         });
@@ -1569,7 +1604,7 @@ pub(crate) mod tests {
             assert!(runmat_accelerate_api::handle_is_logical(&handle));
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather logical");
-            assert_eq!(gathered.shape, logical.shape);
+            assert_eq!(gathered.shape(), logical.shape);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 1.0, 1.0]);
         });
     }
@@ -1589,7 +1624,7 @@ pub(crate) mod tests {
                 GpuTensorStorage::ComplexInterleaved
             );
             let gathered = gather_complex(Value::GpuTensor(handle.clone()));
-            assert_eq!(gathered.shape, complex.shape);
+            assert_eq!(gathered.shape(), complex.shape());
             assert_complex_close(&gathered.materialize_f64(), &complex.materialize_f64());
         });
     }
@@ -1635,7 +1670,7 @@ pub(crate) mod tests {
             assert!(runmat_accelerate_api::handle_is_logical(&handle));
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather bool");
-            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.shape(), [1, 1]);
             assert_eq!(gathered.materialize_f64(), vec![1.0]);
         });
     }
@@ -1653,7 +1688,7 @@ pub(crate) mod tests {
             };
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather chars");
-            assert_eq!(gathered.shape, vec![2, 4]);
+            assert_eq!(gathered.shape(), [2, 4]);
             let mut recovered = Vec::new();
             for col in 0..4 {
                 for row in 0..2 {
@@ -1678,7 +1713,7 @@ pub(crate) mod tests {
             };
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather string");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), [1, 3]);
             let expected: Vec<f64> = "gpu".chars().map(|ch| ch as u32 as f64).collect();
             assert_eq!(gathered.materialize_f64(), expected);
         });
@@ -1691,7 +1726,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![5.0, 6.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let cloned = handle.clone();
@@ -1857,7 +1892,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![2.0, 0.0, -5.5], vec![3, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = call(
@@ -1926,7 +1961,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = call(
@@ -1987,7 +2022,7 @@ pub(crate) mod tests {
                     assert!(runmat_accelerate_api::handle_integer_type(&handle).is_some());
                     let gathered = test_support::gather(Value::GpuTensor(handle.clone()))
                         .expect("wgpu integer gather");
-                    assert_eq!(gathered.shape, vec![2, 1]);
+                    assert_eq!(gathered.shape(), [2, 1]);
                     assert_eq!(gathered.integer_storage(), Some(&expected));
                     drop(handle);
                 }
@@ -2077,7 +2112,7 @@ pub(crate) mod tests {
                     GpuTensorStorage::ComplexInterleaved
                 );
                 let gathered = gather_complex(Value::GpuTensor(handle.clone()));
-                assert_eq!(gathered.shape, vec![1, 2]);
+                assert_eq!(gathered.shape(), [1, 2]);
                 assert_complex_close(&gathered.materialize_f64(), &complex.materialize_f64());
                 drop(handle);
 
