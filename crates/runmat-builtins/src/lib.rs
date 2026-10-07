@@ -394,13 +394,13 @@ impl Type {
                 Type::cell_of(Type::String)
             }
             Value::Tensor(t) => Type::Tensor {
-                shape: Some(t.shape.iter().map(|&d| Some(d)).collect()),
+                shape: Some(t.shape().iter().map(|&d| Some(d)).collect()),
             },
             Value::SparseTensor(t) => Type::Tensor {
                 shape: Some(vec![Some(t.rows), Some(t.cols)]),
             },
             Value::ComplexTensor(t) => Type::Tensor {
-                shape: Some(t.shape.iter().map(|&d| Some(d)).collect()),
+                shape: Some(t.shape().iter().map(|&d| Some(d)).collect()),
             },
             Value::Symbolic(_) => Type::Symbolic,
             Value::SymbolicArray(array) => Type::SymbolicArray {
