@@ -306,11 +306,13 @@ original canonical replay, requested retained-row inventory bounds, overflow and
 cancellation. Analytic normal/reaction, curved-foundation, rotated-periodicity, distributing
 wrench and accepted nonlinear kinematics tests remain mandatory.
 
-The row expansion profile counts retained row/term slots and identifier payloads. It
-excludes targets, geometry, separate row identity/sorting/compaction, plan accumulation/
-classification, allocator overhead and RSS. Equation profiles now derive retained term counts from prepared selections before
-allocating the equation term buffer. Target preparation itself is still additional
-construction work and is not covered by this row-only inventory. Group/evidence construction is additional to this row inventory.
+The retained row expansion profile counts row/term slots and identifier payloads. The
+composed construction profile now additionally includes the largest overlapping row
+identity/sorting/compaction workspace. Both exclude target geometry, plan accumulation/
+classification, allocator overhead and RSS. Equation profiles derive retained term counts
+from prepared selections before allocating the equation term buffer. Target preparation itself is still additional
+construction work outside this row-only inventory. Group/evidence construction is also
+additional to this row inventory.
 It is a component inventory, not whole-compilation policy admission. Full pre-expansion
 composition and retained-output overlap remain required for the scheduled adaptive path;
 no original scientific gate, resource cap or production envelope is promoted here.
@@ -340,3 +342,31 @@ compilation demand. Fallible counted reservations and pre-term row sizing are no
 compilation budget receipt. Complete admission, adaptive output overlap, scheduled execution,
 atomic semantic publication, measured resources and the original scientific failures remain
 open; resource revision stays81 and no tolerance or cap changes.
+
+
+## Composed row-construction workspace
+
+All ordinary solid/explicit/mixed row buffers and equation term expansion now derive
+retained row/term/identifier storage together with the largest overlapping row-finalization
+workspace before allocating the row buffer. The row owner supplies ordering, possible
+replacement storage during compaction, identifier copying and shared canonical codec
+materialization. One count-only serialized identity shape bounds existing node/reference
+owners and translation/rotation terms without retaining a representative term vector.
+Its inventory values never become numerical terms, row identities or physics evidence.
+Actual row construction continues to use the original terms and identity encoder.
+
+Rigid and distributing couplings use the same composed owner. Distributing coupling counts
+the three original translation and three moment buffers separately rather than charging
+six maximum-width rows. Tie/periodic rows count actual transform coefficient directions
+and primary weight inventory before expansion; no blanket dense matrix assumption is used.
+Empty row inventories reserve no finalization work. Overflow, inconsistent inventories
+and entry cancellation reject before buffers; no floating-point equation or sum changes.
+
+Tests compare the count-only finalization envelope with original serialized term shapes
+for both owner classes and DOF families, tiny and maximum finite coefficients, Unicode
+identifiers and up to1024 terms. Existing actual canonical materialization, exact byte
+goldens and analytic constraint references remain mandatory. This composition is requested
+row-construction storage and addressability, not whole-compilation policy admission or RSS.
+Prepared-target overlap, geometry, group/evidence retention, plan accumulation and component
+rank still need complete phase admission before adaptive output and scheduled publication.
+Resource revision stays81; original scientific failures and acceptance limits remain open.

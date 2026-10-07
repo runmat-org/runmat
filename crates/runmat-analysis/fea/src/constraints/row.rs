@@ -12,6 +12,7 @@ use super::contract::{
 use super::{plan::canonical_digest, rank};
 
 mod profile;
+pub(super) use profile::from_term_count as row_workspace_from_term_count;
 pub use profile::{constraint_row_workspace_profile, ConstraintRowWorkspaceProfile};
 
 const ROW_DOMAIN: &str = "structural-constraint-row";

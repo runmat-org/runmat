@@ -8,7 +8,11 @@ pub(super) fn rigid_rows(
     reference_identity: Digest,
     constraint_id: &str,
 ) -> Result<Vec<CanonicalStructuralConstraintRow>, ConstraintPlanError> {
-    let mut rows = reserve(super::super::workspace::multiply(weights.len(), 3)?)?;
+    let mut rows = super::super::lowering::rows(
+        super::super::workspace::multiply(weights.len(), 3)?,
+        4,
+        constraint_id,
+    )?;
     for weight in weights {
         check_cancelled()?;
         let position = coordinates.position(&weight.node_identity).ok_or_else(|| {
@@ -48,6 +52,17 @@ pub(super) fn distributing_rows(
     reference_identity: Digest,
     constraint_id: &str,
 ) -> Result<Vec<CanonicalStructuralConstraintRow>, ConstraintPlanError> {
+    let translation_terms = super::super::workspace::count_add(weights.len(), 4)?;
+    let moment_terms = super::super::workspace::count_add(
+        super::super::workspace::multiply(weights.len(), 3)?,
+        6,
+    )?;
+    let term_slots = super::super::workspace::multiply(
+        super::super::workspace::count_add(translation_terms, moment_terms)?,
+        3,
+    )?;
+    let mut rows =
+        super::super::lowering::variable_rows(6, term_slots, moment_terms, constraint_id)?;
     let mut arms = reserve(weights.len())?;
     for weight in weights {
         check_cancelled()?;
@@ -75,7 +90,6 @@ pub(super) fn distributing_rows(
             "constraint `{constraint_id}` distributing coupling has no rotational lever arm"
         )));
     }
-    let mut rows = reserve(6)?;
 
     for component in 0..3 {
         check_cancelled()?;

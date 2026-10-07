@@ -401,7 +401,22 @@ pub(super) fn pairing_rows(
         identity()
     };
     let row_count = multiply(pairings.len(), 3)?;
-    let mut rows = reserve(row_count)?;
+    let mut term_slots = 0;
+    let mut maximum_terms_per_row = 0;
+    for pairing in pairings {
+        check_cancelled()?;
+        for direction in basis {
+            let count = row_term_count(pairing, direction)?;
+            term_slots = super::workspace::count_add(term_slots, count)?;
+            maximum_terms_per_row = maximum_terms_per_row.max(count);
+        }
+    }
+    let mut rows = super::lowering::variable_rows(
+        row_count,
+        term_slots,
+        maximum_terms_per_row,
+        constraint_id,
+    )?;
     for pairing in pairings {
         check_cancelled()?;
         for (secondary_dof, transformed_direction) in

@@ -16,7 +16,10 @@ mod enforcement;
 mod explicit_surface;
 mod frame;
 mod lowering;
-pub use lowering::{constraint_row_expansion_profile, ConstraintRowExpansionProfile};
+pub use lowering::{
+    constraint_row_construction_profile, constraint_row_expansion_profile,
+    ConstraintRowConstructionProfile, ConstraintRowExpansionProfile,
+};
 mod matrix_apply;
 mod mixed;
 mod mixed_surface;

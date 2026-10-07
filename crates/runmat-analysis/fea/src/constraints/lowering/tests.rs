@@ -95,3 +95,88 @@ fn expansion_storage_rejects_overflow_and_cancellation_before_buffers() {
         ConstraintPlanError::Cancelled
     );
 }
+
+#[test]
+fn construction_inventory_bounds_original_owner_dof_and_identity_materialization_shapes() {
+    use super::super::{row::constraint_row_workspace_profile, CanonicalStructuralDofOwner};
+    use runmat_analysis_core::StructuralRotationDof;
+    use runmat_execution::Digest;
+    use runmat_meshing_core::StableDigest;
+    for count in [1, 3, 17, 1024] {
+        let profile =
+            constraint_row_construction_profile(1, count, count, "original/Δ/row").unwrap();
+        for owner in [
+            CanonicalStructuralDofOwner::StructuralNode(StableDigest::from_bytes([255; 32])),
+            CanonicalStructuralDofOwner::ReferencePoint(Digest::from_bytes([255; 32])),
+        ] {
+            for dof in [
+                CanonicalStructuralDof::TRANSLATIONS[0],
+                CanonicalStructuralDof::Rotation(StructuralRotationDof::Rz),
+            ] {
+                let terms: Vec<_> = (0..count)
+                    .map(|ordinal| CanonicalStructuralConstraintTerm {
+                        owner,
+                        dof,
+                        coefficient: if ordinal % 2 == 0 {
+                            f64::MIN_POSITIVE
+                        } else {
+                            -f64::MAX
+                        },
+                    })
+                    .collect();
+                let actual =
+                    constraint_row_workspace_profile("original/Δ/row", &terms, -f64::MAX).unwrap();
+                assert!(
+                    profile.maximum_row_workspace.total_requested_bytes
+                        >= actual.total_requested_bytes
+                );
+                assert!(
+                    profile.maximum_row_workspace.identity_materialization_bytes
+                        >= actual.identity_materialization_bytes
+                );
+                assert_eq!(profile.retained.term_slots_upper_bound, count);
+                assert_eq!(
+                    profile.total_requested_bytes,
+                    profile.retained.total_requested_bytes
+                        + profile.maximum_row_workspace.total_requested_bytes
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn variable_construction_inventory_counts_mixed_width_rows_and_empty_work() {
+    let profile = constraint_row_construction_profile(3, 1 + 4 + 7, 7, "varied").unwrap();
+    assert_eq!(profile.retained.row_slots, 3);
+    assert_eq!(profile.retained.term_slots_upper_bound, 12);
+    assert_eq!(
+        profile.maximum_row_workspace.compaction_bytes,
+        (7 * std::mem::size_of::<CanonicalStructuralConstraintTerm>()) as u64
+    );
+    let empty = constraint_row_construction_profile(0, 0, 0, "empty").unwrap();
+    assert_eq!(empty.total_requested_bytes, 0);
+    for (rows, terms, width) in [
+        (0, 1, 1),
+        (1, 1, 2),
+        (2, 7, 3),
+        (usize::MAX, usize::MAX, usize::MAX),
+    ] {
+        assert!(constraint_row_construction_profile(rows, terms, width, "invalid").is_err());
+    }
+    let token = crate::progress::FeaCancellationToken::new();
+    token.cancel();
+    let _guard =
+        crate::progress::replace_fea_progress_context(crate::progress::FeaProgressContext {
+            cancellation: token,
+            ..Default::default()
+        });
+    assert_eq!(
+        constraint_row_construction_profile(1, 1, 1, "cancelled").unwrap_err(),
+        ConstraintPlanError::Cancelled
+    );
+    assert_eq!(
+        variable_rows(1, 1, 1, "cancelled").unwrap_err(),
+        ConstraintPlanError::Cancelled
+    );
+}
