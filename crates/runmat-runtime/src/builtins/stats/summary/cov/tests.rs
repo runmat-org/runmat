@@ -19,7 +19,7 @@ fn cov_output_precision_tracks_observations() {
         panic!("expected tensor");
     };
     assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::F32);
-    assert_eq!(result.shape, vec![2, 2]);
+    assert_eq!(result.shape(), [2, 2]);
     let Value::Tensor(result) =
         cov_builtin_sync(Value::Tensor(single), vec![Value::Tensor(double)]).unwrap()
     else {
@@ -30,7 +30,7 @@ fn cov_output_precision_tracks_observations() {
 
 fn assert_tensor_close(actual: &Tensor, expected: &[f64], tol: f64) {
     let dim = (expected.len() as f64).sqrt() as usize;
-    assert_eq!(actual.shape, vec![dim, dim], "unexpected tensor shape");
+    assert_eq!(actual.shape(), [dim, dim], "unexpected tensor shape");
     for (idx, (&got, &want)) in actual
         .materialize_f64()
         .iter()
@@ -523,7 +523,7 @@ fn cov_gpu_roundtrip() {
         .unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = block_on(cov_builtin(Value::GpuTensor(handle), Vec::new())).expect("cov");
@@ -551,7 +551,7 @@ fn cov_gpu_host_weights_return_resident_result() {
         .unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let weights = Tensor::new(vec![1.0, 1.0, 1.0, 2.0, 2.0], vec![5, 1]).unwrap();
@@ -590,13 +590,13 @@ fn cov_gpu_resident_weights_return_resident_result() {
         let data = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             })
             .expect("upload data");
         let weight_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &weights.materialize_f64(),
-                shape: &weights.shape,
+                shape: weights.shape(),
             })
             .expect("upload weights");
 
@@ -627,13 +627,13 @@ fn cov_gpu_rejects_negative_resident_weights() {
         let data = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             })
             .expect("upload data");
         let weight_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &weights.materialize_f64(),
-                shape: &weights.shape,
+                shape: weights.shape(),
             })
             .expect("upload weights");
 
@@ -752,7 +752,7 @@ fn cov_wgpu_noncentered_f32_cancellation_matches_quantized_oracle() {
     assert!(matches!(&gpu_value, Value::GpuTensor(_)));
     let gathered = test_support::gather(gpu_value).expect("gather resident covariance");
     assert_eq!(gathered.numeric_dtype(), runmat_value::NumericDType::F32);
-    assert_eq!(gathered.shape, vec![2, 2]);
+    assert_eq!(gathered.shape(), [2, 2]);
     // The provider forms XᵀX - nμμᵀ before dividing by n-1. For five rows,
     // a dot product takes at most five products/four additions; mean reduction
     // and division take five more steps; the outer product, subtraction, and
@@ -851,13 +851,13 @@ fn cov_wgpu_weighted_matches_cpu_and_stays_resident() {
     let data_handle = provider
         .upload(&runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         })
         .expect("upload data");
     let weight_handle = provider
         .upload(&runmat_accelerate_api::HostTensorView {
             data: &weights.materialize_f64(),
-            shape: &weights.shape,
+            shape: weights.shape(),
         })
         .expect("upload weights");
 

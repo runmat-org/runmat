@@ -194,8 +194,8 @@ pub(super) fn admit_corrcoef_inputs(args: &CorrcoefArgs) -> BuiltinResult<()> {
 
 fn admissible_shape(value: &Value) -> BuiltinResult<&[usize]> {
     match value {
-        Value::Tensor(tensor) => Ok(&tensor.shape),
-        Value::ComplexTensor(tensor) => Ok(&tensor.shape),
+        Value::Tensor(tensor) => Ok(tensor.shape()),
+        Value::ComplexTensor(tensor) => Ok(tensor.shape()),
         Value::LogicalArray(array) => Ok(&array.shape),
         Value::GpuTensor(handle) => Ok(handle.shape()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(&[1, 1]),

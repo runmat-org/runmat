@@ -53,7 +53,7 @@ pub(super) async fn value_to_weight_vector(
         }
         other => tensor::value_into_tensor_for("cov", other).map_err(cov_internal_error)?,
     };
-    validate_weight_shape(&tensor.shape, expected_rows)?;
+    validate_weight_shape(tensor.shape(), expected_rows)?;
     let values = tensor::tensor_into_values_f64(tensor);
     for (idx, weight) in values.iter().enumerate() {
         if !weight.is_finite() || *weight < 0.0 {

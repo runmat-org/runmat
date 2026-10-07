@@ -19,8 +19,8 @@ pub(super) enum NumericInput {
 impl NumericInput {
     fn shape(&self) -> &[usize] {
         match self {
-            Self::Real(tensor) => &tensor.shape,
-            Self::Complex(tensor) => &tensor.shape,
+            Self::Real(tensor) => tensor.shape(),
+            Self::Complex(tensor) => tensor.shape(),
         }
     }
 

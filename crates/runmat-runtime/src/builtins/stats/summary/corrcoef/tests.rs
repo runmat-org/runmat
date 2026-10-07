@@ -30,7 +30,7 @@ fn single_observations_keep_all_four_output_classes() {
             panic!("expected tensor");
         };
         assert_eq!(tensor.numeric_dtype(), runmat_value::NumericDType::F32);
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), [2, 2]);
     }
 }
 
@@ -51,7 +51,7 @@ fn mixed_observation_precision_promotes_corrcoef_result() {
         panic!("expected tensor");
     };
     assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::F64);
-    assert_eq!(result.shape, vec![2, 2]);
+    assert_eq!(result.shape(), [2, 2]);
 }
 
 fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64) -> Tensor {
@@ -60,7 +60,7 @@ fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64)
 
 fn assert_tensor_close(actual: &Tensor, expected: &[f64], tol: f64) {
     let dim = (expected.len() as f64).sqrt() as usize;
-    assert_eq!(actual.shape, vec![dim, dim], "unexpected tensor shape");
+    assert_eq!(actual.shape(), [dim, dim], "unexpected tensor shape");
     for (idx, (&got, &want)) in actual
         .materialize_f64()
         .iter()
@@ -137,7 +137,7 @@ fn corrcoef_accepts_typed_integer_matrix_inputs() {
     let result = block_on(corrcoef_builtin(Value::Tensor(tensor), Vec::new())).expect("corrcoef");
     match result {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![2, 2]);
+            assert_eq!(out.shape(), [2, 2]);
             assert!((out.materialize_f64()[0] - 1.0).abs() < 1.0e-12);
             assert!((out.materialize_f64()[3] - 1.0).abs() < 1.0e-12);
         }
@@ -171,7 +171,7 @@ fn corrcoef_complete_rows_reads_typed_integer_storage() {
 
     match result {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![2, 2]);
+            assert_eq!(out.shape(), [2, 2]);
             for value in out.materialize_f64() {
                 assert!((value - 1.0).abs() < 1.0e-12);
             }
@@ -341,17 +341,20 @@ fn corrcoef_numeric_scalar_second_argument_is_data() {
     assert_tensor_close(&equal, &[f64::NAN], 0.0);
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn corrcoef_public_scalar_vector_and_paired_empty_geometry() {
-    let scalar = Tensor::new(vec![7.0], vec![1, 1]).unwrap();
-    let Value::Tensor(scalar_result) =
-        block_on(corrcoef_builtin(Value::Tensor(scalar), Vec::new())).expect("scalar")
-    else {
-        panic!("expected tensor")
-    };
-    assert_tensor_close(&scalar_result, &[f64::NAN], 0.0);
+    for shape in [vec![], vec![1, 1]] {
+        let scalar = Tensor::new(vec![7.0], shape).unwrap();
+        let Value::Tensor(scalar_result) =
+            block_on(corrcoef_builtin(Value::Tensor(scalar), Vec::new())).expect("scalar")
+        else {
+            panic!("expected tensor")
+        };
+        assert_tensor_close(&scalar_result, &[f64::NAN], 0.0);
+    }
 
-    for shape in [vec![1, 4], vec![4, 1]] {
+    for shape in [vec![4], vec![1, 4], vec![4, 1]] {
         let vector = Tensor::new(vec![1.0, 2.0, 4.0, 8.0], shape).unwrap();
         let Value::Tensor(vector_result) =
             block_on(corrcoef_builtin(Value::Tensor(vector), Vec::new())).expect("vector")
@@ -371,6 +374,17 @@ fn corrcoef_public_scalar_vector_and_paired_empty_geometry() {
         panic!("expected tensor")
     };
     assert_tensor_close(&empty, &[f64::NAN; 4], 0.0);
+
+    let trailing_singleton = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1, 1]).unwrap();
+    let error = block_on(corrcoef_builtin(
+        Value::Tensor(trailing_singleton),
+        Vec::new(),
+    ))
+    .expect_err("corrcoef admits only rank-zero, vector, and matrix inputs");
+    assert_eq!(
+        error.identifier(),
+        CORRCOEF_ERROR_INVALID_ARGUMENT.identifier
+    );
 }
 
 #[test]
@@ -472,7 +486,7 @@ fn resident_complex_observations_preserve_host_complex_correlation() {
         .expect("admitted complex materialization") else {
             panic!("complex correlation must retain its output class");
         };
-        assert_eq!(result.shape, vec![2, 2]);
+        assert_eq!(result.shape(), [2, 2]);
         let values = result.materialize_f64();
         assert_eq!(values[0], (1.0, 0.0));
         assert_eq!(values[3], (1.0, 0.0));
@@ -502,7 +516,7 @@ fn corrcoef_complex_coefficients_are_hermitian() {
     else {
         panic!("expected complex tensor")
     };
-    assert_eq!(result.shape, vec![2, 2]);
+    assert_eq!(result.shape(), [2, 2]);
     let values = result.materialize_f64();
     assert_eq!(values[0], (1.0, 0.0));
     assert!((values[1].0).abs() < 1.0e-12);
@@ -529,7 +543,7 @@ fn corrcoef_complex_integer_components_center_exactly() {
         panic!("expected complex tensor")
     };
     let values = result.materialize_f64();
-    assert_eq!(result.shape, vec![1, 1]);
+    assert_eq!(result.shape(), [1, 1]);
     assert!((values[0].0 - 1.0).abs() < 1.0e-12);
     assert!(values[0].1.abs() < 1.0e-12);
 }
@@ -561,7 +575,7 @@ fn corrcoef_requested_outputs_include_p_values_and_alpha_bounds() {
         })
         .collect::<Vec<_>>();
     for tensor in &tensors {
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), [2, 2]);
     }
     let p = tensors[1].materialize_f64();
     assert_eq!(p[0], 1.0);
@@ -599,7 +613,7 @@ fn corrcoef_gpu_roundtrip() {
         .unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result =
@@ -750,7 +764,7 @@ fn corrcoef_wgpu_matches_cpu() {
     .expect("cpu corrcoef");
     let view = runmat_accelerate_api::HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let handle = provider.upload(&view).expect("upload");
     let options = CorrcoefOptions {
@@ -778,7 +792,7 @@ fn corrcoef_wgpu_public_vector_and_paired_geometry() {
     let row_handle = provider
         .upload(&runmat_accelerate_api::HostTensorView {
             data: &row.materialize_f64(),
-            shape: &row.shape,
+            shape: row.shape(),
         })
         .expect("row upload");
     let row_result = block_on(corrcoef_builtin(
@@ -802,13 +816,13 @@ fn corrcoef_wgpu_public_vector_and_paired_geometry() {
     let left_handle = provider
         .upload(&runmat_accelerate_api::HostTensorView {
             data: &left.materialize_f64(),
-            shape: &left.shape,
+            shape: left.shape(),
         })
         .expect("left upload");
     let right_handle = provider
         .upload(&runmat_accelerate_api::HostTensorView {
             data: &right.materialize_f64(),
-            shape: &right.shape,
+            shape: right.shape(),
         })
         .expect("right upload");
     let paired = block_on(corrcoef_builtin(
@@ -822,8 +836,8 @@ fn corrcoef_wgpu_public_vector_and_paired_geometry() {
         test_support::gather(Value::GpuTensor(left_handle.clone())).expect("left after corrcoef");
     let right_after =
         test_support::gather(Value::GpuTensor(right_handle.clone())).expect("right after corrcoef");
-    assert_eq!(left_after.shape, vec![2, 2]);
-    assert_eq!(right_after.shape, vec![2, 2]);
+    assert_eq!(left_after.shape(), [2, 2]);
+    assert_eq!(right_after.shape(), [2, 2]);
     drop(left_handle);
     drop(right_handle);
 }

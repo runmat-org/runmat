@@ -8,7 +8,7 @@ pub(super) struct Matrix {
 
 impl Matrix {
     pub(super) fn from_single(tensor: Tensor) -> Self {
-        let (rows, cols) = single_geometry(&tensor.shape, tensor.len());
+        let (rows, cols) = single_geometry(tensor.shape(), tensor.len());
         Self {
             data: centered_tensor_values(&tensor, rows, cols),
             rows,
@@ -114,7 +114,7 @@ pub(super) struct ComplexMatrix {
 
 impl ComplexMatrix {
     pub(super) fn from_single(tensor: ComplexTensor) -> Self {
-        let (rows, cols) = single_geometry(&tensor.shape, tensor.len());
+        let (rows, cols) = single_geometry(tensor.shape(), tensor.len());
         Self {
             data: centered_complex_values(&tensor, rows, cols),
             rows,

@@ -140,7 +140,12 @@ pub(super) async fn value_to_tensor(value: Value) -> BuiltinResult<Tensor> {
         .map_err(|err| corr_error(format!("corr: {err}")))?;
     let tensor = tensor::value_into_tensor_for(NAME, gathered)
         .map_err(|err| corr_error(format!("corr: {err}")))?;
-    if tensor.shape.iter().skip(2).any(|dimension| *dimension != 1) {
+    if tensor
+        .shape()
+        .iter()
+        .skip(2)
+        .any(|dimension| *dimension != 1)
+    {
         return Err(corr_error(
             "corr: observations must be a two-dimensional matrix",
         ));
@@ -173,7 +178,7 @@ pub(super) async fn value_to_weights(
 
 pub(super) fn matrix_shape(tensor: &Tensor) -> (usize, usize) {
     let len = tensor.len();
-    match tensor.shape.as_slice() {
+    match tensor.shape() {
         [] => (1, 1),
         [_] => (len, 1),
         [rows, cols, ..] => (*rows, *cols),

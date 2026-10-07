@@ -9,7 +9,7 @@ fn empty_observations_preserve_variable_count_and_row_mismatch() {
     let Value::Tensor(output) = output else {
         panic!("matrix")
     };
-    assert_eq!(output.shape, vec![3, 3]);
+    assert_eq!(output.shape(), [3, 3]);
     assert!(output.materialize_f64().iter().all(|value| value.is_nan()));
     let error = block_on(corr_builtin(
         tensor(vec![], vec![2, 0]),
@@ -50,7 +50,7 @@ fn resident_observations_gather_without_releasing_source() {
         let Value::Tensor(result) = result else {
             panic!("host correlation matrix")
         };
-        assert_eq!(result.shape, vec![2, 2]);
+        assert_eq!(result.shape(), [2, 2]);
         assert!((result.materialize_f64()[1] + 1.).abs() < 1e-12);
         assert!(block_on(provider.download(&handle)).is_ok());
     });
@@ -74,7 +74,7 @@ fn corr_matrix_defaults_to_columns() {
     .unwrap();
     match out {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.shape(), [2, 2]);
             assert!((tensor.materialize_f64()[0] - 1.0).abs() < 1e-12);
             assert!((tensor.materialize_f64()[1] - 1.0).abs() < 1e-12);
             assert!((tensor.materialize_f64()[2] - 1.0).abs() < 1e-12);
@@ -94,7 +94,7 @@ fn corr_accepts_typed_integer_matrix_inputs() {
     .unwrap();
     match out {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.shape(), [2, 2]);
             assert!((tensor.materialize_f64()[0] - 1.0).abs() < 1.0e-12);
             assert!((tensor.materialize_f64()[3] - 1.0).abs() < 1.0e-12);
         }
@@ -120,7 +120,7 @@ fn corr_complete_rows_reads_typed_integer_storage() {
 
     match out {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 1]);
+            assert_eq!(tensor.shape(), [2, 1]);
             assert!((tensor.materialize_f64()[0] - 1.0).abs() < 1.0e-12);
             assert!((tensor.materialize_f64()[1] - 1.0).abs() < 1.0e-12);
         }
@@ -135,7 +135,7 @@ fn corr_xy_returns_cross_correlation_matrix() {
     let out = block_on(corr_builtin(x, vec![y])).unwrap();
     match out {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 1]);
+            assert_eq!(tensor.shape(), [2, 1]);
             assert!((tensor.materialize_f64()[0] - 1.0).abs() < 1e-12);
             assert!((tensor.materialize_f64()[1] + 1.0).abs() < 1e-12);
         }
