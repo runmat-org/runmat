@@ -137,7 +137,7 @@ pub(super) fn interpolate_linear(
                 subs.push(bracket.hi);
             }
         }
-        acc += weight * values[series_offset + column_major_offset(&subs, &spec.values.shape)];
+        acc += weight * values[series_offset + column_major_offset(&subs, spec.values.shape())];
     }
     acc
 }
@@ -195,7 +195,7 @@ pub(super) fn interpolate_nearest(
         };
         subs.push(idx);
     }
-    values[series_offset + column_major_offset(&subs, &spec.values.shape)]
+    values[series_offset + column_major_offset(&subs, spec.values.shape())]
 }
 
 pub(super) fn nearest_index(

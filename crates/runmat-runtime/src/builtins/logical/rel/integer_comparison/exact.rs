@@ -506,7 +506,7 @@ fn complex_operand(value: &Value) -> Option<ComplexOperand<'_>> {
 fn complex_tensor_operand(tensor: &ComplexTensor) -> ComplexOperand<'_> {
     ComplexOperand {
         source: ComplexSource::Dense(tensor),
-        shape: tensor.shape.clone(),
+        shape: tensor.shape().to_vec(),
     }
 }
 
@@ -543,7 +543,7 @@ fn integer_operand(value: &Value) -> Option<IntegerOperand<'_>> {
         }),
         Value::Tensor(tensor) => tensor.integer_storage().map(|storage| IntegerOperand {
             storage: IntegerStorageRef::Array(storage),
-            shape: tensor.shape.clone(),
+            shape: tensor.shape().to_vec(),
         }),
         _ => None,
     }
@@ -565,7 +565,7 @@ fn real_operand(value: &Value) -> Option<RealOperand<'_>> {
         }),
         Value::Tensor(tensor) => Some(RealOperand {
             source: RealSource::Dense(tensor),
-            shape: tensor.shape.clone(),
+            shape: tensor.shape().to_vec(),
         }),
         Value::LogicalArray(array) => Some(RealOperand {
             source: RealSource::Logical { data: &array.data },
@@ -662,7 +662,7 @@ impl NumericOperand<'_> {
     fn shape(&self) -> &[usize] {
         match self {
             Self::Scalar(_) => &[1, 1],
-            Self::Dense(tensor) => &tensor.shape,
+            Self::Dense(tensor) => tensor.shape(),
             Self::Logical(_, shape) => shape,
         }
     }

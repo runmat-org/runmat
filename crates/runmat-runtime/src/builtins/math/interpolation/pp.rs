@@ -291,7 +291,7 @@ fn canonical_shape(shape: &[usize], len: usize) -> Vec<usize> {
 }
 
 fn first_non_singleton_len(tensor: &Tensor) -> Option<usize> {
-    canonical_shape(&tensor.shape, tensor_len(tensor))
+    canonical_shape(tensor.shape(), tensor_len(tensor))
         .into_iter()
         .find(|&dim| dim > 1)
 }

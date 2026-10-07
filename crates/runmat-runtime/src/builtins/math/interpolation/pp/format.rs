@@ -109,7 +109,7 @@ pub async fn pp_from_value(value: Value, name: &'static str) -> BuiltinResult<Pi
     let rows = pieces
         .checked_mul(dim)
         .ok_or_else(|| interp_error(name, format!("{name}: coefficient shape overflow")))?;
-    if coefs_tensor.shape.as_slice() != [rows, order] {
+    if coefs_tensor.shape() != [rows, order] {
         return Err(interp_error(
             name,
             format!("{name}: pp coefficients must be a {rows}-by-{order} matrix"),
@@ -128,7 +128,7 @@ async fn component_shape_field(st: &StructValue, name: &'static str) -> BuiltinR
     ensure_exact_integer_field(&gathered, name, "dim")?;
     let tensor = tensor::value_into_tensor_for(name, gathered)
         .map_err(|err| interp_error(name, format!("{name}: {err}")))?;
-    if !is_vector_shape(&tensor.shape) {
+    if !is_vector_shape(tensor.shape()) {
         return Err(interp_error(
             name,
             format!("{name}: malformed pp dimensions"),

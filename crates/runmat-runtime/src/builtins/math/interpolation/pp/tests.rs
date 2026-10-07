@@ -114,6 +114,40 @@ fn pp_from_value_reads_typed_integer_coefficients_without_mirror() {
     assert!(pp.component_shape.is_empty());
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn pp_from_value_admits_rank_zero_and_rank_one_dimension_metadata_only() {
+    let public = pp_to_value(
+        build_spline_pp(&scalar_series(&[1.0, 4.0, 9.0]), "spline").unwrap(),
+        "spline",
+    )
+    .unwrap();
+    for (values, shape, expected_components) in [
+        (vec![1.0], vec![], vec![]),
+        (vec![1.0, 1.0], vec![2], vec![1, 1]),
+    ] {
+        let Value::Struct(mut fields) = public.clone() else {
+            panic!("spline creates a pp struct");
+        };
+        fields.insert("dim", Value::Tensor(Tensor::new(values, shape).unwrap()));
+        let parsed = futures::executor::block_on(pp_from_value(Value::Struct(fields), "ppval"))
+            .expect("vector dimension metadata");
+        assert_eq!(parsed.component_shape, expected_components);
+        assert_eq!(parsed.dim, 1);
+    }
+
+    let Value::Struct(mut fields) = public else {
+        panic!("spline creates a pp struct");
+    };
+    fields.insert(
+        "dim",
+        Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2]).unwrap()),
+    );
+    let error = futures::executor::block_on(pp_from_value(Value::Struct(fields), "ppval"))
+        .expect_err("matrix dimension metadata must reject");
+    assert!(error.message().contains("malformed pp dimensions"));
+}
+
 #[test]
 fn pp_metadata_rejects_lossy_integer_dimensions_before_evaluation() {
     let series = scalar_series(&[1.0, 4.0, 9.0]);
