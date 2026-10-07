@@ -18,6 +18,15 @@ use super::style::{
 const POINTS_TO_PX: f32 = 96.0 / 72.0;
 const DEFAULT_MARKER_AREA_POINTS2: f64 = 36.0;
 
+/// Point colors are rows of RGB or RGBA components.
+fn point_color_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 #[derive(Clone)]
 pub struct PointArgs {
     pub size: PointSizeArg,
@@ -128,19 +137,20 @@ impl PointColorArg {
                 Ok(Self::Uniform(color))
             }
             Value::Tensor(tensor) => {
+                let (rows, cols) = point_color_matrix_dimensions(tensor);
                 if tensor::is_scalar_tensor(tensor) {
                     Ok(Self::ScalarValues(Value::Tensor(tensor.clone())))
-                } else if tensor.rows == 1 && (tensor.cols == 3 || tensor.cols == 4) {
+                } else if rows == 1 && (cols == 3 || cols == 4) {
                     let r = tensor_value(tensor, 0, 0) as f32;
                     let g = tensor_value(tensor, 0, 1) as f32;
                     let b = tensor_value(tensor, 0, 2) as f32;
-                    let a = if tensor.cols == 4 {
+                    let a = if cols == 4 {
                         tensor_value(tensor, 0, 3) as f32
                     } else {
                         1.0
                     };
                     Ok(Self::Uniform(Vec4::new(r, g, b, a)))
-                } else if tensor.cols == 3 || tensor.cols == 4 {
+                } else if cols == 3 || cols == 4 {
                     Ok(Self::RgbMatrix(Value::Tensor(tensor.clone())))
                 } else {
                     Ok(Self::ScalarValues(Value::Tensor(tensor.clone())))
@@ -395,20 +405,20 @@ fn convert_rgb_color_tensor(
     point_count: usize,
     context: &'static str,
 ) -> BuiltinResult<Vec<Vec4>> {
-    if tensor.cols != 3 && tensor.cols != 4 {
+    let (rows, cols) = point_color_matrix_dimensions(&tensor);
+    if cols != 3 && cols != 4 {
         return Err(plotting_error(
             context,
             format!("{context}: color matrices must have three (RGB) or four (RGBA) columns"),
         ));
     }
-    if tensor.rows == 0 {
+    if rows == 0 {
         return Err(plotting_error(
             context,
             format!("{context}: RGB color matrices cannot be empty"),
         ));
     }
 
-    let rows = tensor.rows;
     if point_count > 0 && rows != point_count && rows != 1 {
         return Err(plotting_error(
             context,
@@ -430,7 +440,7 @@ fn convert_rgb_color_tensor(
         let r = tensor_value(&tensor, src_row, 0) as f32;
         let g = tensor_value(&tensor, src_row, 1) as f32;
         let b = tensor_value(&tensor, src_row, 2) as f32;
-        let a = if tensor.cols > 3 {
+        let a = if cols > 3 {
             tensor_value(&tensor, src_row, 3) as f32
         } else {
             1.0
@@ -441,7 +451,7 @@ fn convert_rgb_color_tensor(
 }
 
 fn tensor_value(tensor: &Tensor, row: usize, col: usize) -> f64 {
-    let rows = tensor.rows.max(1);
+    let rows = point_color_matrix_dimensions(tensor).0.max(1);
     let idx = col * rows + row.min(rows - 1);
     tensor::tensor_values_f64(tensor)
         .get(idx)
@@ -556,6 +566,36 @@ pub fn validate_gpu_color_matrix(
 mod tests {
     use super::*;
     use runmat_value::IntegerStorage;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn point_rgb_colors_keep_rank_one_rows_and_reject_rank_zero_matrices() {
+        let row = Tensor::new(vec![0.25, 0.5, 0.75], vec![3]).unwrap();
+        let arg = PointColorArg::from_value(
+            Value::Tensor(row.clone()),
+            &LineStyleParseOptions::scatter(),
+        )
+        .unwrap();
+        let expected = Vec4::new(0.25, 0.5, 0.75, 1.0);
+        assert!(matches!(arg, PointColorArg::Uniform(color) if color == expected));
+        assert_eq!(
+            convert_rgb_color_tensor(row, 2, "scatter").unwrap(),
+            vec![expected; 2]
+        );
+
+        let scalar = Tensor::new(vec![0.5], Vec::new()).unwrap();
+        let error = convert_rgb_color_tensor(scalar, 1, "scatter")
+            .expect_err("rank-zero color input has no RGB columns");
+        assert!(error
+            .message()
+            .contains("three (RGB) or four (RGBA) columns"));
+
+        let matrix = Tensor::new(vec![0.25, 0.5, 0.5, 0.75, 0.75, 1.0], vec![2, 3]).unwrap();
+        assert_eq!(
+            convert_rgb_color_tensor(matrix, 2, "scatter").unwrap(),
+            vec![expected, Vec4::new(0.5, 0.75, 1.0, 1.0)]
+        );
+    }
 
     #[test]
     fn point_size_and_color_vectors_read_typed_integer_storage() {

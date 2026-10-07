@@ -757,7 +757,7 @@ fn parse_speye_shape(args: &[Value]) -> BuiltinResult<(usize, usize, MatrixClass
         [] => Ok((1, 1)),
         [n] => match n {
             Value::Tensor(tensor)
-                if is_vector_shape(&tensor.shape)
+                if is_vector_shape(tensor.shape())
                     && tensor_utils::tensor_element_len(tensor) == 2 =>
             {
                 let dims = parse_speye_shape_tensor(tensor)?;
@@ -1789,7 +1789,7 @@ fn integer_dense_matrix_from_value(
 ) -> Option<BuiltinResult<IntegerMatrix>> {
     match value {
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
-            if tensor.shape.len() > 2 {
+            if tensor.shape().len() > 2 {
                 return Some(Err(sparse_error(
                     &SPARSE_ERROR_INVALID_INPUT,
                     format!("{label}: input must be a 2-D matrix"),
@@ -1862,7 +1862,7 @@ impl DenseMatrix {
 fn dense_matrix_from_value(value: &Value, label: &str) -> BuiltinResult<DenseMatrix> {
     match value {
         Value::Tensor(tensor) => {
-            if tensor.shape.len() > 2 {
+            if tensor.shape().len() > 2 {
                 return Err(sparse_error(
                     &SPARSE_ERROR_INVALID_INPUT,
                     format!("{label}: input must be a 2-D matrix"),
@@ -2021,7 +2021,7 @@ fn parse_integer_diag_offsets(value: &Value, label: &str) -> Option<BuiltinResul
     let values = match value {
         Value::Int(value) => vec![value.clone()],
         Value::Tensor(tensor) => {
-            if !is_vector_shape(&tensor.shape) {
+            if !is_vector_shape(tensor.shape()) {
                 return None;
             }
             tensor_integer_values(tensor)?
@@ -2519,12 +2519,12 @@ fn sparse_from_value(value: Value) -> BuiltinResult<SparseTensor> {
     match value {
         Value::SparseTensor(sparse) => Ok(sparse),
         Value::Tensor(tensor) => {
-            if tensor.shape.len() != 2 {
+            if tensor.shape().len() != 2 {
                 return Err(sparse_error(
                     &SPARSE_ERROR_INVALID_INPUT,
                     format!(
                         "sparse: input must be a 2-D matrix, got {}-D tensor",
-                        tensor.shape.len()
+                        tensor.shape().len()
                     ),
                 ));
             }
@@ -2535,12 +2535,12 @@ fn sparse_from_value(value: Value) -> BuiltinResult<SparseTensor> {
                 .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))?,
         ),
         Value::ComplexTensor(tensor) => {
-            if tensor.shape.len() != 2 {
+            if tensor.shape().len() != 2 {
                 return Err(sparse_error(
                     &SPARSE_ERROR_INVALID_INPUT,
                     format!(
                         "sparse: input must be a 2-D matrix, got {}-D complex tensor",
-                        tensor.shape.len()
+                        tensor.shape().len()
                     ),
                 ));
             }
@@ -2579,8 +2579,8 @@ fn sparse_from_value(value: Value) -> BuiltinResult<SparseTensor> {
 }
 
 fn sparse_from_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<SparseTensor> {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
+    let rows = tensor.rows();
+    let cols = tensor.cols();
     let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
     let mut row_indices = Vec::new();
     col_ptrs.push(0);
@@ -3236,7 +3236,7 @@ fn integer_to_usize(value: &runmat_value::IntValue) -> Option<usize> {
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
-            if !is_vector_shape(&tensor.shape) {
+            if !is_vector_shape(tensor.shape()) {
                 return Err(numeric_vector_error(value, name));
             }
             Ok(tensor_utils::tensor_values_f64(tensor))
@@ -3296,7 +3296,7 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
 fn numeric_vector_for_label(value: &Value, name: &str, label: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
-            if !is_vector_shape(&tensor.shape) {
+            if !is_vector_shape(tensor.shape()) {
                 return Err(numeric_vector_label_error(value, name, label));
             }
             Ok(tensor_utils::tensor_values_f64(tensor))
@@ -3498,6 +3498,31 @@ pub(crate) mod tests {
             Value::SparseTensor(sparse) => sparse,
             other => panic!("expected sparse tensor, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn sparse_conversion_keeps_full_rank_admission_for_real_and_complex() {
+        for shape in [Vec::new(), vec![1], vec![1, 1, 1]] {
+            let real = Value::Tensor(Tensor::new(vec![7.0], shape.clone()).unwrap());
+            let complex =
+                Value::ComplexTensor(ComplexTensor::new(vec![(7.0, 2.0)], shape.clone()).unwrap());
+            for value in [real, complex] {
+                let error = sparse_from_value(value)
+                    .expect_err("sparse conversion requires exactly two dimensions");
+                assert!(error.message().contains("input must be a 2-D matrix"));
+            }
+        }
+        let complex = ComplexTensor::new(
+            vec![(0.0, 0.0), (7.0, 2.0), (3.0, 4.0), (0.0, 0.0)],
+            vec![2, 2],
+        )
+        .unwrap();
+        let sparse = sparse_from_value(Value::ComplexTensor(complex)).unwrap();
+        assert_eq!(sparse.shape(), [2, 2]);
+        assert_eq!(sparse.nnz(), 2);
+        assert_eq!(sparse.col_ptrs.as_ref(), &[0, 1, 2]);
+        assert_eq!(sparse.row_indices.as_ref(), &[1, 0]);
     }
 
     fn exact_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
@@ -3760,7 +3785,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new_integer(storage, vec![3, 1]).expect("integer tensor");
             let output =
                 expect_tensor(nonzeros_builtin(Value::Tensor(tensor)).expect("integer nonzeros"));
-            assert_eq!(output.shape, vec![2, 1]);
+            assert_eq!(output.shape(), [2, 1]);
             assert_eq!(output.integer_storage(), Some(&expected));
         }
 
@@ -4204,7 +4229,7 @@ pub(crate) mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: dense_values,
-                    shape: &dense.shape,
+                    shape: dense.shape(),
                 })
                 .expect("upload");
             let sparse = expect_sparse(sparse_builtin(vec![Value::GpuTensor(handle)]).unwrap());
@@ -4356,13 +4381,13 @@ pub(crate) mod tests {
     fn nonzeros_returns_column_order_for_dense_sparse_logical_and_complex() {
         let dense = Tensor::new(vec![0.0, 4.0, 5.0, 0.0], vec![2, 2]).unwrap();
         let out = expect_tensor(nonzeros_builtin(Value::Tensor(dense)).expect("nonzeros"));
-        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.shape(), [2, 1]);
         assert_eq!(out.as_f64_slice().expect("double nonzeros"), &[4.0, 5.0]);
 
         let sparse =
             SparseTensor::new(3, 2, vec![0, 2, 3], vec![0, 2, 1], vec![10.0, 30.0, 20.0]).unwrap();
         let out = expect_tensor(nonzeros_builtin(Value::SparseTensor(sparse)).expect("nonzeros"));
-        assert_eq!(out.shape, vec![3, 1]);
+        assert_eq!(out.shape(), [3, 1]);
         assert_eq!(
             out.as_f64_slice().expect("double nonzeros"),
             &[10.0, 30.0, 20.0]
@@ -4379,7 +4404,7 @@ pub(crate) mod tests {
         let out = nonzeros_builtin(Value::ComplexTensor(complex)).expect("nonzeros");
         match out {
             Value::ComplexTensor(tensor) => {
-                assert_eq!(tensor.shape, vec![2, 1]);
+                assert_eq!(tensor.shape(), [2, 1]);
                 assert_eq!(tensor.materialize_f64(), vec![(1.0, 2.0), (0.0, 3.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -4461,7 +4486,7 @@ pub(crate) mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: dense_values,
-                    shape: &dense.shape,
+                    shape: dense.shape(),
                 })
                 .expect("upload");
             let sparse = expect_sparse(spones_builtin(Value::GpuTensor(handle)).expect("spones"));
@@ -4634,7 +4659,7 @@ pub(crate) mod tests {
             spdiags_builtin(vec![Value::Tensor(matrix.clone()), Value::Tensor(offsets)])
                 .expect("spdiags"),
         );
-        assert_eq!(bout.shape, vec![3, 3]);
+        assert_eq!(bout.shape(), [3, 3]);
         assert_eq!(
             bout.as_f64_slice().expect("double spdiags output"),
             &[
@@ -4674,7 +4699,7 @@ pub(crate) mod tests {
             spdiags_builtin(vec![Value::SparseTensor(sparse), Value::Tensor(offsets)])
                 .expect("spdiags"),
         );
-        assert_eq!(bout.shape, vec![1, 1]);
+        assert_eq!(bout.shape(), [1, 1]);
         assert_eq!(bout.as_f64_slice().expect("double spdiags output"), &[42.0]);
     }
 
