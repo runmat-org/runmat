@@ -140,6 +140,14 @@ struct CombvecInput {
     cols: usize,
 }
 
+fn combvec_matrix_dimensions(tensor: &runmat_value::Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 impl CombvecInput {
     fn from_value(value: &Value, index: usize) -> BuiltinResult<Self> {
         match value {
@@ -153,8 +161,9 @@ impl CombvecInput {
                 rows: 1,
                 cols: 1,
             }),
-            Value::Tensor(t) if t.shape.len() <= 2 => {
-                if t.rows == 0 || t.cols == 0 {
+            Value::Tensor(t) if t.shape().len() <= 2 => {
+                let (rows, cols) = combvec_matrix_dimensions(t);
+                if rows == 0 || cols == 0 {
                     return Err(deep_learning_error(
                         "combvec",
                         format!("combvec: input {index} must have at least one column"),
@@ -171,8 +180,8 @@ impl CombvecInput {
                 }
                 Ok(Self {
                     data,
-                    rows: t.rows,
-                    cols: t.cols,
+                    rows,
+                    cols,
                 })
             }
             other => Err(deep_learning_error(
@@ -180,5 +189,42 @@ impl CombvecInput {
                 format!("combvec: input {index} must be a finite numeric scalar or 2-D matrix, got {other:?}"),
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_value::Tensor;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn combvec_preserves_dense_host_rank_boundaries() {
+        let scalar = Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap());
+        let error = futures::executor::block_on(combvec_builtin(vec![scalar]))
+            .expect_err("rank-zero tensor has no matrix columns");
+        assert!(error
+            .message()
+            .contains("input 1 must have at least one column"));
+
+        let row = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap());
+        let other = Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap());
+        let Value::Tensor(output) =
+            futures::executor::block_on(combvec_builtin(vec![row, other])).unwrap()
+        else {
+            panic!("expected output matrix");
+        };
+        assert_eq!(output.shape(), [2, 4]);
+        assert_eq!(
+            output.materialize_f64(),
+            vec![1.0, 10.0, 2.0, 10.0, 1.0, 20.0, 2.0, 20.0]
+        );
+        let Value::Tensor(scalar_output) =
+            futures::executor::block_on(combvec_builtin(vec![Value::Num(7.0)])).unwrap()
+        else {
+            panic!("expected scalar output matrix");
+        };
+        assert_eq!(scalar_output.shape(), [1, 1]);
+        assert_eq!(scalar_output.materialize_f64(), vec![7.0]);
     }
 }

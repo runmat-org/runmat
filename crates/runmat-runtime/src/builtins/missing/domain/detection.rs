@@ -119,13 +119,13 @@ pub(super) fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
         ),
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => logical_from_iter(
             vec![false; tensor_utils::tensor_element_len(tensor)],
-            tensor.shape.clone(),
+            tensor.shape().to_vec(),
         ),
         Value::Tensor(tensor) => {
             let values = tensor_utils::tensor_values_f64_cow(tensor);
             logical_from_iter(
                 values.iter().map(|value| value.is_nan()),
-                tensor.shape.clone(),
+                tensor.shape().to_vec(),
             )
         }
         Value::ComplexTensor(tensor) => logical_from_iter(
@@ -133,7 +133,7 @@ pub(super) fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
                 .materialize_f64()
                 .iter()
                 .map(|(re, im)| re.is_nan() || im.is_nan()),
-            tensor.shape.clone(),
+            tensor.shape().to_vec(),
         ),
         Value::SparseTensor(tensor) => {
             let mut data = vec![0u8; tensor.rows * tensor.cols];
@@ -184,13 +184,13 @@ pub(super) fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
             let values = tensor_utils::tensor_values_f64_cow(&serials);
             logical_from_iter(
                 values.iter().map(|serial| serial.is_nan()),
-                serials.shape.clone(),
+                serials.shape().to_vec(),
             )
         }
         Value::Object(object) if object.is_class(runmat_types::standard::DURATION) => {
             let days = crate::builtins::duration::duration_tensor_from_duration_value(value)?;
             let values = tensor_utils::tensor_values_f64_cow(&days);
-            logical_from_iter(values.iter().map(|day| day.is_nan()), days.shape.clone())
+            logical_from_iter(values.iter().map(|day| day.is_nan()), days.shape().to_vec())
         }
         Value::OutputList(values) => {
             let mut data = Vec::with_capacity(values.len());

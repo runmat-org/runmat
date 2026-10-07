@@ -322,6 +322,28 @@ fn nanmin_supports_pairwise_form() {
     assert!(matches!(result, Value::Tensor(t) if t.materialize_f64() == vec![2.0, 4.0, 3.0]));
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn nanmin_pairwise_preserves_rank_zero_scalarization_and_rank_one_broadcast_shape() {
+    let scalar = block_on(nanmin_builtin(
+        tensor(vec![f64::NAN], Vec::new()),
+        vec![tensor(vec![2.0], Vec::new())],
+    ))
+    .expect("rank-zero pairwise nanmin");
+    assert!(matches!(scalar, Value::Num(value) if value == 2.0));
+
+    let vector = block_on(nanmin_builtin(
+        tensor(vec![f64::NAN], Vec::new()),
+        vec![tensor(vec![2.0, 1.0], vec![2])],
+    ))
+    .expect("rank-zero scalar broadcasts over rank-one input");
+    assert!(matches!(
+        vector,
+        Value::Tensor(tensor)
+            if tensor.shape() == [2] && tensor.materialize_f64() == vec![2.0, 1.0]
+    ));
+}
+
 #[test]
 fn nanmin_empty_placeholder_selects_reduction_not_pairwise() {
     let input = tensor(vec![f64::NAN, 2.0, 3.0, 4.0], vec![2, 2]);
@@ -333,7 +355,7 @@ fn nanmin_empty_placeholder_selects_reduction_not_pairwise() {
     assert!(matches!(
         result,
         Value::Tensor(tensor)
-            if tensor.shape == vec![2, 1] && tensor.materialize_f64() == vec![3.0, 2.0]
+            if tensor.shape() == [2, 1] && tensor.materialize_f64() == vec![3.0, 2.0]
     ));
 }
 
@@ -362,10 +384,10 @@ fn nanmin_reduction_returns_indices_but_pairwise_has_one_output() {
         };
         assert_eq!(outputs.len(), 2);
         assert!(
-            matches!(&outputs[0], Value::Tensor(t) if t.shape == vec![2, 1] && t.materialize_f64() == vec![3.0, 2.0])
+            matches!(&outputs[0], Value::Tensor(t) if t.shape() == [2, 1] && t.materialize_f64() == vec![3.0, 2.0])
         );
         assert!(
-            matches!(&outputs[1], Value::Tensor(t) if t.shape == vec![2, 1] && t.materialize_f64() == vec![2.0, 1.0])
+            matches!(&outputs[1], Value::Tensor(t) if t.shape() == [2, 1] && t.materialize_f64() == vec![2.0, 1.0])
         );
     }
     {

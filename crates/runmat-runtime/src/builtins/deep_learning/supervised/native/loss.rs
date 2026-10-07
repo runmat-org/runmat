@@ -35,8 +35,8 @@ fn matching(
     axes: &AxisPlan,
     function: &'static str,
 ) -> BuiltinResult<()> {
-    if prediction.shape != axes.shape()
-        || target.shape != axes.shape()
+    if prediction.shape() != axes.shape()
+        || target.shape() != axes.shape()
         || prediction.len() != axes.element_count()
         || target.len() != axes.element_count()
     {
@@ -74,7 +74,7 @@ pub(super) fn admit_target(
     classification: bool,
     function: &'static str,
 ) -> BuiltinResult<()> {
-    if target.shape != axes.shape() || target.len() != axes.element_count() {
+    if target.shape() != axes.shape() || target.len() != axes.element_count() {
         return Err(fail(
             function,
             "target differs from admitted output geometry",
@@ -167,7 +167,7 @@ pub(super) fn mse(
     };
     Ok(LossResult {
         value,
-        output_gradient: Tensor::from_numeric_storage(storage, prediction.shape.clone())
+        output_gradient: Tensor::from_numeric_storage(storage, prediction.shape().to_vec())
             .map_err(|error| fail(function, error))?,
     })
 }
@@ -255,7 +255,7 @@ pub(super) fn crossentropy(
     };
     Ok(LossResult {
         value,
-        output_gradient: Tensor::from_numeric_storage(storage, prediction.shape.clone())
+        output_gradient: Tensor::from_numeric_storage(storage, prediction.shape().to_vec())
             .map_err(|error| fail(function, error))?,
     })
 }
@@ -377,7 +377,7 @@ mod tests {
             minus[index] -= 1.0e-6;
             let objective = |values| {
                 crossentropy(
-                    &Tensor::new(values, logits.shape.clone()).unwrap(),
+                    &Tensor::new(values, logits.shape().to_vec()).unwrap(),
                     &target,
                     &axes,
                     PredictionDomain::Logits,

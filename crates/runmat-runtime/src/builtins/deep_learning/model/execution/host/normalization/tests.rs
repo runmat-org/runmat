@@ -42,12 +42,12 @@ fn auto_normalizes_channels_independently_per_batch_and_time() {
         &x,
         &gamma,
         &beta,
-        &axes("CBT", &x.shape),
+        &axes("CBT", x.shape()),
         options(DeepLearningNormalizationAxes::Auto),
     )
     .unwrap();
     assert_eq!(y.axes.layout().labels(), "CBT");
-    assert_eq!(y.tensor.shape, vec![2, 3, 2]);
+    assert_eq!(y.tensor.shape(), &[2, 3, 2]);
     for chunk in y.tensor.as_f64_slice().unwrap().chunks_exact(2) {
         assert!((chunk[0] + 1.5).abs() < 1.0e-4);
         assert!((chunk[1] - 0.5).abs() < 1.0e-4);
@@ -62,7 +62,7 @@ fn objective(x: &[f64], gamma: &[f64], beta: &[f64], dy: &[f64]) -> f64 {
         &x,
         &gamma,
         &beta,
-        &axes("CBT", &x.shape),
+        &axes("CBT", x.shape()),
         options(DeepLearningNormalizationAxes::BatchExcluded),
     )
     .unwrap()
@@ -89,7 +89,7 @@ fn all_norm_adjoint_components_match_finite_differences() {
     let scale = Tensor::new(gamma.to_vec(), vec![3, 1]).unwrap();
     let offset = Tensor::new(beta.to_vec(), vec![3, 1]).unwrap();
     let gradient = Tensor::new(dy.to_vec(), vec![3, 2, 2]).unwrap();
-    let axes = axes("CBT", &input.shape);
+    let axes = axes("CBT", input.shape());
     let opts = options(DeepLearningNormalizationAxes::BatchExcluded);
     let forward_result = forward(&input, &scale, &offset, &axes, opts).unwrap();
     let result = backward(
@@ -140,7 +140,7 @@ fn batch_excluded_full_output_uses_each_batchs_channels_and_times_only() {
     .unwrap();
     let scale = Tensor::new(vec![1., 2., -1.], vec![3, 1]).unwrap();
     let offset = Tensor::new(vec![0.5, -0.5, 1.], vec![3, 1]).unwrap();
-    let axes = axes("CBT", &input.shape);
+    let axes = axes("CBT", input.shape());
     let actual = forward(
         &input,
         &scale,
@@ -177,7 +177,7 @@ fn spatial_channel_mode_and_native_single_are_distinct_from_channel_only() {
     let input = Tensor::from_f32(vec![1., 3., 5., 7., 2., 4., 6., 8.], vec![2, 2, 1, 2]).unwrap();
     let scale = Tensor::from_f32(vec![1., 1.], vec![1, 2]).unwrap();
     let offset = Tensor::from_f32(vec![0., 0.], vec![1, 2]).unwrap();
-    let axes = axes("SCBT", &input.shape);
+    let axes = axes("SCBT", input.shape());
     let y = forward(
         &input,
         &scale,
@@ -186,7 +186,7 @@ fn spatial_channel_mode_and_native_single_are_distinct_from_channel_only() {
         options(DeepLearningNormalizationAxes::SpatialChannel),
     )
     .unwrap();
-    assert_eq!(y.tensor.shape, input.shape);
+    assert_eq!(y.tensor.shape(), input.shape());
     let NumericStorage::F32(values) = y.tensor.into_numeric_storage().unwrap() else {
         panic!("single was widened")
     };
@@ -221,7 +221,7 @@ fn invalid_epsilon_empty_reduction_and_dtype_reject() {
     let input = Tensor::new(vec![1., 2.], vec![2, 1]).unwrap();
     let scale = Tensor::new(vec![1., 1.], vec![2, 1]).unwrap();
     let offset = Tensor::new(vec![0., 0.], vec![2, 1]).unwrap();
-    let axes = axes("CB", &input.shape);
+    let axes = axes("CB", input.shape());
     assert!(matches!(
         forward(
             &input,
@@ -252,7 +252,7 @@ fn invalid_epsilon_empty_reduction_and_dtype_reject() {
             &empty,
             &Tensor::new(vec![], vec![0, 1]).unwrap(),
             &Tensor::new(vec![], vec![0, 1]).unwrap(),
-            &self::axes("CB", &empty.shape),
+            &self::axes("CB", empty.shape()),
             options(DeepLearningNormalizationAxes::Auto)
         ),
         Err(NormalizationError::EmptyReduction)
@@ -426,13 +426,13 @@ fn empty_batch_preserves_shape_without_touching_reduction_coordinates() {
     let input = Tensor::new(vec![], vec![2, 0]).unwrap();
     let scale = Tensor::new(vec![1., 2.], vec![2, 1]).unwrap();
     let offset = Tensor::new(vec![0., 0.], vec![2, 1]).unwrap();
-    let axes = axes("CB", &input.shape);
+    let axes = axes("CB", input.shape());
     let opts = options(DeepLearningNormalizationAxes::Auto);
     let result = forward(&input, &scale, &offset, &axes, opts).unwrap();
-    assert_eq!(result.tensor.shape, vec![2, 0]);
+    assert_eq!(result.tensor.shape(), &[2, 0]);
     let dy = Tensor::new(vec![], vec![2, 0]).unwrap();
     let gradients = backward(&input, &scale, &offset, &dy, &axes, opts, &result.stats).unwrap();
-    assert_eq!(gradients.input.shape, vec![2, 0]);
+    assert_eq!(gradients.input.shape(), &[2, 0]);
     assert_eq!(gradients.scale.as_f64_slice().unwrap(), &[0., 0.]);
     assert_eq!(gradients.offset.as_f64_slice().unwrap(), &[0., 0.]);
 }

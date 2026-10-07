@@ -25,7 +25,7 @@ pub(in crate::builtins::deep_learning) fn backward(
 ) -> Result<NormalizationGradients, NormalizationError> {
     let geometry = Geometry::new(axes, options)?;
     geometry.validate_payload(input, scale, offset)?;
-    if output_gradient.shape != input.shape
+    if output_gradient.shape() != input.shape()
         || output_gradient.numeric_dtype() != input.numeric_dtype()
     {
         return Err(NormalizationError::ShapeMismatch);
@@ -111,11 +111,11 @@ pub(in crate::builtins::deep_learning) fn backward(
         _ => return Err(NormalizationError::StatisticsMismatch),
     };
     Ok(NormalizationGradients {
-        input: Tensor::from_numeric_storage(dx, input.shape.clone())
+        input: Tensor::from_numeric_storage(dx, input.shape().to_vec())
             .map_err(NormalizationError::Storage)?,
-        scale: Tensor::from_numeric_storage(dgamma, scale.shape.clone())
+        scale: Tensor::from_numeric_storage(dgamma, scale.shape().to_vec())
             .map_err(NormalizationError::Storage)?,
-        offset: Tensor::from_numeric_storage(dbeta, offset.shape.clone())
+        offset: Tensor::from_numeric_storage(dbeta, offset.shape().to_vec())
             .map_err(NormalizationError::Storage)?,
     })
 }

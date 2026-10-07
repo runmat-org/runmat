@@ -63,7 +63,7 @@ fn parse_cell_index_value(value: &Value) -> Result<usize, RuntimeError> {
         ),
         Value::Int(i) => IndexScalar::from_int(i),
         Value::Tensor(t)
-            if tensor_element_len(t) == 1 && t.shape.iter().product::<usize>() == 1 =>
+            if tensor_element_len(t) == 1 && t.shape().iter().product::<usize>() == 1 =>
         {
             index_scalar_from_numeric(
                 t.numeric_value_at(0)
@@ -93,7 +93,7 @@ fn parse_cell_index_value_for_len(value: &Value, len: usize) -> Result<usize, Ru
                 return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
             }
         }
-        Value::Tensor(t) if t.len() == 1 && t.shape.iter().product::<usize>() == 1 => {
+        Value::Tensor(t) if t.len() == 1 && t.shape().iter().product::<usize>() == 1 => {
             let value = t
                 .numeric_value_at(0)
                 .expect("validated scalar numeric tensor storage");
@@ -161,7 +161,15 @@ fn resolve_cell_end_relative_index(value: f64, len: usize) -> Result<Option<usiz
 }
 
 fn is_empty_tensor(value: &Value) -> bool {
-    matches!(value, Value::Tensor(t) if t.is_empty() || t.rows == 0 || t.cols == 0)
+    let Value::Tensor(tensor) = value else {
+        return false;
+    };
+    let (rows, cols) = match tensor.shape() {
+        [] => (0, 0),
+        [cols] => (1, *cols),
+        [rows, cols, ..] => (*rows, *cols),
+    };
+    tensor.is_empty() || rows == 0 || cols == 0
 }
 
 pub fn create_cell_2d(values: Vec<Value>, rows: usize, cols: usize) -> Result<Value, RuntimeError> {
@@ -269,7 +277,7 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
                 Ok(vec![index_cell_value(ca, &[idx])?])
             }
             Value::Tensor(t) => {
-                if tensor_element_len(t) == 1 && t.shape.iter().product::<usize>() == 1 {
+                if tensor_element_len(t) == 1 && t.shape().iter().product::<usize>() == 1 {
                     let idx = parse_cell_index_value_for_len(&indices[0], ca.data.len())?;
                     return Ok(vec![index_cell_value(ca, &[idx])?]);
                 }
@@ -633,6 +641,30 @@ fn assign_cell_paren_from_cell(
 mod tests {
     use super::{expand_cell_indices, map_cell_shape_error, resolve_cell_assignment_positions};
     use runmat_value::{CellArray, IntegerStorage, Tensor, Value};
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn cell_index_and_deletion_preserve_rank_boundaries() {
+        let cell = || CellArray::new(vec![Value::Num(10.0), Value::Num(20.0)], 1, 2).unwrap();
+        for shape in [vec![], vec![1]] {
+            let index = Value::Tensor(Tensor::new(vec![2.0], shape).unwrap());
+            assert_eq!(
+                expand_cell_indices(&cell(), &[index]).unwrap(),
+                vec![Value::Num(20.0)]
+            );
+        }
+        let scalar_rhs = Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap());
+        let Value::Cell(result) =
+            super::assign_cell_paren_with_policy(cell(), &[1], &scalar_rhs, true).unwrap()
+        else {
+            panic!("expected cell after deletion");
+        };
+        assert_eq!(result.data, vec![Value::Num(20.0)]);
+        let vector_rhs = Value::Tensor(Tensor::new(vec![7.0], vec![1]).unwrap());
+        let error =
+            super::assign_cell_paren_with_policy(cell(), &[1], &vector_rhs, true).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:DeletionRequiresEmptyRhs"));
+    }
 
     #[test]
     fn cell_shape_error_mapping_reports_identifier() {

@@ -38,7 +38,7 @@ pub(in crate::builtins::deep_learning) struct ChannelGeometry {
 
 impl ChannelGeometry {
     pub fn new(input: &Tensor, axes: &AxisPlan) -> Result<Self, SoftmaxError> {
-        if input.shape.as_slice() != axes.shape() || input.len() != axes.element_count() {
+        if input.shape() != axes.shape() || input.len() != axes.element_count() {
             return Err(SoftmaxError::Axes);
         }
         Self::from_axes(axes, input.numeric_dtype())
@@ -130,7 +130,7 @@ pub(in crate::builtins::deep_learning) fn forward(
         )),
         _ => return Err(SoftmaxError::UnsupportedPrecision),
     };
-    Tensor::from_numeric_storage(storage, input.shape.clone()).map_err(SoftmaxError::Storage)
+    Tensor::from_numeric_storage(storage, input.shape().to_vec()).map_err(SoftmaxError::Storage)
 }
 
 pub(in crate::builtins::deep_learning) fn backward(
@@ -139,7 +139,7 @@ pub(in crate::builtins::deep_learning) fn backward(
     axes: &AxisPlan,
 ) -> Result<Tensor, SoftmaxError> {
     let geometry = ChannelGeometry::new(output, axes)?;
-    if output.shape != dy.shape || output.numeric_dtype() != dy.numeric_dtype() {
+    if output.shape() != dy.shape() || output.numeric_dtype() != dy.numeric_dtype() {
         return Err(SoftmaxError::GradientMismatch);
     }
     let storage = match output.numeric_dtype() {
@@ -161,7 +161,7 @@ pub(in crate::builtins::deep_learning) fn backward(
         )),
         _ => return Err(SoftmaxError::UnsupportedPrecision),
     };
-    Tensor::from_numeric_storage(storage, output.shape.clone()).map_err(SoftmaxError::Storage)
+    Tensor::from_numeric_storage(storage, output.shape().to_vec()).map_err(SoftmaxError::Storage)
 }
 
 fn forward_values<T: Real>(x: &[T], g: &ChannelGeometry) -> Vec<T> {
@@ -216,10 +216,10 @@ mod tests {
     fn non_square_bc_and_cb_use_semantic_channel_axis() {
         let bc = Tensor::new(vec![1., 4., 2., 5., 3., 6.], vec![2, 3]).unwrap();
         let axes_bc =
-            AxisPlan::new(DeepLearningAxisLayout::parse("BC", 2).unwrap(), &bc.shape).unwrap();
+            AxisPlan::new(DeepLearningAxisLayout::parse("BC", 2).unwrap(), bc.shape()).unwrap();
         let cb = Tensor::new(vec![1., 2., 3., 4., 5., 6.], vec![3, 2]).unwrap();
         let axes_cb =
-            AxisPlan::new(DeepLearningAxisLayout::parse("CB", 2).unwrap(), &cb.shape).unwrap();
+            AxisPlan::new(DeepLearningAxisLayout::parse("CB", 2).unwrap(), cb.shape()).unwrap();
         let y_bc = forward(&bc, &axes_bc).unwrap();
         let y_cb = forward(&cb, &axes_cb).unwrap();
         let bc_values = y_bc.as_f64_slice().unwrap();

@@ -102,7 +102,7 @@ impl FillOptions {
     pub(super) fn preflight(&self, value: &Value) -> BuiltinResult<()> {
         match value {
             Value::Tensor(tensor) => {
-                self.preflight_numeric(&tensor.shape, tensor.integer_storage().is_some())
+                self.preflight_numeric(tensor.shape(), tensor.integer_storage().is_some())
             }
             Value::GpuTensor(handle) => {
                 if handle_storage(handle) != GpuTensorStorage::Real {
@@ -254,14 +254,14 @@ pub(super) fn fill_missing_tensor(
     tensor: Tensor,
     options: &FillOptions,
 ) -> BuiltinResult<(Value, LogicalArray)> {
-    let lines = FillLines::new(&tensor.shape, options.dim)?;
+    let lines = FillLines::new(tensor.shape(), options.dim)?;
     if tensor.integer_storage().is_some() {
-        let mask = LogicalArray::new(vec![0; tensor.len()], tensor.shape.clone())
+        let mask = LogicalArray::new(vec![0; tensor.len()], tensor.shape().to_vec())
             .map_err(internal_error)?;
         return Ok((Value::Tensor(tensor), mask));
     }
     let dtype = tensor.numeric_dtype();
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let mut data = tensor_utils::tensor_into_values_f64(tensor);
     let mut mask: Vec<u8> = data.iter().map(|value| u8::from(value.is_nan())).collect();
     match &options.method {

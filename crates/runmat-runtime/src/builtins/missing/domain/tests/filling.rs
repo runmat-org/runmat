@@ -302,7 +302,7 @@ fn fillmissing_integer_noop_preserves_nd_and_empty_mask_shapes() {
             panic!("integer input must retain its tensor carrier");
         };
         assert_eq!(output.integer_storage(), Some(&storage));
-        assert_eq!(output.shape, shape);
+        assert_eq!(output.shape(), shape);
         assert_eq!(mask.shape, shape);
         assert_eq!(mask.data, vec![0; count]);
     }
@@ -317,10 +317,30 @@ fn fillmissing_constant_preserves_nd_values_and_mask_shape() {
     let Value::Tensor(output) = output else {
         panic!("floating input must retain its tensor carrier");
     };
-    assert_eq!(output.shape, shape);
+    assert_eq!(output.shape(), shape);
     assert_eq!(output.materialize_f64(), vec![1.0, 7.0, 7.0, 4.0]);
     assert_eq!(mask.shape, shape);
     assert_eq!(mask.data, vec![0, 1, 1, 0]);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn fillmissing_preserves_rank_zero_and_rank_one_tensor_shapes() {
+    for (shape, data, expected) in [
+        (Vec::new(), vec![f64::NAN], vec![7.0]),
+        (vec![2], vec![f64::NAN, 3.0], vec![7.0, 3.0]),
+    ] {
+        let result = block_on(fillmissing_builtin(
+            Value::Tensor(Tensor::new(data, shape.clone()).unwrap()),
+            vec![Value::from("constant"), Value::Num(7.0)],
+        ))
+        .expect("fillmissing should preserve full-rank tensor geometry");
+        let Value::Tensor(output) = result else {
+            panic!("expected tensor output");
+        };
+        assert_eq!(output.shape(), shape);
+        assert_eq!(output.materialize_f64(), expected);
+    }
 }
 
 #[test]
@@ -351,7 +371,7 @@ fn fillmissing_numeric_methods_traverse_each_matrix_and_nd_line_independently() 
                 panic!("expected tensor")
             };
             assert_eq!(output.materialize_f64(), expected, "{method}, {shape:?}");
-            assert_eq!(output.shape, shape);
+            assert_eq!(output.shape(), shape);
             assert_eq!(mask.shape, shape);
             assert_eq!(mask.data, expected_mask);
         }
@@ -391,7 +411,7 @@ fn fillmissing_numeric_methods_traverse_each_matrix_and_nd_line_independently() 
             panic!("expected tensor")
         };
         assert_eq!(output.materialize_f64(), expected, "{method}, dimension3");
-        assert_eq!(output.shape, shape);
+        assert_eq!(output.shape(), shape);
         assert_eq!(mask.shape, shape);
         assert_eq!(mask.data, vec![0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0]);
     }

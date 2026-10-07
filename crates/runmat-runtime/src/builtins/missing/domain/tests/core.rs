@@ -189,6 +189,28 @@ fn ismissing_detects_numeric_and_string_values() {
     assert!(matches!(result, Value::LogicalArray(mask) if mask.data == vec![0, 1]));
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn ismissing_preserves_rank_zero_and_rank_one_numeric_shapes() {
+    let cases = [
+        Value::Tensor(Tensor::new(vec![f64::NAN], Vec::new()).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, f64::NAN], vec![2]).unwrap()),
+        Value::ComplexTensor(ComplexTensor::new(vec![(f64::NAN, 0.0)], Vec::new()).unwrap()),
+    ];
+    for (input, expected_shape, expected_mask) in [
+        (cases[0].clone(), Vec::new(), vec![1]),
+        (cases[1].clone(), vec![2], vec![0, 1]),
+        (cases[2].clone(), Vec::new(), vec![1]),
+    ] {
+        let result = block_on(ismissing_builtin(input)).expect("ismissing numeric shape");
+        assert!(matches!(
+            result,
+            Value::LogicalArray(mask)
+                if mask.shape == expected_shape && mask.data == expected_mask
+        ));
+    }
+}
+
 #[test]
 fn ismissing_typed_integer_tensor_ignores_f64_mirror() {
     let input = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![1, 3])

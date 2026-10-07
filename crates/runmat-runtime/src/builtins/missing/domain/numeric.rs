@@ -89,7 +89,7 @@ pub(super) fn broadcast_pairwise_numeric(
 ) -> BuiltinResult<(Vec<f64>, Vec<usize>, runmat_value::NumericDType)> {
     let left_len = tensor_utils::tensor_element_len(left);
     let right_len = tensor_utils::tensor_element_len(right);
-    if left_len == right_len && left.shape == right.shape {
+    if left_len == right_len && left.shape() == right.shape() {
         let left_values = tensor_utils::tensor_values_f64_cow(left);
         let right_values = tensor_utils::tensor_values_f64_cow(right);
         let data = left_values
@@ -97,7 +97,7 @@ pub(super) fn broadcast_pairwise_numeric(
             .zip(right_values.iter())
             .map(|(a, b)| op(*a, *b))
             .collect();
-        return Ok((data, left.shape.clone(), left.numeric_dtype()));
+        return Ok((data, left.shape().to_vec(), left.numeric_dtype()));
     }
     if left_len == 1 {
         let left_values = tensor_utils::tensor_values_f64_cow(left);
@@ -106,7 +106,7 @@ pub(super) fn broadcast_pairwise_numeric(
             .iter()
             .map(|b| op(left_values[0], *b))
             .collect();
-        return Ok((data, right.shape.clone(), right.numeric_dtype()));
+        return Ok((data, right.shape().to_vec(), right.numeric_dtype()));
     }
     if right_len == 1 {
         let left_values = tensor_utils::tensor_values_f64_cow(left);
@@ -115,7 +115,7 @@ pub(super) fn broadcast_pairwise_numeric(
             .iter()
             .map(|a| op(*a, right_values[0]))
             .collect();
-        return Ok((data, left.shape.clone(), left.numeric_dtype()));
+        return Ok((data, left.shape().to_vec(), left.numeric_dtype()));
     }
     Err(invalid_argument(
         "nanmin: pairwise inputs must have the same shape or one scalar input",
