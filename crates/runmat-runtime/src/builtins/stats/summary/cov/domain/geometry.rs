@@ -29,7 +29,7 @@ pub(in super::super) fn covariance_element_count(shape: &[usize]) -> BuiltinResu
 
 pub(in super::super) fn covariance_input_shape(value: &Value) -> Option<&[usize]> {
     match value {
-        Value::Tensor(tensor) => Some(&tensor.shape),
+        Value::Tensor(tensor) => Some(tensor.shape()),
         Value::LogicalArray(array) => Some(&array.shape),
         Value::GpuTensor(handle) => Some(handle.shape()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Some(&[1, 1]),
@@ -64,7 +64,7 @@ pub(in super::super) fn validate_covariance_pair_shapes(
 
 impl Matrix {
     fn from_single_tensor(tensor: Tensor) -> BuiltinResult<Self> {
-        if tensor.shape.len() > 2 {
+        if tensor.shape().len() > 2 {
             return Err(cov_error_with_detail(
                 &COV_ERROR_INVALID_ARGUMENT,
                 "inputs must be 2-D matrices or vectors",
@@ -94,7 +94,7 @@ impl Matrix {
     }
 
     fn from_tensor_pair(left: Tensor, right: Tensor) -> BuiltinResult<Self> {
-        validate_covariance_pair_shapes(&left.shape, &right.shape)?;
+        validate_covariance_pair_shapes(left.shape(), right.shape())?;
         let rows = left.len();
         let mut data = centered_tensor_values(&left, rows, 1);
         data.extend(centered_tensor_values(&right, rows, 1));
@@ -161,5 +161,35 @@ fn int_value_to_i128(value: &IntValue) -> i128 {
         IntValue::U16(value) => i128::from(*value),
         IntValue::U32(value) => i128::from(*value),
         IntValue::U64(value) => i128::from(*value),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn covariance_preserves_rank_zero_and_rank_one_observation_roles() {
+        for shape in [Vec::new(), vec![1]] {
+            let input = Value::Tensor(Tensor::new(vec![7.0], shape).unwrap());
+            let Value::Tensor(output) =
+                block_on(super::super::super::cov_builtin(input, Vec::new())).unwrap()
+            else {
+                panic!("expected covariance tensor");
+            };
+            assert_eq!(output.shape(), &[1, 1]);
+            assert_eq!(output.materialize_f64(), vec![0.0]);
+        }
+        let left = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap());
+        let right = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0], vec![3, 1]).unwrap());
+        let Value::Tensor(output) =
+            block_on(super::super::super::cov_builtin(left, vec![right])).unwrap()
+        else {
+            panic!("expected paired covariance tensor");
+        };
+        assert_eq!(output.shape(), &[2, 2]);
+        assert_eq!(output.materialize_f64(), vec![1.0, 2.0, 2.0, 4.0]);
     }
 }

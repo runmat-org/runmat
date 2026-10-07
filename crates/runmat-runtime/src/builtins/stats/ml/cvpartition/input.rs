@@ -62,7 +62,7 @@ pub(super) fn numeric_labels(tensor: Tensor) -> BuiltinResult<PartitionInput> {
             "cvpartition: stratification variable must be nonempty",
         ));
     }
-    if tensor.shape.iter().filter(|dim| **dim > 1).count() > 1 {
+    if tensor.shape().iter().filter(|dim| **dim > 1).count() > 1 {
         return Err(invalid_argument(
             "cvpartition: stratification variable must be a vector",
         ));

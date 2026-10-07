@@ -261,7 +261,7 @@ pub(super) fn custom_numeric_partition(tensor: Tensor) -> BuiltinResult<Partitio
             "cvpartition: CustomPartition test sets must be nonempty",
         ));
     }
-    let is_vector = tensor.shape.iter().filter(|dim| **dim > 1).count() <= 1;
+    let is_vector = tensor.shape().iter().filter(|dim| **dim > 1).count() <= 1;
     if !is_vector {
         let data = values
             .iter()
@@ -277,7 +277,7 @@ pub(super) fn custom_numeric_partition(tensor: Tensor) -> BuiltinResult<Partitio
                 }
             })
             .collect::<BuiltinResult<Vec<_>>>()?;
-        let array = LogicalArray::new(data, tensor.shape)
+        let array = LogicalArray::new(data, tensor.shape().to_vec())
             .map_err(|err| internal_error(format!("cvpartition: {err}")))?;
         return custom_partition(Value::LogicalArray(array));
     }
@@ -353,7 +353,7 @@ pub(super) fn custom_integer_partition(tensor: Tensor) -> BuiltinResult<Partitio
             "cvpartition: CustomPartition test sets must be nonempty",
         ));
     }
-    let is_vector = tensor.shape.iter().filter(|dim| **dim > 1).count() <= 1;
+    let is_vector = tensor.shape().iter().filter(|dim| **dim > 1).count() <= 1;
     let logical_byte = |value: &runmat_value::IntValue| match value.try_to_usize() {
         Some(0) => Ok(0),
         Some(1) => Ok(1),
@@ -369,7 +369,7 @@ pub(super) fn custom_integer_partition(tensor: Tensor) -> BuiltinResult<Partitio
         let shape = if is_vector {
             vec![values.len(), 1]
         } else {
-            tensor.shape.clone()
+            tensor.shape().to_vec()
         };
         let array = LogicalArray::new(data, shape)
             .map_err(|err| internal_error(format!("cvpartition: {err}")))?;

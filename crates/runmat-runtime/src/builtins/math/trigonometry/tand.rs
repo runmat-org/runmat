@@ -182,7 +182,7 @@ fn tand_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
             .iter()
             .map(tand_integer_scalar)
             .collect();
-        return Tensor::new(data, tensor.shape.clone())
+        return Tensor::new(data, tensor.shape().to_vec())
             .map_err(|err| tand_error_with_detail(&TAND_ERROR_INTERNAL, err));
     }
     if tensor.numeric_dtype() == NumericDType::F32 {
@@ -192,20 +192,20 @@ fn tand_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
             .iter()
             .map(|&value| tand_scalar(f64::from(value)) as f32)
             .collect();
-        return Tensor::from_f32(data, tensor.shape.clone())
+        return Tensor::from_f32(data, tensor.shape().to_vec())
             .map_err(|err| tand_error_with_detail(&TAND_ERROR_INTERNAL, err));
     }
     let data = tensor::tensor_values_f64_cow(&tensor)
         .iter()
         .map(|&value| tand_scalar(value))
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
+    Tensor::new(data, tensor.shape().to_vec())
         .map_err(|err| tand_error_with_detail(&TAND_ERROR_INTERNAL, err))
 }
 
 fn tand_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
-    let converted = match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let converted = match storage {
         ComplexStorage::F32(values) => ComplexTensor::from_f32(
             values
                 .into_iter()
@@ -352,7 +352,7 @@ pub(crate) mod tests {
         else {
             panic!("expected character result tensor")
         };
-        assert_eq!(chars.shape, vec![1, 2]);
+        assert_eq!(chars.shape(), &[1, 2]);
         assert_eq!(chars.materialize_f64(), vec![1.0, f64::INFINITY]);
     }
 
@@ -372,7 +372,7 @@ pub(crate) mod tests {
         let result = tand_builtin(Value::Tensor(tensor)).expect("tand");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert_eq!(t.materialize_f64()[0], 0.0);
                 assert_eq!(t.materialize_f64()[1], 1.0);
                 assert_eq!(t.materialize_f64()[2], f64::INFINITY);
@@ -380,6 +380,42 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn tand_preserves_real_and_complex_rank_projection() {
+        assert_eq!(
+            tand_builtin(Value::Tensor(Tensor::new(vec![45.0], Vec::new()).unwrap())).unwrap(),
+            Value::Num(1.0)
+        );
+        let Value::Tensor(real) = tand_builtin(Value::Tensor(
+            Tensor::new(vec![0.0, 45.0], vec![2]).unwrap(),
+        ))
+        .unwrap() else {
+            panic!("expected rank-one real tensor");
+        };
+        assert_eq!(real.shape(), &[2]);
+        assert_eq!(real.materialize_f64(), vec![0.0, 1.0]);
+
+        let Value::Complex(re, im) = tand_builtin(Value::ComplexTensor(
+            ComplexTensor::new(vec![(0.0, 0.0)], Vec::new()).unwrap(),
+        ))
+        .unwrap() else {
+            panic!("expected complex scalar");
+        };
+        assert_eq!((re, im), (0.0, 0.0));
+        let Value::ComplexTensor(complex) = tand_builtin(Value::ComplexTensor(
+            ComplexTensor::new(vec![(0.0, 0.0), (45.0, 0.0)], vec![2]).unwrap(),
+        ))
+        .unwrap() else {
+            panic!("expected rank-one complex tensor");
+        };
+        assert_eq!(complex.shape(), &[2]);
+        let values = complex.materialize_f64();
+        assert_eq!(values[0], (0.0, 0.0));
+        assert!((values[1].0 - 1.0).abs() < 1.0e-12);
+        assert_eq!(values[1].1, 0.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -392,7 +428,7 @@ pub(crate) mod tests {
 
         match tand_builtin(Value::Tensor(tensor)).expect("tand") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), &[1, 2]);
                 let expected = [0.0, 1.0];
                 for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
@@ -411,7 +447,7 @@ pub(crate) mod tests {
         let result = tand_builtin(Value::LogicalArray(logical)).expect("tand");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 assert_eq!(t.materialize_f64()[0], 0.0);
                 let expected = (1.0_f64 * DEG_TO_RAD).tan();
                 assert!((t.materialize_f64()[1] - expected).abs() < 1e-12);
@@ -439,7 +475,7 @@ pub(crate) mod tests {
             assert_eq!(handle.device_id(), source_device);
             let gathered = test_support::gather(result).expect("gather result");
             assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
-            assert_eq!(gathered.shape, vec![3, 1]);
+            assert_eq!(gathered.shape(), &[3, 1]);
         });
     }
 

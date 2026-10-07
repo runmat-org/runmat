@@ -119,7 +119,7 @@ fn sinpi_real_value(value: Value) -> BuiltinResult<Value> {
 
 fn sinpi_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     if tensor.integer_storage().is_some() {
-        return Tensor::new(vec![0.0; tensor.len()], tensor.shape.clone())
+        return Tensor::new(vec![0.0; tensor.len()], tensor.shape().to_vec())
             .map_err(|err| sinpi_error_with_detail(&SINPI_ERROR_INTERNAL, err));
     }
     if tensor.numeric_dtype() == NumericDType::F32 {
@@ -129,20 +129,20 @@ fn sinpi_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
             .iter()
             .map(|&value| sinpi_real(f64::from(value)) as f32)
             .collect();
-        return Tensor::from_f32(data, tensor.shape.clone())
+        return Tensor::from_f32(data, tensor.shape().to_vec())
             .map_err(|err| sinpi_error_with_detail(&SINPI_ERROR_INTERNAL, err));
     }
     let data = tensor::tensor_values_f64_cow(&tensor)
         .iter()
         .map(|&value| sinpi_real(value))
         .collect();
-    Tensor::new(data, tensor.shape.clone())
+    Tensor::new(data, tensor.shape().to_vec())
         .map_err(|err| sinpi_error_with_detail(&SINPI_ERROR_INTERNAL, err))
 }
 
 fn sinpi_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
-    let converted = match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let converted = match storage {
         ComplexStorage::F32(values) => ComplexTensor::from_f32(
             values
                 .into_iter()
@@ -229,8 +229,40 @@ mod tests {
         let Value::Tensor(out) = call(Value::Tensor(tensor)).unwrap() else {
             panic!("expected tensor");
         };
-        assert_eq!(out.shape, vec![1, 5]);
+        assert_eq!(out.shape(), &[1, 5]);
         assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0, -1.0, 0.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn rank_zero_and_rank_one_real_and_complex_inputs_keep_projection() {
+        assert_eq!(
+            call(Value::Tensor(Tensor::new(vec![0.5], Vec::new()).unwrap())).unwrap(),
+            Value::Num(1.0)
+        );
+        let Value::Tensor(real) =
+            call(Value::Tensor(Tensor::new(vec![0.0, 0.5], vec![2]).unwrap())).unwrap()
+        else {
+            panic!("expected rank-one real tensor");
+        };
+        assert_eq!(real.shape(), &[2]);
+        assert_eq!(real.materialize_f64(), vec![0.0, 1.0]);
+
+        let Value::Complex(re, im) = call(Value::ComplexTensor(
+            ComplexTensor::new(vec![(0.0, 0.0)], Vec::new()).unwrap(),
+        ))
+        .unwrap() else {
+            panic!("expected complex scalar");
+        };
+        assert_eq!((re, im), (0.0, 0.0));
+        let Value::ComplexTensor(complex) = call(Value::ComplexTensor(
+            ComplexTensor::new(vec![(0.0, 0.0), (0.5, 0.0)], vec![2]).unwrap(),
+        ))
+        .unwrap() else {
+            panic!("expected rank-one complex tensor");
+        };
+        assert_eq!(complex.shape(), &[2]);
+        assert_eq!(complex.materialize_f64(), vec![(0.0, 0.0), (1.0, 0.0)]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -286,7 +318,7 @@ mod tests {
         let Value::Tensor(out) = call(Value::CharArray(CharArray::new_row("AB"))).unwrap() else {
             panic!("expected character result tensor");
         };
-        assert_eq!(out.shape, vec![1, 2]);
+        assert_eq!(out.shape(), &[1, 2]);
         assert_eq!(out.materialize_f64(), vec![0.0, 0.0]);
     }
 
@@ -317,7 +349,7 @@ mod tests {
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
                     data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 })
                 .expect("upload");
             let Value::Tensor(out) = call(Value::GpuTensor(handle)).unwrap() else {
@@ -339,7 +371,7 @@ mod tests {
 
         match call(Value::Tensor(tensor)).expect("sinpi") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 assert!(out.materialize_f64().iter().all(|value| *value == 0.0));
                 assert!(out.integer_storage().is_none());
             }

@@ -377,6 +377,50 @@ fn custom_integer_vector_expands_to_test_set_columns() {
     assert_eq!(all.data, vec![1, 0, 0, 1, 0, 1, 1, 0]);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn custom_numeric_singletons_preserve_rank_zero_and_rank_one_masks() {
+    for shape in [vec![], vec![1]] {
+        let partition = cv(
+            Value::String("CustomPartition".into()),
+            tensor(vec![1.0], shape.clone()),
+            Vec::new(),
+        );
+        let mask = logical_output(block_on(test_builtin(partition, Vec::new())).unwrap());
+        assert_eq!(mask.shape, vec![1, 1]);
+        assert_eq!(mask.data, vec![1]);
+
+        let partition = cv(
+            Value::String("CustomPartition".into()),
+            cleared_int_tensor(IntegerStorage::U8(vec![0]), shape),
+            Vec::new(),
+        );
+        let mask = logical_output(block_on(test_builtin(partition, Vec::new())).unwrap());
+        assert_eq!(mask.shape, vec![1, 1]);
+        assert_eq!(mask.data, vec![0]);
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn numeric_partition_input_preserves_scalar_count_and_rank_one_labels() {
+    let scalar_count = cv(
+        tensor(vec![2.0], vec![]),
+        Value::String("Resubstitution".into()),
+        Vec::new(),
+    );
+    let label_vector = cv(
+        tensor(vec![8.0, 9.0], vec![2]),
+        Value::String("Resubstitution".into()),
+        Vec::new(),
+    );
+    for partition in [scalar_count, label_vector] {
+        let mask = logical_output(block_on(test_builtin(partition, Vec::new())).unwrap());
+        assert_eq!(mask.shape, vec![2, 1]);
+        assert_eq!(mask.data, vec![1, 1]);
+    }
+}
+
 #[test]
 fn custom_integer_vector_reads_typed_integer_storage_exactly() {
     let partition = cv(

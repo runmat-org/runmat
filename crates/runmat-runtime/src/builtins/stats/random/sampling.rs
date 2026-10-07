@@ -1209,7 +1209,7 @@ fn sample_value_axis(
 ) -> BuiltinResult<Value> {
     match data {
         Value::Tensor(t) => {
-            let shape = normalize_shape(t.shape.clone());
+            let shape = normalize_shape(t.shape().to_vec());
             sample_tensor_axis(t, &shape, axis, indices, name)
         }
         Value::Num(value) => {
@@ -1257,7 +1257,7 @@ fn sample_value_axis(
 
 fn shape_of_sampled_value(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Tensor(t) => Ok(normalize_shape(t.shape.clone())),
+        Value::Tensor(t) => Ok(normalize_shape(t.shape().to_vec())),
         Value::LogicalArray(a) => Ok(normalize_shape(a.shape.clone())),
         Value::StringArray(a) => Ok(normalize_shape(a.shape.clone())),
         Value::CharArray(a) => Ok(vec![a.rows, a.cols]),
@@ -1732,11 +1732,11 @@ async fn parse_unidrnd_args(args: Vec<Value>) -> BuiltinResult<(Tensor, Vec<usiz
         ));
     }
     let shape = if args.len() == 1 {
-        normalize_shape(n.shape.clone())
+        normalize_shape(n.shape().to_vec())
     } else {
         parse_shape_args("unidrnd", &args[1..]).await?
     };
-    if !tensor::is_scalar_tensor(&n) && normalize_shape(n.shape.clone()) != shape {
+    if !tensor::is_scalar_tensor(&n) && normalize_shape(n.shape().to_vec()) != shape {
         return Err(sampling_error(
             "unidrnd",
             "unidrnd: requested size must match non-scalar n",
@@ -2601,7 +2601,7 @@ mod tests {
             let Value::Tensor(sampled) = sampled else {
                 panic!("expected sampled tensor");
             };
-            assert_eq!(sampled.shape, vec![2, 2]);
+            assert_eq!(sampled.shape(), &[2, 2]);
             assert_eq!(sampled.into_numeric_storage(), Ok(expected));
         }
     }
@@ -2623,14 +2623,14 @@ mod tests {
                 assert_eq!(values.len(), 2);
                 match &values[0] {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![2, 2]);
+                        assert_eq!(t.shape(), &[2, 2]);
                         assert_eq!(t.materialize_f64().len(), 4);
                     }
                     other => panic!("expected tensor sample, got {other:?}"),
                 }
                 match &values[1] {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![2, 1]);
+                        assert_eq!(t.shape(), &[2, 1]);
                         assert!(t
                             .materialize_f64()
                             .iter()
@@ -2640,6 +2640,25 @@ mod tests {
                 }
             }
             other => panic!("expected output list, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn datasample_normalizes_rank_zero_and_rank_one_singleton_populations() {
+        let _lock = random::test_guard();
+        random::reset_rng();
+        for shape in [vec![], vec![1]] {
+            let population = Value::Tensor(Tensor::new(vec![7.0], shape).unwrap());
+            let Value::Tensor(sample) = block_on(datasample::datasample_builtin(
+                population,
+                vec![Value::Num(1.0)],
+            ))
+            .expect("sample singleton population") else {
+                panic!("expected tensor sample");
+            };
+            assert_eq!(sample.shape(), &[1, 1]);
+            assert_eq!(sample.materialize_f64(), vec![7.0]);
         }
     }
 
@@ -2834,7 +2853,7 @@ mod tests {
         .unwrap();
         match range {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -2853,7 +2872,7 @@ mod tests {
         .unwrap();
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), &[1, 4]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -2959,7 +2978,7 @@ mod tests {
         .unwrap();
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -2973,7 +2992,7 @@ mod tests {
         let out = block_on(unidrnd::unidrnd_builtin(vec![n])).unwrap();
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
                 assert_eq!(t.materialize_f64()[0], 1.0);
                 assert!((1.0..=2.0).contains(&t.materialize_f64()[1]));
                 assert!((1.0..=3.0).contains(&t.materialize_f64()[2]));
@@ -2991,7 +3010,7 @@ mod tests {
         let out = block_on(unidrnd::unidrnd_builtin(vec![n])).unwrap();
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
                 assert!(t.materialize_f64().iter().all(|value| value.is_finite()));
                 assert!(t
                     .materialize_f64()
@@ -3052,7 +3071,7 @@ mod tests {
                 for (value, expected_len) in values.iter().zip([6usize, 2, 2]) {
                     match value {
                         Value::Tensor(t) => {
-                            assert_eq!(t.shape, vec![1, expected_len]);
+                            assert_eq!(t.shape(), &[1, expected_len]);
                             seen.extend_from_slice(&t.materialize_f64());
                         }
                         other => panic!("expected tensor indices, got {other:?}"),
@@ -3077,7 +3096,7 @@ mod tests {
                     let shapes = values
                         .iter()
                         .map(|value| match value {
-                            Value::Tensor(t) => t.shape.clone(),
+                            Value::Tensor(t) => t.shape().to_vec(),
                             other => panic!("expected tensor indices, got {other:?}"),
                         })
                         .collect::<Vec<_>>();
@@ -3099,9 +3118,9 @@ mod tests {
             .unwrap();
             match out {
                 Value::OutputList(values) => {
-                    assert!(matches!(&values[0], Value::Tensor(t) if t.shape == vec![1, 3]));
-                    assert!(matches!(&values[1], Value::Tensor(t) if t.shape == vec![1, 0]));
-                    assert!(matches!(&values[2], Value::Tensor(t) if t.shape == vec![1, 0]));
+                    assert!(matches!(&values[0], Value::Tensor(t) if t.shape() == [1, 3]));
+                    assert!(matches!(&values[1], Value::Tensor(t) if t.shape() == [1, 0]));
+                    assert!(matches!(&values[2], Value::Tensor(t) if t.shape() == [1, 0]));
                 }
                 other => panic!("expected output list, got {other:?}"),
             }
@@ -3310,13 +3329,13 @@ mod tests {
         assert!(matches!(
             &outputs[0],
             Value::Tensor(tensor)
-                if tensor.shape == vec![2, 1]
+                if tensor.shape() == [2, 1]
                     && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![wide, wide]))
         ));
         assert!(matches!(
             &outputs[1],
             Value::Tensor(tensor)
-                if tensor.shape == vec![2, 2]
+                if tensor.shape() == [2, 2]
                     && tensor.materialize_f64() == vec![1.0; 4]
         ));
     }
@@ -3359,7 +3378,7 @@ mod tests {
                 .expect("RunMat resident nboot") else {
                     panic!("expected empty bootstat tensor");
                 };
-                assert_eq!(output.shape, vec![2, 0]);
+                assert_eq!(output.shape(), &[2, 0]);
             }
         });
     }
@@ -3385,7 +3404,7 @@ mod tests {
             let Value::Tensor(tensor) = output else {
                 panic!("expected tensor bootstat");
             };
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), &[1, 2]);
             assert_eq!(tensor.into_numeric_storage(), Ok(expected));
         }
 
@@ -3417,7 +3436,7 @@ mod tests {
                 assert_eq!(values.len(), 2);
                 match &values[0] {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![4, 1]);
+                        assert_eq!(t.shape(), &[4, 1]);
                         assert_eq!(t.materialize_f64(), vec![10.0; 4]);
                     }
                     Value::Num(value) => assert_eq!(*value, 10.0),
@@ -3425,7 +3444,7 @@ mod tests {
                 }
                 match &values[1] {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![3, 4]);
+                        assert_eq!(t.shape(), &[3, 4]);
                         assert_eq!(t.materialize_f64(), vec![1.0; 12]);
                     }
                     other => panic!("expected tensor bootsam, got {other:?}"),
@@ -3451,12 +3470,12 @@ mod tests {
             Value::OutputList(values) => {
                 assert_eq!(values.len(), 2);
                 match &values[0] {
-                    Value::Tensor(t) => assert_eq!(t.shape, vec![2, 0]),
+                    Value::Tensor(t) => assert_eq!(t.shape(), &[2, 0]),
                     other => panic!("expected empty tensor bootstat, got {other:?}"),
                 }
                 match &values[1] {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![3, 2]);
+                        assert_eq!(t.shape(), &[3, 2]);
                         assert!(t
                             .materialize_f64()
                             .iter()
@@ -3483,7 +3502,7 @@ mod tests {
         ]))
         .unwrap();
         match out {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![3, 1]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[3, 1]),
             other => panic!("expected tensor bootstat, got {other:?}"),
         }
     }
@@ -3500,7 +3519,7 @@ mod tests {
         .unwrap();
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
                 assert_eq!(t.materialize_f64(), vec![42.0; 3]);
             }
             other => panic!("expected tensor bootstat, got {other:?}"),
@@ -3523,7 +3542,7 @@ mod tests {
         match out {
             Value::OutputList(values) => match &values[1] {
                 Value::Tensor(t) => {
-                    assert_eq!(t.shape, vec![4, 2]);
+                    assert_eq!(t.shape(), &[4, 2]);
                     assert!(t
                         .materialize_f64()
                         .iter()
