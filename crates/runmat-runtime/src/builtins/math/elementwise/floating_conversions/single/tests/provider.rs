@@ -18,7 +18,7 @@ fn single_gpu_roundtrip() {
                     .into_iter()
                     .map(|v| v as f64)
                     .collect();
-                assert_eq!(gathered.shape, vec![2, 2]);
+                assert_eq!(gathered.shape(), vec![2, 2]);
                 assert!(gathered.as_f32_slice().is_some());
                 assert_eq!(gathered.materialize_f64(), expected);
             }
@@ -88,7 +88,7 @@ fn single_like_gpu_prototype() {
                     .into_iter()
                     .map(|v| v as f64)
                     .collect();
-                assert_eq!(gathered.shape, vec![2, 2]);
+                assert_eq!(gathered.shape(), vec![2, 2]);
                 assert_eq!(gathered.materialize_f64(), expected);
             }
             other => panic!("expected gpu tensor, got {other:?}"),

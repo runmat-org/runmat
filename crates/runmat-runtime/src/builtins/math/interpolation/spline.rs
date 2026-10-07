@@ -192,7 +192,7 @@ mod tests {
             let Value::Tensor(output) = value else {
                 panic!("vector query must return a tensor");
             };
-            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(output.shape(), vec![1, 2]);
             assert!((output.materialize_f64()[0] - 0.125).abs() < 1e-12);
             assert!((output.materialize_f64()[1] - 3.375).abs() < 1e-12);
         }
@@ -216,7 +216,7 @@ mod tests {
         let Value::Tensor(output) = value else {
             panic!("array-valued spline must return a tensor");
         };
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), vec![2, 2]);
         let expected = [0.125, 1.25, 3.375, 7.75];
         for (actual, expected) in output.materialize_f64().iter().zip(expected) {
             assert!((actual - expected).abs() < 1e-12);
@@ -239,7 +239,7 @@ mod tests {
         let Value::Tensor(output) = value else {
             panic!("array-valued spline must return a tensor");
         };
-        assert_eq!(output.shape, vec![2, 3, 2, 2]);
+        assert_eq!(output.shape(), vec![2, 3, 2, 2]);
         let values = output.materialize_f64();
         for query in 0..4 {
             for component in 0..6 {

@@ -12,7 +12,7 @@ fn imag_gpu_provider_roundtrip() {
         let handle = provider.upload(&view).expect("upload");
         let result = imag_builtin(Value::GpuTensor(handle)).expect("imag");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![4, 1]);
+        assert_eq!(gathered.shape(), vec![4, 1]);
         assert!(gathered.materialize_f64().iter().all(|v| *v == 0.0));
     });
 }
@@ -71,7 +71,7 @@ fn imag_complex_gpu_provider_stays_resident() {
             runmat_accelerate_api::GpuTensorStorage::Real
         );
         let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), vec![2, 1]);
         assert_eq!(gathered.materialize_f64(), vec![2.0, 4.5]);
     });
 }

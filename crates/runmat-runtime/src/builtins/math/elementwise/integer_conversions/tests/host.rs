@@ -78,7 +78,7 @@ fn every_identity_preserves_tensor_shape_and_uses_authoritative_storage() {
         let Value::Tensor(output) = call(name, Value::Tensor(input.clone())) else {
             panic!("{name} must return a tensor");
         };
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), vec![2, 2]);
         assert_eq!(
             output.integer_storage().map(IntegerStorage::integer_class),
             Some(class)
@@ -114,7 +114,7 @@ fn logical_and_character_arrays_convert_for_every_identity() {
             let Value::Tensor(output) = call(name, input) else {
                 panic!("{name} must return a tensor");
             };
-            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(output.shape(), vec![1, 2]);
             assert_eq!(
                 output.integer_storage().map(IntegerStorage::integer_class),
                 Some(class)

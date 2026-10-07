@@ -12,7 +12,7 @@ fn conj_gpu_provider_roundtrip() {
         let handle = provider.upload(&view).expect("upload");
         let result = conj_builtin(Value::GpuTensor(handle)).expect("conj");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![4, 1]);
+        assert_eq!(gathered.shape(), vec![4, 1]);
         assert_eq!(gathered.materialize_f64(), tensor.materialize_f64());
     });
 }

@@ -18,7 +18,7 @@ fn gpu_provider_roundtrip() {
             .unwrap();
         let result = call(Value::GpuTensor(handle)).unwrap();
         let gathered = test_support::gather(result).unwrap();
-        assert_eq!(gathered.shape, vec![4, 1]);
+        assert_eq!(gathered.shape(), vec![4, 1]);
         assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0, 2.0, 3.0]);
     });
 }

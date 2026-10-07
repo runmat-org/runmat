@@ -173,7 +173,7 @@ fn rem_matrix_scalar_broadcast() {
     let result = rem_builtin(Value::Tensor(matrix), Value::Num(2.0)).expect("broadcast");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), vec![2, 2]);
             assert_eq!(
                 t.materialize_f64()
                     .iter()
@@ -202,7 +202,7 @@ fn rem_char_array_support() {
     let result = rem_builtin(Value::CharArray(chars.clone()), Value::Num(5.0)).expect("char rem");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), vec![1, 2]);
             let expected: Vec<f64> = chars
                 .data
                 .iter()
@@ -233,7 +233,7 @@ fn rem_broadcasting_between_vectors() {
     let result = rem_builtin(Value::Tensor(lhs), Value::Tensor(rhs)).expect("broadcast");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 3]);
+            assert_eq!(t.shape(), vec![2, 3]);
             assert_eq!(t.materialize_f64(), vec![1.0, -2.0, 1.0, -2.0, 1.0, -2.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -248,11 +248,11 @@ fn rem_gpu_pair_roundtrip() {
         let denom = Tensor::new(vec![4.0; 6], vec![3, 2]).unwrap();
         let numer_view = runmat_accelerate_api::HostTensorView {
             data: &numer.materialize_f64(),
-            shape: &numer.shape,
+            shape: numer.shape(),
         };
         let denom_view = runmat_accelerate_api::HostTensorView {
             data: &denom.materialize_f64(),
-            shape: &denom.shape,
+            shape: denom.shape(),
         };
         let numer_handle = provider.upload(&numer_view).expect("upload numer");
         let denom_handle = provider.upload(&denom_view).expect("upload denom");
@@ -262,7 +262,7 @@ fn rem_gpu_pair_roundtrip() {
         )
         .expect("rem");
         let gathered = test_support::gather(result).expect("gather result");
-        assert_eq!(gathered.shape, vec![3, 2]);
+        assert_eq!(gathered.shape(), vec![3, 2]);
         assert_eq!(
             gathered.materialize_f64(),
             vec![-1.0, -3.0, 0.0, 1.0, 2.0, 1.0]
@@ -304,7 +304,7 @@ fn rem_dense_integer_arrays_preserve_exact_storage_without_mirror() {
     let Value::Tensor(result) = result else {
         panic!("expected integer tensor");
     };
-    assert_eq!(result.shape, vec![2, 3]);
+    assert_eq!(result.shape(), vec![2, 3]);
     assert_eq!(
         result.integer_storage(),
         Some(&IntegerStorage::I64(vec![-3, 3, -3, 3, 0, 0]))
@@ -343,13 +343,13 @@ fn rem_wgpu_matches_cpu() {
     let numer_handle = provider
         .upload(&runmat_accelerate_api::HostTensorView {
             data: &numer.materialize_f64(),
-            shape: &numer.shape,
+            shape: numer.shape(),
         })
         .expect("upload numer");
     let denom_handle = provider
         .upload(&runmat_accelerate_api::HostTensorView {
             data: &denom.materialize_f64(),
-            shape: &denom.shape,
+            shape: denom.shape(),
         })
         .expect("upload denom");
 
@@ -362,7 +362,7 @@ fn rem_wgpu_matches_cpu() {
         other => panic!("unexpected CPU result {other:?}"),
     };
 
-    assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
+    assert_eq!(gpu_tensor.shape(), cpu_tensor.shape());
     let tol = match provider.precision() {
         runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
         runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

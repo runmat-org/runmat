@@ -138,7 +138,7 @@ mod tests {
         let Value::Tensor(output) = block_on(ppval_builtin(pp, query)).unwrap() else {
             panic!("array-valued ppval must return a tensor");
         };
-        assert_eq!(output.shape, vec![2, 3, 2, 2]);
+        assert_eq!(output.shape(), vec![2, 3, 2, 2]);
         let values = output.materialize_f64();
         for sample in 0..4 {
             for component in 0..6 {
@@ -174,7 +174,7 @@ mod tests {
         else {
             panic!("two-component pp must return a tensor");
         };
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), vec![2, 2]);
         assert_eq!(output.materialize_f64(), vec![10.5, 21.0, 31.5, 42.0]);
     }
 

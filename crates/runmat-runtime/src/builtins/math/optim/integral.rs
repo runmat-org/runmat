@@ -497,8 +497,9 @@ mod tests {
                 let values = (0..samples.len())
                     .map(|index| map(tensor::tensor_value_f64(&samples, index)))
                     .collect();
+                let shape = samples.shape().to_vec();
                 Ok(Value::Tensor(
-                    Tensor::new(values, samples.shape).expect("fixed test sample shape"),
+                    Tensor::new(values, shape).expect("fixed test sample shape"),
                 ))
             }
             other => Ok(Value::Num(map(scalar_bound("x", other).await?))),
@@ -581,8 +582,16 @@ mod tests {
     async fn complex_one_helper(x: Value) -> crate::BuiltinResult<Value> {
         COUNTED_CALLBACKS.with(|count| count.set(count.get() + 1));
         let (len, shape) = match x {
-            Value::Tensor(samples) => (samples.len(), samples.shape),
-            Value::ComplexTensor(samples) => (samples.len(), samples.shape),
+            Value::Tensor(samples) => {
+                let len = samples.len();
+                let shape = samples.shape().to_vec();
+                (len, shape)
+            }
+            Value::ComplexTensor(samples) => {
+                let len = samples.len();
+                let (_, shape) = samples.into_complex_storage_and_shape();
+                (len, shape)
+            }
             _ => return Ok(Value::Complex(1.0, 1.0)),
         };
         let values = vec![(1.0, 1.0); len];
@@ -657,10 +666,11 @@ mod tests {
                         (tail, tail)
                     })
                     .collect::<Vec<_>>();
+                let shape = samples.shape().to_vec();
                 Ok(Value::ComplexTensor(
                     runmat_value::ComplexTensor::from_complex_storage(
                         runmat_value::ComplexStorage::F64(values.into()),
-                        samples.shape,
+                        shape,
                     )
                     .expect("callback batch geometry"),
                 ))
@@ -876,7 +886,11 @@ mod tests {
     )]
     async fn integer_tensor_helper(_x: Value) -> crate::BuiltinResult<Value> {
         let (len, shape) = match _x {
-            Value::Tensor(samples) => (samples.len(), samples.shape),
+            Value::Tensor(samples) => {
+                let len = samples.len();
+                let shape = samples.shape().to_vec();
+                (len, shape)
+            }
             _ => (1, vec![1, 1]),
         };
         let tensor = Tensor::new_integer(IntegerStorage::I16(vec![3; len]), shape).expect("tensor");
@@ -1014,7 +1028,7 @@ mod tests {
         let Value::ComplexTensor(array) = array else {
             panic!("expected complex tensor")
         };
-        assert_eq!(array.shape, vec![1, 2]);
+        assert_eq!(array.shape(), vec![1, 2]);
         assert!(
             matches!(array.numeric_value_at(0), Some((runmat_value::NumericScalar::F64(real), runmat_value::NumericScalar::F64(imaginary))) if (real + 1.0).abs() < 1.0e-9 && (imaginary - 1.0).abs() < 1.0e-9)
         );
@@ -1041,7 +1055,7 @@ mod tests {
                     let Value::ComplexTensor(array) = result else {
                         panic!("expected complex double array")
                     };
-                    assert_eq!(array.shape, vec![1, 1, 1]);
+                    assert_eq!(array.shape(), vec![1, 1, 1]);
                     assert!(matches!(
                         array.complex_storage(),
                         runmat_value::ComplexStorage::F64(_)
@@ -1053,7 +1067,7 @@ mod tests {
                     let Value::Tensor(array) = result else {
                         panic!("expected real double array")
                     };
-                    assert_eq!(array.shape, vec![1, 1, 1]);
+                    assert_eq!(array.shape(), vec![1, 1, 1]);
                     assert_eq!(array.numeric_dtype(), runmat_value::NumericDType::F64);
                     assert!((tensor::tensor_value_f64(&array, 0) - expected).abs() < 1.0e-9);
                 }
@@ -1225,7 +1239,7 @@ mod tests {
         let Value::Tensor(result) = result else {
             panic!("expected array output")
         };
-        assert_eq!(result.shape, vec![1, 3]);
+        assert_eq!(result.shape(), vec![1, 3]);
         for (index, expected) in [0.5, 1.0 / 3.0, 1.0].into_iter().enumerate() {
             assert!((tensor::tensor_value_f64(&result, index) - expected).abs() < 1.0e-7);
         }
@@ -1243,7 +1257,7 @@ mod tests {
         let Value::Tensor(result) = result else {
             panic!("expected array output")
         };
-        assert_eq!(result.shape, vec![1, 3]);
+        assert_eq!(result.shape(), vec![1, 3]);
         assert!((0..3).all(|index| tensor::tensor_value_f64(&result, index) == 0.0));
     }
 
@@ -1280,7 +1294,7 @@ mod tests {
             let Value::Tensor(result) = result else {
                 panic!("expected array output")
             };
-            assert_eq!(result.shape, shape);
+            assert_eq!(result.shape(), shape);
             for (index, expected) in expected.into_iter().enumerate() {
                 assert!((tensor::tensor_value_f64(&result, index) - expected).abs() < 1.0e-7);
             }
@@ -1317,7 +1331,7 @@ mod tests {
         let Value::Tensor(array) = array else {
             panic!("array integral must return a tensor")
         };
-        assert_eq!(array.shape, vec![1, 3]);
+        assert_eq!(array.shape(), vec![1, 3]);
         for (index, expected) in [0.5, 1.0 / 3.0, 1.0].into_iter().enumerate() {
             assert!((tensor::tensor_value_f64(&array, index) - expected).abs() < 1.0e-7);
         }
@@ -1336,7 +1350,7 @@ mod tests {
             let Value::Tensor(result) = result else {
                 panic!("singleton N-D callback must retain its tensor result")
             };
-            assert_eq!(result.shape, vec![1, 1, 1]);
+            assert_eq!(result.shape(), vec![1, 1, 1]);
             assert!((tensor::tensor_value_f64(&result, 0) - expected).abs() < 1.0e-7);
         }
     }
@@ -1353,7 +1367,7 @@ mod tests {
         let Value::Tensor(result) = result else {
             panic!("expected array output")
         };
-        assert_eq!(result.shape, vec![1, 2]);
+        assert_eq!(result.shape(), vec![1, 2]);
         assert!((tensor::tensor_value_f64(&result, 0) / 1.0e308 - 1.0).abs() < 1.0e-12);
         assert!((tensor::tensor_value_f64(&result, 1) / 1.0e308 + 1.0).abs() < 1.0e-12);
     }
@@ -1384,7 +1398,7 @@ mod tests {
             let Value::Tensor(result) = result else {
                 panic!("expected array output")
             };
-            assert_eq!(result.shape, vec![1, 3]);
+            assert_eq!(result.shape(), vec![1, 3]);
         }
     }
 
@@ -1401,7 +1415,7 @@ mod tests {
                 vec![Value::from("ArrayValued"), flag],
             ))
             .expect("array-valued flag");
-            assert!(matches!(result, Value::Tensor(array) if array.shape == [1, 3]));
+            assert!(matches!(result, Value::Tensor(array) if array.shape() == [1, 3]));
         }
     }
 
@@ -1550,7 +1564,7 @@ mod tests {
             ],
         ))
         .expect("array polynomial accepts within one interval");
-        assert!(matches!(array_polynomial, Value::Tensor(value) if value.shape == [1, 3]));
+        assert!(matches!(array_polynomial, Value::Tensor(value) if value.shape() == [1, 3]));
 
         let array_sine = block_on(integral_builtin(
             Value::FunctionHandle("__integral_array_sine".into()),
@@ -1661,7 +1675,7 @@ mod tests {
         let Value::Tensor(array) = array else {
             panic!("expected fixed-shape array")
         };
-        assert_eq!(array.shape, [1, 2]);
+        assert_eq!(array.shape(), [1, 2]);
         assert!((tensor::tensor_value_f64(&array, 0) - 1.0).abs() < 1.0e-6);
         assert!((tensor::tensor_value_f64(&array, 1) - 0.5).abs() < 1.0e-6);
     }

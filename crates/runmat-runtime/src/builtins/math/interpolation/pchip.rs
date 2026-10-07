@@ -197,7 +197,7 @@ mod tests {
         let Value::Tensor(output) = value else {
             panic!("array-valued pchip must return a tensor");
         };
-        assert_eq!(output.shape, vec![2, 3, 2, 2]);
+        assert_eq!(output.shape(), vec![2, 3, 2, 2]);
         let values = output.materialize_f64();
         for query in 0..4 {
             for component in 0..6 {

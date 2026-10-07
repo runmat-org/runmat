@@ -399,7 +399,7 @@ fn fits_linear_data() {
     .expect("polyfit");
     match eval.coefficients() {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), vec![1, 2]);
             assert!((t.materialize_f64()[0] - 1.5).abs() < 1e-10);
             assert!((t.materialize_f64()[1] - 2.0).abs() < 1e-10);
         }
@@ -423,7 +423,7 @@ fn polyfit_typed_integer_vectors_degree_and_weights_cross_double_boundary_exactl
     .expect("polyfit");
     match eval.coefficients() {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), vec![1, 2]);
             assert!((t.materialize_f64()[0] - 2.0).abs() < 1e-10);
             assert!((t.materialize_f64()[1] - 2.0).abs() < 1e-10);
             assert!(t.integer_storage().is_none());
@@ -454,7 +454,7 @@ fn returns_struct_and_mu() {
     }
     match eval.mu() {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), vec![1, 2]);
             assert!((t.materialize_f64()[0]).abs() < 1e-10);
             assert!(t.materialize_f64()[1].abs() > 0.0);
         }
@@ -536,12 +536,12 @@ fn gpu_inputs_are_gathered() {
         let y = Tensor::new(vec![1.0, 3.0, 7.0], vec![3, 1]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &x.materialize_f64(),
-            shape: &x.shape,
+            shape: x.shape(),
         };
         let x_handle = provider.upload(&view).expect("upload");
         let view_y = runmat_accelerate_api::HostTensorView {
             data: &y.materialize_f64(),
-            shape: &y.shape,
+            shape: y.shape(),
         };
         let y_handle = provider.upload(&view_y).expect("upload");
         let eval = evaluate(
@@ -565,15 +565,15 @@ fn gpu_weights_are_gathered() {
 
         let x_view = runmat_accelerate_api::HostTensorView {
             data: &x.materialize_f64(),
-            shape: &x.shape,
+            shape: x.shape(),
         };
         let y_view = runmat_accelerate_api::HostTensorView {
             data: &y.materialize_f64(),
-            shape: &y.shape,
+            shape: y.shape(),
         };
         let w_view = runmat_accelerate_api::HostTensorView {
             data: &weights.materialize_f64(),
-            shape: &weights.shape,
+            shape: weights.shape(),
         };
 
         let x_handle = provider.upload(&x_view).expect("upload x");
@@ -622,11 +622,11 @@ fn polyfit_wgpu_matches_cpu() {
     let trait_provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
     let x_view = runmat_accelerate_api::HostTensorView {
         data: &x.materialize_f64(),
-        shape: &x.shape,
+        shape: x.shape(),
     };
     let y_view = runmat_accelerate_api::HostTensorView {
         data: &y.materialize_f64(),
-        shape: &y.shape,
+        shape: y.shape(),
     };
     let x_handle = trait_provider.upload(&x_view).expect("upload x");
     let y_handle = trait_provider.upload(&y_view).expect("upload y");
@@ -656,7 +656,7 @@ fn polyfit_wgpu_matches_cpu() {
             Value::Tensor(t) => t,
             other => panic!("expected tensor coefficients, got {other:?}"),
         };
-        assert_eq!(cpu_coeff.shape, gpu_coeff.shape);
+        assert_eq!(cpu_coeff.shape(), gpu_coeff.shape());
         for (a, b) in cpu_coeff
             .materialize_f64()
             .iter()
@@ -673,7 +673,7 @@ fn polyfit_wgpu_matches_cpu() {
             Value::Tensor(t) => t,
             other => panic!("expected tensor mu, got {other:?}"),
         };
-        assert_eq!(cpu_mu.shape, gpu_mu.shape);
+        assert_eq!(cpu_mu.shape(), gpu_mu.shape());
         for (a, b) in cpu_mu
             .materialize_f64()
             .iter()
@@ -698,7 +698,7 @@ fn polyfit_wgpu_matches_cpu() {
             Value::Tensor(t) => t.clone(),
             other => panic!("expected tensor R, got {other:?}"),
         };
-        assert_eq!(cpu_r.shape, gpu_r.shape);
+        assert_eq!(cpu_r.shape(), gpu_r.shape());
         for (a, b) in cpu_r
             .materialize_f64()
             .iter()
@@ -805,7 +805,7 @@ fn fits_complex_data() {
     .expect("polyfit complex");
     match eval.coefficients() {
         Value::ComplexTensor(t) => {
-            assert_eq!(t.shape, vec![1, 3]);
+            assert_eq!(t.shape(), vec![1, 3]);
         }
         other => panic!("expected complex tensor coefficients, got {other:?}"),
     }

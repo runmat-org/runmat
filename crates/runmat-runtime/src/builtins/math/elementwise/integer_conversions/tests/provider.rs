@@ -64,7 +64,7 @@ fn every_identity_returns_typed_resident_storage() {
             let input = provider
                 .upload(&HostTensorView {
                     data: &materialized,
-                    shape: &source.shape,
+                    shape: source.shape(),
                 })
                 .expect("upload");
             let output = crate::dispatcher::call_builtin(name, &[Value::GpuTensor(input)])

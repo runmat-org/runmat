@@ -19,7 +19,7 @@ fn supports_single_and_double() {
             panic!("single limit must retain native single storage")
         };
         assert_eq!(output.as_f32_slice(), Some([expected].as_slice()));
-        assert_eq!(output.shape, vec![1, 1]);
+        assert_eq!(output.shape(), vec![1, 1]);
     }
 }
 
@@ -32,7 +32,7 @@ fn like_preserves_complexity_and_sparse_single_storage() {
         panic!("expected complex single scalar")
     };
     assert_eq!(output.numeric_dtype(), NumericDType::F32);
-    assert_eq!(output.shape, vec![1, 1]);
+    assert_eq!(output.shape(), vec![1, 1]);
 
     let sparse = SparseTensor::new_f32(2, 2, vec![0, 1, 1], vec![0], vec![3.0]).unwrap();
     let output = realmin(vec![Value::from("like"), Value::SparseTensor(sparse)])

@@ -53,7 +53,7 @@ fn invalid_calls_do_not_prepare_and_valid_shapes_observe_once() {
             let Value::Tensor(output) = output else {
                 panic!("shape-preserving typed array")
             };
-            assert_eq!(output.shape, shape);
+            assert_eq!(output.shape(), shape);
             assert!(output.integer_storage().is_some());
             assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
             events.borrow_mut().clear();
@@ -155,7 +155,7 @@ fn characters_preserve_column_major_order_and_full_nd_shape() {
         .unwrap() else {
             panic!("character array conversion")
         };
-        assert_eq!(output.shape, shape);
+        assert_eq!(output.shape(), shape);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U16(expected))

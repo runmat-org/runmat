@@ -1535,7 +1535,7 @@ mod tests {
         assert_close_vec(&vector_from_value(&outputs[4]), &[0.0, 0.0, 0.0], 1.0e-7);
         match &outputs[5] {
             Value::Tensor(hessian) => {
-                assert_eq!(hessian.shape, vec![3, 3]);
+                assert_eq!(hessian.shape(), vec![3, 3]);
                 assert!(hessian
                     .materialize_f64()
                     .iter()

@@ -117,7 +117,7 @@ fn like_copies_complexity_without_losing_uint64_max() {
     let Value::ComplexTensor(output) = output else {
         panic!("expected complex integer scalar")
     };
-    assert_eq!(output.shape, vec![1, 1]);
+    assert_eq!(output.shape(), vec![1, 1]);
     assert_eq!(
         output.integer_storage().cloned(),
         Some(

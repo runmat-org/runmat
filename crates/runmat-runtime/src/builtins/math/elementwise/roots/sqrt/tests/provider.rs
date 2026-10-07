@@ -29,7 +29,7 @@ fn sqrt_gpu_provider_roundtrip() {
         let result = sqrt_builtin(Value::GpuTensor(handle)).expect("sqrt");
         let gathered = test_support::gather(result).expect("gather");
         let expected: Vec<f64> = tensor.materialize_f64().iter().map(|&v| v.sqrt()).collect();
-        assert_eq!(gathered.shape, vec![4, 1]);
+        assert_eq!(gathered.shape(), vec![4, 1]);
         for (gpu, cpu) in gathered.materialize_f64().iter().zip(expected.iter()) {
             assert!((gpu - cpu).abs() < 1e-12);
         }
@@ -71,7 +71,7 @@ fn sqrt_complex_gpu_gathers_without_losing_class_or_components() {
         let Value::ComplexTensor(gathered) = gathered else {
             panic!("expected complex tensor");
         };
-        assert_eq!(gathered.shape, vec![1, 2]);
+        assert_eq!(gathered.shape(), vec![1, 2]);
         assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
         let values = gathered
             .as_f32_slice()

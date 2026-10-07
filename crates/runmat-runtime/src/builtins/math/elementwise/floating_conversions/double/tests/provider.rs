@@ -23,7 +23,7 @@ fn double_gpu_roundtrip() {
         let handle = provider.upload(&view).expect("upload");
         let result = double_builtin(Value::GpuTensor(handle), Vec::new()).expect("double");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 2]);
+        assert_eq!(gathered.shape(), vec![2, 2]);
         assert_eq!(gathered.materialize_f64(), tensor.materialize_f64());
     });
 }
@@ -48,7 +48,7 @@ fn double_gpu_integer_handle_converts_to_double_resident_output() {
 
         let gathered =
             test_support::gather(Value::GpuTensor(result_handle)).expect("gather double");
-        assert_eq!(gathered.shape, vec![1, 2]);
+        assert_eq!(gathered.shape(), vec![1, 2]);
         assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
         assert!(gathered.integer_storage().is_none());
         assert_eq!(
