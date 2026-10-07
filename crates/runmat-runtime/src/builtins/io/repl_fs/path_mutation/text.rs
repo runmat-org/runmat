@@ -69,9 +69,7 @@ fn admit(
         }
         Value::GpuTensor(ref handle) => {
             admit_numeric(builtin, policy)?;
-            if crate::builtins::common::shape::effective_rank(handle.shape()) > 2
-                || handle.shape().first().copied().unwrap_or(1) > 1
-            {
+            if !numeric_row(handle.shape()) {
                 return Err(DecodeError::InvalidInput);
             }
             output.push(AdmittedToken::Resident(value));
@@ -105,8 +103,17 @@ fn collect_char_rows(chars: CharArray, output: &mut Vec<AdmittedToken>) {
 }
 
 fn decode_numeric_row(tensor: &Tensor) -> Result<String, DecodeError> {
-    if crate::builtins::common::shape::effective_rank(&tensor.shape) > 2 || tensor.rows() > 1 {
+    if !numeric_row(tensor.shape()) {
         return Err(DecodeError::InvalidInput);
     }
     tensor_char_codes_to_string(tensor).ok_or(DecodeError::InvalidInput)
+}
+
+fn numeric_row(shape: &[usize]) -> bool {
+    let rows = match shape {
+        [] => 0,
+        [_] => 1,
+        [rows, ..] => *rows,
+    };
+    crate::builtins::common::shape::effective_rank(shape) <= 2 && rows <= 1
 }

@@ -23,7 +23,7 @@ fn sqrt_gpu_provider_roundtrip() {
         let tensor = Tensor::new(vec![0.0, 1.0, 4.0, 9.0], vec![4, 1]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = sqrt_builtin(Value::GpuTensor(handle)).expect("sqrt");
@@ -43,7 +43,7 @@ fn sqrt_gpu_negative_restores_complex_result_to_owner() {
         let tensor = Tensor::new(vec![-1.0, 9.0], vec![1, 2]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = sqrt_builtin(Value::GpuTensor(handle)).expect("sqrt");
@@ -51,7 +51,7 @@ fn sqrt_gpu_negative_restores_complex_result_to_owner() {
         let result = block_on(gpu_helpers::gather_value_async(&result)).expect("gather");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![1, 2]);
+                assert_eq!(ct.shape(), &[1, 2]);
                 assert!(ct.materialize_f64()[0].0.abs() < 1e-12);
                 assert!((ct.materialize_f64()[0].1 - 1.0).abs() < 1e-12);
             }
@@ -92,7 +92,7 @@ fn sqrt_wgpu_matches_cpu_elementwise() {
     let cpu = super::super::host::evaluate(Value::Tensor(tensor.clone())).expect("cpu sqrt");
     let view = runmat_accelerate_api::HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let handle = runmat_accelerate_api::provider()
         .unwrap()
@@ -102,7 +102,7 @@ fn sqrt_wgpu_matches_cpu_elementwise() {
     let gathered = test_support::gather(gpu_value).expect("gather");
     match cpu {
         Value::Tensor(ct) => {
-            assert_eq!(gathered.shape, ct.shape);
+            assert_eq!(gathered.shape.as_slice(), ct.shape());
             for (gpu, cpu) in gathered
                 .materialize_f64()
                 .iter()

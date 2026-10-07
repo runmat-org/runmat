@@ -4,7 +4,7 @@ use runmat_builtins::SINGLE_ERROR_INTERNAL;
 use runmat_value::{CharArray, ComplexTensor, IntValue, NumericScalar, NumericStorage, Tensor};
 
 pub(super) fn single_tensor_to_host(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))?;
@@ -14,7 +14,7 @@ pub(super) fn single_tensor_to_host(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 pub(super) fn single_complex_tensor_to_host(tensor: ComplexTensor) -> BuiltinResult<ComplexTensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let data = (0..tensor.len())
         .map(|index| {
             tensor

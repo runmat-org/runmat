@@ -1,6 +1,33 @@
 use runmat_value::{CharArray, StringArray, Tensor, Value};
 use tempfile::tempdir;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn numeric_filename_decode_preserves_low_rank_row_admission_without_writing() {
+    let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
+    for shape in [Vec::new(), vec![1]] {
+        let value = Value::Tensor(Tensor::new(vec![97.0], shape).unwrap());
+        let request = futures::executor::block_on(super::super::input::decode(vec![value]))
+            .expect("numeric row filename");
+        assert_eq!(request.filename.as_deref(), Some("a"));
+    }
+    for (shape, codes) in [
+        (vec![2], vec![97.0, 98.0]),
+        (vec![0, 0], Vec::new()),
+        (vec![1, 1, 2], vec![97.0, 98.0]),
+    ] {
+        let value = Value::Tensor(Tensor::new(codes, shape).unwrap());
+        let Err(error) = futures::executor::block_on(super::super::input::decode(vec![value]))
+        else {
+            panic!("non-row numeric filename must fail")
+        };
+        assert_eq!(
+            error.identifier(),
+            runmat_builtins::SAVEPATH_ERROR_ARGUMENT_TYPE.identifier
+        );
+    }
+}
+
 #[test]
 fn rejects_excess_arity_and_output_count() {
     let _lock = super::support::lock();

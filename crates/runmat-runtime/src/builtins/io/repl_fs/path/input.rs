@@ -71,7 +71,7 @@ fn require_numeric_extension() -> BuiltinResult<()> {
 }
 
 fn decode_numeric_row(tensor: &Tensor) -> BuiltinResult<String> {
-    if !numeric_row(&tensor.shape) {
+    if !numeric_row(tensor.shape()) {
         return Err(invalid_input());
     }
     tensor_char_codes_to_string(tensor).ok_or_else(invalid_input)

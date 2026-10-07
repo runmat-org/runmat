@@ -46,9 +46,9 @@ impl ArrayData {
 
     pub(in crate::builtins::acceleration::gpu::arrayfun) fn shape_vec(&self) -> Vec<usize> {
         match self {
-            Self::Tensor(value) => normalized_shape(&value.shape),
+            Self::Tensor(value) => normalized_shape(value.shape()),
             Self::Logical(value) => normalized_shape(&value.shape),
-            Self::Complex(value) => normalized_shape(&value.shape),
+            Self::Complex(value) => normalized_shape(value.shape()),
             Self::Char(value) => vec![value.rows, value.cols],
             Self::String(value) => normalized_shape(&value.shape),
             Self::Scalar(_) => vec![1, 1],

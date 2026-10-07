@@ -13,7 +13,7 @@ pub(super) fn evaluate(value: Value) -> BuiltinResult<Value> {
 }
 
 pub(super) fn evaluate_tensor(tensor: Tensor) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor.into_numeric_storage().map_err(errors::internal)?;
     match storage {
         NumericStorage::F64(values) => evaluate_f64(values, shape),

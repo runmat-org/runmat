@@ -3,6 +3,49 @@ use tempfile::{tempdir, NamedTempFile};
 
 use super::super::super::path_mutation::test_support::{canonical, PathGuard};
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn numeric_path_mutation_decode_keeps_low_rank_and_empty_row_policy() {
+    use super::super::super::path_mutation::text::{self, DecodeError, NumericPolicy};
+
+    let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
+    let policy =
+        NumericPolicy::RunMatExtension(&runmat_builtins::ADDPATH_NUMERIC_CHARACTER_CODES_EXTENSION);
+    for (shape, codes, expected) in [
+        (Vec::new(), vec![97.0], "a"),
+        (vec![1], vec![97.0], "a"),
+        (vec![2], vec![97.0, 98.0], "ab"),
+        (vec![0, 0], Vec::new(), ""),
+    ] {
+        let value = Value::Tensor(runmat_value::Tensor::new(codes, shape).unwrap());
+        let Ok(tokens) = futures::executor::block_on(text::decode(vec![value], "addpath", policy))
+        else {
+            panic!("admitted numeric path row")
+        };
+        assert_eq!(tokens, vec![expected]);
+    }
+    for (shape, codes) in [
+        (vec![2, 1], vec![97.0, 98.0]),
+        (vec![1, 1, 2], vec![97.0, 98.0]),
+    ] {
+        let value = Value::Tensor(runmat_value::Tensor::new(codes, shape).unwrap());
+        assert!(matches!(
+            futures::executor::block_on(text::decode(vec![value], "addpath", policy)),
+            Err(DecodeError::InvalidInput)
+        ));
+    }
+    let allocation =
+        crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![2]);
+    assert!(matches!(
+        futures::executor::block_on(text::decode(
+            vec![Value::GpuTensor(allocation.handle)],
+            "addpath",
+            policy,
+        )),
+        Err(DecodeError::Provider(_))
+    ));
+}
+
 #[test]
 fn rejects_missing_arguments_and_conflicting_positions() {
     let _guard = PathGuard::new();

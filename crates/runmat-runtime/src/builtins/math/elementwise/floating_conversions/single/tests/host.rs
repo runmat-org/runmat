@@ -21,7 +21,7 @@ fn character_conversion_preserves_column_major_order_and_full_nd_shape() {
         let Value::Tensor(output) = single_builtin(Value::CharArray(chars), vec![]).unwrap() else {
             panic!("dense character conversion");
         };
-        assert_eq!(output.shape, shape);
+        assert_eq!(output.shape(), shape.as_slice());
         assert_eq!(output.materialize_f64(), expected);
     }
 }
@@ -45,7 +45,7 @@ fn single_scalar_rounds_to_f32() {
     let Value::Tensor(tensor) = result else {
         panic!("expected native single scalar tensor");
     };
-    assert_eq!(tensor.shape, vec![1, 1]);
+    assert_eq!(tensor.shape(), &[1, 1]);
     assert_eq!(
         tensor.as_f32_slice(),
         Some(&[std::f64::consts::PI as f32][..])
@@ -83,7 +83,7 @@ fn single_converts_symbolic_array_constants() {
 
     match result {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), &[1, 2]);
             assert_eq!(
                 tensor.materialize_f64(),
                 vec![(1.25f32) as f64, (2.5f32) as f64]
@@ -122,7 +122,7 @@ fn single_tensor_preserves_shape() {
     let result = single_builtin(Value::Tensor(tensor), Vec::new()).expect("single");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(
                 t.into_numeric_storage().expect("single storage"),
                 NumericStorage::F32(vec![1.25, 2.5, 3.75, 4.5])
@@ -140,7 +140,7 @@ fn single_tensor_reads_typed_integer_storage_exactly() {
     let result = single_builtin(Value::Tensor(tensor), Vec::new()).expect("single");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(
                 t.into_numeric_storage().expect("single storage"),
                 NumericStorage::F32(vec![1.0, 2.0, 3.0, 4.0])
@@ -187,7 +187,7 @@ fn single_complex_tensor_rounds_both_components() {
     let result = single_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("single");
     match result {
         Value::ComplexTensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), &[1, 2]);
             let expected: Vec<(f64, f64)> = vec![
                 ((1.234567f32) as f64, (-9.876543f32) as f64),
                 ((0.3333333f32) as f64, (0.6666667f32) as f64),
@@ -211,7 +211,7 @@ fn single_complex_tensor_reads_typed_integer_storage_exactly() {
     let result = single_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("single");
     match result {
         Value::ComplexTensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), &[1, 2]);
             assert_eq!(t.integer_storage(), None);
             assert_eq!(t.materialize_f64(), vec![(1.0, 3.0), (-2.0, -4.0)]);
         }
@@ -226,7 +226,7 @@ fn single_char_array_produces_codes() {
     let result = single_builtin(Value::CharArray(chars), Vec::new()).expect("single");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), &[1, 2]);
             assert_eq!(t.materialize_f64(), vec![65.0, 90.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -240,4 +240,37 @@ fn single_errors_on_string_input() {
         single_builtin(Value::String("hello".to_string()), Vec::new()).expect_err("expected error");
     assert_eq!(err.identifier(), SINGLE_ERROR_INVALID_INPUT.identifier);
     assert!(err.message().contains("string"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn single_preserves_low_rank_real_and_complex_geometry_while_rounding_class() {
+    let scalar = Tensor::new(vec![1.25], Vec::new()).expect("rank-zero double");
+    let Value::Tensor(scalar) = single_builtin(Value::Tensor(scalar), Vec::new()).expect("single")
+    else {
+        panic!("single tensor output")
+    };
+    assert_eq!(scalar.shape(), &[]);
+    assert_eq!(scalar.numeric_dtype(), runmat_value::NumericDType::F32);
+    assert_eq!(scalar.as_f32_slice(), Some(&[1.25_f32][..]));
+
+    let vector =
+        ComplexTensor::new(vec![(1.0, -2.0), (3.0, 4.0)], vec![2]).expect("complex vector");
+    let Value::ComplexTensor(vector) =
+        single_builtin(Value::ComplexTensor(vector), Vec::new()).expect("single complex")
+    else {
+        panic!("single complex tensor output")
+    };
+    assert_eq!(vector.shape(), &[2]);
+    assert_eq!(vector.numeric_dtype(), runmat_value::NumericDType::F32);
+    assert_eq!(
+        vector
+            .as_f32_slice()
+            .unwrap()
+            .iter()
+            .copied()
+            .map(<(f32, f32)>::from)
+            .collect::<Vec<_>>(),
+        vec![(1.0, -2.0), (3.0, 4.0)]
+    );
 }

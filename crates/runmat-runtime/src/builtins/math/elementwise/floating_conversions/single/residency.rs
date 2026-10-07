@@ -80,7 +80,7 @@ fn upload_single_like(
             error.source = Some(Box::new(source));
             error
         })?;
-    if valid_single_like_output(&handle, prototype, provider, &tensor.shape) {
+    if valid_single_like_output(&handle, prototype, provider, tensor.shape()) {
         Ok(Value::GpuTensor(handle))
     } else {
         let mut error = single_error_with_detail(

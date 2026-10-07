@@ -18,7 +18,7 @@ fn double_gpu_roundtrip() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = double_builtin(Value::GpuTensor(handle), Vec::new()).expect("double");
@@ -188,7 +188,7 @@ fn double_like_host_gathers_gpu_input() {
         let tensor = Tensor::new(vec![3.0], vec![1, 1]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = double_builtin(
@@ -199,7 +199,7 @@ fn double_like_host_gathers_gpu_input() {
         match result {
             Value::Num(n) => assert_eq!(n, 3.0),
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 1]);
+                assert_eq!(t.shape(), &[1, 1]);
                 assert_eq!(t.materialize_f64(), vec![3.0]);
             }
             other => panic!("expected scalar host value, got {other:?}"),

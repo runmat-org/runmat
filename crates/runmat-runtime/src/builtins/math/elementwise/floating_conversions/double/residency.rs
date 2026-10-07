@@ -90,7 +90,7 @@ fn upload_double_like_real(
             error.source = Some(Box::new(source));
             error
         })?;
-    if valid_double_like_output(&handle, prototype, provider, &tensor.shape, false) {
+    if valid_double_like_output(&handle, prototype, provider, tensor.shape(), false) {
         Ok(Value::GpuTensor(handle))
     } else {
         let mut error = double_error_with_detail(
@@ -115,7 +115,7 @@ fn upload_double_like_complex(
             error.source = Some(Box::new(source));
             error
         })?;
-    if valid_double_like_output(&handle, prototype, provider, &tensor.shape, true) {
+    if valid_double_like_output(&handle, prototype, provider, tensor.shape(), true) {
         gpu_helpers::complex_gpu_value(handle)
     } else {
         let mut error = double_error_with_detail(

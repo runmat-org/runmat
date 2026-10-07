@@ -7,7 +7,7 @@ fn single_gpu_roundtrip() {
         let tensor = Tensor::new(vec![0.1, 0.2, 0.3, 0.4], vec![2, 2]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = single_builtin(Value::GpuTensor(handle), Vec::new()).expect("single");
@@ -39,7 +39,7 @@ fn single_like_host_prototype() {
     .expect("single");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, tensor.shape);
+            assert_eq!(t.shape(), tensor.shape());
             let expected: Vec<f64> = [1.0f32, 2.0, 3.0, 4.0]
                 .into_iter()
                 .map(|v| v as f64)
@@ -170,7 +170,7 @@ fn single_like_case_insensitive() {
     .expect("single");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, tensor.shape);
+            assert_eq!(t.shape(), tensor.shape());
             let expected: Vec<f64> = [1.5f32, 2.25f32].into_iter().map(|v| v as f64).collect();
             assert_eq!(t.materialize_f64(), expected);
         }

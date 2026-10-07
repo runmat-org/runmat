@@ -86,7 +86,7 @@ pub(super) fn double_from_symbolic_array(array: SymbolicArray) -> BuiltinResult<
 }
 
 pub(super) fn double_from_tensor(tensor: Tensor) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let values = tensor
         .into_numeric_storage()
         .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error))?
@@ -97,7 +97,7 @@ pub(super) fn double_from_tensor(tensor: Tensor) -> BuiltinResult<Value> {
 }
 
 pub(super) fn double_from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     ComplexTensor::new(tensor.materialize_f64(), shape)
         .map(Value::ComplexTensor)
         .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error))

@@ -19,7 +19,7 @@ fn double_converts_string_scalars_and_arrays() {
     else {
         panic!("expected tensor");
     };
-    assert_eq!(output.shape, vec![2, 2]);
+    assert_eq!(output.shape(), &[2, 2]);
     let values = output.materialize_f64();
     assert_eq!(values[0..2], [1.0, -2.25]);
     assert!(values[2].is_nan());

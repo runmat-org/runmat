@@ -8,7 +8,7 @@ fn single_large_ones_preserve_values() {
     let result = single_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("single");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, tensor.shape);
+            assert_eq!(t.shape(), tensor.shape());
             // Sum should equal m exactly.
             let sum: f64 = t.materialize_f64().iter().copied().sum();
             assert!(

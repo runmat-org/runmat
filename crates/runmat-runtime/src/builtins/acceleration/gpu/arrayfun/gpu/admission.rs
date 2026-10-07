@@ -9,8 +9,8 @@ use runmat_value::Value;
 fn operand_shape(value: &Value) -> Option<&[usize]> {
     match value {
         Value::GpuTensor(value) => Some(value.shape()),
-        Value::Tensor(value) => Some(&value.shape),
-        Value::ComplexTensor(value) => Some(&value.shape),
+        Value::Tensor(value) => Some(value.shape()),
+        Value::ComplexTensor(value) => Some(value.shape()),
         Value::LogicalArray(value) => Some(&value.shape),
         Value::Num(_) | Value::Int(_) | Value::Complex(_, _) | Value::Bool(_) => Some(&[1, 1]),
         _ => None,

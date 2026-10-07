@@ -23,7 +23,7 @@ fn character_conversion_preserves_column_major_order_and_full_nd_shape() {
         let Value::Tensor(output) = double_builtin(Value::CharArray(chars), vec![]).unwrap() else {
             panic!("dense character conversion");
         };
-        assert_eq!(output.shape, shape);
+        assert_eq!(output.shape(), shape.as_slice());
         assert_eq!(output.materialize_f64(), expected);
     }
 }
@@ -93,7 +93,7 @@ fn double_converts_symbolic_array_constants() {
 
     match result {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), &[1, 2]);
             assert_eq!(tensor.materialize_f64(), vec![1.5, 2.5]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -129,7 +129,7 @@ fn double_logical_array_returns_tensor() {
     let result = double_builtin(Value::LogicalArray(logical), Vec::new()).expect("double");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 1.0, 0.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -143,7 +143,7 @@ fn double_char_array_converts_to_codes() {
     let result = double_builtin(Value::CharArray(chars), Vec::new()).expect("double");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), &[1, 2]);
             assert_eq!(t.materialize_f64(), vec![65.0, 66.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -170,7 +170,7 @@ fn double_tensor_preserves_shape() {
     let result = double_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("double");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, tensor.shape);
+            assert_eq!(t.shape(), tensor.shape());
             assert_eq!(
                 t.into_numeric_storage().expect("double storage"),
                 NumericStorage::F64(vec![1.25, 2.5, 3.75, 4.5])
@@ -189,7 +189,7 @@ fn double_tensor_reads_typed_integer_storage_and_clears_class() {
     let result = double_builtin(Value::Tensor(tensor), Vec::new()).expect("double");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), &[1, 2]);
             assert_eq!(
                 t.into_numeric_storage().expect("double storage"),
                 NumericStorage::F64(vec![(1_u64 << 63) as f64, u64::MAX as f64])
@@ -213,7 +213,7 @@ fn double_complex_tensor_reads_typed_integer_storage_and_clears_class() {
     match result {
         Value::ComplexTensor(t) => {
             assert!(t.integer_storage().is_none());
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), &[1, 2]);
             assert_eq!(t.materialize_f64(), vec![(-2.0, 5.0), (3.0, -7.0)]);
         }
         other => panic!("expected complex tensor, got {other:?}"),
@@ -255,4 +255,28 @@ fn double_sparse_tensor_reads_typed_integer_storage_and_clears_class() {
         output.as_f64_slice(),
         Some(&[i64::MIN as f64, i64::MAX as f64][..])
     );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn double_preserves_low_rank_real_and_complex_geometry_while_promoting_class() {
+    let scalar = Tensor::from_f32(vec![1.25], Vec::new()).expect("rank-zero single");
+    let Value::Tensor(scalar) = double_builtin(Value::Tensor(scalar), Vec::new()).expect("double")
+    else {
+        panic!("tensor input remains a tensor")
+    };
+    assert_eq!(scalar.shape(), &[]);
+    assert_eq!(scalar.numeric_dtype(), NumericDType::F64);
+    assert_eq!(scalar.materialize_f64(), vec![1.25]);
+
+    let vector =
+        ComplexTensor::from_f32(vec![(1.0, -2.0), (3.0, 4.0)], vec![2]).expect("complex vector");
+    let Value::ComplexTensor(vector) =
+        double_builtin(Value::ComplexTensor(vector), Vec::new()).expect("double complex")
+    else {
+        panic!("complex tensor input remains a complex tensor")
+    };
+    assert_eq!(vector.shape(), &[2]);
+    assert_eq!(vector.numeric_dtype(), NumericDType::F64);
+    assert_eq!(vector.materialize_f64(), vec![(1.0, -2.0), (3.0, 4.0)]);
 }

@@ -380,7 +380,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 // Row-column indexing (1-based)
                 let row = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
                 let col = positive_integer_index(indices[1], "RunMat:IndexOutOfBounds")?;
-                let shape = normalize_scalar_shape(&tensor.shape);
+                let shape = normalize_scalar_shape(tensor.shape());
                 let rows = shape.first().copied().unwrap_or(1);
                 let cols = shape.get(1).copied().unwrap_or(1);
 
@@ -467,7 +467,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
             } else if indices.len() == 2 {
                 let row = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
                 let col = positive_integer_index(indices[1], "RunMat:IndexOutOfBounds")?;
-                let shape = normalize_scalar_shape(&tensor.shape);
+                let shape = normalize_scalar_shape(tensor.shape());
                 let rows = shape.first().copied().unwrap_or(1);
                 let cols = shape.get(1).copied().unwrap_or(1);
 
@@ -708,6 +708,54 @@ mod tests {
                 sparse.get(0, 0).unwrap_or(0.0)
             }
             other => panic!("expected sparse scalar value, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn low_rank_two_subscript_indexing_preserves_scalar_normalization_and_exact_values() {
+        for (shape, values, row) in [
+            (vec![], vec![u64::MAX], 1.0),
+            (vec![2], vec![9_007_199_254_740_993, u64::MAX], 2.0),
+        ] {
+            let real = Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(values.clone()), shape.clone()).unwrap(),
+            );
+            assert_eq!(
+                block_on(perform_indexing(&real, &[row, 1.0])).unwrap(),
+                Value::Int(IntValue::U64(u64::MAX))
+            );
+            let complex = Value::ComplexTensor(
+                ComplexTensor::new_integer(
+                    IntegerComplexStorage::new(
+                        IntegerStorage::U64(values.clone()),
+                        IntegerStorage::U64(vec![1; values.len()]),
+                    )
+                    .unwrap(),
+                    shape,
+                )
+                .unwrap(),
+            );
+            let Value::ComplexTensor(output) =
+                block_on(perform_indexing(&complex, &[row, 1.0])).unwrap()
+            else {
+                panic!("complex integer selection preserves native component storage")
+            };
+            assert_eq!(output.shape(), &[1, 1]);
+            assert_eq!(
+                output.integer_storage(),
+                Some(
+                    &IntegerComplexStorage::new(
+                        IntegerStorage::U64(vec![u64::MAX]),
+                        IntegerStorage::U64(vec![1]),
+                    )
+                    .unwrap()
+                )
+            );
+            for input in [&real, &complex] {
+                let error = block_on(perform_indexing(input, &[1.0, 2.0])).unwrap_err();
+                assert_eq!(error.identifier(), Some("RunMat:IndexOutOfBounds"));
+            }
         }
     }
 

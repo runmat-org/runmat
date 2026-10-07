@@ -13,7 +13,7 @@ fn gpu_provider_roundtrip() {
         let handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             })
             .unwrap();
         let result = call(Value::GpuTensor(handle)).unwrap();
@@ -30,7 +30,7 @@ fn gpu_negative_value_errors() {
         let handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             })
             .unwrap();
         let err = call(Value::GpuTensor(handle)).unwrap_err();
@@ -81,7 +81,7 @@ fn realsqrt_wgpu_matches_cpu_for_nonnegative_values() {
         .expect("WGPU provider")
         .upload(&runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         })
         .expect("upload");
     let output = block_on(super::super::provider::evaluate(handle)).expect("realsqrt");
@@ -90,7 +90,7 @@ fn realsqrt_wgpu_matches_cpu_for_nonnegative_values() {
         runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
         runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
     };
-    assert_eq!(gathered.shape, tensor.shape);
+    assert_eq!(gathered.shape.as_slice(), tensor.shape());
     for (actual, expected) in gathered.materialize_f64().iter().zip(expected) {
         assert!((actual - expected).abs() < tolerance);
     }

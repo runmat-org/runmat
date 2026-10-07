@@ -49,7 +49,7 @@ fn preflight(value: &Value) -> crate::BuiltinResult<()> {
         Value::String(_) => Ok(()),
         Value::StringArray(array) if array.data.len() == 1 => Ok(()),
         Value::CharArray(chars) if is_row(&chars.shape) => Ok(()),
-        Value::Tensor(tensor) if is_row(&tensor.shape) => require_numeric_extension(),
+        Value::Tensor(tensor) if is_row(tensor.shape()) => require_numeric_extension(),
         Value::GpuTensor(handle) if is_row(handle.shape()) => require_numeric_extension(),
         _ => Err(super::errors::descriptor(
             &runmat_builtins::SAVEPATH_ERROR_ARGUMENT_TYPE,

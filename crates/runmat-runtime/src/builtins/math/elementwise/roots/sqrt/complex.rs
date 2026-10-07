@@ -12,8 +12,8 @@ pub(super) fn evaluate_scalar(real: f64, imag: f64) -> Value {
 }
 
 pub(super) fn evaluate_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
-    let storage = match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(values) => ComplexStorage::F64(
             values
                 .into_iter()

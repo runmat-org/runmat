@@ -121,7 +121,7 @@ fn base_and_like_forms_prepare_only_data_and_observe_execution_once() {
                 let Value::Tensor(output) = result else {
                     panic!("dense shape-preserving output");
                 };
-                assert_eq!(output.shape, shape);
+                assert_eq!(output.shape(), shape.as_slice());
                 assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
                 events.borrow_mut().clear();
             }

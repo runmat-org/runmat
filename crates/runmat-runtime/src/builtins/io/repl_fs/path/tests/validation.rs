@@ -10,6 +10,34 @@ fn locked() -> (std::sync::MutexGuard<'static, ()>, PathGuard) {
     (lock, PathGuard::new())
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn numeric_path_admission_retains_empty_and_low_rank_rows() {
+    let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
+    for (shape, codes, expected) in [
+        (Vec::new(), vec![97.0], "a"),
+        (vec![1], vec![97.0], "a"),
+        (vec![0, 0], Vec::new(), ""),
+    ] {
+        let value = Value::Tensor(Tensor::new(codes, shape).unwrap());
+        let admitted = super::super::input::admit(value).expect("numeric row path");
+        assert_eq!(
+            futures::executor::block_on(admitted.resolve()).unwrap(),
+            expected
+        );
+    }
+    for (shape, codes) in [
+        (vec![2], vec![97.0, 98.0]),
+        (vec![1, 1, 2], vec![97.0, 98.0]),
+    ] {
+        let value = Value::Tensor(Tensor::new(codes, shape).unwrap());
+        let Err(error) = super::super::input::admit(value) else {
+            panic!("non-row path must fail")
+        };
+        assert_eq!(error.identifier(), Some("RunMat:path:InvalidInput"));
+    }
+}
+
 #[test]
 fn rejects_invalid_text_shapes_and_value_kinds() {
     let (_lock, _guard) = locked();

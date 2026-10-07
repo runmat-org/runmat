@@ -5,6 +5,33 @@ use tempfile::tempdir;
 
 use super::support::call;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn numeric_root_decode_preserves_low_rank_row_admission() {
+    let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
+    for shape in [Vec::new(), vec![1]] {
+        let codes = Value::Tensor(Tensor::new(vec![97.0], shape).unwrap());
+        let request = futures::executor::block_on(super::super::input::decode(vec![codes]))
+            .expect("numeric row root");
+        assert_eq!(request.root.as_deref(), Some("a"));
+    }
+    for (shape, codes) in [
+        (vec![2], vec![97.0, 98.0]),
+        (vec![0, 0], Vec::new()),
+        (vec![1, 1, 2], vec![97.0, 98.0]),
+    ] {
+        let value = Value::Tensor(Tensor::new(codes, shape).unwrap());
+        let Err(error) = futures::executor::block_on(super::super::input::decode(vec![value]))
+        else {
+            panic!("non-row numeric root must fail")
+        };
+        assert_eq!(
+            error.identifier(),
+            runmat_builtins::GENPATH_ERROR_FOLDER_TYPE.identifier
+        );
+    }
+}
+
 #[test]
 fn rejects_too_many_inputs_before_decoding() {
     let error = call(vec![

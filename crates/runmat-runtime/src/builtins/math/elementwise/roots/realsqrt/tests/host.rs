@@ -57,7 +57,7 @@ fn dense_tensor_preserves_shape() {
     let tensor = Tensor::new(vec![0.0, 1.0, 4.0, 9.0], vec![2, 2]).unwrap();
     match call(Value::Tensor(tensor)).unwrap() {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![2, 2]);
+            assert_eq!(out.shape(), &[2, 2]);
             assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 2.0, 3.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -85,7 +85,7 @@ fn single_tensor_preserves_dtype() {
     let tensor = Tensor::from_f32(vec![2.0, 9.0], vec![1, 2]).unwrap();
     match call(Value::Tensor(tensor)).unwrap() {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![1, 2]);
+            assert_eq!(out.shape(), &[1, 2]);
             assert_eq!(out.numeric_dtype(), NumericDType::F32);
             assert_eq!(
                 out.into_numeric_storage().unwrap(),
@@ -201,4 +201,27 @@ fn sparse_negative_value_errors() {
     let sparse = SparseTensor::new(2, 1, vec![0, 1], vec![1], vec![-4.0]).unwrap();
     let err = call(Value::SparseTensor(sparse)).unwrap_err();
     assert_eq!(err.identifier(), ERROR_DOMAIN.identifier);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn realsqrt_low_rank_inputs_preserve_geometry_class_and_domain_order() {
+    let scalar = Tensor::from_f32(vec![4.0], Vec::new()).expect("rank-zero single");
+    let Value::Tensor(scalar) = call(Value::Tensor(scalar)).expect("realsqrt scalar") else {
+        panic!("single scalar retains tensor class")
+    };
+    assert_eq!(scalar.shape(), &[]);
+    assert_eq!(scalar.numeric_dtype(), NumericDType::F32);
+    assert_eq!(scalar.as_f32_slice(), Some(&[2.0_f32][..]));
+
+    let vector = Tensor::new(vec![4.0, 9.0], vec![2]).expect("rank-one double");
+    let Value::Tensor(vector) = call(Value::Tensor(vector)).expect("realsqrt vector") else {
+        panic!("rank-one output remains a tensor")
+    };
+    assert_eq!(vector.shape(), &[2]);
+    assert_eq!(vector.materialize_f64(), vec![2.0, 3.0]);
+
+    let negative = Tensor::new(vec![-4.0], Vec::new()).expect("rank-zero negative");
+    let error = call(Value::Tensor(negative)).expect_err("negative input rejects");
+    assert_eq!(error.identifier(), ERROR_DOMAIN.identifier);
 }
