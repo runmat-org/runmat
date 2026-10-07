@@ -6,13 +6,13 @@ fn rmmissing_removes_rows_and_columns() {
     let value = tensor(vec![1.0, 2.0, f64::NAN, 4.0, 5.0, 6.0], vec![3, 2]);
     let result = block_on(rmmissing_builtin(value, Vec::new())).unwrap();
     assert!(
-        matches!(result, Value::Tensor(t) if t.shape == vec![2, 2] && t.materialize_f64() == vec![1.0, 2.0, 4.0, 5.0])
+        matches!(result, Value::Tensor(t) if t.shape() == [2, 2] && t.materialize_f64() == vec![1.0, 2.0, 4.0, 5.0])
     );
 
     let value = tensor(vec![1.0, 2.0, f64::NAN, 4.0, 5.0, 6.0], vec![3, 2]);
     let result = block_on(rmmissing_builtin(value, vec![Value::Num(2.0)])).unwrap();
     assert!(
-        matches!(result, Value::Tensor(t) if t.shape == vec![3, 1] && t.materialize_f64() == vec![4.0, 5.0, 6.0])
+        matches!(result, Value::Tensor(t) if t.shape() == [3, 1] && t.materialize_f64() == vec![4.0, 5.0, 6.0])
     );
 }
 
@@ -129,7 +129,7 @@ fn rmmissing_resident_integer_restores_value_and_mask_through_exact_owner() {
             Some(&IntegerStorage::U64(vec![1, 9_007_199_254_740_993]))
         );
         let gathered_mask = test_support::gather(outputs[1].clone()).expect("gather mask");
-        assert_eq!(gathered_mask.shape, vec![1, 2]);
+        assert_eq!(gathered_mask.shape(), &[1, 2]);
         assert_eq!(gathered_mask.materialize_f64(), vec![0.0, 0.0]);
         assert!(gpu_helpers::exact_provider_for_handle(&source).is_some());
         for output in outputs {

@@ -99,7 +99,7 @@ fn fea_public_object_mirror_preserves_recursive_integer_kinds() {
     let Some(Value::Tensor(matrix)) = object.properties.get("matrix") else {
         panic!("exact integer matrix");
     };
-    assert_eq!(matrix.shape, vec![2, 2]);
+    assert_eq!(matrix.shape(), &[2, 2]);
     assert_eq!(
         matrix
             .integer_storage()

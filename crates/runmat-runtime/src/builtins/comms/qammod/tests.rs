@@ -290,7 +290,7 @@ fn qammod_inprocess_gpu_bit_input_returns_complex_resident_output() {
         let input_handle = provider
             .upload(&HostTensorView {
                 data: &input.materialize_f64(),
-                shape: &input.shape,
+                shape: input.shape(),
             })
             .expect("upload");
         let result = block_on(super::qammod_builtin(
@@ -491,7 +491,7 @@ fn qammod_wgpu_input_returns_complex_resident_output() {
             let expected = qammod(Value::Tensor(input.clone()), 4, vec![]);
             let view = HostTensorView {
                 data: &input.materialize_f64(),
-                shape: &input.shape,
+                shape: input.shape(),
             };
             let input_handle = provider.upload(&view).expect("upload");
             let result = block_on(super::qammod_builtin(
@@ -543,7 +543,7 @@ fn qammod_wgpu_bit_input_returns_complex_resident_output() {
             );
             let view = HostTensorView {
                 data: &input.materialize_f64(),
-                shape: &input.shape,
+                shape: input.shape(),
             };
             let input_handle = provider.upload(&view).expect("upload");
             let result = block_on(super::qammod_builtin(

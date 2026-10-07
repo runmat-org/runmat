@@ -107,7 +107,7 @@ mod tests {
             else {
                 panic!("expected real poles");
             };
-            assert_eq!(poles.shape, vec![1, 1]);
+            assert_eq!(poles.shape(), &[1, 1]);
             assert!((poles.materialize_f64()[0] + 2.0).abs() < 1e-8);
             assert!(provider.telemetry_snapshot().download_bytes > 0);
         });
@@ -126,7 +126,7 @@ mod tests {
         let Value::Tensor(poles) = block_on(pole_builtin(sys)).expect("pole") else {
             panic!("expected real poles");
         };
-        assert_eq!(poles.shape, vec![2, 1]);
+        assert_eq!(poles.shape(), &[2, 1]);
         assert!(poles
             .materialize_f64()
             .iter()
@@ -150,7 +150,7 @@ mod tests {
         let Value::Tensor(poles) = block_on(pole_builtin(sys)).expect("pole") else {
             panic!("expected real poles");
         };
-        assert_eq!(poles.shape, vec![2, 1]);
+        assert_eq!(poles.shape(), &[2, 1]);
         assert!(poles
             .materialize_f64()
             .iter()
@@ -170,7 +170,7 @@ mod tests {
         let Value::ComplexTensor(poles) = block_on(pole_builtin(sys)).expect("pole") else {
             panic!("expected complex poles");
         };
-        assert_eq!(poles.shape, vec![2, 1]);
+        assert_eq!(poles.shape(), &[2, 1]);
         assert!(poles
             .materialize_f64()
             .iter()
@@ -200,7 +200,7 @@ mod tests {
         let Value::ComplexTensor(poles) = block_on(pole_builtin(sys)).expect("pole") else {
             panic!("expected complex poles");
         };
-        assert_eq!(poles.shape, vec![2, 1]);
+        assert_eq!(poles.shape(), &[2, 1]);
         assert!(poles
             .materialize_f64()
             .iter()

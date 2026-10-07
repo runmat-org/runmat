@@ -61,7 +61,7 @@ fn fea_results_field_exposes_values_metadata_and_plot_context() {
     let Some(Value::Tensor(values)) = field_object.properties.get("values") else {
         panic!("expected values tensor");
     };
-    assert_eq!(values.shape, vec![1]);
+    assert_eq!(values.shape(), &[1]);
     assert_eq!(values.materialize_f64(), vec![42.0]);
     assert!(field_object
         .properties

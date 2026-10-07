@@ -2981,7 +2981,7 @@ mod tests {
         let Value::Tensor(result) = result else {
             panic!("numeric scalar growth must materialize a tensor")
         };
-        assert_eq!(result.shape, vec![1, 2]);
+        assert_eq!(result.shape(), &[1, 2]);
         assert_eq!(result.materialize_f64(), vec![1.0, 3.0]);
     }
 

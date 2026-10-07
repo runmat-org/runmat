@@ -536,14 +536,14 @@ mod tests {
         assert_eq!(property(&sys, "Ts"), &Value::Num(0.0));
         match property(&sys, "Numerator") {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 1]);
+                assert_eq!(tensor.shape(), &[1, 1]);
                 assert_eq!(tensor.materialize_f64(), vec![20.0]);
             }
             other => panic!("expected numerator tensor, got {other:?}"),
         }
         match property(&sys, "Denominator") {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_eq!(tensor.shape(), &[1, 2]);
                 assert_eq!(tensor.materialize_f64(), vec![1.0, 5.0]);
             }
             other => panic!("expected denominator tensor, got {other:?}"),
@@ -611,14 +611,14 @@ mod tests {
 
         match property(&sys, "Numerator") {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_eq!(tensor.shape(), &[1, 2]);
                 assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected numerator tensor, got {other:?}"),
         }
         match property(&sys, "Denominator") {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_eq!(tensor.shape(), &[1, 3]);
                 assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0, 2.0]);
             }
             other => panic!("expected denominator tensor, got {other:?}"),

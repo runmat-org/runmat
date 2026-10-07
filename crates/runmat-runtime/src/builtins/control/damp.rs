@@ -295,7 +295,7 @@ mod tests {
         }
         match &outputs[2] {
             Value::ComplexTensor(poles) => {
-                assert_eq!(poles.shape, vec![2, 1]);
+                assert_eq!(poles.shape(), &[2, 1]);
                 assert!(poles
                     .materialize_f64()
                     .iter()

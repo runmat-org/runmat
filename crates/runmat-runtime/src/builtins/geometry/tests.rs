@@ -183,10 +183,10 @@ fn geometry_meshes_builtin_returns_patch_ready_surface_topology() {
     let Some(Value::Tensor(vertices)) = mesh.fields.get("vertices") else {
         panic!("expected vertices tensor");
     };
-    assert_eq!(vertices.shape, vec![3, 3]);
+    assert_eq!(vertices.shape(), &[3, 3]);
     let Some(Value::Tensor(faces)) = mesh.fields.get("faces") else {
         panic!("expected faces tensor");
     };
-    assert_eq!(faces.shape, vec![1, 3]);
+    assert_eq!(faces.shape(), &[1, 3]);
     assert_eq!(faces.materialize_f64(), vec![1.0, 2.0, 3.0]);
 }

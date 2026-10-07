@@ -96,7 +96,7 @@ mod tests {
             else {
                 panic!("expected real empty column");
             };
-            assert_eq!(zeros.shape, vec![0, 1]);
+            assert_eq!(zeros.shape(), &[0, 1]);
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         });
     }
@@ -114,7 +114,7 @@ mod tests {
         let Value::Tensor(zeros) = block_on(zero_builtin(sys)).expect("zero") else {
             panic!("expected real zeros");
         };
-        assert_eq!(zeros.shape, vec![2, 1]);
+        assert_eq!(zeros.shape(), &[2, 1]);
         assert!(zeros
             .materialize_f64()
             .iter()
@@ -138,7 +138,7 @@ mod tests {
         let Value::ComplexTensor(zeros) = block_on(zero_builtin(sys)).expect("zero") else {
             panic!("expected complex zeros");
         };
-        assert_eq!(zeros.shape, vec![2, 1]);
+        assert_eq!(zeros.shape(), &[2, 1]);
         assert!(zeros
             .materialize_f64()
             .iter()
@@ -163,7 +163,7 @@ mod tests {
         let Value::Tensor(zeros) = block_on(zero_builtin(sys)).expect("zero") else {
             panic!("expected real empty column");
         };
-        assert_eq!(zeros.shape, vec![0, 1]);
+        assert_eq!(zeros.shape(), &[0, 1]);
         assert!(zeros.materialize_f64().is_empty());
     }
 }

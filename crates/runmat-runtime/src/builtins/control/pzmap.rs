@@ -478,11 +478,11 @@ mod tests {
         assert_eq!(outputs.len(), 2);
 
         let poles = tensor(&outputs[0]);
-        assert_eq!(poles.shape, vec![1, 1]);
+        assert_eq!(poles.shape(), &[1, 1]);
         assert!((poles.materialize_f64()[0] + 4.0).abs() < 1.0e-8);
 
         let zeros = tensor(&outputs[1]);
-        assert_eq!(zeros.shape, vec![2, 1]);
+        assert_eq!(zeros.shape(), &[2, 1]);
         assert!(zeros
             .materialize_f64()
             .iter()
@@ -504,7 +504,7 @@ mod tests {
         let Value::ComplexTensor(poles) = &outputs[0] else {
             panic!("expected complex poles");
         };
-        assert_eq!(poles.shape, vec![2, 1]);
+        assert_eq!(poles.shape(), &[2, 1]);
         assert!(poles
             .materialize_f64()
             .iter()
@@ -517,7 +517,7 @@ mod tests {
             .materialize_f64()
             .iter()
             .any(|(_, im)| (*im + 1.0).abs() < 1.0e-8));
-        assert_eq!(tensor(&outputs[1]).shape, vec![0, 1]);
+        assert_eq!(tensor(&outputs[1]).shape(), &[0, 1]);
     }
 
     #[cfg(feature = "plot-core")]
@@ -599,7 +599,7 @@ mod tests {
         };
         assert_eq!(outputs.len(), 2);
         assert_eq!(tensor(&outputs[0]).materialize_f64(), vec![-1.0]);
-        assert_eq!(tensor(&outputs[1]).shape, vec![0, 1]);
+        assert_eq!(tensor(&outputs[1]).shape(), &[0, 1]);
     }
 
     #[test]

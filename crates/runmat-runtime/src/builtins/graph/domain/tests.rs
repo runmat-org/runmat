@@ -509,7 +509,7 @@ fn empty_treelayout_obeys_requested_output_count() {
         let Value::Tensor(tensor) = value else {
             panic!("expected empty tensor, got {value:?}");
         };
-        assert_eq!(tensor.shape, vec![1, 0]);
+        assert_eq!(tensor.shape(), &[1, 0]);
         assert!(tensor.materialize_f64().is_empty());
     };
 
