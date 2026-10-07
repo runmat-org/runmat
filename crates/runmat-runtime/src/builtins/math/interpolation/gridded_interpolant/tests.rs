@@ -36,6 +36,31 @@ fn call(args: Vec<Value>) -> BuiltinResult<Value> {
     block_on(gridded_interpolant_builtin(args))
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn constructor_preserves_rank_one_and_full_rank_grid_geometry() {
+    let vector = Tensor::new(vec![10.0, 20.0, 40.0], vec![3]).expect("rank-one values");
+    let vector_spec = parse_constructor(vec![Value::Tensor(vector)]).expect("vector constructor");
+    assert_eq!(vector_spec.values.shape(), [3]);
+    assert_eq!(vector_spec.grid_vectors, vec![vec![1.0, 2.0, 3.0]]);
+
+    let volume = Tensor::new((0..8).map(f64::from).collect(), vec![2, 2, 2])
+        .expect("three-dimensional values");
+    let volume_spec = parse_constructor(vec![Value::Tensor(volume)]).expect("volume constructor");
+    assert_eq!(volume_spec.values.shape(), [2, 2, 2]);
+    assert_eq!(
+        volume_spec.grid_vectors,
+        vec![vec![1.0, 2.0], vec![1.0, 2.0], vec![1.0, 2.0]]
+    );
+
+    let scalar = Tensor::new(vec![7.0], Vec::new()).expect("rank-zero scalar");
+    let error = match parse_constructor(vec![Value::Tensor(scalar)]) {
+        Ok(_) => panic!("a scalar cannot provide the required two-point grid"),
+        Err(error) => error,
+    };
+    assert!(error.message().contains("at least two points"));
+}
+
 fn subsref(obj: Value, args: Vec<Value>) -> BuiltinResult<Value> {
     let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
     let len = args.len();

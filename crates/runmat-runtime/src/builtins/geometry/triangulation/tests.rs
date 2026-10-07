@@ -90,7 +90,7 @@ fn point_location_aliases_bound_outputs_before_receiver_and_return_barycentric_r
             panic!("barycentric coordinates")
         };
         assert_eq!(ti.materialize_f64(), vec![1.0]);
-        assert_eq!((bc.rows, bc.cols), (1, 3));
+        assert_eq!(bc.shape(), [1, 3]);
         assert!((bc.materialize_f64().iter().sum::<f64>() - 1.0).abs() < 1e-12);
     }
 }
@@ -124,12 +124,11 @@ fn delaunaytri_builds_legacy_and_modern_properties() {
     let Value::Tensor(points) = dt.properties.get("X").unwrap() else {
         panic!("expected points")
     };
-    assert_eq!((points.rows, points.cols), (4, 2));
+    assert_eq!(points.shape(), [4, 2]);
     let Value::Tensor(tri) = dt.properties.get("Triangulation").unwrap() else {
         panic!("expected triangulation")
     };
-    assert_eq!(tri.cols, 3);
-    assert_eq!(tri.rows, 2);
+    assert_eq!(tri.shape(), [2, 3]);
     assert!(dt.properties.contains_key("ConnectivityList"));
     assert!(dt.properties.contains_key("Points"));
 }
@@ -157,8 +156,7 @@ fn delaunaytri_accepts_coordinate_vectors() {
     let Value::Tensor(points) = dt.properties.get("Points").unwrap() else {
         panic!("expected points")
     };
-    assert_eq!(points.rows, 3);
-    assert_eq!(points.cols, 2);
+    assert_eq!(points.shape(), [3, 2]);
 }
 
 #[test]
@@ -359,8 +357,8 @@ fn delaunaytri_empty_constructor_returns_empty_topology() {
     let Value::Tensor(tri) = dt.properties.get("Triangulation").unwrap() else {
         panic!("expected triangulation")
     };
-    assert_eq!((points.rows, points.cols), (0, 2));
-    assert_eq!((tri.rows, tri.cols), (0, 3));
+    assert_eq!(points.shape(), [0, 2]);
+    assert_eq!(tri.shape(), [0, 3]);
 }
 
 #[test]
@@ -392,7 +390,7 @@ fn delaunaytri_query_helpers_return_expected_shapes() {
     let Value::Tensor(edges) = block_on(free_boundary_builtin(dt.clone())).unwrap() else {
         panic!("expected boundary tensor")
     };
-    assert_eq!((edges.rows, edges.cols), (3, 2));
+    assert_eq!(edges.shape(), [3, 2]);
 
     let Value::Tensor(nn) = block_on(nearest_neighbor_builtin(
         dt.clone(),
@@ -411,8 +409,7 @@ fn delaunaytri_query_helpers_return_expected_shapes() {
     let Value::Tensor(ti) = location else {
         panic!("expected location tensor")
     };
-    assert_eq!(ti.rows, 1);
-    assert_eq!(ti.cols, 1);
+    assert_eq!(ti.shape(), [1, 1]);
     assert_eq!(ti.materialize_f64(), vec![1.0]);
 }
 

@@ -5,7 +5,10 @@ use super::*;
 
 fn numeric_shape(value: &Value, builtin: &'static str) -> BuiltinResult<(usize, usize, usize)> {
     match value {
-        Value::Tensor(tensor) => Ok((tensor.rows, tensor.cols, tensor.len())),
+        Value::Tensor(tensor) => {
+            let (rows, cols) = coordinate_matrix_dimensions(tensor);
+            Ok((rows, cols, tensor.len()))
+        }
         Value::Num(_) | Value::Int(_) => Ok((1, 1, 1)),
         Value::GpuTensor(handle) => {
             if runmat_accelerate_api::handle_is_logical(handle)
@@ -71,7 +74,7 @@ fn vector_pair(x: &Value, y: &Value, builtin: &'static str) -> BuiltinResult<()>
 
 fn ordinary_2d_value(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => has_only_trailing_singletons(&tensor.shape),
+        Value::Tensor(tensor) => has_only_trailing_singletons(tensor.shape()),
         Value::GpuTensor(handle) => has_only_trailing_singletons(handle.shape()),
         _ => true,
     }

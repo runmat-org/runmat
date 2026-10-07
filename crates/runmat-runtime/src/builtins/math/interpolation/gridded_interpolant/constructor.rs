@@ -83,7 +83,7 @@ pub(super) fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>
             ensure_exact_integer_scalar(&value, name)?;
             Ok(vec![value.to_f64()])
         }
-        Value::Tensor(tensor) if is_vector_shape(&tensor.shape) => {
+        Value::Tensor(tensor) if is_vector_shape(tensor.shape()) => {
             // Grid coordinates are evaluated in the interpolator's f64 domain.
             ensure_exact_integer_tensor(&tensor, name)?;
             Ok(tensor_utils::tensor_into_values_f64(tensor))
@@ -120,7 +120,7 @@ pub(super) fn ensure_exact_integer_tensor(tensor: &Tensor, name: &str) -> Builti
 }
 
 pub(super) fn normalize_default_values(values: Tensor) -> BuiltinResult<Tensor> {
-    if is_vector_shape(&values.shape) && values.shape.first().copied().unwrap_or(1) == 1 {
+    if is_vector_shape(values.shape()) && values.shape().first().copied().unwrap_or(1) == 1 {
         let len = tensor_utils::tensor_element_len(&values);
         values.reshape(vec![len, 1]).map_err(internal)
     } else {
@@ -133,9 +133,9 @@ pub(super) fn normalize_values_for_grid(
     values: Tensor,
 ) -> BuiltinResult<Tensor> {
     if grid_vectors.len() == 1
-        && is_vector_shape(&values.shape)
+        && is_vector_shape(values.shape())
         && tensor_utils::tensor_element_len(&values) == grid_vectors[0].len()
-        && values.shape.first().copied().unwrap_or(1) == 1
+        && values.shape().first().copied().unwrap_or(1) == 1
     {
         values
             .reshape(vec![grid_vectors[0].len(), 1])
@@ -161,10 +161,10 @@ pub(super) fn grid_vectors_from_cell(cell: CellArray) -> BuiltinResult<Vec<Vec<f
 }
 
 pub(super) fn default_grid_vectors(values: &Tensor) -> Vec<Vec<f64>> {
-    let dims = effective_grid_rank(&values.shape);
+    let dims = effective_grid_rank(values.shape());
     (0..dims)
         .map(|dim| {
-            let len = values.shape.get(dim).copied().unwrap_or(1);
+            let len = values.shape().get(dim).copied().unwrap_or(1);
             (1..=len).map(|value| value as f64).collect::<Vec<_>>()
         })
         .collect()
@@ -190,20 +190,20 @@ pub(super) fn full_grid_vectors(
     for (idx, grid) in grids.into_iter().enumerate() {
         let tensor = numeric_tensor(grid, &format!("X{}", idx + 1))?;
         if let Some(first) = tensors.first() {
-            if tensor.shape != first.shape {
+            if tensor.shape() != first.shape() {
                 return Err(invalid("full-grid arrays must have matching shapes"));
             }
         }
         tensors.push(tensor);
     }
     let grid_rank = tensors.len();
-    let grid_shape = tensors[0].shape.clone();
+    let grid_shape = tensors[0].shape().to_vec();
     if grid_shape.len() != grid_rank {
         return Err(invalid(
             "full-grid arrays must have one dimension per grid variable",
         ));
     }
-    if values.shape.len() < grid_rank || values.shape[..grid_rank] != grid_shape[..] {
+    if values.shape().len() < grid_rank || values.shape()[..grid_rank] != grid_shape[..] {
         return Err(invalid(
             "full-grid arrays must match the leading shape of V",
         ));
@@ -216,7 +216,7 @@ pub(super) fn full_grid_vectors(
         for idx in 0..len {
             let mut subs = vec![0; grid_rank];
             subs[dim] = idx;
-            vector.push(values[column_major_offset(&subs, &tensor.shape)]);
+            vector.push(values[column_major_offset(&subs, tensor.shape())]);
         }
         vectors.push(vector);
     }
@@ -259,7 +259,7 @@ pub(super) fn validate_grid_value_shape(
         return Ok(());
     }
     validate_method_support(grid_vectors, method, extrapolation)?;
-    if grid_vectors.len() > values.shape.len().max(1) {
+    if grid_vectors.len() > values.shape().len().max(1) {
         return Err(invalid("number of grid vectors exceeds V rank"));
     }
     for (dim, grid) in grid_vectors.iter().enumerate() {
@@ -272,7 +272,7 @@ pub(super) fn validate_grid_value_shape(
         if !grid.windows(2).all(|pair| pair[0] < pair[1]) {
             return Err(invalid("grid vectors must be strictly increasing"));
         }
-        let expected = values.shape.get(dim).copied().unwrap_or(1);
+        let expected = values.shape().get(dim).copied().unwrap_or(1);
         if grid.len() != expected {
             return Err(invalid(format!(
                 "grid vector {} length {} does not match V dimension {} length {}",

@@ -2,6 +2,23 @@ use super::*;
 use runmat_accelerate::simple_provider::InProcessProvider;
 use runmat_accelerate_api::{AccelProvider, HostLogicalTensorView, ThreadProviderGuard};
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn dense_rank_zero_and_rank_one_points_keep_triangulation_geometry() {
+    let point = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2]).expect("rank-one point"));
+    let triangulation = object(block_on(delaunay_tri_builtin(vec![point])).expect("one point"));
+    let Value::Tensor(stored) = triangulation.properties.get("X").expect("stored points") else {
+        panic!("point matrix")
+    };
+    assert_eq!(stored.shape(), [1, 2]);
+    assert_eq!(stored.materialize_f64(), vec![0.0, 1.0]);
+
+    let scalar = Value::Tensor(Tensor::new(vec![0.0], vec![]).expect("rank-zero tensor"));
+    let error = block_on(delaunay_tri_builtin(vec![scalar]))
+        .expect_err("rank-zero tensor has no coordinate columns");
+    assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
+}
+
 #[test]
 fn one_row_point_matrix_with_empty_constraints_is_not_a_coordinate_pair() {
     let points = tensor(&[0.0, 0.0], 1, 2);
@@ -10,7 +27,7 @@ fn one_row_point_matrix_with_empty_constraints_is_not_a_coordinate_pair() {
     let Value::Tensor(stored) = dt.properties.get("X").unwrap() else {
         panic!("point matrix")
     };
-    assert_eq!((stored.rows, stored.cols), (1, 2));
+    assert_eq!(stored.shape(), [1, 2]);
     let vectors = object(
         block_on(delaunay_tri_builtin(vec![
             points,
@@ -21,7 +38,7 @@ fn one_row_point_matrix_with_empty_constraints_is_not_a_coordinate_pair() {
     let Value::Tensor(stored) = vectors.properties.get("X").unwrap() else {
         panic!("paired coordinates")
     };
-    assert_eq!((stored.rows, stored.cols), (2, 2));
+    assert_eq!(stored.shape(), [2, 2]);
 
     let singleton_tail = Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![1, 2, 1]).unwrap());
     assert!(block_on(delaunay_tri_builtin(vec![singleton_tail])).is_ok());
@@ -113,7 +130,7 @@ fn admitted_resident_single_point_constraint_form_downloads_once() {
     let Value::Tensor(points) = dt.properties.get("X").unwrap() else {
         panic!("point matrix")
     };
-    assert_eq!((points.rows, points.cols), (1, 2));
+    assert_eq!(points.shape(), [1, 2]);
     assert_eq!(provider.telemetry_snapshot().download_bytes, 16);
     assert!(resident.allocation_lease().validate_live().is_ok());
 }
