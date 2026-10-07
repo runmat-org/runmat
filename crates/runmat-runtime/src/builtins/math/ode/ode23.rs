@@ -154,12 +154,16 @@ mod tests {
 
     #[test]
     fn ode23_supports_two_output_form() {
-        let _resolver =
-            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_name| {
-                Some(0)
-            })));
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _fixtures = crate::user_functions::test_support::install_exact_named_forwarders(
+            &runtime,
+            &[("decay", 551)],
+        )
+        .unwrap();
+        let entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            move |_function, args, _requested_outputs| {
+            move |function, args, _requested_outputs| {
+                assert_eq!(function, 551);
                 let y = match &args[1] {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
@@ -167,14 +171,15 @@ mod tests {
                 Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(-y)) })
             },
         )));
-
         let _out_guard = crate::output_count::push_output_count(Some(2));
-        let out = block_on(ode23_builtin(
+        drop(entry);
+
+        let out = block_on(runtime.scope(ode23_builtin(
             Value::FunctionHandle("decay".into()),
             Value::Tensor(Tensor::new(vec![0.0, 0.5, 1.0], vec![1, 3]).unwrap()),
             Value::Num(1.0),
             Vec::new(),
-        ))
+        )))
         .unwrap();
 
         match out {

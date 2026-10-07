@@ -213,12 +213,16 @@ mod tests {
 
     #[test]
     fn ode15s_newton_step_handles_picard_unstable_stiff_decay() {
-        let _resolver =
-            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_name| {
-                Some(0)
-            })));
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _fixtures = crate::user_functions::test_support::install_exact_named_forwarders(
+            &runtime,
+            &[("stiff_decay", 573)],
+        )
+        .unwrap();
+        let entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            move |_function, args, _requested_outputs| {
+            move |function, args, _requested_outputs| {
+                assert_eq!(function, 573);
                 let y = match &args[1] {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
@@ -228,6 +232,7 @@ mod tests {
                 )
             },
         )));
+        drop(entry);
         let input = OdeInput {
             tspan: vec![0.0, 0.1],
             y0: vec![1.0],
@@ -237,14 +242,14 @@ mod tests {
             runtime: None,
         };
 
-        let (next, err) = block_on(step_ode15s(
+        let (next, err) = block_on(runtime.scope(step_ode15s(
             "ode15s",
             &Value::FunctionHandle("stiff_decay".into()),
             0.0,
             &[1.0],
             0.1,
             &input,
-        ))
+        )))
         .unwrap();
 
         assert_eq!(next.len(), 1);
