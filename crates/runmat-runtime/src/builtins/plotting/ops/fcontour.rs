@@ -1110,18 +1110,28 @@ mod tests {
         ]
     }
 
-    fn with_test_function(
-        f: impl Fn(f64, f64) -> f64 + Send + Sync + 'static,
-    ) -> (
-        crate::user_functions::FunctionInvokerGuard,
-        crate::user_functions::BoundFunctionInvokerGuard,
-    ) {
+    struct TestFunction {
+        runtime: crate::context::RuntimeContext,
+        binding: runmat_value::BoundFunctionBinding,
+        _bound: crate::user_functions::BoundFunctionInvokerGuard,
+        _numeric: crate::user_functions::FunctionInvokerGuard,
+    }
+
+    impl TestFunction {
+        fn value(&self) -> Value {
+            crate::user_functions::test_support::exact_local_value("surface", self.binding.clone())
+        }
+    }
+
+    fn with_test_function(f: impl Fn(f64, f64) -> f64 + Send + Sync + 'static) -> TestFunction {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 1);
+        let entry = runtime.enter();
         let f = Arc::new(f);
-        let bound = crate::user_functions::test_support::install_bound_forwarder(
-            crate::user_functions::test_support::exact_portable_binding(1, "fcontour fixture"),
-        );
+        let bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let numeric = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            move |_function, args, _requested_outputs| {
+            move |function, args, _requested_outputs| {
+                assert_eq!(function, 1);
                 let f = Arc::clone(&f);
                 let x = match &args[0] {
                     Value::Num(value) => *value,
@@ -1134,14 +1144,13 @@ mod tests {
                 Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(f(x, y))) })
             },
         )));
-        (numeric, bound)
-    }
-
-    fn test_bound(name: &str) -> Value {
-        crate::user_functions::test_support::exact_local_value(
-            name,
-            crate::user_functions::test_support::exact_portable_binding(1, "fcontour fixture"),
-        )
+        drop(entry);
+        TestFunction {
+            runtime,
+            binding,
+            _bound: bound,
+            _numeric: numeric,
+        }
     }
 
     #[test]
@@ -1161,10 +1170,11 @@ mod tests {
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
         let _ = clear_figure(None);
-        let _invoker = with_test_function(|x, y| x * x + y);
+        let fixture = with_test_function(|x, y| x * x + y);
+        let _entry = fixture.runtime.enter();
 
-        let handle = block_on(fcontour_builtin(vec![
-            test_bound("surface"),
+        let handle = block_on(fixture.runtime.scope(fcontour_builtin(vec![
+            fixture.value(),
             Value::Tensor(runmat_value::Tensor::new(vec![0.0, 1.0, 0.0, 2.0], vec![1, 4]).unwrap()),
             Value::String("MeshDensity".into()),
             Value::Num(5.0),
@@ -1174,7 +1184,7 @@ mod tests {
             Value::Num(2.0),
             Value::String("DisplayName".into()),
             Value::String("parabola".into()),
-        ]))
+        ])))
         .unwrap();
 
         let ty = get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap();
@@ -1211,18 +1221,19 @@ mod tests {
             Value::Num(2.0),
         )
         .unwrap();
-        let _invoker = with_test_function(|x, y| x - y);
+        let fixture = with_test_function(|x, y| x - y);
+        let _entry = fixture.runtime.enter();
 
-        let handle = block_on(fcontour_builtin(vec![
+        let handle = block_on(fixture.runtime.scope(fcontour_builtin(vec![
             Value::Num(ax),
-            test_bound("surface"),
+            fixture.value(),
             Value::Tensor(
                 runmat_value::Tensor::new(vec![-1.0, 1.0, -1.0, 1.0], vec![1, 4]).unwrap(),
             ),
             Value::String("r--".into()),
             Value::String("MeshDensity".into()),
             Value::Num(3.0),
-        ]))
+        ])))
         .unwrap();
 
         let ty = get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap();
@@ -1236,15 +1247,16 @@ mod tests {
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
         let _ = clear_figure(None);
-        let _invoker = with_test_function(|x, y| x + y);
+        let fixture = with_test_function(|x, y| x + y);
+        let _entry = fixture.runtime.enter();
 
-        let handle = block_on(fcontour_builtin(vec![
-            test_bound("surface"),
+        let handle = block_on(fixture.runtime.scope(fcontour_builtin(vec![
+            fixture.value(),
             Value::String("MeshDensity".into()),
             Value::Int(IntValue::U8(3)),
             Value::String("Fill".into()),
             Value::Int(IntValue::U16(1)),
-        ]))
+        ])))
         .unwrap();
 
         let fill = get_builtin(vec![Value::Num(handle), Value::String("Fill".into())]).unwrap();
@@ -1262,12 +1274,13 @@ mod tests {
     fn fcontour_rejects_invalid_mesh_density() {
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
-        let _invoker = with_test_function(|x, y| x + y);
-        let err = block_on(fcontour_builtin(vec![
-            test_bound("surface"),
+        let fixture = with_test_function(|x, y| x + y);
+        let _entry = fixture.runtime.enter();
+        let err = block_on(fixture.runtime.scope(fcontour_builtin(vec![
+            fixture.value(),
             Value::String("MeshDensity".into()),
             Value::Num(1.0),
-        ]))
+        ])))
         .expect_err("expected mesh-density validation error");
         assert_eq!(err.identifier(), FCONTOUR_ERROR_INVALID_ARGUMENT.identifier);
     }
@@ -1364,7 +1377,8 @@ mod tests {
 
     #[test]
     fn fcontour_positional_integer_levels_require_runmat_extension_mode() {
-        let args = vec![test_bound("surface"), Value::Int(IntValue::U8(5))];
+        let fixture = with_test_function(|x, y| x + y);
+        let args = vec![fixture.value(), Value::Int(IntValue::U8(5))];
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let err = parse_fcontour_args(args.clone())
