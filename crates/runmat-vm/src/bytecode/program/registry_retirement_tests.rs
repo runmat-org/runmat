@@ -51,6 +51,203 @@ fn registry() -> FunctionRegistry {
     ]))
 }
 
+#[test]
+fn program_source_members_use_selected_runtime_projection() {
+    use runmat_runtime::source_context::ProgramSourceRecord;
+    use runmat_types::ProgramSourceId;
+
+    let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_program_sources([ProgramSourceRecord {
+        ordinal: ProgramSourceId(0),
+        name: std::sync::Arc::from("locals.m"),
+        fullpath_name: None,
+        text: std::sync::Arc::from("primary and local functions"),
+    }])
+    .expect("selected source");
+    let program = Some(BytecodeSourceRef::Program(ProgramSourceId(0)));
+    let source = runtime.program_source_id(ProgramSourceId(0)).unwrap();
+    let registry = FunctionRegistry::new(HashMap::from([
+        (
+            FunctionId(2),
+            FunctionBytecode {
+                function: FunctionId(2),
+                display_name: "child_local".into(),
+                source_id: program,
+                source_role: runmat_types::FunctionSourceRole::Local,
+                ..Default::default()
+            },
+        ),
+        (
+            FunctionId(1),
+            FunctionBytecode {
+                function: FunctionId(1),
+                display_name: "primary_file".into(),
+                source_id: program,
+                source_role: runmat_types::FunctionSourceRole::Primary,
+                ..Default::default()
+            },
+        ),
+    ]));
+
+    let group = registry.execution_source_group_facts_in(&runtime, source);
+    assert_eq!(group.len(), 2);
+    assert_eq!(group[0].name, "primary_file");
+    assert_eq!(group[0].role, runmat_types::FunctionSourceRole::Primary);
+    assert_eq!(group[1].name, "child_local");
+    assert_eq!(group[1].role, runmat_types::FunctionSourceRole::Local);
+    assert!(group.iter().all(|member| member.source_id == source));
+    let owners = group[0]
+        .definition_owners
+        .as_ref()
+        .expect("complete program source graph");
+    assert_eq!(owners.len(), 2);
+    assert!(std::sync::Arc::ptr_eq(
+        owners,
+        group[1].definition_owners.as_ref().unwrap()
+    ));
+}
+
+#[test]
+fn source_group_refuses_foreign_and_retired_issued_owners() {
+    let first = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ));
+    let second = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ));
+    let foreign = runmat_runtime::source_context::lease_source_context_in_context(
+        &first,
+        "foreign.m",
+        None,
+        "function x = foreign; end",
+    )
+    .expect("foreign owner");
+    let local = runmat_runtime::source_context::lease_source_context_in_context(
+        &second,
+        "local.m",
+        None,
+        "function x = local; end",
+    )
+    .expect("local owner");
+    assert_eq!(foreign.source_id(), local.source_id());
+    let registry = FunctionRegistry::new(HashMap::from([
+        (
+            FunctionId(1),
+            FunctionBytecode {
+                function: FunctionId(1),
+                display_name: "foreign".into(),
+                source_id: Some(BytecodeSourceRef::Runtime(foreign.source_ref())),
+                ..Default::default()
+            },
+        ),
+        (
+            FunctionId(2),
+            FunctionBytecode {
+                function: FunctionId(2),
+                display_name: "local".into(),
+                source_id: Some(BytecodeSourceRef::Runtime(local.source_ref())),
+                ..Default::default()
+            },
+        ),
+    ]));
+    assert!(registry
+        .execution_source_group(&second, foreign.source_ref())
+        .is_empty());
+    let group = registry.execution_source_group_facts_in(&second, local.source_id());
+    assert_eq!(group.len(), 1);
+    assert_eq!(group[0].name, "local");
+    assert_eq!(group[0].function, 2);
+    assert_eq!(group[0].source_id, local.source_id());
+    assert!(group[0]
+        .definition_owners
+        .as_ref()
+        .is_some_and(|owners| !owners.is_empty()));
+
+    let retired = local.source_ref();
+    drop(local);
+    assert!(registry.execution_source_group(&second, retired).is_empty());
+    assert!(registry
+        .execution_source_group_facts_in(&second, retired.source_id())
+        .is_empty());
+}
+
+#[test]
+fn retained_program_source_group_uses_only_captured_definition_owners() {
+    use runmat_runtime::source_context::ProgramSourceRecord;
+    use runmat_types::ProgramSourceId;
+
+    let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_program_sources([ProgramSourceRecord {
+        ordinal: ProgramSourceId(0),
+        name: std::sync::Arc::from("retained.m"),
+        fullpath_name: None,
+        text: std::sync::Arc::from("primary and local functions"),
+    }])
+    .expect("selected source");
+    let source = runtime.program_source_id(ProgramSourceId(0)).unwrap();
+    let program = Some(BytecodeSourceRef::Program(ProgramSourceId(0)));
+    let mut registry = FunctionRegistry::new(HashMap::from([
+        (
+            FunctionId(1),
+            FunctionBytecode {
+                function: FunctionId(1),
+                display_name: "old_primary".into(),
+                source_id: program,
+                source_file: Some("/old/retained.m".into()),
+                source_role: runmat_types::FunctionSourceRole::Primary,
+                ..Default::default()
+            },
+        ),
+        (
+            FunctionId(2),
+            FunctionBytecode {
+                function: FunctionId(2),
+                display_name: "old_local".into(),
+                source_id: program,
+                source_file: Some("/old/retained.m".into()),
+                source_role: runmat_types::FunctionSourceRole::Local,
+                ..Default::default()
+            },
+        ),
+    ]));
+    let (authority, _issuer) = local_authority(&registry, FunctionId(1));
+    registry.remove(FunctionId(1)).expect("retire primary");
+    registry.remove(FunctionId(2)).expect("retire local");
+    for (id, name) in [(1, "new_primary"), (2, "new_local")] {
+        registry.insert_replacing_name(FunctionBytecode {
+            function: FunctionId(id),
+            display_name: name.into(),
+            source_id: program,
+            ..Default::default()
+        });
+    }
+
+    let selected = registry
+        .owned_view(FunctionId(1), &authority)
+        .expect("retained program owner view");
+    let old = selected.execution_source_group_facts_in(&runtime, source);
+    assert_eq!(old.len(), 2);
+    assert_eq!(old[0].name, "old_primary");
+    assert_eq!(old[1].name, "old_local");
+    assert!(old
+        .iter()
+        .all(|info| info.source_file.as_deref() == Some("/old/retained.m")));
+    let owners = old[0].definition_owners.as_ref().expect("retained graph");
+    assert_eq!(owners.len(), 2);
+    assert!(std::sync::Arc::ptr_eq(
+        owners,
+        old[1].definition_owners.as_ref().unwrap()
+    ));
+    let current = registry.execution_source_group_facts_in(&runtime, source);
+    assert_eq!(current.len(), 2);
+    assert_eq!(current[0].name, "new_primary");
+    assert_eq!(current[1].name, "new_local");
+}
+
 fn local_authority(
     registry: &FunctionRegistry,
     function: FunctionId,

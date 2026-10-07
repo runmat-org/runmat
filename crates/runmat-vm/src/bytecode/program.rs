@@ -584,11 +584,14 @@ impl FunctionRegistry {
 
     /// Enumerate only definitions selected by the current execution owner.
     /// A retained overlay never falls back to later published source members.
-    pub fn execution_source_group(
+    fn execution_source_group(
         &self,
+        runtime: &runmat_runtime::context::RuntimeContext,
         source: runmat_runtime::source_context::RuntimeSourceRef,
     ) -> Vec<&FunctionBytecode> {
-        let source = BytecodeSourceRef::Runtime(source);
+        let Some(source_id) = source.resolve_in(runtime) else {
+            return Vec::new();
+        };
         let mut bodies = Vec::new();
         if let Some(overlay) = &self.static_overlay {
             if let runmat_value::BoundFunctionAuthority::Local {
@@ -599,21 +602,31 @@ impl FunctionRegistry {
             {
                 for lease in std::iter::once(definition).chain(dependencies.iter()) {
                     if let Some(body) = self.get_owned(FunctionId(lease.function()), lease) {
-                        if body.source_id == Some(source) {
+                        if body.source_id.and_then(|id| id.resolve_in(runtime)) == Some(source_id) {
                             bodies.push(body);
                         }
                     }
                 }
             }
         } else {
-            for id in self
-                .source_functions
-                .get(&source)
-                .map(Vec::as_slice)
-                .unwrap_or(&[])
+            let portable = runtime
+                .portable_ordinal_for_source(source)
+                .map(BytecodeSourceRef::Program);
+            for key in [Some(BytecodeSourceRef::Runtime(source)), portable]
+                .into_iter()
+                .flatten()
             {
-                if let Some(body) = self.get_current(*id) {
-                    bodies.push(body);
+                for id in self
+                    .source_functions
+                    .get(&key)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[])
+                {
+                    if let Some(body) = self.get_current(*id) {
+                        if body.source_id.and_then(|id| id.resolve_in(runtime)) == Some(source_id) {
+                            bodies.push(body);
+                        }
+                    }
                 }
             }
         }

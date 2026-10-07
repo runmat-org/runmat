@@ -54,7 +54,7 @@ impl FunctionRegistry {
         else {
             return Vec::new();
         };
-        let bodies = self.execution_source_group(source);
+        let bodies = self.execution_source_group(runtime, source);
         let owners = bodies
             .first()
             .and_then(|body| self.definition_dependency_owners(body.function))

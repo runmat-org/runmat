@@ -135,6 +135,12 @@ mod tests {
             crate::execution::RuntimeExecutionService::new(),
         ));
         let _entry = runtime.enter();
+        let _source_guard = crate::source_context::replace_source_catalog(vec![(
+            SourceId(3),
+            "/old/file.m".to_string(),
+            "handles = localfunctions();".to_string(),
+        )])
+        .expect("retained localfunctions source admission");
         let _current_guard = crate::source_context::replace_current_source_id(Some(SourceId(3)));
         let owner = Arc::new(runmat_value::FunctionDefinitionOwner::default());
         let owners = Arc::new(vec![(10, Arc::clone(&owner))]);
