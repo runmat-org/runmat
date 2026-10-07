@@ -17,7 +17,7 @@ pub(super) fn values(value: Value) -> (Vec<f64>, Vec<usize>, NumericDType) {
         Value::Num(number) => (vec![number], vec![1, 1], NumericDType::F64),
         Value::Tensor(tensor) => {
             let dtype = tensor.numeric_dtype();
-            (tensor.materialize_f64(), tensor.shape, dtype)
+            (tensor.materialize_f64(), tensor.shape().to_vec(), dtype)
         }
         other => panic!("expected numeric output, got {other:?}"),
     }

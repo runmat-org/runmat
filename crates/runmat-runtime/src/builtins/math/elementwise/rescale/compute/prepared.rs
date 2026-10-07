@@ -32,7 +32,7 @@ impl<'a> PreparedOperands<'a> {
         Self {
             values: tensors.map(tensor::tensor_values_f64_cow),
             broadcasts: tensors
-                .map(|tensor| OperandBroadcast::new(&tensor.shape, output_shape.len())),
+                .map(|tensor| OperandBroadcast::new(tensor.shape(), output_shape.len())),
         }
     }
 

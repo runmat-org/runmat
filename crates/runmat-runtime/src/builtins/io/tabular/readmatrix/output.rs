@@ -12,7 +12,7 @@ pub(super) fn finalize_output(tensor: Tensor, options: &ReadMatrixOptions) -> Bu
 }
 
 fn tensor_to_logical(tensor: Tensor) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor.into_numeric_storage().map_err(|error| {
         readmatrix_error_with(
             &READMATRIX_ERROR_TENSOR_BUILD,
@@ -58,7 +58,7 @@ fn tensor_to_integer_like(tensor: Tensor, prototype: &IntegerStorage) -> Builtin
     if tensor.numeric_dtype() == prototype.numeric_dtype() {
         return Ok(Value::Tensor(tensor));
     }
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor.into_numeric_storage().map_err(|e| {
         readmatrix_error_with(&READMATRIX_ERROR_TENSOR_BUILD, format!("readmatrix: {e}"))
     })?;
@@ -111,7 +111,7 @@ pub(super) fn tensor_to_gpu(
             owner,
             &runmat_accelerate_api::HostLogicalTensorView {
                 data: &bits,
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             },
             &[prototype],
         )
@@ -135,7 +135,7 @@ pub(super) fn tensor_to_gpu(
                     runmat_accelerate_api::ProviderExecutionError::from_source(error),
                 )
             })?;
-        return checked_like_result(output, prototype, &tensor.shape);
+        return checked_like_result(output, prototype, tensor.shape());
     }
     let target_dtype = if let Some(integer) = expected_integer {
         integer_element_dtype(integer)
@@ -156,7 +156,7 @@ pub(super) fn tensor_to_gpu(
     } else {
         tensor::coerce_tensor_dtype(tensor, target_dtype)
     };
-    let expected_shape = tensor.shape.clone();
+    let expected_shape = tensor.shape().to_vec();
     let mut uploaded = gpu_helpers::upload_tensor_protecting(owner, &tensor, &[prototype])
         .map_err(|error| {
             crate::runtime_error::with_provider_execution_source(

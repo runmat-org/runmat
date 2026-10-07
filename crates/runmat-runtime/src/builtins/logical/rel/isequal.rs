@@ -223,7 +223,7 @@ impl RealNumericView<'_> {
     fn shape(&self) -> Vec<usize> {
         match self {
             Self::Scalar(_) => vec![1, 1],
-            Self::Tensor(value) => value.shape.clone(),
+            Self::Tensor(value) => value.shape().to_vec(),
             Self::Logical(value) => value.shape.clone(),
             Self::Char(value) => vec![value.rows, value.cols],
             Self::Sparse(value) => vec![value.rows, value.cols],
@@ -284,7 +284,7 @@ fn real_complex_equal(
     complex: &ComplexTensor,
     nan_equal: bool,
 ) -> bool {
-    if real.shape() != complex.shape || real.len() != complex.len() {
+    if real.shape() != complex.shape() || real.len() != complex.len() {
         return false;
     }
     (0..real.len()).all(|index| {
@@ -343,7 +343,7 @@ fn integer_equals_float(integer: IntValue, float: NumericScalar) -> bool {
 }
 
 fn complex_tensors_equal(a: &ComplexTensor, b: &ComplexTensor, nan_equal: bool) -> bool {
-    if a.shape != b.shape || a.len() != b.len() {
+    if a.shape() != b.shape() || a.len() != b.len() {
         return false;
     }
     (0..a.len()).all(|index| {
@@ -363,7 +363,7 @@ fn complex_scalar_tensor_equal(
     tensor: &ComplexTensor,
     nan_equal: bool,
 ) -> bool {
-    if tensor.shape != [1, 1] || tensor.len() != 1 {
+    if tensor.shape() != [1, 1] || tensor.len() != 1 {
         return false;
     }
     let (tensor_real, tensor_imag) = tensor

@@ -14,6 +14,33 @@ fn operand_indexing_appends_trailing_singletons() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn explicit_rank_zero_bounds_preserve_scalarization_and_rank_one_output() {
+    let scalar = |value| tensor(vec![value], Vec::new());
+    let bounds = || {
+        vec![
+            scalar(0.0),
+            scalar(1.0),
+            Value::from("InputMin"),
+            scalar(0.0),
+            Value::from("InputMax"),
+            scalar(10.0),
+        ]
+    };
+
+    let rank_zero = futures::executor::block_on(rescale_builtin(scalar(5.0), bounds()))
+        .expect("rank-zero input and bounds remain scalar");
+    assert!(matches!(rank_zero, Value::Num(value) if value == 0.5));
+
+    let rank_one =
+        futures::executor::block_on(rescale_builtin(tensor(vec![0.0, 10.0], vec![2]), bounds()))
+            .expect("rank-one input broadcasts against rank-zero bounds");
+    let (data, shape, _) = values(rank_one);
+    assert_eq!(shape, vec![2]);
+    assert_close(&data, &[0.0, 1.0]);
+}
+
 #[tokio::test]
 async fn output_and_input_bounds_broadcast_together() {
     let result = rescale_builtin(

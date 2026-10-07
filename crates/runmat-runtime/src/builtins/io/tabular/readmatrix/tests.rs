@@ -9,6 +9,9 @@ use crate::builtins::common::test_support;
 #[path = "tests/owner.rs"]
 mod owner;
 
+#[path = "tests/output.rs"]
+mod output;
+
 #[test]
 fn resident_like_logical_upload_is_owned_and_preserves_nd_empty_shapes() {
     test_support::with_test_provider(|provider| {
@@ -326,7 +329,7 @@ fn readmatrix_reads_csv_data() {
     .expect("readmatrix");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 3]);
+            assert_eq!(t.shape(), vec![2, 3]);
             assert_eq!(values(&t), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -471,7 +474,7 @@ fn readmatrix_skips_header_lines() {
     .expect("readmatrix");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), vec![2, 2]);
             assert_eq!(values(&t), vec![0.0, 1.0, 10.0, 12.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -493,7 +496,7 @@ fn readmatrix_respects_delimiter_option() {
     .expect("readmatrix");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 3]);
+            assert_eq!(t.shape(), vec![2, 3]);
             assert_eq!(values(&t), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -515,7 +518,7 @@ fn readmatrix_respects_range_string() {
     .expect("readmatrix");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), vec![2, 2]);
             assert_eq!(values(&t), vec![22.0, 32.0, 23.0, 33.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -538,7 +541,7 @@ fn readmatrix_respects_range_numeric_vector() {
     .expect("readmatrix");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), vec![2, 2]);
             assert_eq!(values(&t), vec![22.0, 32.0, 23.0, 33.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -562,7 +565,7 @@ fn readmatrix_treats_custom_missing_tokens() {
     .expect("readmatrix");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 3]);
+            assert_eq!(t.shape(), vec![2, 3]);
             let values = values(&t);
             assert!(values[1].is_nan()); // column 1, row 2
             assert!(values[2].is_nan()); // column 2, row 1
@@ -594,7 +597,7 @@ fn readmatrix_uses_decimal_and_thousands_separators() {
     .expect("readmatrix");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), vec![1, 2]);
             let values = values(&t);
             assert!((values[0] - 1234.56).abs() < 1e-9);
             assert!((values[1] - 7890.12).abs() < 1e-9);
@@ -618,7 +621,7 @@ fn readmatrix_applies_empty_value() {
     .expect("readmatrix");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 3]);
+            assert_eq!(t.shape(), vec![2, 3]);
             assert_eq!(values(&t), vec![1.0, 4.0, 0.0, 0.0, 3.0, 6.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -648,7 +651,7 @@ fn readmatrix_accepts_struct_options() {
     .expect("readmatrix");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), vec![2, 2]);
             assert_eq!(values(&t), vec![9.0, 11.0, 10.0, 12.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -688,7 +691,7 @@ fn readmatrix_returns_empty_on_no_data() {
     .expect("readmatrix");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![0, 0]);
+            assert_eq!(t.shape(), vec![0, 0]);
             assert!(t.is_empty());
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -775,7 +778,7 @@ fn readmatrix_like_gpu_proto() {
             Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
         );
         let gathered = test_support::gather(result).expect("gather result");
-        assert_eq!(gathered.shape, vec![2, 2]);
+        assert_eq!(gathered.shape(), vec![2, 2]);
         assert_eq!(values(&gathered), vec![1.0, 3.0, 2.0, 4.0]);
         let _ = fs::remove_file(&path);
     });
@@ -835,7 +838,7 @@ fn readmatrix_accepts_character_vector_path() {
     .expect("readmatrix");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 3]);
+            assert_eq!(t.shape(), vec![1, 3]);
             assert_eq!(values(&t), vec![1.0, 2.0, 3.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -856,7 +859,7 @@ fn readmatrix_handles_quoted_fields() {
     .expect("readmatrix");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 3]);
+            assert_eq!(t.shape(), vec![1, 3]);
             assert_eq!(values(&t), vec![1.0, 2.0, 3.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -877,7 +880,7 @@ fn readmatrix_preserves_negative_infinity() {
     .expect("readmatrix");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 3]);
+            assert_eq!(t.shape(), vec![1, 3]);
             let values = values(&t);
             assert!(values[0].is_infinite() && values[0].is_sign_negative());
             assert!(values[1].is_infinite() && values[1].is_sign_positive());
@@ -901,7 +904,7 @@ fn readmatrix_accepts_shift_jis_encoding_label() {
     .expect("readmatrix");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), vec![2, 2]);
             assert_eq!(values(&t), vec![1.0, 3.0, 2.0, 4.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -926,7 +929,7 @@ fn readmatrix_auto_detects_utf16_bom() {
     .expect("readmatrix");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), vec![2, 2]);
             assert_eq!(values(&t), vec![1.0, 3.0, 2.0, 4.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -947,7 +950,7 @@ fn readmatrix_supports_whitespace_delimiter() {
     .expect("readmatrix");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 3]);
+            assert_eq!(t.shape(), vec![2, 3]);
             assert_eq!(values(&t), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),

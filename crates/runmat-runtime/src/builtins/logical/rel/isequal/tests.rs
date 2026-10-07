@@ -116,6 +116,58 @@ fn isequal_tensors_different_shape() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn isequal_preserves_exact_rank_identity_and_scalar_bridges() {
+    let rank_zero = || Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap());
+    let rank_one = || Value::Tensor(Tensor::new(vec![7.0], vec![1]).unwrap());
+    let matrix_scalar = || Value::Tensor(Tensor::new(vec![7.0], vec![1, 1]).unwrap());
+
+    assert_eq!(
+        run_isequal(vec![rank_zero(), rank_zero()]).unwrap(),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        run_isequal(vec![rank_zero(), rank_one()]).unwrap(),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        run_isequal(vec![rank_zero(), matrix_scalar()]).unwrap(),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        run_isequal(vec![Value::Num(7.0), rank_zero()]).unwrap(),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        run_isequal(vec![Value::Num(7.0), rank_one()]).unwrap(),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        run_isequal(vec![Value::Num(7.0), matrix_scalar()]).unwrap(),
+        Value::Bool(true)
+    );
+
+    let rank_zero_complex =
+        || Value::ComplexTensor(ComplexTensor::new(vec![(7.0, 0.0)], Vec::new()).unwrap());
+    assert_eq!(
+        run_isequal(vec![rank_zero(), rank_zero_complex()]).unwrap(),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        run_isequal(vec![Value::Complex(7.0, 0.0), rank_zero_complex()]).unwrap(),
+        Value::Bool(false)
+    );
+    assert_eq!(
+        run_isequal(vec![
+            Value::Complex(7.0, 0.0),
+            Value::ComplexTensor(ComplexTensor::new(vec![(7.0, 0.0)], vec![1, 1]).unwrap()),
+        ])
+        .unwrap(),
+        Value::Bool(true)
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn isequal_tensors_different_values() {
     let t1 = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();

@@ -137,7 +137,7 @@ fn invocation_keeps_opened_provider_and_cwd_when_ambient_owner_changes_while_pen
     let Value::Tensor(matrix) = block_on(call).expect("original captured owner") else {
         panic!("numeric matrix")
     };
-    assert_eq!(matrix.shape, vec![2, 2]);
+    assert_eq!(matrix.shape(), vec![2, 2]);
     assert_eq!(matrix.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
     assert_eq!(selected.opens.load(Ordering::SeqCst), 1);
 }
@@ -196,7 +196,7 @@ fn paged_text_filename_and_option_reject_before_file_open() {
     else {
         panic!("numeric matrix")
     };
-    assert_eq!(result.shape, vec![2, 2]);
+    assert_eq!(result.shape(), vec![2, 2]);
     assert_eq!(selected.opens.load(Ordering::SeqCst), 1);
 }
 

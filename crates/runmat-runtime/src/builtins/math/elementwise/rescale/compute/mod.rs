@@ -33,12 +33,12 @@ pub(super) fn rescale(
         BUILTIN_NAME,
     )?;
     let shape = broadcast::output_shape(
-        &input.tensor.shape,
+        input.tensor.shape(),
         &[
-            &lower.tensor.shape,
-            &upper.tensor.shape,
-            &input_min.tensor.shape,
-            &input_max.tensor.shape,
+            lower.tensor.shape(),
+            upper.tensor.shape(),
+            input_min.tensor.shape(),
+            input_max.tensor.shape(),
         ],
     )?;
     let length = broadcast::element_count(&shape)?;
