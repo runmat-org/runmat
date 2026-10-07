@@ -23,6 +23,7 @@ mod sparse;
 mod string;
 mod symbolic;
 
+pub(crate) use admission::BorrowedShapeAdmission;
 pub use admission::{
     ComplexTensorAdmission, NumericTensorAdmission, ValidatedComplexTensorParts,
     ValidatedNumericTensorParts,

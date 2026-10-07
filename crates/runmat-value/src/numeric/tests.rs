@@ -239,6 +239,52 @@ mod integer_storage_tests {
     }
 
     #[test]
+    fn borrowed_shape_validation_preserves_payload_allocations_and_diagnostics() {
+        let numeric = NumericStorage::F64(vec![1.0, 2.0]);
+        let numeric_pointer = numeric.as_f64_slice().unwrap().as_ptr();
+        assert_eq!(numeric.validate_shape(&[1, 2, 1]), Ok(()));
+        assert_eq!(numeric.as_f64_slice().unwrap().as_ptr(), numeric_pointer);
+        assert_eq!(
+            numeric.validate_shape(&[usize::MAX, 2]).unwrap_err(),
+            format!(
+                "numeric tensor shape {:?} overflows usize",
+                vec![usize::MAX, 2]
+            )
+        );
+        assert_eq!(
+            numeric.validate_shape(&[3]).unwrap_err(),
+            "double storage length 2 doesn't match shape [3] (3 elements)"
+        );
+
+        let complex = ComplexStorage::F32(
+            vec![ComplexElement(1.0_f32, -1.0), ComplexElement(2.0, -2.0)].into(),
+        );
+        let ComplexStorage::F32(values) = &complex else {
+            unreachable!("single complex fixture")
+        };
+        let complex_pointer = values.as_ptr();
+        assert_eq!(complex.validate_shape(&[1, 1, 2]), Ok(()));
+        let ComplexStorage::F32(values) = &complex else {
+            unreachable!("single complex fixture")
+        };
+        assert_eq!(values.as_ptr(), complex_pointer);
+        assert_eq!(
+            complex.validate_shape(&[usize::MAX, 2]).unwrap_err(),
+            format!(
+                "complex tensor shape {:?} overflows usize",
+                vec![usize::MAX, 2]
+            )
+        );
+        assert_eq!(
+            complex.validate_shape(&[3]).unwrap_err(),
+            "complex single storage length 2 doesn't match shape [3] (3 elements)"
+        );
+
+        let empty = ComplexStorage::F64(Vec::<ComplexElement<f64>>::new().into());
+        assert_eq!(empty.validate_shape(&[4, 0, usize::MAX]), Ok(()));
+    }
+
+    #[test]
     fn numeric_storage_moves_integer_buffers_without_floating_conversion() {
         let exact = IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]);
         let storage = NumericStorage::from_integer_storage(exact.clone());

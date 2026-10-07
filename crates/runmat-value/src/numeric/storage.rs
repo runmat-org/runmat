@@ -240,12 +240,10 @@ impl NumericStorage {
     }
 
     pub fn validate_shape(&self, shape: &[usize]) -> Result<(), String> {
-        let expected = shape
-            .iter()
-            .try_fold(1usize, |count, &dimension| count.checked_mul(dimension));
-        let Some(expected) = expected else {
-            return Err(format!("numeric tensor shape {shape:?} overflows usize"));
-        };
+        let expected =
+            crate::array::BorrowedShapeAdmission::new(shape).finish_synchronously(|shape| {
+                format!("numeric tensor shape {shape:?} overflows usize")
+            })?;
         if self.len() != expected {
             return Err(format!(
                 "{} storage length {} doesn't match shape {:?} ({} elements)",

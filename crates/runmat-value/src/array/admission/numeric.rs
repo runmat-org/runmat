@@ -103,7 +103,7 @@ impl NumericTensorAdmission {
             .shape
             .advance(maximum_work, |shape| storage.overflow_error(shape))?;
         if self.shape.is_complete() {
-            let expected = self.shape.elements;
+            let expected = self.shape.elements();
             if self.storage.len() != expected {
                 return Err(self.storage.length_error(&self.shape.shape, expected));
             }

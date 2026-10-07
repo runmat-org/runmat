@@ -45,7 +45,7 @@ impl ComplexTensorAdmission {
             format!("complex tensor shape {shape:?} overflows usize")
         })?;
         if self.shape.is_complete() {
-            let expected = self.shape.elements;
+            let expected = self.shape.elements();
             if self.storage.len() != expected {
                 return Err(format!(
                     "complex {} storage length {} doesn't match shape {:?} ({} elements)",

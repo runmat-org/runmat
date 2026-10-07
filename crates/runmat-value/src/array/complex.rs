@@ -309,12 +309,9 @@ impl ComplexStorage {
     }
 
     pub fn validate_shape(&self, shape: &[usize]) -> Result<(), String> {
-        let expected = shape
-            .iter()
-            .try_fold(1usize, |count, &dimension| count.checked_mul(dimension));
-        let Some(expected) = expected else {
-            return Err(format!("complex tensor shape {shape:?} overflows usize"));
-        };
+        let expected = BorrowedShapeAdmission::new(shape).finish_synchronously(|shape| {
+            format!("complex tensor shape {shape:?} overflows usize")
+        })?;
         if self.len() != expected {
             return Err(format!(
                 "complex {} storage length {} doesn't match shape {:?} ({} elements)",
