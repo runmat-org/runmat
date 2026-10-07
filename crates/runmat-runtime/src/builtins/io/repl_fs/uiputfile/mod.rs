@@ -44,25 +44,41 @@ fn invalid_selection(detail: String) -> RuntimeError {
     uiputfile_error(&UIPUTFILE_ERROR_INVALID_SELECTION, detail)
 }
 
-fn host_error(detail: impl AsRef<str>) -> RuntimeError {
-    uiputfile_error(&UIPUTFILE_ERROR_HOST, detail)
+fn host_error(source: RuntimeError) -> RuntimeError {
+    let detail = source.message().to_string();
+    let mut error = uiputfile_error(&UIPUTFILE_ERROR_HOST, detail);
+    error.source = Some(Box::new(source));
+    error
+}
+
+fn host_io_error(source: std::io::Error) -> RuntimeError {
+    let detail = source.to_string();
+    let mut error = uiputfile_error(&UIPUTFILE_ERROR_HOST, detail);
+    error.source = Some(Box::new(source));
+    error
 }
 
 #[runtime_builtin(
     name = "uiputfile",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::repl_fs::uiputfile"
 )]
-async fn uiputfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn uiputfile_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &UIPUTFILE_DESCRIPTOR,
         &UIPUTFILE_ERROR_TOO_MANY_OUTPUTS,
         NAME,
     )?;
     let options = parse_options(&args)?;
-    let selection = runmat_filesystem::select_file_save_async(&options.request)
+    let request = runmat_filesystem::resolve_save_file_dialog_request(&options.request)
+        .map_err(host_io_error)?;
+    let selection = crate::context::select_file_save(runtime.as_ref(), request)
         .await
-        .map_err(|err| host_error(err.to_string()))?;
+        .map_err(host_error)?;
     outputs_for_selection(selection, &options)
 }
 

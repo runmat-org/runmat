@@ -4,7 +4,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("uigetdir"),
     slug: Some("uigetdir"),
     summary: "Open a host folder-selection dialog and return the selected folder path.",
-    description: "`uigetdir` requests a folder selection from the active RunMat host dialog provider and returns MATLAB-compatible output values. Interactive hosts can implement the provider hook to show a native or browser folder picker; noninteractive hosts return the standard cancellation value.",
+    description: "`uigetdir` requests a folder selection from the selected RunMat session host and returns MATLAB-compatible output values. Interactive hosts can implement the typed hook to show a native or browser folder picker; noninteractive sessions return the standard cancellation value.",
     keywords: &[
         "uigetdir",
         "folder dialog",
@@ -34,7 +34,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection {
             heading: "Host integration",
             paragraphs: &[
-                "Native and browser hosts use the configured HostDialogProvider. Interactive selections require that host to install a dialog implementation; an absent hook follows the documented cancellation behavior rather than fabricating a selected path.",
+                "Native and browser sessions use their selected RuntimeHostService. Interactive selections require that exact session host to implement the directory-picker hook; an absent hook follows the documented cancellation behavior rather than fabricating a selected path.",
                 "Dialog requests are host callbacks and fusion boundaries. They are not GPU operations or distributed worker computations. The documented examples require the DesktopHost interaction fixture; a command-line-only run is not evidence that an interactive picker worked.",
             ]
         },

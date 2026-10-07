@@ -4,7 +4,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("uiputfile"),
     slug: Some("uiputfile"),
     summary: "Open a host save-file dialog and return the selected file name and path.",
-    description: "`uiputfile` requests a save-file target from the active RunMat host dialog provider and returns MATLAB-compatible output values. Interactive hosts can implement the provider hook to show a native or browser save picker; noninteractive hosts return the standard cancellation values.",
+    description: "`uiputfile` requests a save-file target from the selected RunMat session host and returns MATLAB-compatible output values. Interactive hosts can implement the typed hook to show a native or browser save picker; noninteractive sessions return the standard cancellation values.",
     keywords: &[
         "uiputfile",
         "file picker",
@@ -23,10 +23,10 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             paragraphs: &[
                 "`file = uiputfile()` uses an all-files filter.",
                 "`uiputfile(filter)` accepts a character vector, string scalar, semicolon-delimited pattern list, or an N-by-1/N-by-2 cell array of patterns and descriptions.",
-                "`uiputfile(filter, title, defaultName)` forwards the dialog title and initial file or directory path to the host dialog provider.",
+                "`uiputfile(filter, title, defaultName)` forwards the dialog title and initial file or directory path to the selected session host.",
                 "The selected `path` output is the containing directory with a trailing path separator. The `index` output is a one-based integer-valued double, not a native integer-class result.",
                 "Inputs are textual. Host or provider-resident numeric values are rejected before the save-file request is made.",
-                "Cancellation returns numeric zero for `file`, `path`, and `index`, matching MATLAB. This is also the behavior for host dialog providers that do not implement a save-file picker.",
+                "Cancellation returns numeric zero for `file`, `path`, and `index`, matching MATLAB. This is also the behavior when the selected session host does not implement a save-file picker.",
                 "Host text and filter cells are validated before any dialog request. Genuine character or cell pages reject; trailing singleton dimensions retain their effective row/matrix shape. Numeric resident values are not text and do not trigger a gather.",
                 "Requesting more than three outputs rejects before opening the dialog. Requesting zero outputs still performs the host interaction and validates its result.",
             ]
@@ -44,7 +44,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     faqs: &[
         BuiltinDocumentationFaq {
             question: "What happens in noninteractive or headless RunMat hosts?",
-            answer: "The runtime returns numeric cancellation zeros when no HostDialogProvider is installed. A host that provides an interactive picker implements select_file_save."
+            answer: "The runtime returns numeric cancellation zeros when the selected session host has no picker. An interactive session host implements select_file_save."
         },
         BuiltinDocumentationFaq {
             question: "How does a browser host provide a real save picker?",

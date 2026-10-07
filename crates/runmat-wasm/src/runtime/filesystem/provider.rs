@@ -1,23 +1,27 @@
 use async_trait::async_trait;
 use runmat_filesystem::{
-    DirEntry, FileHandle, FsMetadata, FsProvider, HostDialogProvider, OpenFileDialogRequest,
-    OpenFileDialogSelection, OpenFlags, ReadManyEntry, SaveFileDialogRequest,
-    SaveFileDialogSelection,
+    DirEntry, DirectoryDialogRequest, DirectoryDialogSelection, FileHandle, FsMetadata, FsProvider,
+    OpenFileDialogRequest, OpenFileDialogSelection, OpenFlags, ReadManyEntry,
+    SaveFileDialogRequest, SaveFileDialogSelection,
 };
+use runmat_runtime::context::{HostInteraction, RuntimeHostService, RuntimeServiceFuture};
+use runmat_runtime::{interaction::InteractionResponse, RuntimeError};
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use wasm_bindgen::prelude::*;
 
 use super::bindings::JsFsFuncs;
 use super::handle::{JsFileHandle, JsFileState};
 
-pub(crate) fn install_js_fs_provider(bindings: &JsValue) -> Result<(), JsValue> {
+pub(crate) fn install_js_fs_provider(
+    bindings: &JsValue,
+) -> Result<Rc<dyn RuntimeHostService>, JsValue> {
     let funcs = JsFsFuncs::new(bindings)?;
     let provider = Arc::new(JsFsProvider { funcs });
     runmat_filesystem::set_provider(provider.clone());
-    runmat_filesystem::set_host_dialog_provider(Some(provider));
-    Ok(())
+    Ok(Rc::new(JsDialogHost { provider }))
 }
 
 pub(crate) struct JsFsProvider {
@@ -116,21 +120,73 @@ impl FsProvider for JsFsProvider {
     }
 }
 
-#[async_trait(?Send)]
-impl HostDialogProvider for JsFsProvider {
-    async fn select_file_open(
-        &self,
-        request: &OpenFileDialogRequest,
-    ) -> io::Result<Option<OpenFileDialogSelection>> {
-        self.funcs.select_file_open_async(request).await
+struct JsDialogHost {
+    provider: Arc<JsFsProvider>,
+}
+
+impl RuntimeHostService for JsDialogHost {
+    fn console(&self, stream: runmat_runtime::console::ConsoleStream, text: String) {
+        runmat_runtime::console::forward_recorded_console_output(stream, text);
     }
 
-    async fn select_file_save(
+    fn warning(&self, _: runmat_runtime::warning_store::RuntimeWarning) {}
+
+    fn interact(
         &self,
-        request: &SaveFileDialogRequest,
-    ) -> io::Result<Option<SaveFileDialogSelection>> {
-        self.funcs.select_file_save_async(request).await
+        request: HostInteraction,
+    ) -> RuntimeServiceFuture<Result<InteractionResponse, RuntimeError>> {
+        runmat_runtime::interaction::invoke_installed_async_handler(request).unwrap_or_else(|| {
+            Box::pin(async {
+                Err(runmat_runtime::build_runtime_error(
+                    "The browser host does not provide interactive input",
+                )
+                .with_identifier("RunMat:host:InteractionUnavailable")
+                .build())
+            })
+        })
     }
+
+    fn select_file_open(
+        &self,
+        request: OpenFileDialogRequest,
+    ) -> RuntimeServiceFuture<Result<Option<OpenFileDialogSelection>, RuntimeError>> {
+        let provider = self.provider.clone();
+        Box::pin(async move {
+            provider
+                .funcs
+                .select_file_open_async(&request)
+                .await
+                .map_err(dialog_error)
+        })
+    }
+
+    fn select_file_save(
+        &self,
+        request: SaveFileDialogRequest,
+    ) -> RuntimeServiceFuture<Result<Option<SaveFileDialogSelection>, RuntimeError>> {
+        let provider = self.provider.clone();
+        Box::pin(async move {
+            provider
+                .funcs
+                .select_file_save_async(&request)
+                .await
+                .map_err(dialog_error)
+        })
+    }
+
+    fn select_directory(
+        &self,
+        _request: DirectoryDialogRequest,
+    ) -> RuntimeServiceFuture<Result<Option<DirectoryDialogSelection>, RuntimeError>> {
+        Box::pin(async { Ok(None) })
+    }
+}
+
+fn dialog_error(source: io::Error) -> RuntimeError {
+    runmat_runtime::build_runtime_error(source.to_string())
+        .with_identifier("RunMat:host:DialogFailed")
+        .with_source(source)
+        .build()
 }
 
 impl JsFsProvider {

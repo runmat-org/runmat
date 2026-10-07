@@ -5,6 +5,9 @@ use runmat_value::{CellArray, Value};
 
 use crate::{BuiltinResult, RuntimeError};
 
+#[cfg(test)]
+mod selected_context_tests;
+
 pub(crate) type ErrorMapper = fn(String) -> RuntimeError;
 
 pub(crate) fn parse_filter_spec(

@@ -300,6 +300,33 @@ pub trait RuntimeHostService {
     ) -> RuntimeServiceFuture<Result<(), RuntimeError>> {
         Box::pin(async { Err(super::host_document::unavailable()) })
     }
+
+    fn select_file_open(
+        &self,
+        _request: runmat_filesystem::OpenFileDialogRequest,
+    ) -> RuntimeServiceFuture<
+        Result<Option<runmat_filesystem::OpenFileDialogSelection>, RuntimeError>,
+    > {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn select_file_save(
+        &self,
+        _request: runmat_filesystem::SaveFileDialogRequest,
+    ) -> RuntimeServiceFuture<
+        Result<Option<runmat_filesystem::SaveFileDialogSelection>, RuntimeError>,
+    > {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn select_directory(
+        &self,
+        _request: runmat_filesystem::DirectoryDialogRequest,
+    ) -> RuntimeServiceFuture<
+        Result<Option<runmat_filesystem::DirectoryDialogSelection>, RuntimeError>,
+    > {
+        Box::pin(async { Ok(None) })
+    }
 }
 
 /// Host-owned asynchronous HTTP authority. The returned future must not start

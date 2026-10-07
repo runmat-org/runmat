@@ -1,13 +1,11 @@
 use super::*;
-use async_trait::async_trait;
-use runmat_filesystem::HostDialogProvider;
 use runmat_value::{CharArray, Tensor};
-use std::io;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 fn call(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
     let _guard = crate::output_count::push_output_count(outputs);
-    futures::executor::block_on(uiputfile_builtin(args))
+    futures::executor::block_on(uiputfile_builtin(crate::context::legacy::active(), args))
 }
 
 fn text(value: &Value) -> String {
@@ -30,14 +28,28 @@ struct DialogProvider {
     request: Arc<Mutex<Option<SaveFileDialogRequest>>>,
 }
 
-#[async_trait(?Send)]
-impl HostDialogProvider for DialogProvider {
-    async fn select_file_save(
+impl crate::context::RuntimeHostService for DialogProvider {
+    fn console(&self, _: crate::console::ConsoleStream, _: String) {}
+
+    fn warning(&self, _: crate::warning_store::RuntimeWarning) {}
+
+    fn interact(
         &self,
-        request: &SaveFileDialogRequest,
-    ) -> io::Result<Option<SaveFileDialogSelection>> {
-        *self.request.lock().unwrap() = Some(request.clone());
-        Ok(self.selection.clone())
+        _: crate::context::HostInteraction,
+    ) -> crate::context::RuntimeServiceFuture<
+        Result<crate::interaction::InteractionResponse, RuntimeError>,
+    > {
+        panic!("dialog fixture must not request terminal interaction")
+    }
+
+    fn select_file_save(
+        &self,
+        request: SaveFileDialogRequest,
+    ) -> crate::context::RuntimeServiceFuture<Result<Option<SaveFileDialogSelection>, RuntimeError>>
+    {
+        *self.request.lock().unwrap() = Some(request);
+        let selection = self.selection.clone();
+        Box::pin(async move { Ok(selection) })
     }
 }
 
@@ -71,11 +83,15 @@ fn with_dialog_provider(
 ) {
     let _lock = runmat_filesystem::provider_override_lock();
     let request = Arc::new(Mutex::new(None));
-    let provider = Arc::new(DialogProvider {
+    let provider = Rc::new(DialogProvider {
         selection,
         request: request.clone(),
     });
-    let _guard = runmat_filesystem::replace_host_dialog_provider(Some(provider));
+    let context = crate::context::RuntimeContext::new(Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(crate::context::RuntimeServicePorts::default().with_host(provider));
+    let _selected = context.enter();
     body(request);
 }
 

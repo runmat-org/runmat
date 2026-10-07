@@ -16,6 +16,7 @@ mod preferences;
 pub(crate) mod process_invocation;
 mod user_path;
 mod host_document;
+mod host_dialog;
 mod managed_observations;
 pub(crate) mod output_projection;
 pub mod host_effect;
@@ -59,6 +60,7 @@ pub use graphics_presentation::{
     GraphicsFlushReceipt, GraphicsFlushRequest, GraphicsPresentation,
     RuntimeGraphicsFlushOperation, RuntimeGraphicsPresentationService,
 };
+pub(crate) use host_dialog::{select_directory, select_file_open, select_file_save};
 pub(crate) use host_document::request as request_document;
 pub use host_document::{HostDocumentRequest, HostTextLocation, HostTextSelection};
 #[cfg(target_arch = "wasm32")]

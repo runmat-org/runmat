@@ -93,6 +93,24 @@ pub fn record_console_output(stream: ConsoleStream, text: impl Into<String>) {
     }
 }
 
+/// Forward an entry that the Runtime host port received after the canonical
+/// buffer and diary owners already recorded it. Host adapters use this to
+/// preserve installed live-stream listeners without recursively recording.
+pub fn forward_recorded_console_output(stream: ConsoleStream, text: String) {
+    let entry = ConsoleEntry {
+        stream,
+        text,
+        timestamp_ms: now_ms(),
+    };
+    if let Some(forwarder) = FORWARDER
+        .get()
+        .and_then(|lock| lock.read().ok().map(|guard| guard.as_ref().cloned()))
+        .flatten()
+    {
+        forwarder(&entry);
+    }
+}
+
 /// Record a control event that asks the host to clear the visible console.
 pub fn record_clear_screen() {
     record_console_output(ConsoleStream::ClearScreen, String::new());

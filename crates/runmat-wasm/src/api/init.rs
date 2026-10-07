@@ -43,7 +43,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     ensure_getrandom_js();
     #[cfg(target_arch = "wasm32")]
     ensure_figure_event_bridge();
-    install_fs_provider_from_options(&options).map_err(|err| {
+    let dialog_host = install_fs_provider_from_options(&options).map_err(|err| {
         init_error_with_details(
             InitErrorCode::FilesystemProvider,
             "Failed to install filesystem provider",
@@ -87,6 +87,9 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
             format!("Failed to initialize RunMat session: {err}"),
         )
     })?;
+    if let Some(host) = dialog_host.clone() {
+        session.install_host_service(host);
+    }
     if matches!(
         parsed_opts.application_settings,
         Some(ApplicationSettingsMode::IsolatedMemory)
@@ -210,6 +213,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
         telemetry_sink,
         package_cache,
         execution_service,
+        dialog_host,
     ))
 }
 
@@ -239,29 +243,37 @@ async fn package_cache_from_options(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn install_fs_provider_from_options(options: &JsValue) -> Result<(), JsValue> {
+pub(crate) fn install_fs_provider_from_options(
+    options: &JsValue,
+) -> Result<Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeHostService>>, JsValue> {
     if options.is_null() || options.is_undefined() || !options.is_object() {
-        return Ok(());
+        return Ok(None);
     }
     let value = js_sys::Reflect::get(options, &JsValue::from_str("fsProvider"))?;
     if value.is_null() || value.is_undefined() {
-        return Ok(());
+        return Ok(None);
     }
-    install_js_fs_provider(&value)
+    install_js_fs_provider(&value).map(Some)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn install_fs_provider_from_options(_options: &JsValue) -> Result<(), JsValue> {
-    Ok(())
+pub(crate) fn install_fs_provider_from_options(
+    _options: &JsValue,
+) -> Result<Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeHostService>>, JsValue> {
+    Ok(None)
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn install_fs_provider_value(bindings: JsValue) -> Result<(), JsValue> {
+pub(crate) fn install_fs_provider_value(
+    bindings: JsValue,
+) -> Result<std::rc::Rc<dyn runmat_runtime::context::RuntimeHostService>, JsValue> {
     install_js_fs_provider(&bindings)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn install_fs_provider_value(_bindings: JsValue) -> Result<(), JsValue> {
+pub(crate) fn install_fs_provider_value(
+    _bindings: JsValue,
+) -> Result<std::rc::Rc<dyn runmat_runtime::context::RuntimeHostService>, JsValue> {
     Err(crate::wire::errors::js_error(
         "filesystem provider installation is only available when targeting wasm32",
     ))

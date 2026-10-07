@@ -1033,45 +1033,6 @@ pub async fn set_readonly_async(path: impl AsRef<Path>, readonly: bool) -> io::R
     provider.set_readonly(&resolved, readonly).await
 }
 
-pub async fn select_file_open_async(
-    request: &OpenFileDialogRequest,
-) -> io::Result<Option<OpenFileDialogSelection>> {
-    let mut resolved = request.clone();
-    if let Some(default_path) = resolved.default_path.as_mut() {
-        *default_path = capture_provider_path(default_path)?.1;
-    }
-    match current_host_dialog_provider() {
-        Some(provider) => provider.select_file_open(&resolved).await,
-        None => Ok(None),
-    }
-}
-
-pub async fn select_file_save_async(
-    request: &SaveFileDialogRequest,
-) -> io::Result<Option<SaveFileDialogSelection>> {
-    let mut resolved = request.clone();
-    if let Some(default_path) = resolved.default_path.as_mut() {
-        *default_path = capture_provider_path(default_path)?.1;
-    }
-    match current_host_dialog_provider() {
-        Some(provider) => provider.select_file_save(&resolved).await,
-        None => Ok(None),
-    }
-}
-
-pub async fn select_directory_async(
-    request: &DirectoryDialogRequest,
-) -> io::Result<Option<DirectoryDialogSelection>> {
-    let mut resolved = request.clone();
-    if let Some(default_path) = resolved.default_path.as_mut() {
-        *default_path = capture_provider_path(default_path)?.1;
-    }
-    match current_host_dialog_provider() {
-        Some(provider) => provider.select_directory(&resolved).await,
-        None => Ok(None),
-    }
-}
-
 pub async fn data_manifest_descriptor_async(
     request: &DataManifestRequest,
 ) -> io::Result<DataManifestDescriptor> {
@@ -1274,11 +1235,6 @@ mod tests {
         flushed_async: Arc<Mutex<bool>>,
     }
 
-    struct TestHostDialogProvider {
-        request: Arc<Mutex<Option<OpenFileDialogRequest>>>,
-        selection: OpenFileDialogSelection,
-    }
-
     struct TestProviderStateGuard {
         previous_provider: Arc<dyn FsProvider>,
         previous_current_dir: Option<PathBuf>,
@@ -1338,17 +1294,6 @@ mod tests {
 
         fn file_bytes(&self, path: impl AsRef<Path>) -> Option<Vec<u8>> {
             self.files.lock().unwrap().get(path.as_ref()).cloned()
-        }
-    }
-
-    #[async_trait(?Send)]
-    impl HostDialogProvider for TestHostDialogProvider {
-        async fn select_file_open(
-            &self,
-            request: &OpenFileDialogRequest,
-        ) -> io::Result<Option<OpenFileDialogSelection>> {
-            *self.request.lock().unwrap() = Some(request.clone());
-            Ok(Some(self.selection.clone()))
         }
     }
 
@@ -1921,11 +1866,11 @@ mod tests {
     }
 
     #[test]
-    fn select_file_open_defaults_to_cancelled_selection() {
+    fn dialog_requests_resolve_default_paths_through_the_selected_storage_provider() {
         let _guard = test_lock();
-        let provider: Arc<dyn FsProvider> = Arc::new(UnsupportedProvider);
+        let provider = Arc::new(VirtualFsProvider::new("/workspace", &["/workspace/data"]));
         let _provider_guard = replace_provider(provider);
-        let request = OpenFileDialogRequest {
+        let open = OpenFileDialogRequest {
             title: Some("Open".to_string()),
             default_path: Some(PathBuf::from("data")),
             filters: vec![OpenFileDialogFilter {
@@ -1934,81 +1879,34 @@ mod tests {
             }],
             multiselect: false,
         };
-
-        let selection =
-            futures::executor::block_on(select_file_open_async(&request)).expect("select file");
-
-        assert_eq!(selection, None);
-    }
-
-    #[test]
-    fn host_dialog_provider_is_independent_from_storage_provider() {
-        let _guard = test_lock();
-        let storage: Arc<dyn FsProvider> = Arc::new(UnsupportedProvider);
-        let _storage_guard = replace_provider(storage);
-        let observed = Arc::new(Mutex::new(None));
-        let selected_path = PathBuf::from("/workspace/selected.csv");
-        let dialogs: Arc<dyn HostDialogProvider> = Arc::new(TestHostDialogProvider {
-            request: observed.clone(),
-            selection: OpenFileDialogSelection {
-                paths: vec![selected_path.clone()],
-                filter_index: Some(2),
-            },
-        });
-        let _dialog_guard = replace_host_dialog_provider(Some(dialogs));
-        let request = OpenFileDialogRequest {
-            title: Some("Choose data".to_string()),
-            default_path: Some(PathBuf::from("/workspace")),
-            filters: vec![OpenFileDialogFilter {
-                patterns: vec!["*.csv".to_string()],
-                description: Some("CSV files".to_string()),
-            }],
-            multiselect: false,
-        };
-
-        let selection = futures::executor::block_on(select_file_open_async(&request))
-            .expect("host dialog selection")
-            .expect("selected file");
-
-        assert_eq!(selection.paths, vec![selected_path]);
-        assert_eq!(selection.filter_index, Some(2));
-        assert_eq!(*observed.lock().unwrap(), Some(request));
-    }
-
-    #[test]
-    fn select_file_save_defaults_to_cancelled_selection() {
-        let _guard = test_lock();
-        let provider: Arc<dyn FsProvider> = Arc::new(UnsupportedProvider);
-        let _provider_guard = replace_provider(provider);
-        let request = SaveFileDialogRequest {
+        let save = SaveFileDialogRequest {
             title: Some("Save".to_string()),
-            default_path: Some(PathBuf::from("data.mat")),
-            filters: vec![OpenFileDialogFilter {
-                patterns: vec!["*.mat".to_string()],
-                description: Some("MAT files".to_string()),
-            }],
+            default_path: Some(PathBuf::from("data/results.mat")),
+            filters: Vec::new(),
         };
-
-        let selection =
-            futures::executor::block_on(select_file_save_async(&request)).expect("select file");
-
-        assert_eq!(selection, None);
-    }
-
-    #[test]
-    fn select_directory_defaults_to_cancelled_selection() {
-        let _guard = test_lock();
-        let provider: Arc<dyn FsProvider> = Arc::new(UnsupportedProvider);
-        let _provider_guard = replace_provider(provider);
-        let request = DirectoryDialogRequest {
-            title: Some("Select folder".to_string()),
+        let directory = DirectoryDialogRequest {
+            title: Some("Directory".to_string()),
             default_path: Some(PathBuf::from("data")),
         };
 
-        let selection =
-            futures::executor::block_on(select_directory_async(&request)).expect("select folder");
-
-        assert_eq!(selection, None);
+        assert_eq!(
+            resolve_open_file_dialog_request(&open)
+                .unwrap()
+                .default_path,
+            Some(PathBuf::from("/workspace/data"))
+        );
+        assert_eq!(
+            resolve_save_file_dialog_request(&save)
+                .unwrap()
+                .default_path,
+            Some(PathBuf::from("/workspace/data/results.mat"))
+        );
+        assert_eq!(
+            resolve_directory_dialog_request(&directory)
+                .unwrap()
+                .default_path,
+            Some(PathBuf::from("/workspace/data"))
+        );
     }
 
     #[test]

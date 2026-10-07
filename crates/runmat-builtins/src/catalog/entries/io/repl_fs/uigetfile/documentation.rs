@@ -4,7 +4,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("uigetfile"),
     slug: Some("uigetfile"),
     summary: "Open a host file-selection dialog and return the selected file name and path.",
-    description: "`uigetfile` requests an open-file selection from the active RunMat host dialog provider and returns MATLAB-compatible output values. Interactive hosts can implement the provider hook to show a native or browser picker; noninteractive hosts return the standard cancellation values.",
+    description: "`uigetfile` requests an open-file selection from the selected RunMat session host and returns MATLAB-compatible output values. Interactive hosts can implement the typed hook to show a native or browser picker; noninteractive sessions return the standard cancellation values.",
     keywords: &[
         "uigetfile",
         "file picker",
@@ -23,10 +23,10 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             paragraphs: &[
                 "`file = uigetfile()` uses an all-files filter.",
                 "`uigetfile(filter)` accepts a character vector, string scalar, semicolon-delimited pattern list, or an N-by-1/N-by-2 cell array of patterns and descriptions.",
-                "`uigetfile(filter, title, defaultName)` forwards the dialog title and initial file or directory path to the host dialog provider.",
+                "`uigetfile(filter, title, defaultName)` forwards the dialog title and initial file or directory path to the selected session host.",
                 "`uigetfile(..., 'MultiSelect', 'on')` allows multiple selected files. When multiple files are selected, `file` is a cell array of character vectors. A single selected file is returned as a character vector.",
                 "The selected `path` output is the containing directory with a trailing path separator. The `index` output is the one-based selected filter index.",
-                "Cancellation returns numeric zero for `file`, `path`, and `index`, matching MATLAB. This is also the behavior for host dialog providers that do not implement an open-file picker.",
+                "Cancellation returns numeric zero for `file`, `path`, and `index`, matching MATLAB. This is also the behavior when the selected session host does not implement an open-file picker.",
                 "Host text and filter cells are validated before any dialog request. Genuine character or cell pages reject; trailing singleton dimensions retain their effective row/matrix shape. Numeric resident values are not text and do not trigger a gather.",
                 "Requesting more than three outputs rejects before opening the dialog. Requesting zero outputs still performs the host interaction and validates its result.",
                 "MultiSelect accepts on/off in MATLAB compatibility mode. In RunMat mode it additionally accepts logical values, finite double scalars, all eight fixed-width integer scalars, and true/false/yes/no text aliases. Numeric controls use exact zero/nonzero decoding; these extensions reject before host access in MATLAB mode.",
@@ -45,7 +45,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     faqs: &[
         BuiltinDocumentationFaq {
             question: "What happens in noninteractive or headless RunMat hosts?",
-            answer: "The runtime returns numeric cancellation zeros when no HostDialogProvider is installed. A host that provides an interactive picker implements select_file_open."
+            answer: "The runtime returns numeric cancellation zeros when the selected session host has no picker. An interactive session host implements select_file_open."
         },
         BuiltinDocumentationFaq {
             question: "How does a browser host provide a real file picker?",

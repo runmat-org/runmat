@@ -83,6 +83,7 @@ pub struct RunMatWasm {
     telemetry_sink: Option<Arc<dyn TelemetrySink>>,
     package_cache: Option<Arc<dyn runmat_package_cache::CacheBackend>>,
     execution_service: std::rc::Rc<BrowserExecutionService>,
+    dialog_host: RefCell<Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeHostService>>>,
 }
 
 pub(crate) struct InFlightSession<'a> {
@@ -186,6 +187,7 @@ impl RunMatWasm {
         telemetry_sink: Option<Arc<dyn TelemetrySink>>,
         package_cache: Option<Arc<dyn runmat_package_cache::CacheBackend>>,
         execution_service: std::rc::Rc<BrowserExecutionService>,
+        dialog_host: Option<std::rc::Rc<dyn runmat_runtime::context::RuntimeHostService>>,
     ) -> Self {
         #[cfg(target_arch = "wasm32")]
         let local_tasks = RefCell::new(session.browser_local_task_supervisor());
@@ -202,6 +204,7 @@ impl RunMatWasm {
             telemetry_sink,
             package_cache,
             execution_service,
+            dialog_host: RefCell::new(dialog_host),
         }
     }
 
@@ -1317,6 +1320,9 @@ impl RunMatWasm {
         session.set_callstack_limit(config.callstack_limit);
         session.set_error_namespace(config.error_namespace.clone());
         session.install_execution_services(self.execution_service.clone());
+        if let Some(host) = self.dialog_host.borrow().clone() {
+            session.install_host_service(host);
+        }
         if let Some(handoff) = installed_handoff {
             session
                 .install_project_handoff(handoff)
@@ -1853,12 +1859,16 @@ impl RunMatWasm {
 
     #[wasm_bindgen(js_name = setFsProvider)]
     pub fn set_fs_provider(&self, bindings: JsValue) -> Result<(), JsValue> {
-        install_fs_provider_value(bindings).map_err(|err| {
+        self.ensure_not_disposed()?;
+        let host = install_fs_provider_value(bindings).map_err(|err| {
             js_error(&format!(
                 "Failed to install filesystem provider: {}",
                 js_value_to_string(err)
             ))
-        })
+        })?;
+        self.session.borrow_mut().install_host_service(host.clone());
+        self.dialog_host.replace(Some(host));
+        Ok(())
     }
 
     #[wasm_bindgen(js_name = dispose)]
