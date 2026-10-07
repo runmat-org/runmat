@@ -429,7 +429,7 @@ pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CummaxEvalu
             })
         }
         Value::ComplexTensor(ct) => {
-            let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&ct.shape));
+            let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(ct.shape()));
             let (values, indices) = cummax_complex_tensor(&ct, target_dim, direction, nan_mode)?;
             Ok(CummaxEvaluation {
                 values: complex_tensor_into_value(values),
@@ -567,7 +567,7 @@ fn cummax_host(
             let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
             integer_cummax(
                 tensor.integer_storage().expect("checked integer storage"),
-                tensor.shape.clone(),
+                tensor.shape().to_vec(),
                 target_dim,
                 direction,
             )
@@ -711,7 +711,7 @@ fn cummax_tensor(
     direction: CummaxDirection,
     nan_mode: CummaxNanMode,
 ) -> BuiltinResult<(Tensor, Tensor)> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| cummax_internal_error(&error))?;
@@ -740,7 +740,7 @@ fn cummax_complex_tensor(
 ) -> BuiltinResult<(ComplexTensor, Tensor)> {
     complex_cumulative_extrema::cumulative_extrema(
         tensor.clone().into_complex_storage(),
-        tensor.shape.clone(),
+        tensor.shape().to_vec(),
         dim,
         match direction {
             CummaxDirection::Forward => complex_cumulative_extrema::Direction::Forward,
@@ -774,7 +774,7 @@ fn ones_indices(shape: &[usize]) -> BuiltinResult<Tensor> {
 }
 
 fn default_dimension(tensor: &Tensor) -> usize {
-    default_dimension_from_shape(&tensor.shape)
+    default_dimension_from_shape(tensor.shape())
 }
 
 fn default_dimension_from_shape(shape: &[usize]) -> usize {
@@ -939,14 +939,14 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![4.0, 4.0, 2.0, 5.0, 7.0, 7.0]);
             }
             other => panic!("expected tensor values, got {other:?}"),
         }
         match indices {
             Value::Tensor(idx) => {
-                assert_eq!(idx.shape, vec![2, 3]);
+                assert_eq!(idx.shape(), [2, 3]);
                 assert_eq!(idx.materialize_f64(), vec![1.0, 1.0, 1.0, 2.0, 1.0, 1.0]);
             }
             other => panic!("expected tensor indices, got {other:?}"),
@@ -1261,7 +1261,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![4.0, 2.0, 7.0, 1.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval = evaluate(Value::GpuTensor(handle), &[]).expect("cummax");
@@ -1315,7 +1315,7 @@ pub(crate) mod tests {
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
                     data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 })
                 .expect("upload");
             let args = vec![Value::from("omitnan")];
@@ -1342,7 +1342,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let args = vec![Value::Int(IntValue::I32(5))];
@@ -1377,7 +1377,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_eval = evaluate(Value::GpuTensor(handle), &[]).expect("cummax gpu");
@@ -1391,12 +1391,12 @@ pub(crate) mod tests {
         let gathered_vals = test_support::gather(gpu_vals).expect("gather values");
         let gathered_idx = test_support::gather(gpu_idx).expect("gather indices");
 
-        assert_eq!(gathered_vals.shape, expected_vals.shape);
+        assert_eq!(gathered_vals.shape(), expected_vals.shape());
         assert_eq!(
             gathered_vals.materialize_f64(),
             expected_vals.materialize_f64()
         );
-        assert_eq!(gathered_idx.shape, expected_idx.shape);
+        assert_eq!(gathered_idx.shape(), expected_idx.shape());
         assert_eq!(
             gathered_idx.materialize_f64(),
             expected_idx.materialize_f64()

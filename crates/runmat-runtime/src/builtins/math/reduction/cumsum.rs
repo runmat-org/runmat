@@ -365,7 +365,7 @@ async fn cumsum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
             Ok(complex_tensor_into_value(result))
         }
         Value::ComplexTensor(ct) => {
-            let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&ct.shape));
+            let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(ct.shape()));
             let result = cumsum_complex_tensor(&ct, target_dim, direction, nan_mode)?;
             Ok(complex_tensor_into_value(result))
         }
@@ -509,7 +509,7 @@ fn cumsum_host(
             let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
             crate::builtins::math::reduction::integer_native::cumulative(
                 tensor.integer_storage().expect("checked integer storage"),
-                &tensor.shape,
+                tensor.shape(),
                 target_dim,
                 integer_direction(direction),
                 crate::builtins::math::reduction::integer_native::CumulativeOperation::Sum,
@@ -590,7 +590,7 @@ async fn cumsum_gpu(
         let tensor = gpu_helpers::gather_tensor_async(&handle)
             .await
             .map_err(|err| cumsum_internal_error(err.message()))?;
-        let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&tensor.shape));
+        let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(tensor.shape()));
         let result = cumsum_tensor(tensor, fallback_dim, direction, nan_mode)?;
         return Ok(tensor::tensor_into_value(result));
     }
@@ -652,7 +652,7 @@ fn cumsum_tensor(
     direction: CumsumDirection,
     nan_mode: CumsumNanMode,
 ) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| cumsum_internal_error(&error))?;
@@ -685,18 +685,18 @@ fn cumsum_complex_tensor(
             "dimension must be >= 1",
         ));
     }
-    if tensor.materialize_f64().is_empty() || dim > tensor.shape.len() {
+    if tensor.materialize_f64().is_empty() || dim > tensor.shape().len() {
         return Ok(tensor.clone());
     }
 
     let dim_index = dim - 1;
-    let segment_len = tensor.shape[dim_index];
+    let segment_len = tensor.shape()[dim_index];
     if segment_len == 0 {
         return Ok(tensor.clone());
     }
 
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
+    let stride_before = dim_product(&tensor.shape()[..dim_index]);
+    let stride_after = dim_product(&tensor.shape()[dim..]);
     let block = stride_before * segment_len;
     let mut output = vec![(0.0f64, 0.0f64); tensor.materialize_f64().len()];
 
@@ -772,7 +772,7 @@ fn cumsum_complex_tensor(
         }
     }
 
-    ComplexTensor::new(output, tensor.shape.clone()).map_err(|e| cumsum_internal_error(&e))
+    ComplexTensor::new(output, tensor.shape().to_vec()).map_err(|e| cumsum_internal_error(&e))
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
@@ -785,7 +785,7 @@ fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
 }
 
 fn default_dimension(tensor: &Tensor) -> usize {
-    default_dimension_from_shape(&tensor.shape)
+    default_dimension_from_shape(tensor.shape())
 }
 
 fn default_dimension_from_shape(shape: &[usize]) -> usize {
@@ -997,7 +997,7 @@ pub(crate) mod tests {
         let result = cumsum_builtin(Value::Tensor(tensor), Vec::new()).expect("cumsum");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 5.0, 2.0, 7.0, 3.0, 9.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1012,7 +1012,7 @@ pub(crate) mod tests {
         let result = cumsum_builtin(Value::Tensor(tensor), args).expect("cumsum");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 4.0, 3.0, 9.0, 6.0, 15.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1082,7 +1082,7 @@ pub(crate) mod tests {
         let result = cumsum_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("cumsum");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert!((out.materialize_f64()[0].0 - 1.0).abs() < 1e-12);
                 assert!((out.materialize_f64()[0].1 - 2.0).abs() < 1e-12);
                 assert!((out.materialize_f64()[1].0 - 4.0).abs() < 1e-12);
@@ -1099,12 +1099,12 @@ pub(crate) mod tests {
             let tensor = BuiltinsTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = cumsum_builtin(Value::GpuTensor(handle), Vec::new()).expect("cumsum");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), [4, 1]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 6.0, 10.0]);
         });
     }
@@ -1167,7 +1167,7 @@ pub(crate) mod tests {
         let result = cumsum_builtin(Value::Tensor(tensor), args).expect("cumsum");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![5.0, 4.0, 7.0, 5.0, 9.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1235,7 +1235,7 @@ pub(crate) mod tests {
             .expect("cumsum");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), [3, 1]);
                 assert!((out.materialize_f64()[0].0 - 1.0).abs() < 1e-12);
                 assert!((out.materialize_f64()[0].1 - 0.5).abs() < 1e-12);
                 assert!((out.materialize_f64()[1].0 - 1.0).abs() < 1e-12);
@@ -1255,7 +1255,7 @@ pub(crate) mod tests {
                 .expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = cumsum_builtin(Value::GpuTensor(handle), vec![Value::from("omitnan")])
@@ -1272,7 +1272,7 @@ pub(crate) mod tests {
             let tensor = BuiltinsTensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let original_id = handle.buffer_id();
@@ -1283,7 +1283,7 @@ pub(crate) mod tests {
             .expect("cumsum");
             match result {
                 Value::GpuTensor(out) => {
-                    assert_eq!(out.shape(), tensor.shape);
+                    assert_eq!(out.shape(), tensor.shape());
                     assert_eq!(out.buffer_id(), original_id);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
@@ -1337,7 +1337,7 @@ pub(crate) mod tests {
         let cpu = cumsum_builtin(Value::Tensor(tensor.clone()), Vec::new()).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = runmat_accelerate_api::provider()
             .unwrap()
@@ -1347,7 +1347,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu_result).expect("gather gpu");
         match cpu {
             Value::Tensor(ct) => {
-                assert_eq!(ct.shape, gathered.shape);
+                assert_eq!(ct.shape(), gathered.shape());
                 for (a, b) in ct
                     .materialize_f64()
                     .iter()
@@ -1375,7 +1375,7 @@ pub(crate) mod tests {
         .unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().unwrap();
         let handle = provider.upload(&view).unwrap();
@@ -1387,7 +1387,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu).expect("gather gpu");
         match cpu {
             Value::Tensor(ct) => {
-                assert_eq!(ct.shape, gathered.shape);
+                assert_eq!(ct.shape(), gathered.shape());
                 let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-9,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

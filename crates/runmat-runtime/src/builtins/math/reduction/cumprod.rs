@@ -401,7 +401,7 @@ async fn cumprod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value>
             Ok(complex_tensor_into_value(result))
         }
         Value::ComplexTensor(ct) => {
-            let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&ct.shape));
+            let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(ct.shape()));
             let result = cumprod_complex_tensor(&ct, target_dim, direction, nan_mode)?;
             Ok(complex_tensor_into_value(result))
         }
@@ -545,7 +545,7 @@ fn cumprod_host(
             let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
             crate::builtins::math::reduction::integer_native::cumulative(
                 tensor.integer_storage().expect("checked integer storage"),
-                &tensor.shape,
+                tensor.shape(),
                 target_dim,
                 integer_direction(direction),
                 crate::builtins::math::reduction::integer_native::CumulativeOperation::Product,
@@ -626,7 +626,7 @@ async fn cumprod_gpu(
         let tensor = gpu_helpers::gather_tensor_async(&handle)
             .await
             .map_err(|err| cumprod_internal_error(err.message()))?;
-        let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&tensor.shape));
+        let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(tensor.shape()));
         let result = cumprod_tensor(tensor, fallback_dim, direction, nan_mode)?;
         return Ok(tensor::tensor_into_value(result));
     }
@@ -688,7 +688,7 @@ fn cumprod_tensor(
     direction: CumprodDirection,
     nan_mode: CumprodNanMode,
 ) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| cumprod_internal_error(&error))?;
@@ -721,18 +721,18 @@ fn cumprod_complex_tensor(
             "dimension must be >= 1",
         ));
     }
-    if tensor.materialize_f64().is_empty() || dim > tensor.shape.len() {
+    if tensor.materialize_f64().is_empty() || dim > tensor.shape().len() {
         return Ok(tensor.clone());
     }
 
     let dim_index = dim - 1;
-    let segment_len = tensor.shape[dim_index];
+    let segment_len = tensor.shape()[dim_index];
     if segment_len == 0 {
         return Ok(tensor.clone());
     }
 
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
+    let stride_before = dim_product(&tensor.shape()[..dim_index]);
+    let stride_after = dim_product(&tensor.shape()[dim..]);
     let block = stride_before * segment_len;
     let mut output = vec![(0.0f64, 0.0f64); tensor.materialize_f64().len()];
 
@@ -804,7 +804,7 @@ fn cumprod_complex_tensor(
         }
     }
 
-    ComplexTensor::new(output, tensor.shape.clone()).map_err(|e| cumprod_internal_error(&e))
+    ComplexTensor::new(output, tensor.shape().to_vec()).map_err(|e| cumprod_internal_error(&e))
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
@@ -821,7 +821,7 @@ fn complex_mul(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
 }
 
 fn default_dimension(tensor: &Tensor) -> usize {
-    default_dimension_from_shape(&tensor.shape)
+    default_dimension_from_shape(tensor.shape())
 }
 
 fn default_dimension_from_shape(shape: &[usize]) -> usize {
@@ -1018,7 +1018,7 @@ pub(crate) mod tests {
         let result = cumprod_builtin(Value::Tensor(tensor), Vec::new()).expect("cumprod");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 4.0, 2.0, 10.0, 3.0, 18.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1033,7 +1033,7 @@ pub(crate) mod tests {
         let result = cumprod_builtin(Value::Tensor(tensor), args).expect("cumprod");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 4.0, 2.0, 20.0, 6.0, 120.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1104,7 +1104,7 @@ pub(crate) mod tests {
         let result = cumprod_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("cumprod");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert!((out.materialize_f64()[0].0 - 1.0).abs() < 1e-12);
                 assert!((out.materialize_f64()[0].1 - 2.0).abs() < 1e-12);
                 assert!((out.materialize_f64()[1].0 - 5.0).abs() < 1e-12);
@@ -1121,12 +1121,12 @@ pub(crate) mod tests {
             let tensor = BuiltinsTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = cumprod_builtin(Value::GpuTensor(handle), Vec::new()).expect("cumprod");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), [4, 1]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 2.0, 6.0, 24.0]);
         });
     }
@@ -1189,7 +1189,7 @@ pub(crate) mod tests {
         let result = cumprod_builtin(Value::Tensor(tensor), args).expect("cumprod");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 assert_eq!(out.materialize_f64(), vec![4.0, 4.0, 10.0, 5.0, 18.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1259,7 +1259,7 @@ pub(crate) mod tests {
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
                     data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 })
                 .expect("upload");
             let args = vec![Value::from("omitnan")];
@@ -1301,7 +1301,7 @@ pub(crate) mod tests {
 
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload");
@@ -1316,7 +1316,7 @@ pub(crate) mod tests {
 
         match cpu {
             Value::Tensor(ct) => {
-                assert_eq!(gathered.shape, ct.shape);
+                assert_eq!(gathered.shape(), ct.shape());
                 assert_eq!(gathered.materialize_f64(), ct.materialize_f64());
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1341,7 +1341,7 @@ pub(crate) mod tests {
 
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload");
@@ -1356,7 +1356,7 @@ pub(crate) mod tests {
 
         match cpu {
             Value::Tensor(ct) => {
-                assert_eq!(gathered.shape, ct.shape);
+                assert_eq!(gathered.shape(), ct.shape());
                 let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
