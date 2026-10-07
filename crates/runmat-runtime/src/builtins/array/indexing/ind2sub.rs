@@ -473,10 +473,10 @@ fn compute_subscripts(
         }
     }
 
-    let output_shape = if indices.shape.is_empty() {
+    let output_shape = if indices.shape().is_empty() {
         vec![len, 1]
     } else {
-        indices.shape.clone()
+        indices.shape().to_vec()
     };
 
     let mut tensors = Vec::with_capacity(dims.len());
@@ -604,14 +604,14 @@ pub(crate) mod tests {
                 assert_eq!(values.len(), 2);
                 match &values[0] {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![1, 3]);
+                        assert_eq!(t.shape(), [1, 3]);
                         assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
                     }
                     other => panic!("expected tensor rows, got {other:?}"),
                 }
                 match &values[1] {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![1, 3]);
+                        assert_eq!(t.shape(), [1, 3]);
                         assert_eq!(t.materialize_f64(), vec![3.0, 3.0, 3.0]);
                     }
                     other => panic!("expected tensor cols, got {other:?}"),
@@ -779,7 +779,7 @@ pub(crate) mod tests {
                 let Value::Tensor(output) = output else {
                     panic!("expected double tensor output");
                 };
-                assert_eq!(output.shape, vec![1, 2]);
+                assert_eq!(output.shape(), [1, 2]);
                 assert_eq!(output.materialize_f64(), expected);
                 assert!(output.integer_storage().is_none());
             }
@@ -885,7 +885,7 @@ pub(crate) mod tests {
             let idx_tensor = Tensor::new(vec![10.0, 11.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
                 data: &idx_tensor.materialize_f64(),
-                shape: &idx_tensor.shape,
+                shape: idx_tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload indices");
             let result = ind2sub_builtin(Value::Tensor(dims), Value::GpuTensor(handle)).unwrap();
@@ -902,10 +902,10 @@ pub(crate) mod tests {
                         other => panic!("expected gpu tensor output, got {other:?}"),
                     }
                     let rows = test_support::gather(values[0].clone()).expect("gather rows");
-                    assert_eq!(rows.shape, vec![2, 1]);
+                    assert_eq!(rows.shape(), [2, 1]);
                     assert_eq!(rows.materialize_f64(), vec![1.0, 2.0]);
                     let cols = test_support::gather(values[1].clone()).expect("gather cols");
-                    assert_eq!(cols.shape, vec![2, 1]);
+                    assert_eq!(cols.shape(), [2, 1]);
                     assert_eq!(cols.materialize_f64(), vec![4.0, 4.0]);
                 }
                 other => panic!("expected cell output, got {other:?}"),
@@ -937,7 +937,7 @@ pub(crate) mod tests {
                 };
                 assert_eq!(runmat_accelerate_api::handle_integer_type(handle), None);
                 let output = test_support::gather(output).expect("gather output");
-                assert_eq!(output.shape, vec![1, 2]);
+                assert_eq!(output.shape(), [1, 2]);
                 assert_eq!(output.materialize_f64(), expected);
                 assert!(output.integer_storage().is_none());
             }
@@ -1009,7 +1009,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().unwrap();
         let view = HostTensorView {
             data: &idx_tensor.materialize_f64(),
-            shape: &idx_tensor.shape,
+            shape: idx_tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload indices");
 
@@ -1030,7 +1030,7 @@ pub(crate) mod tests {
         for (cpu_val, gpu_val) in cpu_values.iter().zip(gpu_values.iter()) {
             let host_cpu = test_support::gather(cpu_val.clone()).expect("gather cpu");
             let host_gpu = test_support::gather(gpu_val.clone()).expect("gather gpu");
-            assert_eq!(host_cpu.shape, host_gpu.shape);
+            assert_eq!(host_cpu.shape(), host_gpu.shape());
             assert_eq!(host_cpu.materialize_f64(), host_gpu.materialize_f64());
         }
     }

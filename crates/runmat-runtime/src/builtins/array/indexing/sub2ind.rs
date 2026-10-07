@@ -388,11 +388,11 @@ fn compute_indices(
         if len != 1 {
             has_non_scalar = true;
             if let Some(shape) = &target_shape {
-                if &tensor.shape != shape {
+                if tensor.shape() != shape {
                     return Err(sub2ind_error("Subscript inputs must have the same size."));
                 }
             } else {
-                target_shape = Some(tensor.shape.clone());
+                target_shape = Some(tensor.shape().to_vec());
                 result_len = len;
             }
         }
@@ -601,7 +601,7 @@ pub(crate) mod tests {
         .unwrap();
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), [3, 1]);
                 assert_eq!(t.materialize_f64(), vec![10.0, 11.0, 12.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -622,7 +622,7 @@ pub(crate) mod tests {
 
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![3, 1]);
+                assert_eq!(tensor.shape(), [3, 1]);
                 assert_eq!(tensor.materialize_f64(), vec![10.0, 11.0, 12.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -643,7 +643,7 @@ pub(crate) mod tests {
         .unwrap();
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), [1, 2]);
                 assert_eq!(t.materialize_f64(), vec![3.0, 11.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -702,7 +702,7 @@ pub(crate) mod tests {
             let Value::Tensor(result) = result else {
                 panic!("expected double tensor output");
             };
-            assert_eq!(result.shape, vec![1, 2]);
+            assert_eq!(result.shape(), [1, 2]);
             assert_eq!(result.materialize_f64(), vec![5.0, 6.0]);
             assert!(result.integer_storage().is_none());
         }
@@ -783,19 +783,19 @@ pub(crate) mod tests {
             let dims_handle = provider
                 .upload(&HostTensorView {
                     data: &dims.materialize_f64(),
-                    shape: &dims.shape,
+                    shape: dims.shape(),
                 })
                 .expect("upload dims");
             let rows_handle = provider
                 .upload(&HostTensorView {
                     data: &rows.materialize_f64(),
-                    shape: &rows.shape,
+                    shape: rows.shape(),
                 })
                 .expect("upload rows");
             let cols_handle = provider
                 .upload(&HostTensorView {
                     data: &cols.materialize_f64(),
-                    shape: &cols.shape,
+                    shape: cols.shape(),
                 })
                 .expect("upload cols");
 
@@ -808,7 +808,7 @@ pub(crate) mod tests {
             match result {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).unwrap();
-                    assert_eq!(gathered.shape, vec![3, 1]);
+                    assert_eq!(gathered.shape(), [3, 1]);
                     assert_eq!(gathered.materialize_f64(), vec![10.0, 11.0, 12.0]);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
@@ -843,7 +843,7 @@ pub(crate) mod tests {
             };
             assert_eq!(runmat_accelerate_api::handle_integer_type(handle), None);
             let result = test_support::gather(result).expect("gather result");
-            assert_eq!(result.shape, vec![1, 2]);
+            assert_eq!(result.shape(), [1, 2]);
             assert_eq!(result.materialize_f64(), vec![5.0, 6.0]);
             assert!(result.integer_storage().is_none());
         });
@@ -873,13 +873,13 @@ pub(crate) mod tests {
         let rows_handle = provider
             .upload(&HostTensorView {
                 data: &rows.materialize_f64(),
-                shape: &rows.shape,
+                shape: rows.shape(),
             })
             .expect("upload rows");
         let cols_handle = provider
             .upload(&HostTensorView {
                 data: &cols.materialize_f64(),
-                shape: &cols.shape,
+                shape: cols.shape(),
             })
             .expect("upload cols");
 
@@ -895,7 +895,7 @@ pub(crate) mod tests {
             Value::Num(v) => Tensor::new(vec![v], vec![1, 1]).unwrap(),
             other => panic!("unexpected cpu result {other:?}"),
         };
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 }
