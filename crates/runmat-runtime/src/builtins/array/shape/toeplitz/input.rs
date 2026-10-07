@@ -25,7 +25,7 @@ impl InputVector {
             }),
             Value::Int(value) => Ok(Self::TypedInteger(IntegerStorage::from_scalar(value))),
             Value::Tensor(tensor) => {
-                validate_vector_shape(&tensor.shape, tensor_utils::tensor_element_len(&tensor))?;
+                validate_vector_shape(tensor.shape(), tensor_utils::tensor_element_len(&tensor))?;
                 let storage = tensor
                     .into_numeric_storage()
                     .map_err(|err| error_with_detail(&ERROR_INTERNAL, err))?;
@@ -51,7 +51,7 @@ impl InputVector {
             }),
             Value::ComplexTensor(tensor) => {
                 validate_vector_shape(
-                    &tensor.shape,
+                    tensor.shape(),
                     tensor_utils::complex_tensor_element_len(&tensor),
                 )?;
                 Ok(match tensor.integer_storage() {

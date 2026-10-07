@@ -533,7 +533,7 @@ async fn matrix_from_gpu(
 }
 
 fn matrix_from_real_tensor(tensor: Tensor, ctx: BuiltinContext) -> BuiltinResult<MatrixInput> {
-    let Some((rows, cols)) = matrix_dims_or_false(&tensor.shape) else {
+    let Some((rows, cols)) = matrix_dims_or_false(tensor.shape()) else {
         return Ok(MatrixInput::TooManyDimensions);
     };
     if rows
@@ -571,7 +571,7 @@ fn matrix_from_complex_tensor(
     tensor: ComplexTensor,
     ctx: BuiltinContext,
 ) -> BuiltinResult<MatrixInput> {
-    let Some((rows, cols)) = matrix_dims_or_false(&tensor.shape) else {
+    let Some((rows, cols)) = matrix_dims_or_false(tensor.shape()) else {
         return Ok(MatrixInput::TooManyDimensions);
     };
     if rows
@@ -1264,7 +1264,7 @@ mod tests {
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
                     data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 })
                 .unwrap();
             assert!(expect_bool(call_isdiag(Value::GpuTensor(handle)).unwrap()));
@@ -1292,7 +1292,7 @@ mod tests {
         let handle = provider
             .upload(&HostTensorView {
                 data: &lower.materialize_f64(),
-                shape: &lower.shape,
+                shape: lower.shape(),
             })
             .expect("upload lower");
         assert!(!expect_bool(

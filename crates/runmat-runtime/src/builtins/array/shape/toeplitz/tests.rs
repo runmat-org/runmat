@@ -11,14 +11,14 @@ fn empty_and_nd_vectors_preserve_geometry() {
         else {
             panic!("tensor");
         };
-        assert_eq!(output.shape, vec![0, 2]);
+        assert_eq!(output.shape(), [0, 2]);
     }
     let input = Tensor::new(vec![1., 2., 3.], vec![1, 1, 3]).unwrap();
     let Value::Tensor(output) = block_on(toeplitz_builtin(vec![Value::Tensor(input)])).unwrap()
     else {
         panic!("tensor");
     };
-    assert_eq!(output.shape, vec![3, 3]);
+    assert_eq!(output.shape(), [3, 3]);
 }
 
 #[test]
@@ -86,7 +86,7 @@ fn toeplitz_one_real_vector_is_symmetric() {
     let Value::Tensor(tensor) = out else {
         panic!("expected tensor");
     };
-    assert_eq!(tensor.shape, vec![3, 3]);
+    assert_eq!(tensor.shape(), [3, 3]);
     assert_eq!(
         tensor.materialize_f64(),
         vec![1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0]
@@ -103,7 +103,7 @@ fn toeplitz_column_and_row_use_first_column_diagonal() {
     let Value::Tensor(tensor) = out else {
         panic!("expected tensor");
     };
-    assert_eq!(tensor.shape, vec![3, 2]);
+    assert_eq!(tensor.shape(), [3, 2]);
     assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 1.0, 2.0]);
 }
 
@@ -114,7 +114,7 @@ fn toeplitz_complex_single_input_uses_row_and_conjugates_first_column() {
     let Value::ComplexTensor(tensor) = out else {
         panic!("expected complex tensor");
     };
-    assert_eq!(tensor.shape, vec![2, 2]);
+    assert_eq!(tensor.shape(), [2, 2]);
     assert_eq!(
         tensor.materialize_f64(),
         vec![(1.0, 2.0), (3.0, -4.0), (3.0, 4.0), (1.0, 2.0)]
@@ -128,7 +128,7 @@ fn toeplitz_preserves_native_single_storage() {
     let Value::Tensor(tensor) = out else {
         panic!("expected tensor");
     };
-    assert_eq!(tensor.shape, vec![3, 3]);
+    assert_eq!(tensor.shape(), [3, 3]);
     assert_eq!(
         tensor.into_numeric_storage().expect("single storage"),
         NumericStorage::F32(vec![1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0])
@@ -192,7 +192,7 @@ fn toeplitz_preserves_all_exact_integer_classes() {
         else {
             panic!("expected exact integer tensor");
         };
-        assert_eq!(output.shape, vec![3, 3]);
+        assert_eq!(output.shape(), [3, 3]);
         assert_eq!(output.integer_storage(), Some(&expected));
     }
 
@@ -248,7 +248,7 @@ fn toeplitz_typed_complex_integer_vector_shape_uses_storage_len_not_mirror() {
         panic!("expected exact complex integer tensor");
     };
 
-    assert_eq!(output.shape, vec![3, 3]);
+    assert_eq!(output.shape(), [3, 3]);
     let storage = output.integer_storage().expect("typed complex storage");
     assert_eq!(
         storage.real,
