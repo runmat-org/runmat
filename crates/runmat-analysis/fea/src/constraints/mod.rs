@@ -70,3 +70,9 @@ mod construction_tests;
 mod tests;
 pub use algebra::{AffineConstraintReduction, ConstraintAlgebraError, ResolvedConstraintMatrix};
 pub(crate) use reaction::solve_constraint_multipliers;
+
+pub use plan::{
+    constraint_authored_workspace_profile, constraint_plan_finalization_workspace_profile,
+    ConstraintAuthoredWorkspaceProfile, ConstraintPlanFinalizationWorkspaceProfile,
+};
+pub use row::{constraint_row_workspace_profile, ConstraintRowWorkspaceProfile};

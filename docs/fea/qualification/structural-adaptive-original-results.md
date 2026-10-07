@@ -206,3 +206,37 @@ and explicit-surface topology construction, row/plan encoding, accumulation/sort
 graph/rank/validation aggregation and adaptive evaluation/output composition. No
 whole-constraint/task admission, scheduled adaptive graph, atomic semantic publication,
 measured resource envelope or original scientific gate is qualified by these profiles.
+
+
+## Counted ordering and canonical finalization
+
+Constraint sorting now uses a counted ordinal vector with fallible reservation and
+in-place permutation cycles. Original ordinal is the tie break, preserving stable
+term order and floating-point duplicate-coefficient summation. Source-equation hashing
+borrows targets rather than cloning their strings and persistent-entity metadata.
+Authored source preparation profiles its source/ID/digest/ordered-reference vectors and
+shared canonical materialization estimate before constructing those buffers. Plan
+accumulation requests exact additional capacity instead of geometric growth slack.
+
+Row finalization exposes its additional ordinal, possible compaction, ID-copy and
+canonical materialization inventory. It excludes the already-owned incoming term buffer;
+that allocation remains the lowering owner's responsibility. The row codec shape uses
+all original candidate terms and the longest recovery/residual enum spellings so that
+post-combination singleton or rotational rows remain covered. Estimates are supplied by
+the shared canonical codec, not a private string/map multiplier or measured RSS.
+
+Canonical validation now borrows sorted reference points for binary lookup and uses
+sorted row ranges for group counts, removing copied reference sets and row-reference
+vectors. A focused validation module owns the existing semantic checks. Checked evidence
+addition rejects overflow; every row must belong to a declared group. Hostile canonical
+payloads bypassing producer validation are rejected at cold import for both cases.
+Valid canonical plans, original rank/conflict tolerances and numerical equations remain.
+
+The post-lowering plan finalization profile composes counted group/row ordering, shared
+graph preflight and component-bounded rank workspace, plus the shared full-plan codec
+estimate. Its graph derivation allocates counted graph scratch: the existing count-only
+graph reservation must be admitted before requesting the tighter profile. This is a
+phase inventory, not a pre-lowering whole-compilation receipt. Mixed/explicit topology,
+complete lowering/evidence construction and overlap, adaptive evaluation/output, scheduled
+execution, semantic publication, measured resources and scientific qualification remain
+separate requirements. No resource ceiling or original failed acceptance target changed.

@@ -133,12 +133,15 @@ fn borrowed_reference_point_preparation_preserves_aliases_and_conflict_rejection
     let p = constraint_reference_point_workspace_profile(&model).unwrap();
     assert_eq!(p.candidate_slots, 2);
     assert_eq!(p.id_payload_bytes, 18);
-    let authored = plan::structural_constraints(&model);
+    let authored = plan::structural_constraints(&model).unwrap();
     let points = compile::canonical_reference_points(&authored).unwrap();
     assert_eq!(points.len(), 1);
     assert_eq!(points[0].reference_point_id, "reference");
     model.constraints.push(constraint("c", [0.2, 0.3, -2.]));
-    assert!(compile::canonical_reference_points(&plan::structural_constraints(&model)).is_err());
+    assert!(
+        compile::canonical_reference_points(&plan::structural_constraints(&model).unwrap())
+            .is_err()
+    );
 }
 
 #[test]

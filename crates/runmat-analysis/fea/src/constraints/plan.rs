@@ -5,7 +5,6 @@
 //! plan; it must not reinterpret authored targets or coordinate frames.
 
 use std::cmp::Ordering;
-use std::collections::BTreeSet;
 
 use runmat_analysis_core::{AnalysisModel, StructuralConstraintKind};
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
@@ -21,10 +20,21 @@ use super::row::{
 use super::target::validate_resolved_target;
 use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
 
-const PLAN_PREFIX: &[u8] = b"runmat-analysis-structural-constraint-plan/v1\0";
+mod authored_profile;
+mod profile;
+mod validation;
+pub use authored_profile::{
+    constraint_authored_workspace_profile, ConstraintAuthoredWorkspaceProfile,
+};
+pub use profile::{
+    constraint_plan_finalization_workspace_profile, ConstraintPlanFinalizationWorkspaceProfile,
+};
+
+pub(super) const PLAN_PREFIX: &[u8] = b"runmat-analysis-structural-constraint-plan/v1\0";
 const PLAN_DOMAIN: &str = "structural-constraint-plan";
 const SOURCE_DOMAIN: &str = "structural-constraint-source";
-const PLAN_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+pub(super) const PLAN_LIMITS: CanonicalLimits =
+    CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 
 impl CanonicalStructuralConstraintPlan {
     pub fn compile_for_model(
@@ -42,207 +52,7 @@ impl CanonicalStructuralConstraintPlan {
     }
 
     pub fn validate(&self) -> Result<(), ConstraintPlanError> {
-        if self.schema_version != 1
-            || !self.topology.has_valid_identity()
-            || self.evidence.authored_constraint_count != self.groups.len()
-            || self.evidence.active_row_count + self.evidence.redundant_row_count != self.rows.len()
-            || self.evidence.rank != self.evidence.active_row_count
-            || self.evidence.conflicting_row_count != 0
-        {
-            return Err(ConstraintPlanError::Invalid(
-                "schema, topology, or evidence is inconsistent".into(),
-            ));
-        }
-        if !self
-            .reference_points
-            .windows(2)
-            .all(|pair| pair[0].identity < pair[1].identity)
-            || self.reference_points.iter().any(|point| {
-                point.reference_point_id.trim().is_empty()
-                    || point.position_meters.iter().any(|value| !value.is_finite())
-                    || match reference_point_identity(
-                        &point.reference_point_id,
-                        point.position_meters,
-                    ) {
-                        Ok(identity) => identity != point.identity,
-                        Err(_) => true,
-                    }
-            })
-        {
-            return Err(ConstraintPlanError::Invalid(
-                "canonical reference-point evidence is invalid".into(),
-            ));
-        }
-        let reference_point_identities = self
-            .reference_points
-            .iter()
-            .map(|point| point.identity)
-            .collect::<BTreeSet<_>>();
-        let all_rows = self.rows.iter().collect::<Vec<_>>();
-        if !enforcement::matches_rows(self.enforcement, &all_rows) {
-            return Err(ConstraintPlanError::Invalid(
-                "plan enforcement differs from its canonical row space".into(),
-            ));
-        }
-        if !self
-            .groups
-            .windows(2)
-            .all(|pair| pair[0].constraint_id < pair[1].constraint_id)
-            || !self
-                .rows
-                .windows(2)
-                .all(|pair| compare_rows(&pair[0], &pair[1]) == Ordering::Less)
-        {
-            return Err(ConstraintPlanError::Invalid(
-                "groups and rows must be uniquely ordered".into(),
-            ));
-        }
-        for group in &self.groups {
-            let group_rows = self
-                .rows
-                .iter()
-                .filter(|row| row.constraint_id == group.constraint_id)
-                .collect::<Vec<_>>();
-            let implementation_is_valid = match self.topology {
-                CanonicalStructuralTopologyIdentity::Solid { .. } => {
-                    group.implementation
-                        == runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection
-                }
-                CanonicalStructuralTopologyIdentity::ConformalMixed { .. } => matches!(
-                    group.implementation,
-                    runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection
-                        | runmat_analysis_core::BoundaryTransferImplementation::ExplicitRegionConnectivity
-                ),
-                CanonicalStructuralTopologyIdentity::Explicit { .. } => {
-                    group.implementation
-                        == runmat_analysis_core::BoundaryTransferImplementation::ExplicitRegionConnectivity
-                }
-            };
-            if group.constraint_id.is_empty()
-                || !implementation_is_valid
-                || group.targets.is_empty()
-                || group.row_count != group_rows.len()
-                || !group
-                    .targets
-                    .windows(2)
-                    .all(|pair| pair[0].selection_digest < pair[1].selection_digest)
-                || !group
-                    .reference_point_identities
-                    .windows(2)
-                    .all(|pair| pair[0] < pair[1])
-                || group
-                    .reference_point_identities
-                    .iter()
-                    .any(|identity| !reference_point_identities.contains(identity))
-                || match &group.coupling {
-                    Some(coupling) => {
-                        group.reference_point_identities.as_slice()
-                            != [coupling.reference_point_identity]
-                            || coupling.target_weights.is_empty()
-                            || !coupling.characteristic_length_meters.is_finite()
-                            || coupling.characteristic_length_meters < 0.0
-                            || (coupling.kind == ConstraintCouplingKind::Distributing
-                                && coupling.characteristic_length_meters <= 1.0e-12)
-                            || !coupling
-                                .target_weights
-                                .windows(2)
-                                .all(|pair| pair[0].node_identity < pair[1].node_identity)
-                            || coupling.target_weights.iter().any(|weight| {
-                                weight.node_identity == StableDigest::ZERO
-                                    || !weight.weight.is_finite()
-                                    || weight.weight <= 0.0
-                                    || !group.targets.iter().any(|target| {
-                                        target
-                                            .matched_node_identities
-                                            .contains(&weight.node_identity)
-                                    })
-                            })
-                            || (coupling
-                                .target_weights
-                                .iter()
-                                .map(|weight| weight.weight)
-                                .sum::<f64>()
-                                - 1.0)
-                                .abs()
-                                > 1.0e-10
-                    }
-                    None => !group.reference_point_identities.is_empty(),
-                }
-                || !group
-                    .pairings
-                    .windows(2)
-                    .all(|pair| pair[0].secondary_node_identity < pair[1].secondary_node_identity)
-                || group.pairings.iter().any(|pairing| {
-                    pairing.secondary_node_identity == StableDigest::ZERO
-                        || !pairing.geometric_error_meters.is_finite()
-                        || pairing.geometric_error_meters < 0.0
-                        || pairing.primary_weights.is_empty()
-                        || !pairing.primary_weights.windows(2).all(|pair| {
-                            pair[0].primary_node_identity < pair[1].primary_node_identity
-                        })
-                        || pairing.primary_weights.iter().any(|weight| {
-                            weight.primary_node_identity == StableDigest::ZERO
-                                || !weight.weight.is_finite()
-                                || weight.weight == 0.0
-                        })
-                        || (pairing
-                            .primary_weights
-                            .iter()
-                            .map(|weight| weight.weight)
-                            .sum::<f64>()
-                            - 1.0)
-                            .abs()
-                            > 1.0e-10
-                })
-            {
-                return Err(ConstraintPlanError::Invalid(
-                    "group evidence differs from its canonical rows".into(),
-                ));
-            }
-            for target in &group.targets {
-                validate_resolved_target(&group.constraint_id, target)?;
-            }
-        }
-        for row in &self.rows {
-            if row.constraint_id.is_empty()
-                || row.terms.is_empty()
-                || !row.right_hand_side.is_finite()
-                || row.identity != row_identity(row)?
-                || row.residual_quantity != residual_quantity(&row.terms)
-            {
-                return Err(ConstraintPlanError::Invalid(
-                    "constraint row identity or numerical content is invalid".into(),
-                ));
-            }
-            if row.terms.iter().any(|term| {
-                let invalid_owner = match term.owner {
-                    CanonicalStructuralDofOwner::StructuralNode(identity) => {
-                        identity == StableDigest::ZERO
-                    }
-                    CanonicalStructuralDofOwner::ReferencePoint(identity) => {
-                        !reference_point_identities.contains(&identity)
-                    }
-                };
-                invalid_owner || !term.coefficient.is_finite() || term.coefficient == 0.0
-            }) || !row
-                .terms
-                .windows(2)
-                .all(|pair| term_key(&pair[0]) < term_key(&pair[1]))
-            {
-                return Err(ConstraintPlanError::Invalid(
-                    "constraint row terms are invalid or not uniquely ordered".into(),
-                ));
-            }
-        }
-        let (active, redundant) = validate_row_classification(&self.rows)?;
-        if active != self.evidence.active_row_count
-            || redundant != self.evidence.redundant_row_count
-        {
-            return Err(ConstraintPlanError::Invalid(
-                "constraint rank evidence differs from its canonical rows".into(),
-            ));
-        }
-        Ok(())
+        validation::validate(self)
     }
 
     pub fn validate_against(
@@ -254,7 +64,7 @@ impl CanonicalStructuralConstraintPlan {
         if self.topology.mesh_digest() != Some(mesh.canonical_digest) {
             return Err(ConstraintPlanError::TopologyMismatch);
         }
-        let authored = structural_constraints(model);
+        let authored = structural_constraints(model)?;
         if self.authored_constraints_digest != authored_constraints_digest(&authored)? {
             return Err(ConstraintPlanError::AuthoredConstraintsMismatch);
         }
@@ -291,7 +101,7 @@ impl CanonicalStructuralConstraintPlan {
         {
             return Err(ConstraintPlanError::TopologyMismatch);
         }
-        let authored = structural_constraints(model);
+        let authored = structural_constraints(model)?;
         if self.authored_constraints_digest != authored_constraints_digest(&authored)? {
             return Err(ConstraintPlanError::AuthoredConstraintsMismatch);
         }
@@ -324,21 +134,30 @@ impl CanonicalStructuralConstraintPlan {
 
 pub(super) fn structural_constraints(
     model: &AnalysisModel,
-) -> Vec<&runmat_analysis_core::StructuralConstraint> {
-    model
+) -> Result<Vec<&runmat_analysis_core::StructuralConstraint>, ConstraintPlanError> {
+    let count = model
         .constraints
         .iter()
-        .filter_map(|constraint| constraint.structural())
-        .collect()
+        .filter(|c| c.structural().is_some())
+        .count();
+    let mut authored = super::workspace::reserve(count)?;
+    for constraint in &model.constraints {
+        super::workspace::check_cancelled()?;
+        if let Some(c) = constraint.structural() {
+            authored.push(c);
+        }
+    }
+    Ok(authored)
 }
 
 pub(super) fn authored_constraints_digest(
     constraints: &[&runmat_analysis_core::StructuralConstraint],
 ) -> Result<Digest, ConstraintPlanError> {
-    let mut sources = constraints
-        .iter()
-        .map(|constraint| source_digest(constraint))
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut sources = super::workspace::reserve(constraints.len())?;
+    for constraint in constraints {
+        super::workspace::check_cancelled()?;
+        sources.push(source_digest(constraint)?);
+    }
     sources.sort_unstable();
     canonical_digest(SOURCE_DOMAIN, &sources)
 }
@@ -347,13 +166,14 @@ pub(super) fn source_digest(
     constraint: &runmat_analysis_core::StructuralConstraint,
 ) -> Result<Digest, ConstraintPlanError> {
     if let StructuralConstraintKind::Equation(equation) = &constraint.kind {
-        let mut terms = equation.terms.clone();
-        terms.sort_by(|left, right| {
+        let mut terms = super::workspace::reserve(equation.terms.len())?;
+        terms.extend(equation.terms.iter());
+        super::workspace::sort_stable_by(&mut terms, |left, right| {
             authored_target_key(&left.target)
                 .cmp(&authored_target_key(&right.target))
                 .then_with(|| left.dof.cmp(&right.dof))
                 .then_with(|| left.coefficient.total_cmp(&right.coefficient))
-        });
+        })?;
         canonical_digest(
             SOURCE_DOMAIN,
             &(
@@ -409,3 +229,20 @@ pub(super) fn reference_point_identity(
         &(reference_point_id, position_meters),
     )
 }
+
+pub(super) fn canonical_value_workspace_bytes<T: Serialize + ?Sized>(
+    value: &T,
+) -> Result<u64, ConstraintPlanError> {
+    super::workspace::check_cancelled()?;
+    runmat_canonical_codec::serialized_materialization_resident_bytes_estimate(value, PLAN_LIMITS)
+        .map_err(|e| {
+            if crate::is_fea_cancelled() {
+                ConstraintPlanError::Cancelled
+            } else {
+                ConstraintPlanError::Encoding(e.to_string())
+            }
+        })
+}
+
+#[cfg(test)]
+mod source_tests;

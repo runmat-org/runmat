@@ -42,7 +42,7 @@ pub(super) fn combine(
 
 pub(super) fn matches_rows(
     enforcement: ConstraintEnforcement,
-    rows: &[&CanonicalStructuralConstraintRow],
+    rows: &[CanonicalStructuralConstraintRow],
 ) -> bool {
     if rows.is_empty() {
         return enforcement == ConstraintEnforcement::DirectElimination;

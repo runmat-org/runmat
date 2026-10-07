@@ -1,6 +1,5 @@
 //! One borrowed compilation pipeline for solid, explicit and conformal mixed constraints.
 //! Family lowering owns equations; this owner accumulates and finalizes the canonical plan once.
-use std::collections::BTreeSet;
 
 use runmat_analysis_core::{AnalysisModel, BoundaryTransferImplementation, StructuralConstraint};
 use runmat_meshing_core::SolverMeshArtifact;
@@ -55,7 +54,8 @@ pub(super) fn compile(
     mesh: Option<&SolverMeshArtifact>,
 ) -> Result<CanonicalStructuralConstraintPlan, ConstraintPlanError> {
     super::workspace::check_cancelled()?;
-    let authored = structural_constraints(model);
+    let _authored_profile = super::plan::constraint_authored_workspace_profile(model)?;
+    let authored = structural_constraints(model)?;
     validate_unique_ids(&authored)?;
     let topology = CompilationTopology::derive(model, mesh)?;
     let reference_points = canonical_reference_points(&authored)?;
@@ -80,7 +80,9 @@ pub(super) fn compile(
             pairings,
             coupling,
         } = compiled;
-        targets.sort_by_key(|target| target.selection_digest);
+        super::workspace::sort_stable_by(&mut targets, |a, b| {
+            a.selection_digest.cmp(&b.selection_digest)
+        })?;
         targets.dedup_by_key(|target| target.selection_digest);
         enforcement_mode = enforcement::combine(
             enforcement_mode,
@@ -89,7 +91,7 @@ pub(super) fn compile(
         let row_count = compiled_rows.len();
         // This fallible accumulation is not a pre-expansion workspace admission claim.
         // Per-constraint target/row construction still needs its owner-side profile.
-        rows.try_reserve(row_count).map_err(allocation)?;
+        rows.try_reserve_exact(row_count).map_err(allocation)?;
         rows.extend(compiled_rows);
         groups.push(group(
             constraint,
@@ -101,8 +103,8 @@ pub(super) fn compile(
         )?);
     }
 
-    groups.sort_by(|left, right| left.constraint_id.cmp(&right.constraint_id));
-    rows.sort_by(row::compare_rows);
+    super::workspace::sort_stable_by(&mut groups, |a, b| a.constraint_id.cmp(&b.constraint_id))?;
+    super::workspace::sort_stable_by(&mut rows, row::compare_rows)?;
     let (active_row_count, redundant_row_count) = row::classify(&mut rows)?;
     let plan = CanonicalStructuralConstraintPlan {
         schema_version: 1,
@@ -148,14 +150,24 @@ fn group(
 }
 
 fn validate_unique_ids(constraints: &[&StructuralConstraint]) -> Result<(), ConstraintPlanError> {
-    let mut ids = BTreeSet::new();
-    for constraint in constraints {
-        if !ids.insert(constraint.constraint_id.as_str()) {
-            return Err(ConstraintPlanError::DuplicateConstraintId {
-                constraint_id: constraint.constraint_id.clone(),
-            });
-        }
+    let mut ids = super::workspace::reserve(constraints.len())?;
+    ids.extend(
+        constraints
+            .iter()
+            .enumerate()
+            .map(|(ordinal, c)| (c.constraint_id.as_str(), ordinal)),
+    );
+    ids.sort_unstable();
+    if let Some(pair) = ids
+        .windows(2)
+        .filter(|pair| pair[0].0 == pair[1].0)
+        .min_by_key(|pair| pair[1].1)
+    {
+        return Err(ConstraintPlanError::DuplicateConstraintId {
+            constraint_id: pair[1].0.into(),
+        });
     }
+
     Ok(())
 }
 

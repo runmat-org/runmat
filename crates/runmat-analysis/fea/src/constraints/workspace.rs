@@ -29,3 +29,6 @@ pub(super) fn add(a: u64, b: u64) -> Result<u64, ConstraintPlanError> {
 pub(super) fn overflow() -> ConstraintPlanError {
     ConstraintPlanError::Invalid("constraint requested storage exceeds addressable slots".into())
 }
+
+mod ordering;
+pub(super) use ordering::{ordering_workspace_bytes, sort_stable_by};

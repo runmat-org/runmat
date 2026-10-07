@@ -11,6 +11,9 @@ use super::contract::{
 };
 use super::{plan::canonical_digest, rank};
 
+mod profile;
+pub use profile::{constraint_row_workspace_profile, ConstraintRowWorkspaceProfile};
+
 const ROW_DOMAIN: &str = "structural-constraint-row";
 
 #[cfg(test)]
@@ -58,7 +61,8 @@ pub(super) fn new_sparse(
     mut terms: Vec<CanonicalStructuralConstraintTerm>,
     right_hand_side: f64,
 ) -> Result<CanonicalStructuralConstraintRow, ConstraintPlanError> {
-    terms.sort_by_key(term_key);
+    let _profile = constraint_row_workspace_profile(constraint_id, &terms, right_hand_side)?;
+    super::workspace::sort_stable_by(&mut terms, |a, b| term_key(a).cmp(&term_key(b)))?;
     // Do not retain geometric growth slack from lowering across the whole plan. Boxing
     // removes excess capacity; exact-capacity inputs keep their allocation. A shrinking
     // allocator may move this buffer, so this is not a zero-allocation claim for spare capacity.

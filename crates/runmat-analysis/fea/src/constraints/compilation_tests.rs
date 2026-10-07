@@ -25,7 +25,7 @@ fn provenance(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
     }
 }
 
-fn mesh(order: ElementOrder) -> SolverMeshArtifact {
+pub(super) fn mesh(order: ElementOrder) -> SolverMeshArtifact {
     let mut mesh = canonical_tetrahedron_solver_mesh(order);
     mesh.topology.nodes[0]
         .provenance
@@ -334,4 +334,21 @@ fn explicit_compilation_checks_malformed_frame_before_equation_lowering() {
         CanonicalStructuralConstraintPlan::compile_for_model(&model, None),
         Err(ConstraintPlanError::DegenerateFrame { .. })
     ));
+}
+
+#[test]
+fn counted_unique_ids_preserve_first_authored_duplicate_diagnostic() {
+    let mesh = mesh(ElementOrder::Tet4);
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mut constraints = Vec::new();
+    for id in ["z", "z", "a", "a"] {
+        constraints.push(prescribed(id, RegionTarget::boundary("root"), 0.0));
+    }
+    model.constraints = constraints;
+    assert_eq!(
+        CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap_err(),
+        ConstraintPlanError::DuplicateConstraintId {
+            constraint_id: "z".into()
+        }
+    );
 }
