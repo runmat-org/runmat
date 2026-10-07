@@ -110,7 +110,9 @@ impl Drop for InFlightSession<'_> {
             if self.host.disposed.get() {
                 session.cancel_execution();
                 session.shutdown_local_tasks();
-                session.clear_variables();
+                if let Err(err) = session.clear_variables() {
+                    warn!("RunMat wasm: disposed in-flight workspace cleanup failed: {err}");
+                }
                 // The moved session is terminal. Never replace the disposed
                 // placeholder with an owner whose callbacks could resume.
             } else {
@@ -120,7 +122,9 @@ impl Drop for InFlightSession<'_> {
                 session.set_emit_fusion_plan(config.emit_fusion_plan);
                 drop(config);
                 if self.host.clear_workspace_after_flight.replace(false) {
-                    session.clear_variables();
+                    if let Err(err) = session.clear_variables() {
+                        warn!("RunMat wasm: deferred workspace clear failed: {err}");
+                    }
                 }
                 *self.host.session.borrow_mut() = session;
             }
@@ -1556,15 +1560,19 @@ impl RunMatWasm {
     }
 
     #[wasm_bindgen(js_name = clearWorkspace)]
-    pub fn clear_workspace(&self) {
+    pub fn clear_workspace(&self) -> Result<(), JsValue> {
         if self.disposed.get() {
-            return;
+            return Ok(());
         }
         if self.in_flight_session.get() {
             self.clear_workspace_after_flight.set(true);
         } else {
-            self.session.borrow_mut().clear_variables();
+            self.session
+                .borrow_mut()
+                .clear_variables()
+                .map_err(|err| runtime_error_to_js(&err))?;
         }
+        Ok(())
     }
 
     #[wasm_bindgen(js_name = exportWorkspaceState)]
@@ -1867,7 +1875,9 @@ impl RunMatWasm {
             let mut session = self.session.borrow_mut();
             session.cancel_execution();
             session.shutdown_local_tasks();
-            session.clear_variables();
+            if let Err(err) = session.clear_variables() {
+                warn!("RunMat wasm: disposed workspace cleanup failed: {err}");
+            }
         } else {
             // `take_session` leaves a fresh placeholder in this slot. Its
             // unrelated task owner must be terminal too.

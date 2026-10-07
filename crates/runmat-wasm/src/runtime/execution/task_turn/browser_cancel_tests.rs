@@ -16,6 +16,49 @@ use web_sys::{MessageChannel, MessageEvent};
 
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
+#[wasm_bindgen_test(async)]
+async fn public_workspace_clear_and_reset_keep_the_browser_session_usable() {
+    let runtime = crate::init_runmat(JsValue::NULL)
+        .await
+        .expect("initialize browser runtime");
+    let request = json!({
+        "source": { "kind": "text", "name": "workspace-clear.m", "text": "retained = uint16(7);" },
+        "compatibility": "runmat"
+    })
+    .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+    .expect("encode execution request");
+    runtime
+        .execute_request_js(request)
+        .await
+        .expect("execute workspace assignment");
+    let snapshot = runtime
+        .workspace_snapshot()
+        .expect("read populated workspace");
+    let values = Reflect::get(&snapshot, &JsValue::from_str("values")).expect("workspace values");
+    assert_eq!(Array::from(&values).length(), 1);
+
+    runtime.clear_workspace().expect("clear workspace");
+    let snapshot = runtime
+        .workspace_snapshot()
+        .expect("read cleared workspace");
+    let values =
+        Reflect::get(&snapshot, &JsValue::from_str("values")).expect("cleared workspace values");
+    assert_eq!(Array::from(&values).length(), 0);
+
+    let previous_owner = runtime.session.borrow().browser_local_task_supervisor();
+    runtime.reset_session().expect("reset browser session");
+    assert!(!Rc::ptr_eq(
+        &previous_owner,
+        &runtime.session.borrow().browser_local_task_supervisor(),
+    ));
+    runtime.workspace_snapshot().expect("read reset workspace");
+    runtime.dispose();
+    runtime
+        .clear_workspace()
+        .expect("disposed clear remains idempotent");
+    assert!(runtime.workspace_snapshot().is_err());
+}
+
 async fn cancel_during_public_execution(name: &str, text: &str, result_name: &str) {
     let runtime = Rc::new(
         crate::init_runmat(JsValue::NULL)
