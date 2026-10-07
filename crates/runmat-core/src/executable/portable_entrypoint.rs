@@ -5,6 +5,7 @@ pub(super) struct PortableEntrypoint {
     pub(super) function: runmat_types::ProgramFunctionId,
     /// Session/compiler identity of the same body. This is intentionally not
     /// serialized into the portable executable identity.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) compiled_function: runmat_hir::FunctionId,
     pub(super) kind: runmat_execution::ExecutableEntrypointKind,
 }
@@ -102,6 +103,7 @@ fn function_entrypoint(
     Ok(PortableEntrypoint {
         name: name.to_string(),
         function: body.portable_function,
+        #[cfg(not(target_arch = "wasm32"))]
         compiled_function: function,
         kind: runmat_execution::ExecutableEntrypointKind::Function,
     })
@@ -158,6 +160,7 @@ fn script_entrypoint(unit: &ExecutableUnit) -> Result<PortableEntrypoint, String
     Ok(PortableEntrypoint {
         name: "script".into(),
         function: portable,
+        #[cfg(not(target_arch = "wasm32"))]
         compiled_function: function,
         kind: runmat_execution::ExecutableEntrypointKind::Script,
     })

@@ -557,6 +557,7 @@ impl RunMatSession {
                 )
             })?
         };
+        #[cfg(not(target_arch = "wasm32"))]
         let analysis = interactive_unit.analysis();
         let execution_runtime =
             interactive_unit
