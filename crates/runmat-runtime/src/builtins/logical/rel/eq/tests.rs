@@ -312,13 +312,13 @@ fn eq_gpu_provider_roundtrip() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let a = provider.upload(&view).expect("upload");
         let b = provider.upload(&view).expect("upload");
         let result = run_eq(Value::GpuTensor(a), Value::GpuTensor(b)).expect("gpu eq succeeds");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![3, 1]);
+        assert_eq!(gathered.shape(), &[3, 1]);
         assert_eq!(gathered.materialize_f64(), vec![1.0, 1.0, 1.0]);
     });
 }
@@ -413,7 +413,7 @@ fn eq_resident_integer_with_host_scalar_falls_back_exactly() {
         )
         .expect("exact fallback");
         let gathered = test_support::gather(result).expect("gather logical result");
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), &[2, 1]);
         assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0]);
         handle.release().expect("free input");
     });
@@ -430,7 +430,7 @@ fn eq_wgpu_matches_host() {
     let cpu = run_eq_host(Value::Tensor(tensor.clone()), Value::Tensor(tensor.clone())).unwrap();
     let view = HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let provider = runmat_accelerate_api::provider().unwrap();
     let a = provider.upload(&view).unwrap();
@@ -439,7 +439,7 @@ fn eq_wgpu_matches_host() {
     let gathered = test_support::gather(gpu).expect("gather");
     match (cpu, gathered) {
         (Value::LogicalArray(expected), actual) => {
-            assert_eq!(actual.shape, expected.shape);
+            assert_eq!(actual.shape(), expected.shape);
             let tol = match provider.precision() {
                 ProviderPrecision::F64 => 1e-12,
                 ProviderPrecision::F32 => 1e-5,
@@ -450,7 +450,7 @@ fn eq_wgpu_matches_host() {
             }
         }
         (Value::Bool(flag), actual) => {
-            assert_eq!(tensor::element_count(&actual.shape), 1);
+            assert_eq!(tensor::element_count(actual.shape()), 1);
             assert_eq!(actual.materialize_f64()[0] != 0.0, flag);
         }
         other => panic!("unexpected comparison result {other:?}"),

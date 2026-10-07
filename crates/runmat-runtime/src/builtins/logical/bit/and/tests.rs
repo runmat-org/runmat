@@ -250,13 +250,13 @@ fn and_gpu_roundtrip() {
         let tensor = Tensor::new(vec![0.0, 2.0, 0.0, 4.0], vec![2, 2]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let a = provider.upload(&view).unwrap();
         let b = provider.upload(&view).unwrap();
         let result = run_and(Value::GpuTensor(a), Value::GpuTensor(b)).unwrap();
         let gathered = test_support::gather(result).unwrap();
-        assert_eq!(gathered.shape, vec![2, 2]);
+        assert_eq!(gathered.shape(), &[2, 2]);
         assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0]);
     });
 }
@@ -270,11 +270,11 @@ fn and_gpu_supports_broadcast() {
 
         let lhs_view = HostTensorView {
             data: &lhs.materialize_f64(),
-            shape: &lhs.shape,
+            shape: lhs.shape(),
         };
         let rhs_view = HostTensorView {
             data: &rhs.materialize_f64(),
-            shape: &rhs.shape,
+            shape: rhs.shape(),
         };
 
         let gpu_lhs = provider.upload(&lhs_view).expect("upload lhs");
@@ -282,7 +282,7 @@ fn and_gpu_supports_broadcast() {
 
         let result = run_and(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs)).expect("and");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![4, 1]);
+        assert_eq!(gathered.shape(), &[4, 1]);
         assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0]);
     });
 }
@@ -313,7 +313,7 @@ fn and_resident_integer_fallback_is_exact_and_restores_residency() {
             "fallback must restore gpuArray residency"
         );
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![3, 1]);
+        assert_eq!(gathered.shape(), &[3, 1]);
         assert_eq!(gathered.materialize_f64(), vec![0.0, 0.0, 1.0]);
     });
 }
@@ -341,7 +341,7 @@ fn and_resident_complex_extension_gathers_and_restores_residency() {
             "fallback must restore gpuArray residency"
         );
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), &[2, 1]);
         assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0]);
     });
 }
@@ -367,11 +367,11 @@ fn and_wgpu_matches_host_path() {
 
     let view_lhs = HostTensorView {
         data: &lhs.materialize_f64(),
-        shape: &lhs.shape,
+        shape: lhs.shape(),
     };
     let view_rhs = HostTensorView {
         data: &rhs.materialize_f64(),
-        shape: &rhs.shape,
+        shape: rhs.shape(),
     };
     let gpu_lhs = provider.upload(&view_lhs).expect("upload lhs");
     let gpu_rhs = provider.upload(&view_rhs).expect("upload rhs");
@@ -379,7 +379,7 @@ fn and_wgpu_matches_host_path() {
     let gpu_value = run_and(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs)).expect("gpu and");
     let gathered = test_support::gather(gpu_value).expect("gather gpu result");
 
-    assert_eq!(gathered.shape, expected_shape);
+    assert_eq!(gathered.shape(), expected_shape);
     let tol = match provider.precision() {
         ProviderPrecision::F64 => 1e-12,
         ProviderPrecision::F32 => 1e-5,
@@ -428,6 +428,6 @@ fn and_wgpu_integer_broadcast_fallback_restores_logical_gpuarray() {
         "fallback must restore gpuArray residency"
     );
     let gathered = test_support::gather(result).expect("gather");
-    assert_eq!(gathered.shape, vec![2, 2]);
+    assert_eq!(gathered.shape(), &[2, 2]);
     assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0, 0.0, 0.0]);
 }

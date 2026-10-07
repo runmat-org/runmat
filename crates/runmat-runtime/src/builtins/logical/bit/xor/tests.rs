@@ -235,17 +235,17 @@ fn xor_gpu_roundtrip() {
         let other = Tensor::new(vec![1.0, 0.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let view_a = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let view_b = HostTensorView {
             data: &other.materialize_f64(),
-            shape: &other.shape,
+            shape: other.shape(),
         };
         let a = provider.upload(&view_a).unwrap();
         let b = provider.upload(&view_b).unwrap();
         let result = run_xor(Value::GpuTensor(a), Value::GpuTensor(b)).unwrap();
         let gathered = test_support::gather(result).unwrap();
-        assert_eq!(gathered.shape, vec![2, 2]);
+        assert_eq!(gathered.shape(), &[2, 2]);
         assert_eq!(gathered.materialize_f64(), vec![1.0, 1.0, 1.0, 0.0]);
     });
 }
@@ -259,11 +259,11 @@ fn xor_gpu_supports_broadcast() {
 
         let view_lhs = HostTensorView {
             data: &lhs.materialize_f64(),
-            shape: &lhs.shape,
+            shape: lhs.shape(),
         };
         let view_rhs = HostTensorView {
             data: &rhs.materialize_f64(),
-            shape: &rhs.shape,
+            shape: rhs.shape(),
         };
 
         let gpu_lhs = provider.upload(&view_lhs).expect("upload lhs");
@@ -271,7 +271,7 @@ fn xor_gpu_supports_broadcast() {
 
         let result = run_xor(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs)).expect("xor");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![4, 1]);
+        assert_eq!(gathered.shape(), &[4, 1]);
         assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0]);
     });
 }
@@ -327,11 +327,11 @@ fn xor_wgpu_matches_host_path() {
 
     let view_lhs = HostTensorView {
         data: &lhs.materialize_f64(),
-        shape: &lhs.shape,
+        shape: lhs.shape(),
     };
     let view_rhs = HostTensorView {
         data: &rhs.materialize_f64(),
-        shape: &rhs.shape,
+        shape: rhs.shape(),
     };
     let gpu_lhs = provider.upload(&view_lhs).expect("upload lhs");
     let gpu_rhs = provider.upload(&view_rhs).expect("upload rhs");
@@ -339,7 +339,7 @@ fn xor_wgpu_matches_host_path() {
     let gpu_value = run_xor(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs)).expect("gpu xor");
     let gathered = test_support::gather(gpu_value).expect("gather gpu result");
 
-    assert_eq!(gathered.shape, expected_shape);
+    assert_eq!(gathered.shape(), expected_shape);
     let tol = match provider.precision() {
         ProviderPrecision::F64 => 1e-12,
         ProviderPrecision::F32 => 1e-5,

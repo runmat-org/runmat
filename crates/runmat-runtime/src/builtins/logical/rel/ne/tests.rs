@@ -273,17 +273,17 @@ fn ne_gpu_provider_roundtrip() {
         let tensor_b = Tensor::new(vec![1.0, 0.0, 3.0, 5.0], vec![2, 2]).unwrap();
         let view_a = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let view_b = HostTensorView {
             data: &tensor_b.materialize_f64(),
-            shape: &tensor_b.shape,
+            shape: tensor_b.shape(),
         };
         let h_a = provider.upload(&view_a).expect("upload a");
         let h_b = provider.upload(&view_b).expect("upload b");
         let result = run_ne(Value::GpuTensor(h_a), Value::GpuTensor(h_b)).expect("ne");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 2]);
+        assert_eq!(gathered.shape(), &[2, 2]);
         assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0, 1.0, 0.0]);
     });
 }
@@ -295,12 +295,12 @@ fn ne_gpu_falls_back_to_host_when_only_one_tensor() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = run_ne(Value::GpuTensor(handle), Value::Num(2.0)).expect("ne");
         let gathered = test_support::gather(result).expect("gather logical result");
-        assert_eq!(gathered.shape, vec![3, 1]);
+        assert_eq!(gathered.shape(), &[3, 1]);
         assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 1.0]);
     });
 }
@@ -378,11 +378,11 @@ fn ne_wgpu_matches_host() {
     let cpu = run_ne_host(Value::Tensor(a.clone()), Value::Tensor(b.clone())).unwrap();
     let view_a = HostTensorView {
         data: &a.materialize_f64(),
-        shape: &a.shape,
+        shape: a.shape(),
     };
     let view_b = HostTensorView {
         data: &b.materialize_f64(),
-        shape: &b.shape,
+        shape: b.shape(),
     };
     let provider = runmat_accelerate_api::provider().expect("provider");
     let h_a = provider.upload(&view_a).unwrap();
@@ -391,7 +391,7 @@ fn ne_wgpu_matches_host() {
     let gathered = test_support::gather(gpu).expect("gather");
     match (cpu, gathered) {
         (Value::LogicalArray(cp), gt) => {
-            assert_eq!(gt.shape, cp.shape);
+            assert_eq!(gt.shape(), cp.shape);
             let tol = match provider.precision() {
                 ProviderPrecision::F64 => 1e-12,
                 ProviderPrecision::F32 => 1e-5,

@@ -82,7 +82,7 @@ fn gt_gpu_wide_integer_scalar_fallback_is_exact_owner_resident_logical() {
             provider
         ));
         let gathered = test_support::gather(result).expect("gather result");
-        assert_eq!(gathered.shape, vec![1, 2]);
+        assert_eq!(gathered.shape(), &[1, 2]);
         assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0]);
     });
 }
@@ -192,17 +192,17 @@ fn gt_gpu_provider_roundtrip() {
         let rhs = Tensor::new(vec![0.0, 5.0, 6.0], vec![1, 3]).unwrap();
         let view_l = HostTensorView {
             data: &lhs.materialize_f64(),
-            shape: &lhs.shape,
+            shape: lhs.shape(),
         };
         let view_r = HostTensorView {
             data: &rhs.materialize_f64(),
-            shape: &rhs.shape,
+            shape: rhs.shape(),
         };
         let handle_l = provider.upload(&view_l).expect("upload lhs");
         let handle_r = provider.upload(&view_r).expect("upload rhs");
         let result = run_gt(Value::GpuTensor(handle_l), Value::GpuTensor(handle_r)).expect("gt");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![1, 3]);
+        assert_eq!(gathered.shape(), &[1, 3]);
         assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 1.0]);
     });
 }
@@ -220,11 +220,11 @@ fn gt_wgpu_matches_host() {
 
     let view_l = HostTensorView {
         data: &lhs.materialize_f64(),
-        shape: &lhs.shape,
+        shape: lhs.shape(),
     };
     let view_r = HostTensorView {
         data: &rhs.materialize_f64(),
-        shape: &rhs.shape,
+        shape: rhs.shape(),
     };
     let provider = runmat_accelerate_api::provider().expect("provider");
     let handle_l = provider.upload(&view_l).expect("upload lhs");
@@ -234,7 +234,7 @@ fn gt_wgpu_matches_host() {
 
     match (cpu, gathered) {
         (Value::LogicalArray(host), tensor) => {
-            assert_eq!(tensor.shape, host.shape);
+            assert_eq!(tensor.shape(), host.shape);
             let expected: Vec<f64> = host
                 .data
                 .iter()
@@ -243,7 +243,7 @@ fn gt_wgpu_matches_host() {
             assert_eq!(tensor.materialize_f64(), expected);
         }
         (Value::Bool(host_flag), tensor) => {
-            assert_eq!(tensor.shape, vec![1, 1]);
+            assert_eq!(tensor.shape(), &[1, 1]);
             let expected = if host_flag { 1.0 } else { 0.0 };
             assert_eq!(tensor.materialize_f64(), vec![expected]);
         }

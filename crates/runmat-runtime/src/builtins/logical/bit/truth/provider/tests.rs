@@ -99,7 +99,7 @@ fn resident_pair(provider: &dyn AccelProvider) -> (GpuTensorHandle, GpuTensorHan
     let data = tensor.materialize_f64();
     let view = HostTensorView {
         data: &data,
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     (
         provider.upload(&view).expect("upload lhs"),

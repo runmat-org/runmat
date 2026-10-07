@@ -100,12 +100,12 @@ fn not_gpu_roundtrip() {
         let tensor = Tensor::new(vec![0.0, 1.0, 0.0, 2.0], vec![2, 2]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = run_not(Value::GpuTensor(handle)).expect("not on gpu");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 2]);
+        assert_eq!(gathered.shape(), &[2, 2]);
         assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0]);
     });
 }
@@ -317,13 +317,13 @@ fn not_wgpu_matches_host_path() {
     let cpu = run_not_host(Value::Tensor(tensor.clone())).unwrap();
     let view = HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let handle = provider.upload(&view).unwrap();
     let gpu = run_not(Value::GpuTensor(handle)).unwrap();
     let gathered = test_support::gather(gpu).expect("gather");
     let cpu_tensor = tensor::value_to_tensor(&cpu).expect("cpu tensor");
-    assert_eq!(gathered.shape, cpu_tensor.shape);
+    assert_eq!(gathered.shape(), cpu_tensor.shape());
     let tol = match provider.precision() {
         ProviderPrecision::F64 => 1e-12,
         ProviderPrecision::F32 => 1e-5,

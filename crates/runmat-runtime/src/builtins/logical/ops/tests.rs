@@ -355,7 +355,7 @@ fn logical_gpu_roundtrip() {
         let tensor = Tensor::new(vec![0.0, 1.0, -2.0], vec![3, 1]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result =
@@ -440,7 +440,7 @@ fn logical_wgpu_matches_cpu_conversion() {
 
     let view = runmat_accelerate_api::HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let handle = provider.upload(&view).expect("upload");
 
@@ -467,6 +467,6 @@ fn logical_wgpu_matches_cpu_conversion() {
         other => panic!("unexpected cpu result {other:?}"),
     };
 
-    assert_eq!(gathered.shape, expected_shape);
+    assert_eq!(gathered.shape(), expected_shape);
     assert_eq!(gathered.materialize_f64(), expected);
 }
