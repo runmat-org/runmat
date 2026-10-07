@@ -1,6 +1,14 @@
 //! Scatterhist bounded numeric controls.
 use super::*;
 
+pub(super) fn control_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 pub(super) fn parse_bins(value: &Value) -> BuiltinResult<[usize; 2]> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| invalid("scatterhist: NBins must be numeric"))?;
@@ -65,15 +73,16 @@ pub(super) fn bin_count_integer(value: &IntValue) -> BuiltinResult<usize> {
 pub(super) fn parse_bandwidth_cycle(value: &Value) -> BuiltinResult<Vec<[f64; 2]>> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| invalid("scatterhist: Bandwidth must be numeric"))?;
-    if tensor.shape.iter().skip(2).any(|&extent| extent > 1) {
+    if tensor.shape().iter().skip(2).any(|&extent| extent > 1) {
         return Err(invalid("scatterhist: Bandwidth must be a 2-D matrix"));
     }
     let values = tensor_values_f64(&tensor);
+    let (rows, cols) = control_matrix_dimensions(&tensor);
     // The documented 2-by-K form wins for the ambiguous 2-by-2 matrix.
     // Retain the earlier RunMat K-by-2 form when K is not two.
-    if tensor.rows == 2 && tensor.cols > 0 {
-        let mut bandwidths = Vec::with_capacity(tensor.cols);
-        for column in 0..tensor.cols {
+    if rows == 2 && cols > 0 {
+        let mut bandwidths = Vec::with_capacity(cols);
+        for column in 0..cols {
             bandwidths.push([
                 bandwidth_value(values[2 * column])?,
                 bandwidth_value(values[2 * column + 1])?,
@@ -81,12 +90,12 @@ pub(super) fn parse_bandwidth_cycle(value: &Value) -> BuiltinResult<Vec<[f64; 2]
         }
         return Ok(bandwidths);
     }
-    if tensor.rows > 0 && tensor.cols == 2 {
-        let mut bandwidths = Vec::with_capacity(tensor.rows);
-        for row in 0..tensor.rows {
+    if rows > 0 && cols == 2 {
+        let mut bandwidths = Vec::with_capacity(rows);
+        for row in 0..rows {
             bandwidths.push([
                 bandwidth_value(values[row])?,
-                bandwidth_value(values[tensor.rows + row])?,
+                bandwidth_value(values[rows + row])?,
             ]);
         }
         return Ok(bandwidths);

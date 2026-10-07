@@ -10,6 +10,25 @@ fn vec_tensor(values: &[f64]) -> Value {
     Value::Tensor(Tensor::new(values.to_vec(), vec![values.len(), 1]).unwrap())
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn numeric_control_rank_boundaries_preserve_bandwidth_and_rgb_admission() {
+    let scalar = Value::Tensor(Tensor::new(vec![0.5], Vec::new()).unwrap());
+    assert_eq!(parse_bandwidth_cycle(&scalar).unwrap(), vec![[0.5, 0.5]]);
+    assert!(parse_color_cycle(&scalar)
+        .expect_err("rank-zero Color has no RGB columns")
+        .message()
+        .contains("RGB"));
+
+    let bandwidth = Value::Tensor(Tensor::new(vec![0.5, 1.0], vec![2]).unwrap());
+    assert_eq!(parse_bandwidth_cycle(&bandwidth).unwrap(), vec![[0.5, 1.0]]);
+    let color = Value::Tensor(Tensor::new(vec![0.25, 0.5, 0.75], vec![3]).unwrap());
+    assert_eq!(
+        parse_color_cycle(&color).unwrap(),
+        vec![Vec4::new(0.25, 0.5, 0.75, 1.0)]
+    );
+}
+
 #[test]
 fn categorical_group_must_match_full_observation_count() {
     let labels = Value::StringArray(

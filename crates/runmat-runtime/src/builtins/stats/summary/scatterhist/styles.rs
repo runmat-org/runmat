@@ -134,13 +134,14 @@ pub(super) fn parse_color_cycle(value: &Value) -> BuiltinResult<Vec<Vec4>> {
             let tensor = tensor::value_to_tensor(value)
                 .map_err(|_| invalid("scatterhist: Color must be text or an RGB matrix"))?;
             let values = tensor_values_f64(&tensor);
-            if tensor.rows > 0 && tensor.cols == 3 {
-                let mut colors = Vec::with_capacity(tensor.rows);
-                for row in 0..tensor.rows {
+            let (rows, cols) = controls::control_matrix_dimensions(&tensor);
+            if rows > 0 && cols == 3 {
+                let mut colors = Vec::with_capacity(rows);
+                for row in 0..rows {
                     colors.push(rgb_color(
                         values[row],
-                        values[tensor.rows + row],
-                        values[2 * tensor.rows + row],
+                        values[rows + row],
+                        values[2 * rows + row],
                     )?);
                 }
                 return Ok(colors);
