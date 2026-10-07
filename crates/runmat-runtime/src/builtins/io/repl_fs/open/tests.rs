@@ -1,5 +1,7 @@
 use super::*;
 
+mod selected_context;
+
 #[test]
 fn invalid_names_reject_without_host_or_provider_access() {
     let resident = Value::GpuTensor(

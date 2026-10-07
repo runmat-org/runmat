@@ -4,12 +4,15 @@ use futures::executor::block_on;
 use runmat_value::IntValue;
 use tempfile::tempdir;
 
+mod selected_context;
+
 fn call(args: Vec<Value>) -> BuiltinResult<Value> {
     let outputs = crate::output_count::current_output_count();
     let (context, _) = crate::context::document_test_support::recording_context();
+    let selected = context.clone();
     block_on(context.scope(async move {
         let _outputs = crate::output_count::push_output_count(outputs);
-        opentoline_builtin(args).await
+        opentoline_builtin(Some(selected), args).await
     }))
 }
 
@@ -25,13 +28,13 @@ fn navigation_delivers_exact_typed_position_and_requires_host_support() {
         Value::from("select"),
     ];
     assert_eq!(
-        block_on(opentoline_builtin(args.clone()))
+        block_on(opentoline_builtin(None, args.clone()))
             .unwrap_err()
             .identifier(),
         Some("RunMat:host:DocumentInteractionUnavailable")
     );
     let (context, recorder) = crate::context::document_test_support::recording_context();
-    block_on(context.scope(opentoline_builtin(args))).unwrap();
+    block_on(opentoline_builtin(Some(context), args)).unwrap();
     assert_eq!(
         *recorder.requests.borrow(),
         vec![crate::context::HostDocumentRequest::Navigate {
@@ -59,12 +62,16 @@ fn option_and_host_position_admission_precede_any_resident_download() {
         Value::from("bad-option"),
     ];
     assert_eq!(
-        block_on(opentoline_builtin(args)).unwrap_err().identifier(),
+        block_on(opentoline_builtin(None, args))
+            .unwrap_err()
+            .identifier(),
         OPENTOLINE_ERROR_OPTION.identifier
     );
     let args = vec![Value::from("missing.m"), resident, Value::Num(-1.0)];
     assert_eq!(
-        block_on(opentoline_builtin(args)).unwrap_err().identifier(),
+        block_on(opentoline_builtin(None, args))
+            .unwrap_err()
+            .identifier(),
         OPENTOLINE_ERROR_POSITION.identifier
     );
     let pages = Value::CharArray(

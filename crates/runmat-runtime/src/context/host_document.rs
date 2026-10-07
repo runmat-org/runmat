@@ -34,9 +34,10 @@ pub enum HostDocumentRequest {
 }
 
 pub(crate) async fn request(
-    context: &RuntimeContext,
+    context: Option<&RuntimeContext>,
     request: HostDocumentRequest,
 ) -> Result<(), RuntimeError> {
+    let context = context.ok_or_else(unavailable)?;
     let host = context.service_ports().host().ok_or_else(unavailable)?;
     host.open_document(request).await
 }

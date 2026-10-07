@@ -21,9 +21,13 @@ const BUILTIN_NAME: &str = "opentoline";
 #[runtime_builtin(
     name = "opentoline",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::repl_fs::opentoline"
 )]
-async fn opentoline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn opentoline_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     if !(2..=4).contains(&args.len()) {
         return Err(opentoline_error(
             &OPENTOLINE_ERROR_ARG_COUNT,
@@ -85,10 +89,10 @@ async fn opentoline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             crate::context::HostTextSelection::Caret
         },
     };
-    crate::context::legacy::request_document(crate::context::HostDocumentRequest::Navigate {
-        path,
-        location,
-    })
+    crate::context::request_document(
+        runtime.as_ref(),
+        crate::context::HostDocumentRequest::Navigate { path, location },
+    )
     .await
     .map_err(|err| opentoline_flow_error("opentoline", err))?;
 

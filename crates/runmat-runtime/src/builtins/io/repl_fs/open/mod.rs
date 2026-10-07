@@ -52,7 +52,8 @@ async fn open_builtin(
             .map_err(open_workspace_flow)?
             .is_some()
     {
-        crate::context::legacy::request_document(
+        crate::context::request_document(
+            runtime.as_ref(),
             crate::context::HostDocumentRequest::OpenVariable { name },
         )
         .await
@@ -96,9 +97,12 @@ async fn open_path(
     }
 
     if is_viewer_or_editor_extension(&extension) {
-        crate::context::legacy::request_document(crate::context::HostDocumentRequest::OpenFile {
-            path: path.to_path_buf(),
-        })
+        crate::context::request_document(
+            runtime,
+            crate::context::HostDocumentRequest::OpenFile {
+                path: path.to_path_buf(),
+            },
+        )
         .await
         .map_err(|err| open_flow_error("open", err))?;
         return Ok(empty_array());

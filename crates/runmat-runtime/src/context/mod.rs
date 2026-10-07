@@ -59,6 +59,7 @@ pub use graphics_presentation::{
     GraphicsFlushReceipt, GraphicsFlushRequest, GraphicsPresentation,
     RuntimeGraphicsFlushOperation, RuntimeGraphicsPresentationService,
 };
+pub(crate) use host_document::request as request_document;
 pub use host_document::{HostDocumentRequest, HostTextLocation, HostTextSelection};
 #[cfg(target_arch = "wasm32")]
 pub use local_tasks::BrowserLocalTaskSupervisor;
