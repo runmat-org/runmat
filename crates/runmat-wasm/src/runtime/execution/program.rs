@@ -40,8 +40,12 @@ async fn invoke(
             .clone(),
     ))
     .map_err(|error| format!("unsupported portable language mode: {error}"))?;
-    let mut session = runmat_core::RunMatSession::with_options(false, false)
-        .map_err(|error| format!("failed to initialize portable browser session: {error}"))?;
+    let mut session = runmat_core::RunMatSession::with_frozen_environment(
+        false,
+        false,
+        request.environment.entries().to_vec(),
+    )
+    .map_err(|error| format!("failed to initialize portable browser session: {error}"))?;
     session.set_compat_mode(mode);
     if let Some(execution) = execution {
         session.install_execution_services(execution);

@@ -2,6 +2,8 @@
 
 mod cancellation;
 pub use cancellation::CancellationToken;
+mod environment;
+pub use environment::{EnvironmentSnapshot, EnvironmentStorageProfile};
 mod error;
 pub mod executable;
 pub mod handle;

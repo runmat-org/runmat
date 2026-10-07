@@ -18,7 +18,7 @@ use runmat_execution_artifact::{
     ArtifactAccess, ExecutableForm, LogicalObject, ObjectNamespace, ProgramArtifact,
     ProgramBuildRecipe, ProgramExecutionDescriptor, ProgramExecutionObject,
     ProgramExecutionRequest, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
 };
 use serde::{Deserialize, Serialize};
 
@@ -292,7 +292,8 @@ pub fn decode_structural_study_root(
         store,
     )?;
     let geometry_meshing = ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        environment: root.geometry_meshing.environment,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         recipe: root.geometry_meshing.recipe,
         artifact: root.geometry_meshing.artifact,
         function: root.geometry_meshing.function,
@@ -350,6 +351,7 @@ fn required_program(program: &RequiredGeometryMeshingProgram) -> RequiredStructu
 
 fn descriptor_from_request(request: &ProgramExecutionRequest) -> ProgramExecutionDescriptor {
     ProgramExecutionDescriptor {
+        environment: request.environment.clone(),
         schema_version: request.schema_version,
         recipe: request.recipe.clone(),
         artifact: request.artifact.clone(),

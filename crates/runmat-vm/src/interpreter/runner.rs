@@ -180,6 +180,7 @@ async fn invoke_semantic_function_value_with_input_residency(
     input_residency: InputResidency,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<(Value, Vec<Value>), RuntimeError> {
+    let runtime = runtime.inherit_same_session_environment();
     runtime
         .scope(invoke_semantic_function_value_with_input_residency_inner(
             function,

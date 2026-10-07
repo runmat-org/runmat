@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub use runmat_execution_artifact::{
     ProgramExecutionRequest as WorkerRequest, ProgramExecutionResponse as WorkerResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
 };
 
 pub const NATIVE_WORKER_MESSAGE_SCHEMA_V1: u16 = 1;

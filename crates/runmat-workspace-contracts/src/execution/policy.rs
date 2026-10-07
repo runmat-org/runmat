@@ -176,7 +176,7 @@ pub fn transition_execution_lease(
         }
         now.checked_add(i64::from(duration))
             .filter(|expiry| *expiry <= MAX_TIMESTAMP_MS)
-            .ok_or_else(|| ExecutionAuthorityError::ExpiryOverflow)
+            .ok_or(ExecutionAuthorityError::ExpiryOverflow)
     };
     if let ExecutionLeaseCommand::Acquire { owner, duration_ms } = command {
         let expires_at_ms = expiry(*duration_ms)?;
@@ -203,7 +203,7 @@ pub fn transition_execution_lease(
             current
                 .map_or(0, |state| state.fence().0)
                 .checked_add(1)
-                .ok_or_else(|| ExecutionAuthorityError::FenceOverflow)?,
+                .ok_or(ExecutionAuthorityError::FenceOverflow)?,
         );
         let lease = ExecutionLease {
             work: work.clone(),

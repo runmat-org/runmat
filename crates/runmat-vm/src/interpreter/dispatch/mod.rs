@@ -187,6 +187,7 @@ fn create_async_future_value(
         .runtime
         .execution()
         .create_future(runmat_runtime::execution::DeferredCall {
+            environment: runmat_runtime::execution::capture_deferred_environment(&context.runtime)?,
             function: function.0,
             arguments,
             requested_outputs,
@@ -230,12 +231,21 @@ async fn await_execution_value(
                     runmat_hir::CallableFallbackPolicy::None,
                     runmat_runtime::call::descriptor::CallableCallKind::Direct,
                 );
-                let result =
-                    runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor)
-                        .await
-                        .map(|value| {
-                            calls::normalize_requested_outputs(value, call.requested_outputs)
-                        });
+                let runtime = context
+                    .runtime
+                    .clone()
+                    .with_invocation_environment(&call.environment)
+                    .map_err(|error| {
+                        execution_error(runmat_runtime::execution::ExecutionServiceError::Failed(
+                            error.to_string(),
+                        ))
+                    })?;
+                let result = runtime
+                    .scope(
+                        runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor),
+                    )
+                    .await
+                    .map(|value| calls::normalize_requested_outputs(value, call.requested_outputs));
                 let stored = result.as_ref().map(Clone::clone).map_err(|error| {
                     runmat_runtime::execution::ExecutionServiceError::Failed(error.to_string())
                 });

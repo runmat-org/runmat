@@ -22,7 +22,7 @@ impl SessionProgramService {
             });
             let service = Rc::clone(&service);
             let previous = previous.clone();
-            let runtime = runtime.clone();
+            let runtime = runtime.clone().inherit_same_session_environment();
             Box::pin(async move {
                 let Some(owner) = owner else {
                     return match previous {

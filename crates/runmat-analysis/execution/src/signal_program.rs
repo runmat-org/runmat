@@ -5,7 +5,7 @@ use runmat_execution::task::{Callable, TaskRequest};
 use runmat_execution::{Digest, ExecutableUnitEnvelope, OutputContract, TaskId};
 use runmat_execution_artifact::{
     ExecutableForm, ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionObject,
-    ProgramExecutionObjectLocation, ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ProgramExecutionObjectLocation, ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
 };
 use runmat_execution_runner::TaskSubmission;
 
@@ -305,7 +305,7 @@ pub(crate) fn validate_prepared_generator_program(
     for chunk in &program.chunks {
         chunk.request.validate_for_portable_host()?;
         ProgramExecutionInputs {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
             arguments: chunk.request.arguments.clone(),
             objects: input_locations(&program.input_references),
         }
@@ -450,7 +450,7 @@ pub fn prepare_generator_program(
         .into_iter()
         .map(|plan| {
             let inputs = ProgramExecutionInputs {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
                 arguments: plan.arguments.clone(),
                 objects: input_locations(&input_references),
             };
@@ -631,6 +631,7 @@ pub fn build_generator_task_submission(
     ]);
     Ok(TaskSubmission {
         request: TaskRequest {
+            environment: runmat_execution::EnvironmentSnapshot::default(),
             id: task_id,
             scope_id: context.scope_id,
             pool_id: context.pool_id,

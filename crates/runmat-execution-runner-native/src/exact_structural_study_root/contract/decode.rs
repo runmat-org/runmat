@@ -50,7 +50,8 @@ pub fn decode_exact_structural_study_root(
     let (exact_arguments, materialization_arguments) =
         component_arguments.split_at(exact_argument_count);
     let exact_meshing = ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        environment: root.exact_meshing.environment.clone(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         recipe: root.exact_meshing.recipe.clone(),
         artifact: root.exact_meshing.artifact.clone(),
         function: root.exact_meshing.function,

@@ -9,7 +9,7 @@ use runmat_execution_artifact::{
     ArtifactAccess, ExecutableForm, LogicalObject, ObjectNamespace, ProgramArtifact,
     ProgramBuildRecipe, ProgramExecutionDescriptor, ProgramExecutionObject,
     ProgramExecutionRequest, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
 };
 use serde::{Deserialize, Serialize};
 
@@ -353,7 +353,8 @@ pub fn prepare_exact_structural_sweep_root(
     let mut request_arguments = vec![ValuePayload::Object(Box::new(root_reference))];
     request_arguments.extend(arguments);
     let request = ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         recipe,
         artifact,
         function: 0,
@@ -481,7 +482,8 @@ pub fn prepare_structural_sweep_root(
     let mut request_arguments = vec![ValuePayload::Object(Box::new(root_reference))];
     request_arguments.extend(arguments);
     let request = ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         recipe,
         artifact,
         function: 0,
@@ -550,7 +552,8 @@ pub fn decode_exact_structural_sweep_root(
     for entry in root.entries {
         let end = offset + entry.argument_count as usize;
         let request = ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            environment: entry.descriptor.environment,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
             recipe: entry.descriptor.recipe,
             artifact: entry.descriptor.artifact,
             function: entry.descriptor.function,
@@ -579,7 +582,8 @@ pub fn decode_exact_structural_sweep_root(
 
 fn descriptor(request: &ProgramExecutionRequest) -> ProgramExecutionDescriptor {
     ProgramExecutionDescriptor {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        environment: request.environment.clone(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         recipe: request.recipe.clone(),
         artifact: request.artifact.clone(),
         function: request.function,
@@ -603,3 +607,6 @@ fn insert_object(
         }
     }
 }
+
+#[cfg(test)]
+mod environment_tests;

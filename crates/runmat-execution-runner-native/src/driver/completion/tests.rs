@@ -54,6 +54,7 @@ fn assigned() -> (Driver, AttemptRequest) {
         }))
         .unwrap();
     let request = TaskRequest {
+        environment: runmat_execution::EnvironmentSnapshot::default(),
         id: TaskId::derive(&[b"completion"]),
         scope_id: scope,
         pool_id: pool,

@@ -95,6 +95,7 @@ pub fn task(
 ) -> TaskSubmission {
     TaskSubmission {
         request: TaskRequest {
+            environment: runmat_execution::EnvironmentSnapshot::default(),
             id: TaskId::derive(&[name.as_bytes()]),
             scope_id: scope,
             pool_id: pool,

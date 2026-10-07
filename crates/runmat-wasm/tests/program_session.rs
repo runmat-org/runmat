@@ -44,7 +44,8 @@ async fn original(text: &str, selected: Option<&str>, outputs: u16) -> ProgramEx
         expected_artifact_id: None,
     };
     ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         function: envelope.manifest.identity.entrypoint_function.0 as usize,
         artifact: ProgramArtifact::materialize(
             &recipe,
@@ -137,4 +138,38 @@ async fn original_callable_forms_preserve_nonprimary_outputs() {
         request.arguments = vec![runmat_runtime::execution::value_codec::encode_inline_value(&Value::Num(10.0)).unwrap()];
         assert_eq!(values(execute(request).await), vec![Value::Num(16.0), Value::Num(20.0)], "{name}");
     }
+}
+
+#[wasm_bindgen_test]
+async fn cold_browser_invocation_preserves_explicit_environment_and_absence() {
+    let mut request = original(
+        "function [value, absent] = originalEnvironment(); value = getenv('RUNMAT_BROWSER_ORIGINAL'); absent = getenv('HOME'); setenv('RUNMAT_BROWSER_ORIGINAL','child'); end",
+        Some("originalEnvironment"), 2,
+    ).await;
+    request.environment = runmat_execution::EnvironmentSnapshot::new(vec![(
+        "RUNMAT_BROWSER_ORIGINAL".into(),
+        "captured".into(),
+    )])
+    .unwrap();
+    let bytes = serde_json::to_vec(&request).unwrap();
+    let digest = request.canonical_digest().unwrap();
+    let expected = vec![
+        Value::CharArray(runmat_value::CharArray::new_row("captured")),
+        Value::CharArray(runmat_value::CharArray::new_row("")),
+    ];
+    for _ in 0..2 {
+        let cold: ProgramExecutionRequest = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(cold.canonical_digest().unwrap(), digest);
+        let response = execute(cold).await;
+        response.validate_against(&request).unwrap();
+        assert_eq!(values(response), expected);
+    }
+    request.environment = runmat_execution::EnvironmentSnapshot::default();
+    assert_eq!(
+        values(execute(request).await),
+        vec![
+            Value::CharArray(runmat_value::CharArray::new_row("")),
+            Value::CharArray(runmat_value::CharArray::new_row("")),
+        ]
+    );
 }

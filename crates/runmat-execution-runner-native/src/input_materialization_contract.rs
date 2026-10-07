@@ -152,7 +152,8 @@ fn prepared_program(
             .cloned()
             .map(|plan| PreparedGeneratorChunk {
                 request: ProgramExecutionRequest {
-                    schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+                    environment: descriptor.environment.clone(),
+                    schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
                     recipe: descriptor.recipe.clone(),
                     artifact: descriptor.artifact.clone(),
                     function: descriptor.function,

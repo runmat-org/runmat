@@ -89,7 +89,7 @@ async fn raw_wasm_script_captures_complete_original_program() {
     assert_eq!(restored.source().text, source);
     let function = runmat_types::ProgramFunctionId(u32::try_from(call.function).unwrap());
     assert!(restored.function_analysis(function).is_some());
-    let (_, artifact, _) = runmat_vm::materialize_deferred_call(
+    let request = runmat_vm::materialize_deferred_call(
         &call,
         runmat_execution::OutputContract {
             requested_outputs: 1,
@@ -97,7 +97,10 @@ async fn raw_wasm_script_captures_complete_original_program() {
         runmat_execution_artifact::ProgramTarget::portable("original-raw-wasm"),
     )
     .unwrap();
-    assert_eq!(artifact.executable_unit().unwrap().unwrap(), envelope);
+    assert_eq!(
+        request.artifact.executable_unit().unwrap().unwrap(),
+        envelope
+    );
 
     // A later caller must capture the earlier declaration's complete product,
     // even when its own local function ordinal collides with the retained ID.
@@ -166,7 +169,7 @@ async fn original_transitive_products_survive_wasm_producer_teardown() {
     )
     .unwrap();
     assert_eq!(envelope.dependency_products.len(), 2);
-    let (_, artifact, _) = runmat_vm::materialize_deferred_call(
+    let request = runmat_vm::materialize_deferred_call(
         &call,
         runmat_execution::OutputContract {
             requested_outputs: 1,
@@ -174,7 +177,10 @@ async fn original_transitive_products_survive_wasm_producer_teardown() {
         runmat_execution_artifact::ProgramTarget::portable("original-wasm-dependencies"),
     )
     .unwrap();
-    assert_eq!(artifact.executable_unit().unwrap().unwrap(), envelope);
+    assert_eq!(
+        request.artifact.executable_unit().unwrap().unwrap(),
+        envelope
+    );
     let mut cold = runmat_core::RunMatSession::with_options(false, false).unwrap();
     let result = cold
         .invoke_portable_unit(

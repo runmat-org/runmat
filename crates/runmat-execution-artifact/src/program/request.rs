@@ -3,13 +3,13 @@ use std::collections::BTreeSet;
 
 use minicbor::Encoder;
 use runmat_execution::value::{ValueLimits, ValuePayload, ValueRef, ValueRefKind};
-use runmat_execution::Digest;
+use runmat_execution::{Digest, EnvironmentSnapshot};
 use serde::{Deserialize, Serialize};
 
 use super::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionInputs};
 use crate::{ArtifactError, ArtifactResult};
 
-pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V1: u16 = 1;
+pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V2: u16 = 2;
 pub const MAX_PROGRAM_EXECUTION_ARGUMENTS: usize = 4096;
 pub const MAX_PROGRAM_EXECUTION_RESULT_OBJECTS: usize = 65_539;
 
@@ -21,12 +21,16 @@ pub struct ProgramExecutionDescriptor {
     pub artifact: ProgramArtifact,
     pub function: usize,
     pub requested_outputs: u16,
+    pub environment: EnvironmentSnapshot,
 }
 
 impl ProgramExecutionDescriptor {
     pub fn validate(&self) -> ArtifactResult<()> {
+        self.environment
+            .validate()
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
         self.artifact.validate_against(&self.recipe)?;
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V1
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V2
             || !entrypoint_matches(self.artifact.form, self.function, &self.recipe.entrypoint)
             || self.requested_outputs != self.recipe.outputs.requested_outputs
         {
@@ -39,6 +43,7 @@ impl ProgramExecutionDescriptor {
 
     pub fn validate_for_portable_host(&self) -> ArtifactResult<()> {
         self.validate()?;
+        crate::environment::validate(self.environment.entries())?;
         self.artifact.target.validate_for_portable_host()
     }
 }
@@ -49,6 +54,7 @@ pub struct ProgramExecutionRequest<
     R = ProgramBuildRecipe,
     A = ProgramArtifact,
     V = Vec<ValuePayload>,
+    E = EnvironmentSnapshot,
 > {
     pub schema_version: u16,
     pub recipe: R,
@@ -56,12 +62,17 @@ pub struct ProgramExecutionRequest<
     pub function: usize,
     pub arguments: V,
     pub requested_outputs: u16,
+    pub environment: E,
 }
 
 /// Original request fields borrowed for validation, identity and transport encoding.
 /// Owned deserialization retains the same default request type and wire schema.
-pub type BorrowedProgramExecutionRequest<'a> =
-    ProgramExecutionRequest<&'a ProgramBuildRecipe, &'a ProgramArtifact, &'a [ValuePayload]>;
+pub type BorrowedProgramExecutionRequest<'a> = ProgramExecutionRequest<
+    &'a ProgramBuildRecipe,
+    &'a ProgramArtifact,
+    &'a [ValuePayload],
+    &'a EnvironmentSnapshot,
+>;
 
 impl ProgramExecutionRequest {
     pub fn from_parts(
@@ -71,20 +82,25 @@ impl ProgramExecutionRequest {
         descriptor.validate()?;
         inputs.validate()?;
         let request = Self {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
             recipe: descriptor.recipe,
             artifact: descriptor.artifact,
             function: descriptor.function,
             arguments: inputs.arguments,
             requested_outputs: descriptor.requested_outputs,
+            environment: descriptor.environment,
         };
         request.validate()?;
         Ok(request)
     }
 }
 
-impl<R: Borrow<ProgramBuildRecipe>, A: Borrow<ProgramArtifact>, V: AsRef<[ValuePayload]>>
-    ProgramExecutionRequest<R, A, V>
+impl<
+        R: Borrow<ProgramBuildRecipe>,
+        A: Borrow<ProgramArtifact>,
+        V: AsRef<[ValuePayload]>,
+        E: Borrow<EnvironmentSnapshot>,
+    > ProgramExecutionRequest<R, A, V, E>
 {
     pub fn as_borrowed(&self) -> BorrowedProgramExecutionRequest<'_> {
         ProgramExecutionRequest {
@@ -94,14 +110,19 @@ impl<R: Borrow<ProgramBuildRecipe>, A: Borrow<ProgramArtifact>, V: AsRef<[ValueP
             function: self.function,
             arguments: self.arguments.as_ref(),
             requested_outputs: self.requested_outputs,
+            environment: self.environment.borrow(),
         }
     }
 
     pub fn validate(&self) -> ArtifactResult<()> {
+        self.environment
+            .borrow()
+            .validate()
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
         let recipe = self.recipe.borrow();
         let artifact = self.artifact.borrow();
         let arguments = self.arguments.as_ref();
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V1 {
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V2 {
             return Err(ArtifactError::Invalid(
                 "unsupported program execution request schema".into(),
             ));
@@ -144,6 +165,7 @@ impl<R: Borrow<ProgramBuildRecipe>, A: Borrow<ProgramArtifact>, V: AsRef<[ValueP
 
     pub fn validate_for_portable_host(&self) -> ArtifactResult<()> {
         self.validate()?;
+        crate::environment::validate(self.environment.borrow().entries())?;
         self.artifact.borrow().target.validate_for_portable_host()
     }
 
@@ -157,7 +179,7 @@ impl<R: Borrow<ProgramBuildRecipe>, A: Borrow<ProgramArtifact>, V: AsRef<[ValueP
         let mut bytes = b"runmat-program-execution-request\0".to_vec();
         let mut encoder = Encoder::new(&mut bytes);
         encoder
-            .array(6)
+            .array(7)
             .and_then(|encoder| encoder.u16(self.schema_version))
             .and_then(|encoder| encoder.bytes(recipe_id.0.bytes()))
             .and_then(|encoder| encoder.bytes(self.artifact.borrow().id.0.bytes()))
@@ -172,6 +194,15 @@ impl<R: Borrow<ProgramBuildRecipe>, A: Borrow<ProgramArtifact>, V: AsRef<[ValueP
                 .bytes(Digest::sha256(argument).bytes())
                 .map_err(encoding)?;
         }
+        encoder
+            .bytes(
+                self.environment
+                    .borrow()
+                    .identity()
+                    .map_err(|error| ArtifactError::Invalid(error.to_string()))?
+                    .bytes(),
+            )
+            .map_err(encoding)?;
         Ok(Digest::sha256(bytes))
     }
 }
@@ -231,9 +262,10 @@ impl ProgramExecutionResponse {
         R: Borrow<ProgramBuildRecipe>,
         A: Borrow<ProgramArtifact>,
         V: AsRef<[ValuePayload]>,
+        E: Borrow<EnvironmentSnapshot>,
     >(
         &self,
-        request: &ProgramExecutionRequest<R, A, V>,
+        request: &ProgramExecutionRequest<R, A, V, E>,
     ) -> ArtifactResult<()> {
         request.validate()?;
         match self {
@@ -322,7 +354,7 @@ mod tests {
     use super::*;
     use crate::ExecutableForm;
 
-    fn request() -> ProgramExecutionRequest {
+    pub(super) fn request() -> ProgramExecutionRequest {
         let revision = ProgramRevision::new(
             Digest::sha256(b"graph"),
             Digest::sha256(b"source"),
@@ -357,7 +389,8 @@ mod tests {
         )
         .unwrap();
         ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            environment: EnvironmentSnapshot::default(),
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
             recipe,
             artifact,
             function: 7,
@@ -580,3 +613,7 @@ mod tests {
         assert!(duplicate.validate_against(&request).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "request/environment_tests.rs"]
+mod environment_tests;

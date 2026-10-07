@@ -68,12 +68,14 @@ fn prepare_session(
             .clone(),
     ))
     .map_err(|error| format!("unsupported portable language mode: {error}"))?;
-    let mut session = match environment {
-        Some(entries) => {
-            runmat_core::RunMatSession::with_frozen_environment(false, false, entries.to_vec())
-        }
-        None => runmat_core::RunMatSession::with_options(false, false),
+    if environment.is_some_and(|entries| entries != request.environment.entries()) {
+        return Err("portable invocation environment differs from admitted bundle context".into());
     }
+    let mut session = runmat_core::RunMatSession::with_frozen_environment(
+        false,
+        false,
+        request.environment.entries().to_vec(),
+    )
     .map_err(|error| format!("failed to initialize portable execution session: {error}"))?;
     session.set_compat_mode(mode);
     if let Some(project) = project {

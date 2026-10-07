@@ -25,7 +25,7 @@ pub(crate) struct NativeProcessProvider<'a> {
     pub objects: &'a FilesystemObjectStore,
 }
 use crate::protocol::{
-    StoredProgram, WorkerRequest, WorkerResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    StoredProgram, WorkerRequest, WorkerResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
 };
 use runmat_execution_runner::{
     AttemptExecutionObservation, AttemptExecutionTermination, AttemptFailureKind, AttemptReport,
@@ -181,7 +181,8 @@ fn prepare_program(
     let stored: StoredProgram =
         serde_json::from_slice(&stored).map_err(|error| error.to_string())?;
     let worker_request = WorkerRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        environment: request.task.environment.clone(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         recipe: stored.recipe,
         artifact: stored.artifact,
         function: stored.function,

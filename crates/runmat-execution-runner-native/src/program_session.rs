@@ -135,7 +135,8 @@ impl NativeProgramSession {
             program
                 .validate_for_portable_host()
                 .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-            if submission.request.inputs != program.arguments
+            if submission.request.environment != program.environment
+                || submission.request.inputs != program.arguments
                 || submission.request.outputs.requested_outputs != program.requested_outputs
             {
                 return Err(NativeExecutionError::Protocol(

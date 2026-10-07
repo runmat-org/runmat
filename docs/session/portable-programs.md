@@ -166,7 +166,37 @@ routes install the exact bundle snapshot after cold source materialization; each
 attempt starts with its own copy. This is a bounded semantic environment contract,
 not measured process memory or a complete host sandbox.
 
-Complete console retention, portable host policy, standalone deferred-call environment
-capture and parent allocation transport still require their own execution evidence.
+Complete console retention, portable host policy and parent allocation transport
+still require their own execution evidence; captured invocation context is described below.
 No remote/distributed, accelerator, FEA family or release qualification follows from
 these environment checks.
+
+## Captured invocation environment
+
+The compiler compatibility identity and invocation environment are distinct. Deferred
+calls capture the original session environment when the future is created. A single
+materializer carries it with the callable, arguments and outputs in the portable
+schema-V2 request. The required field may be explicitly empty; omission does not mean
+inherit the worker process. Context is included in request identity and in the original
+scheduled task, attempt and checkpoint. A code artifact alone does not own context.
+
+Local interpreter and native invocation extents isolate mutations from their parent
+while retaining the original session services and cancellation. Native and browser
+cold hosts initialize from the request snapshot. Bundle admission requires its declared
+environment to agree with the original descriptor. Remote worker control admission also
+checks bundle, task and request agreement before reserving capacity. Composed child
+descriptors retain their original context through cold decoding. Cold diagnostics establish transport
+identity and shape, not permission to execute or independent mathematical proof.
+
+Portable admission uses the existing public bundle policy: sorted unique names, bounded
+ASCII data, and rejection of credential-like names. Unsupported inventories reject; adapters
+do not silently filter them. Name validation does not establish that values are public;
+hosts authorize their selected portable inventories. Direct session initialization has
+its broader basic shape contract. Hosts should install an explicitly selected portable environment before
+creating tasks that require portable execution.
+
+The shared storage profile counts original UTF-8 data, typed entry storage and exact
+JSON encoding without allocating a wire copy. Scheduling rejects a reservation smaller
+than this component; standalone native/browser requests add it to their base reservation.
+This is a minimum component reservation. Allocator overhead, retained copies, runtime
+maps, other execution storage and measured process RSS remain distinct obligations.

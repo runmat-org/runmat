@@ -18,6 +18,7 @@ pub const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
 #[derive(Clone)]
 pub struct RuntimeContext {
     execution: Rc<dyn RuntimeExecutionServices>,
+    pub(super) environment: Rc<std::cell::RefCell<super::environment::EnvironmentState>>,
     program_revision: Option<runmat_execution::ProgramRevision>,
     search_path: Option<Arc<crate::builtins::common::path_state::SearchPath>>,
     services: RuntimeServicePorts,
@@ -56,10 +57,11 @@ impl RuntimeContext {
         cancellation: Arc<AtomicBool>,
         environment: super::environment::EnvironmentState,
     ) -> Self {
-        let state = Rc::new(RuntimeContextState::new(cancellation, environment));
+        let state = Rc::new(RuntimeContextState::new(cancellation));
         crate::class_registry::register_context_state(&state);
         Self {
             execution,
+            environment: Rc::new(std::cell::RefCell::new(environment)),
             program_revision: None,
             search_path: None,
             services: RuntimeServicePorts::default(),

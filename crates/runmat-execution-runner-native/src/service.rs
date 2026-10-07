@@ -121,7 +121,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
             }
         };
         let outputs = record.handle.outputs.clone();
-        let (recipe, artifact, inputs) = materialize_call(&call, outputs.clone())?;
+        let program = materialize_call(&call, outputs.clone())?;
         let sequence = state.next_task;
         state.next_task = sequence
             .checked_add(1)
@@ -129,7 +129,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
         let id = TaskId::derive(&[self.scope_id.bytes(), &sequence.to_be_bytes()]);
         let completion = self
             .driver
-            .submit(id, call.function, recipe, artifact, inputs, outputs.clone())
+            .submit(id, program)
             .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
         state.future_mut(future)?.state = FutureState::Running(completion);
         let handle = TaskHandle {
@@ -156,18 +156,8 @@ impl RuntimeExecutionServices for NativeExecutionService {
         let requested_outputs = u16::try_from(call.requested_outputs)
             .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
         let outputs = OutputContract { requested_outputs };
-        let (recipe, artifact, arguments) = materialize_call(&call, outputs)?;
-        self.durable.submit(
-            runmat_execution_artifact::ProgramExecutionRequest {
-                schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
-                recipe,
-                artifact,
-                function: call.function,
-                arguments,
-                requested_outputs,
-            },
-            options,
-        )
+        self.durable
+            .submit(materialize_call(&call, outputs)?, options)
     }
 
     fn await_job(&self, job: &JobHandle) -> Result<Value, ExecutionServiceError> {
@@ -344,21 +334,18 @@ impl RuntimeExecutionServices for NativeExecutionService {
 fn materialize_call(
     call: &DeferredCall,
     outputs: OutputContract,
-) -> Result<
-    (
-        runmat_execution_artifact::ProgramBuildRecipe,
-        runmat_execution_artifact::ProgramArtifact,
-        Vec<runmat_execution::value::ValuePayload>,
-    ),
-    ExecutionServiceError,
-> {
-    runmat_vm::materialize_deferred_call(
+) -> Result<runmat_execution_artifact::ProgramExecutionRequest, ExecutionServiceError> {
+    let request = runmat_vm::materialize_deferred_call(
         call,
-        outputs,
+        outputs.clone(),
         runmat_execution_artifact::ProgramTarget::portable(format!(
             "{}-{}-interpreter-bytecode-v1",
             std::env::consts::ARCH,
-            std::env::consts::OS
+            std::env::consts::OS,
         )),
-    )
+    )?;
+    request
+        .validate_for_portable_host()
+        .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+    Ok(request)
 }

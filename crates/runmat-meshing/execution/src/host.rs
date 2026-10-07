@@ -6,7 +6,7 @@ use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::{
     ExecutableForm, LogicalObject, ObjectNamespace, ProgramArtifact, ProgramBuildRecipe,
     ProgramExecutionRequest, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
 };
 use runmat_geometry_core::{
     decode_geometry_document, encode_geometry_document, GeometryDocument, GeometryModel,
@@ -309,7 +309,8 @@ impl MeshingHostWorkload {
                 .map(|root| ValuePayload::Object(Box::new(root))),
         );
         let request = ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            environment: runmat_execution::EnvironmentSnapshot::default(),
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
             recipe,
             artifact,
             function: 0,

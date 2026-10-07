@@ -167,6 +167,7 @@ async fn retained_program_owner_validates_caller_and_preserves_original_cold_pro
         .freeze_executable(function, &caller.revision().program_revision)
         .is_err());
     let call = DeferredCall {
+        environment: runmat_execution::EnvironmentSnapshot::default(),
         function: function.0 as usize,
         arguments: vec![Value::Num(5.0)],
         requested_outputs: 1,

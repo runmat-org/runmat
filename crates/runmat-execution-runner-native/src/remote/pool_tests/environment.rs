@@ -62,7 +62,7 @@ async fn pinned_quic_original_unit_restores_frozen_environment_for_every_attempt
             .unwrap();
         for ordinal in [1_u8, 2] {
             let task_id = TaskId::derive(&[b"quic-environment-task", &[ordinal]]);
-            let scheduling = runmat_execution_runner::AttemptRequest {
+            let mut scheduling = runmat_execution_runner::AttemptRequest {
                 id: runmat_execution::identity::AttemptId::derive(&[
                     b"quic-environment-attempt",
                     &[ordinal],
@@ -74,6 +74,33 @@ async fn pinned_quic_original_unit_restores_frozen_environment_for_every_attempt
                 driver_fence: 9,
                 task: submission(scope_id, pool_id, task_id, artifact_id).request,
             };
+            scheduling.task.environment = program.environment.clone();
+            if ordinal == 1 {
+                for substitution in 0..3 {
+                    let mut rejected = RemoteAttempt {
+                        scheduling: scheduling.clone(),
+                        program: program.clone(),
+                    };
+                    match substitution {
+                        0 => {
+                            rejected.scheduling.task.environment =
+                                runmat_execution::EnvironmentSnapshot::default()
+                        }
+                        1 => {
+                            rejected.program.environment =
+                                runmat_execution::EnvironmentSnapshot::new(vec![(
+                                    name.into(),
+                                    "substituted".into(),
+                                )])
+                                .unwrap();
+                            rejected.scheduling.task.environment =
+                                rejected.program.environment.clone();
+                        }
+                        _ => rejected.scheduling.task.resources.memory_bytes = 1,
+                    }
+                    assert!(channel.execute(rejected).await.is_err());
+                }
+            }
             let report = channel
                 .execute(RemoteAttempt {
                     scheduling,

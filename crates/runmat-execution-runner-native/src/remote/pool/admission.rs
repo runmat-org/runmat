@@ -44,6 +44,7 @@ impl RemotePoolDriver {
         if submission.request.scope_id != self.scope_id
             || submission.request.pool_id != self.pool_id
             || submission.request.program_artifact_id != artifact_id
+            || submission.request.environment != program.environment
             || submission.request.inputs != program.arguments
             || submission.request.outputs.requested_outputs != program.requested_outputs
         {
@@ -71,6 +72,7 @@ impl RemotePoolDriver {
             || existing.submission.request.program_artifact_id
                 != submission.request.program_artifact_id
             || existing.submission.request.callable != submission.request.callable
+            || existing.submission.request.environment != submission.request.environment
             || existing.submission.request.inputs != submission.request.inputs
             || existing.submission.request.outputs != submission.request.outputs
             || existing.submission.request.resources != submission.request.resources
@@ -209,6 +211,7 @@ impl RemotePoolDriver {
             let artifact_id =
                 runmat_execution::identity::ArtifactId::derive(&[program.artifact.id.0.bytes()]);
             if submission.request.program_artifact_id != artifact_id
+                || submission.request.environment != program.environment
                 || submission.request.inputs != program.arguments
                 || submission.request.outputs.requested_outputs != program.requested_outputs
             {

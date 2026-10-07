@@ -133,6 +133,7 @@ pub fn build_task_submission(
     let qualified_name = stage_callable(workload.stage).to_string();
     Ok(TaskSubmission {
         request: TaskRequest {
+            environment: runmat_execution::EnvironmentSnapshot::default(),
             id: task_id,
             scope_id: context.scope_id,
             pool_id: context.pool_id,

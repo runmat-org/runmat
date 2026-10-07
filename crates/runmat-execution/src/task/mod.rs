@@ -29,8 +29,23 @@ pub struct TaskRequest {
     pub program_artifact_id: ArtifactId,
     pub callable: Callable,
     pub inputs: Vec<ValuePayload>,
+    pub environment: crate::EnvironmentSnapshot,
     pub outputs: OutputContract,
     pub resources: ResourceRequest,
     pub retry: RetryPolicy,
     pub deadline_unix_millis: Option<u64>,
+}
+
+impl TaskRequest {
+    /// Admit the original context component. Whole execution storage remains separate.
+    pub fn validate_environment_reservation(&self) -> Result<(), crate::ContractError> {
+        let minimum = self.environment.storage_profile()?.minimum_memory_bytes()?;
+        if minimum > self.resources.memory_bytes {
+            return Err(crate::ContractError::invalid(
+                "invocation environment",
+                "exceeds task memory reservation",
+            ));
+        }
+        Ok(())
+    }
 }

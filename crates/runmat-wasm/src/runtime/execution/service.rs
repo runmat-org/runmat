@@ -9,9 +9,7 @@ use runmat_execution::{
     CancellationReason, Digest, ExecutionScopeId, FutureHandle, FutureId, OutputContract, PoolId,
     TaskHandle, TaskId,
 };
-use runmat_execution_artifact::{
-    ProgramExecutionRequest, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
-};
+use runmat_execution_artifact::ProgramExecutionResponse;
 use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{
     AttemptFailureKind, AttemptReport, AttemptRequest, AttemptSuccess, Driver, DriverAction,
@@ -317,13 +315,28 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             }
             None => return Err(ExecutionServiceError::UnknownHandle),
         };
-        let (recipe, artifact, arguments) = runmat_vm::materialize_deferred_call(
+        let request = runmat_vm::materialize_deferred_call(
             &call,
             future.outputs.clone(),
             runmat_execution_artifact::ProgramTarget::portable(
                 "wasm32-browser-interpreter-bytecode-v1",
             ),
         )?;
+        request
+            .validate_for_portable_host()
+            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+        let mut resources = browser_request(self.capabilities);
+        let context_bytes = request
+            .environment
+            .storage_profile()
+            .and_then(|profile| profile.minimum_memory_bytes())
+            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+        resources.memory_bytes = resources
+            .memory_bytes
+            .checked_add(context_bytes)
+            .ok_or_else(|| {
+                ExecutionServiceError::Failed("invocation memory reservation overflow".into())
+            })?;
         let sequence = state.next_task;
         state.next_task = sequence.wrapping_add(1);
         let task_id = TaskId::derive(&[self.scope_id.bytes(), &sequence.to_be_bytes()]);
@@ -336,14 +349,32 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                 parent: Some(self.scope_id),
             })
             .map_err(driver_error)?;
-        let request = ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
-            recipe: recipe.clone(),
-            artifact: artifact.clone(),
-            function: call.function,
-            arguments: arguments.clone(),
-            requested_outputs: future.outputs.requested_outputs,
-        };
+        let artifact_id = ArtifactId::derive(&[request.artifact.id.0.bytes()]);
+        let arguments = request.arguments.clone();
+        let actions = state
+            .driver
+            .handle(DriverCommand::Submit(Box::new(TaskSubmission {
+                request: TaskRequest {
+                    environment: call.environment.clone(),
+                    id: task_id,
+                    scope_id: task_scope_id,
+                    pool_id: self.pool_id,
+                    program_artifact_id: artifact_id,
+                    callable: Callable {
+                        owner_identity: "browser-session".into(),
+                        qualified_name: call.function.to_string(),
+                        entrypoint_digest: Digest::sha256(call.function.to_be_bytes()),
+                    },
+                    inputs: arguments,
+                    outputs: future.outputs.clone(),
+                    resources,
+                    retry: RetryPolicy::Never,
+                    deadline_unix_millis: None,
+                },
+                dependencies: BTreeSet::new(),
+                priority: 0,
+            })))
+            .map_err(driver_error)?;
         state.requests.insert(task_id, request);
         state
             .futures
@@ -357,30 +388,6 @@ impl RuntimeExecutionServices for BrowserExecutionService {
                 scope_id: task_scope_id,
             },
         );
-        let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
-        let actions = state
-            .driver
-            .handle(DriverCommand::Submit(Box::new(TaskSubmission {
-                request: TaskRequest {
-                    id: task_id,
-                    scope_id: task_scope_id,
-                    pool_id: self.pool_id,
-                    program_artifact_id: artifact_id,
-                    callable: Callable {
-                        owner_identity: "browser-session".into(),
-                        qualified_name: call.function.to_string(),
-                        entrypoint_digest: Digest::sha256(call.function.to_be_bytes()),
-                    },
-                    inputs: arguments,
-                    outputs: future.outputs.clone(),
-                    resources: browser_request(self.capabilities),
-                    retry: RetryPolicy::Never,
-                    deadline_unix_millis: None,
-                },
-                dependencies: BTreeSet::new(),
-                priority: 0,
-            })))
-            .map_err(driver_error)?;
         drop(state);
         self.dispatch(actions);
         Ok(TaskHandle {
@@ -523,6 +530,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
 
 #[cfg(test)]
 mod tests {
+    use runmat_execution_artifact::{ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2};
     use wasm_bindgen_test::*;
 
     use super::*;
@@ -546,6 +554,7 @@ mod tests {
         let envelope = unit.portable_envelope_for(Some("originalFailure")).unwrap();
         let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
         DeferredCall {
+            environment: runmat_execution::EnvironmentSnapshot::default(),
             function,
             arguments: Vec::new(),
             requested_outputs: 1,
@@ -585,6 +594,7 @@ mod tests {
         let service = BrowserExecutionService::new(None).unwrap();
         let future = service
             .create_future(DeferredCall {
+                environment: runmat_execution::EnvironmentSnapshot::default(),
                 function: 0,
                 arguments: Vec::new(),
                 requested_outputs: 1,

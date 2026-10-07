@@ -24,7 +24,6 @@ pub struct RuntimeContextState {
     pub(crate) session_variables: RefCell<crate::workspace::session::SessionVariableState>,
     pub(crate) warnings: RefCell<Vec<crate::warning_store::RuntimeWarning>>,
     pub(crate) console: RefCell<crate::console::ConsoleState>,
-    pub(crate) environment: RefCell<super::environment::EnvironmentState>,
     pub(crate) classes: RefCell<crate::class_registry::RuntimeClassState>,
     pub(crate) interaction: RefCell<crate::interaction::InteractionState>,
     pub(crate) test_services: RefCell<Vec<crate::testing::RuntimeTestServices>>,
@@ -41,10 +40,7 @@ pub struct RuntimeContextState {
 }
 
 impl RuntimeContextState {
-    pub(super) fn new(
-        cancellation: Arc<AtomicBool>,
-        environment: super::environment::EnvironmentState,
-    ) -> Self {
+    pub(super) fn new(cancellation: Arc<AtomicBool>) -> Self {
         Self {
             source: RefCell::new(SourceState::default()),
             call: RefCell::new(CallState::default()),
@@ -56,7 +52,6 @@ impl RuntimeContextState {
             ),
             warnings: RefCell::new(Vec::new()),
             console: RefCell::new(crate::console::ConsoleState::default()),
-            environment: RefCell::new(environment),
             classes: RefCell::new(crate::class_registry::RuntimeClassState::default()),
             interaction: RefCell::new(crate::interaction::InteractionState::default()),
             test_services: RefCell::new(Vec::new()),

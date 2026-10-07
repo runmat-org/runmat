@@ -27,16 +27,8 @@ impl EnvironmentState {
     }
 
     pub(super) fn from_snapshot(entries: Vec<(String, String)>) -> io::Result<Self> {
-        if entries.windows(2).any(|pair| pair[0].0 >= pair[1].0)
-            || entries.iter().any(|(key, value)| {
-                key.is_empty() || key.contains(['=', '\0']) || value.contains('\0')
-            })
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "environment snapshot names must be valid, sorted and unique",
-            ));
-        }
+        runmat_execution::EnvironmentSnapshot::validate_entries(&entries)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
         Ok(Self(entries.into_iter().collect()))
     }
 
@@ -81,14 +73,42 @@ impl super::RuntimeContext {
     /// Validation completes before replacement, so invalid imports leave state intact.
     pub fn install_environment_snapshot(&self, entries: Vec<(String, String)>) -> io::Result<()> {
         let snapshot = EnvironmentState::from_snapshot(entries)?;
-        self.state().environment.replace(snapshot);
+        self.environment_state().replace(snapshot);
         Ok(())
     }
 
     pub fn environment_snapshot(&self) -> Vec<(String, String)> {
-        self.state().environment.borrow().vars()
+        self.environment_state().borrow().vars()
     }
 }
 
 #[cfg(test)]
 mod tests;
+
+impl super::RuntimeContext {
+    pub(crate) fn environment_state(&self) -> &std::rc::Rc<std::cell::RefCell<EnvironmentState>> {
+        &self.environment
+    }
+
+    /// An invocation owns its environment while retaining the original session services,
+    /// call state and cancellation. Parent environment mutations cannot rewrite it.
+    pub fn with_invocation_environment(
+        mut self,
+        snapshot: &runmat_execution::EnvironmentSnapshot,
+    ) -> io::Result<Self> {
+        let state = EnvironmentState::from_snapshot(snapshot.entries().to_vec())?;
+        self.environment = std::rc::Rc::new(std::cell::RefCell::new(state));
+        Ok(self)
+    }
+
+    /// Captured function invokers keep their services but enter the calling extent's
+    /// environment only when it belongs to the same session. Never crosses sessions.
+    pub fn inherit_same_session_environment(mut self) -> Self {
+        if let Some(active) = super::legacy::active() {
+            if std::rc::Rc::ptr_eq(self.state(), active.state()) {
+                self.environment = active.environment.clone();
+            }
+        }
+        self
+    }
+}

@@ -129,7 +129,8 @@ pub(super) async fn run_remote_driver(
         ));
     }
     bundle.validate().map_err(protocol)?;
-    if bundle.manifest.program_revision != descriptor.recipe.program_revision
+    if bundle.manifest.portable_environment != descriptor.environment.entries()
+        || bundle.manifest.program_revision != descriptor.recipe.program_revision
         || !bundle
             .manifest
             .recipes

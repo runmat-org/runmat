@@ -1,6 +1,5 @@
 mod builder;
 mod closure;
-mod environment;
 mod manifest;
 mod validator;
 

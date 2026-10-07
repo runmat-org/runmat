@@ -49,7 +49,8 @@ async fn mixed_recovery_uses_exact_encryption_purposes_and_reencrypts_alias_chan
     .unwrap();
     let effectful_recipe = recipe(revision.clone());
     let effectful_request = ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         artifact: ProgramArtifact::materialize(
             &effectful_recipe,
             ExecutableForm::InterpreterBytecodeV1,
@@ -66,7 +67,8 @@ async fn mixed_recovery_uses_exact_encryption_purposes_and_reencrypts_alias_chan
     recipe.entrypoint = "analysis_workload".into();
     recipe.execution_mode = "recovery-publication-test".into();
     let request = ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         artifact: ProgramArtifact::materialize(&recipe, ExecutableForm::AnalysisWorkload, vec![1])
             .unwrap(),
         recipe,
@@ -181,7 +183,8 @@ async fn scheduler_and_physical_roots_survive_one_serialized_publication_sequenc
     recipe.entrypoint = "analysis_workload".into();
     recipe.execution_mode = "recovery-publication-test".into();
     let request = ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         artifact: ProgramArtifact::materialize(&recipe, ExecutableForm::AnalysisWorkload, vec![1])
             .unwrap(),
         recipe,

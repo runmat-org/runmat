@@ -218,6 +218,7 @@ async fn submit_original(
         .await?;
     let task = runmat_execution_runner::TaskSubmission {
         request: TaskRequest {
+            environment: program.environment.clone(),
             id: TaskId::derive(&[context.scope_id.bytes(), program.artifact.id.0.bytes()]),
             scope_id: context.scope_id,
             pool_id: context.pool_id,

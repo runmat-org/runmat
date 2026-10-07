@@ -26,7 +26,7 @@ fn env_lock() -> &'static RwLock<BTreeMap<String, String>> {
 
 pub fn var(key: &str) -> io::Result<String> {
     if let Some(context) = crate::context::legacy::active() {
-        return context.state().environment.borrow().var(key);
+        return context.environment_state().borrow().var(key);
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -47,7 +47,7 @@ pub fn var(key: &str) -> io::Result<String> {
 
 pub fn vars() -> Vec<(String, String)> {
     if let Some(context) = crate::context::legacy::active() {
-        return context.state().environment.borrow().vars();
+        return context.environment_state().borrow().vars();
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -66,7 +66,7 @@ pub fn set_var(key: &str, value: &str) {
         "invalid environment variable"
     );
     if let Some(context) = crate::context::legacy::active() {
-        context.state().environment.borrow_mut().set_var(key, value);
+        context.environment_state().borrow_mut().set_var(key, value);
         return;
     }
     #[cfg(target_arch = "wasm32")]
@@ -86,7 +86,7 @@ pub fn remove_var(key: &str) {
         "invalid environment variable"
     );
     if let Some(context) = crate::context::legacy::active() {
-        context.state().environment.borrow_mut().remove_var(key);
+        context.environment_state().borrow_mut().remove_var(key);
         return;
     }
     #[cfg(target_arch = "wasm32")]

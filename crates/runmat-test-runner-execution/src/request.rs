@@ -20,6 +20,7 @@ pub(crate) fn task<S>(
     let qualified_name = format!("test:{}", request.test_id.as_str());
     TaskSubmission {
         request: TaskRequest {
+            environment: runmat_execution::EnvironmentSnapshot::default(),
             id: session.task_id(request.test_id.as_str(), request.attempt),
             scope_id: session.scope_id,
             pool_id: session.pool_id,

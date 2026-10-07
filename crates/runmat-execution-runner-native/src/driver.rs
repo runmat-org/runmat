@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex};
 use runmat_execution::identity::ArtifactId;
 use runmat_execution::resource::{Capability, ResourceRequest};
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
-use runmat_execution::value::ValuePayload;
 use runmat_execution::{
     CancellationReason, Digest, ExecutionScopeId, OutputContract, PoolId, TaskId,
 };
@@ -105,14 +104,31 @@ impl LocalDriver {
     pub(crate) fn submit(
         self: &Arc<Self>,
         task_id: TaskId,
-        function: usize,
-        recipe: ProgramBuildRecipe,
-        artifact: ProgramArtifact,
-        inputs: Vec<ValuePayload>,
-        outputs: OutputContract,
+        program: runmat_execution_artifact::ProgramExecutionRequest,
     ) -> NativeExecutionResult<Arc<TaskCompletion>> {
+        program
+            .validate_for_portable_host()
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        let context_bytes = program
+            .environment
+            .storage_profile()
+            .and_then(|profile| profile.minimum_memory_bytes())
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        let memory_bytes = (1024_u64 * 1024)
+            .checked_add(context_bytes)
+            .ok_or_else(|| {
+                NativeExecutionError::Protocol("invocation memory reservation overflow".into())
+            })?;
+        let outputs = OutputContract {
+            requested_outputs: program.requested_outputs,
+        };
+        let function = program.function;
+        let inputs = program.arguments;
+        let recipe = program.recipe;
+        let artifact = program.artifact;
         let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
         let request = TaskRequest {
+            environment: program.environment,
             id: task_id,
             scope_id: self.scope_id,
             pool_id: self.pool_id,
@@ -126,7 +142,7 @@ impl LocalDriver {
             outputs,
             resources: ResourceRequest {
                 cpu_millicores: 1000,
-                memory_bytes: 1024 * 1024,
+                memory_bytes,
                 scratch_bytes: 1024 * 1024,
                 max_wall_millis: 24 * 60 * 60 * 1000,
                 max_artifact_bytes: u64::from(self.config.max_message_bytes),

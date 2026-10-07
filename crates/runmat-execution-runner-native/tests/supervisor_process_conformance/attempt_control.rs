@@ -156,6 +156,7 @@ async fn run_case(case: ControlCase) {
     .unwrap();
     let task = TaskSubmission {
         request: runmat_execution::task::TaskRequest {
+            environment: runmat_execution::EnvironmentSnapshot::default(),
             id: runmat_execution::TaskId::derive(&[b"controlled-original-task"]),
             scope_id: context.scope_id,
             pool_id: context.pool_id,
@@ -190,6 +191,7 @@ async fn run_case(case: ControlCase) {
     let original_artifact = artifact.id;
     let (record, duplicate) = client
         .submit_program(ProgramBatchSubmission {
+            environment: runmat_execution::EnvironmentSnapshot::default(),
             recipe,
             artifact,
             function: 7,

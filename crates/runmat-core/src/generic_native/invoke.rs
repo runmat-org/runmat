@@ -305,6 +305,7 @@ fn program_function(
 fn isolated_procedure_runtime(
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> runmat_runtime::context::RuntimeContext {
+    let runtime = runtime.inherit_same_session_environment();
     let ports = runtime.service_ports().clone().without_workspace();
     runtime.with_service_ports(ports)
 }

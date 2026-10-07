@@ -3,7 +3,7 @@ use crate::{ArtifactError, ArtifactResult};
 pub const MAX_PORTABLE_ENVIRONMENT_ENTRIES: usize = 256;
 pub const MAX_PORTABLE_ENVIRONMENT_BYTES: usize = 1024 * 1024;
 
-pub(super) fn validate(entries: &[(String, String)]) -> ArtifactResult<()> {
+pub(crate) fn validate(entries: &[(String, String)]) -> ArtifactResult<()> {
     let bytes = entries.iter().try_fold(0_usize, |total, (name, value)| {
         total.checked_add(name.len())?.checked_add(value.len())
     });

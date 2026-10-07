@@ -185,7 +185,7 @@ mod tests {
     use runmat_execution::{OutputContract, ProgramEnvironment, ProgramRevision};
     use runmat_execution_artifact::{
         ProgramArtifact, ProgramBuildRecipe, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-        PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
     };
 
     use super::*;
@@ -235,7 +235,8 @@ mod tests {
         };
         let artifact = ProgramArtifact::materialize(&recipe, form, vec![1]).unwrap();
         ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            environment: runmat_execution::EnvironmentSnapshot::default(),
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
             recipe,
             artifact,
             function: 0,

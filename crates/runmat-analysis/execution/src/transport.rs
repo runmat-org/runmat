@@ -4,7 +4,7 @@ use runmat_execution::identity::ValueId;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::{
     LogicalObject, ProgramExecutionInputs, ProgramExecutionObject, ProgramExecutionObjectLocation,
-    ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
 };
 
 use crate::{
@@ -88,7 +88,7 @@ impl PreparedAnalysisProgram {
             ));
         }
         let inputs = ProgramExecutionInputs {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
             arguments: self.request.arguments.clone(),
             objects: locations,
         };

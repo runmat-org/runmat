@@ -16,6 +16,8 @@ use std::time::Duration;
 mod cancellation;
 #[path = "output_process_conformance/durable_poll.rs"]
 mod durable_poll;
+#[path = "output_process_conformance/environment.rs"]
+mod environment;
 #[path = "supervisor_process_conformance/fixture.rs"]
 mod fixture;
 #[path = "output_process_conformance/handles.rs"]
@@ -29,7 +31,9 @@ fn main() {
         .build()
         .unwrap();
     runtime.block_on(async {
-        if std::env::args().any(|arg| arg == cancellation::WORKER_MARKER) {
+        if std::env::args().any(|arg| arg == environment::PRODUCER_MARKER) {
+            environment::produce().await;
+        } else if std::env::args().any(|arg| arg == cancellation::WORKER_MARKER) {
             cancellation::blocked_worker().await;
         } else if std::env::args().any(|arg| arg == HiddenMode::ExecutionWorker.marker()) {
             runmat_execution_runner_native::run_worker_stdio().await.unwrap();
@@ -72,6 +76,7 @@ async fn call_source(requested_outputs: usize, source: &str) -> DeferredCall {
         .unwrap();
     let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
     DeferredCall {
+        environment: runmat_execution::EnvironmentSnapshot::default(),
         function,
         arguments: vec![],
         requested_outputs,
@@ -98,6 +103,7 @@ async fn witness() {
     handles::verify_caller(&service).await;
     cancellation::verify(&config).await;
     portable_units::verify(&config).await;
+    environment::verify_producer_exit(&config).await;
     for requested in [0, 1, 2] {
         let future = service.create_future(call(requested).await).unwrap();
         handles::reject_altered_future(&service, &future);
@@ -171,7 +177,7 @@ async fn witness() {
             .expect("durable original task evidence must survive cold attachment");
         assert!(!evidence.attempts.is_empty());
         let original = call(requested).await;
-        let (recipe, artifact, arguments) = runmat_vm::materialize_deferred_call(
+        let request = runmat_vm::materialize_deferred_call(
             &original,
             job.outputs.clone(),
             runmat_execution_artifact::ProgramTarget::portable(format!(
@@ -181,14 +187,6 @@ async fn witness() {
             )),
         )
         .unwrap();
-        let request = runmat_execution_artifact::ProgramExecutionRequest {
-            schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
-            recipe,
-            artifact,
-            function: original.function,
-            arguments,
-            requested_outputs: requested as u16,
-        };
         cold.response
             .expect("original response must survive cold attachment")
             .validate_against(&request)

@@ -517,6 +517,13 @@ async fn validate_and_reserve_attempt(
     };
     if bundle.requires_source_project() != state.materialized_project.is_some()
         || attempt.program.validate_for_portable_host().is_err()
+        || attempt.scheduling.task.environment != attempt.program.environment
+        || bundle.manifest.portable_environment != attempt.program.environment.entries()
+        || attempt
+            .scheduling
+            .task
+            .validate_environment_reservation()
+            .is_err()
         || !bundle
             .manifest
             .recipes

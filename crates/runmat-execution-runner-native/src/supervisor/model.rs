@@ -4,7 +4,7 @@ use runmat_execution::value::ValuePayload;
 use runmat_execution::{Digest, JobHandle};
 use runmat_execution_artifact::{
     ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest, ProgramExecutionResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
 };
 use runmat_execution_runner::AttemptResourceAccounting;
 use serde::{Deserialize, Serialize};
@@ -87,11 +87,13 @@ pub struct ProgramBatchSubmission<
     A = ProgramArtifact,
     V = Vec<ValuePayload>,
     T = runmat_execution_runner::TaskSubmission,
+    E = runmat_execution::EnvironmentSnapshot,
 > {
     pub recipe: R,
     pub artifact: A,
     pub function: usize,
     pub arguments: V,
+    pub environment: E,
     pub requested_outputs: u16,
     pub task: T,
     pub idempotency_key: Option<String>,
@@ -110,6 +112,7 @@ impl ProgramBatchSubmission {
             artifact: request.artifact,
             function: request.function,
             arguments: request.arguments,
+            environment: request.environment,
             requested_outputs: request.requested_outputs,
             task,
             idempotency_key,
@@ -121,7 +124,8 @@ impl ProgramBatchSubmission {
         &self,
     ) -> runmat_execution_artifact::BorrowedProgramExecutionRequest<'_> {
         ProgramExecutionRequest {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            environment: &self.environment,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
             recipe: &self.recipe,
             artifact: &self.artifact,
             function: self.function,
@@ -139,7 +143,8 @@ impl ProgramBatchSubmission {
             .resources
             .validate()
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-        if self.task.request.inputs != self.arguments
+        if self.task.request.environment != self.environment
+            || self.task.request.inputs != self.arguments
             || self.task.request.outputs.requested_outputs != self.requested_outputs
             || self.task.request.program_artifact_id
                 != runmat_execution::identity::ArtifactId::derive(&[self.artifact.id.0.bytes()])
@@ -171,6 +176,7 @@ impl ProgramBatchSubmission {
             artifact: &self.artifact,
             function: self.function,
             arguments: self.arguments.as_slice(),
+            environment: &self.environment,
             requested_outputs: self.requested_outputs,
             task: &self.task,
             idempotency_key: None,

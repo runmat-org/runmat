@@ -193,6 +193,9 @@ pub(super) fn evaluate_rvalue(
                 .runtime
                 .execution()
                 .create_future(runmat_runtime::execution::DeferredCall {
+                    environment: runmat_runtime::execution::capture_deferred_environment(
+                        &state.runtime,
+                    )?,
                     function: function.0,
                     arguments,
                     requested_outputs: requested_outputs.fixed_count(),

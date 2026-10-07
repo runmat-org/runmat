@@ -31,7 +31,8 @@ fn request(text: &str, selected: Option<&str>, outputs: u16) -> ProgramExecution
         expected_artifact_id: None,
     };
     ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         function: envelope.manifest.identity.entrypoint_function.0 as usize,
         artifact: ProgramArtifact::materialize(
             &recipe,

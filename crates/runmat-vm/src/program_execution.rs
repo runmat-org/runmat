@@ -1,7 +1,6 @@
-use runmat_execution::{value::ValuePayload, OutputContract};
+use runmat_execution::OutputContract;
 use runmat_execution_artifact::{
-    ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
-    ProgramExecutionResponse,
+    ExecutableForm, ProgramArtifact, ProgramExecutionRequest, ProgramExecutionResponse,
 };
 use runmat_runtime::execution::{DeferredCall, ExecutionServiceError};
 
@@ -9,7 +8,7 @@ pub fn materialize_deferred_call(
     call: &DeferredCall,
     outputs: OutputContract,
     target: runmat_execution_artifact::ProgramTarget,
-) -> Result<(ProgramBuildRecipe, ProgramArtifact, Vec<ValuePayload>), ExecutionServiceError> {
+) -> Result<ProgramExecutionRequest, ExecutionServiceError> {
     let program = call.program.as_deref().ok_or_else(|| {
         ExecutionServiceError::Failed("execution is missing its exact program".into())
     })?;
@@ -27,7 +26,7 @@ pub fn materialize_deferred_call(
         ));
     }
     let (recipe, artifact) =
-        ProgramArtifact::materialize_executable_unit(&envelope, outputs, target)
+        ProgramArtifact::materialize_executable_unit(&envelope, outputs.clone(), target)
             .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
     let arguments = call
         .arguments
@@ -35,7 +34,19 @@ pub fn materialize_deferred_call(
         .map(runmat_runtime::execution::value_codec::encode_inline_value)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
-    Ok((recipe, artifact, arguments))
+    let request = ProgramExecutionRequest {
+        schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        recipe,
+        artifact,
+        arguments,
+        function: call.function,
+        requested_outputs: outputs.requested_outputs,
+        environment: call.environment.clone(),
+    };
+    request
+        .validate()
+        .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+    Ok(request)
 }
 
 pub async fn execute_program_request(request: ProgramExecutionRequest) -> ProgramExecutionResponse {
@@ -44,6 +55,26 @@ pub async fn execute_program_request(request: ProgramExecutionRequest) -> Progra
             message: "worker rejected a protocol or program identity mismatch".into(),
         };
     }
+    let runtime = match runmat_runtime::context::RuntimeContext::with_frozen_environment(
+        std::rc::Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        request.environment.entries().to_vec(),
+    ) {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            return ProgramExecutionResponse::Failure {
+                message: error.to_string(),
+            }
+        }
+    };
+    runtime
+        .scope(execute_validated_program_request(request))
+        .await
+}
+
+async fn execute_validated_program_request(
+    request: ProgramExecutionRequest,
+) -> ProgramExecutionResponse {
     if request.artifact.form == ExecutableForm::InterpreterScriptV1 {
         return execute_script_request(request).await;
     }
@@ -198,7 +229,7 @@ mod tests {
     use runmat_execution::{Digest, OutputContract, ProgramEnvironment, ProgramRevision};
     use runmat_execution_artifact::{
         ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
-        ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
     };
 
     use super::execute_program_request;
@@ -246,7 +277,8 @@ mod tests {
         .unwrap();
         let response =
             futures::executor::block_on(execute_program_request(ProgramExecutionRequest {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+                environment: runmat_execution::EnvironmentSnapshot::default(),
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
                 recipe,
                 artifact,
                 function: 0,
@@ -293,7 +325,8 @@ mod tests {
         .unwrap();
         let response =
             futures::executor::block_on(execute_program_request(ProgramExecutionRequest {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+                environment: runmat_execution::EnvironmentSnapshot::default(),
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
                 recipe,
                 artifact,
                 function: 0,

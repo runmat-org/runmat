@@ -30,7 +30,8 @@ async fn original_request() -> ProgramExecutionRequest {
         expected_artifact_id: None,
     };
     let request: ProgramExecutionRequest = ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         function: envelope.manifest.identity.entrypoint_function.0 as usize,
         artifact: ProgramArtifact::materialize(
             &recipe,
@@ -50,7 +51,15 @@ async fn original_unit_consumes_exact_frozen_environment_and_live_cancellation()
     let request = original_request().await;
     for value in ["first", "second"] {
         let environment = [("RUNMAT_NATIVE_CONTEXT".into(), value.into())];
-        let response = execute_unit(&request, None, Some(&environment), None).await;
+        let mut request = request.clone();
+        request.environment =
+            runmat_execution::EnvironmentSnapshot::new(environment.to_vec()).unwrap();
+        let mismatch = [("RUNMAT_NATIVE_CONTEXT".into(), "substituted".into())];
+        assert!(matches!(
+            execute_unit(&request, None, Some(&mismatch), None).await,
+            ProgramExecutionResponse::Failure { .. }
+        ));
+        let response = execute_unit(&request, None, None, None).await;
         response.validate_against(&request).unwrap();
         let ProgramExecutionResponse::Success { value: output } = response else {
             panic!("original execution failed: {response:?}")

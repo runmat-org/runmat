@@ -1,6 +1,7 @@
 use super::*;
 use crate::{Bytecode, FunctionBytecode, FunctionRegistry, Instr};
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution_artifact::ProgramBuildRecipe;
 use runmat_hir::FunctionId;
 use runmat_value::Value;
 
@@ -93,7 +94,8 @@ fn original_function_outputs_preserve_zero_one_and_multiple_ordinals() {
         )
         .unwrap();
         let request = ProgramExecutionRequest {
-            schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+            environment: runmat_execution::EnvironmentSnapshot::default(),
+            schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
             recipe,
             artifact,
             function: 7,

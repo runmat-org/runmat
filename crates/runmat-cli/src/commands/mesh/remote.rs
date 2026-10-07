@@ -9,7 +9,7 @@ use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{
     ArtifactAccess, ExecutionBundleBuilder, ProgramExecutionDescriptor, ProgramExecutionInputs,
-    ProgramExecutionObject, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    ProgramExecutionObject, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
 };
 use runmat_execution_runner_native::{
     prepare_exact_meshing_root, resolve_native_meshing_request, ExactMeshingRootPreparation,
@@ -284,14 +284,15 @@ fn prepare_remote_root(
         bail!("exact-meshing root input inventory contains an unbound reference");
     }
     let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         recipe: request.recipe,
         artifact: request.artifact,
         function: request.function,
         requested_outputs: request.requested_outputs,
     })?;
     let inputs = ProgramExecutionInputs {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         arguments: request.arguments,
         objects: Vec::new(),
     };

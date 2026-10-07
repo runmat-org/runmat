@@ -138,7 +138,7 @@ pub(super) fn validate(bundle: &ExecutionBundle) -> ArtifactResult<()> {
             "callable inventory references a source outside the bundle".into(),
         ));
     }
-    super::environment::validate(&bundle.manifest.portable_environment)?;
+    crate::environment::validate(&bundle.manifest.portable_environment)?;
     Ok(())
 }
 

@@ -18,6 +18,7 @@ pub struct DeferredCall {
     pub function: usize,
     pub arguments: Vec<Value>,
     pub requested_outputs: usize,
+    pub environment: runmat_execution::EnvironmentSnapshot,
     pub program_revision: Option<runmat_execution::ProgramRevision>,
     /// Canonical complete V4 compiler product and flat original dependency inventory frozen by the active session owner.
     /// The serial service does not inspect it; isolated consumers reject partial
@@ -337,6 +338,7 @@ mod tests {
         let second = RuntimeExecutionService::new();
         let future = first
             .create_future(DeferredCall {
+                environment: runmat_execution::EnvironmentSnapshot::default(),
                 function: 1,
                 arguments: vec![],
                 requested_outputs: 1,
@@ -355,6 +357,7 @@ mod tests {
         let service = RuntimeExecutionService::new();
         let future = service
             .create_future(DeferredCall {
+                environment: runmat_execution::EnvironmentSnapshot::default(),
                 function: 7,
                 arguments: vec![Value::Num(3.0)],
                 requested_outputs: 1,
@@ -403,6 +406,7 @@ mod tests {
         let service = RuntimeExecutionService::new();
         let future = service
             .create_future(DeferredCall {
+                environment: runmat_execution::EnvironmentSnapshot::default(),
                 function: 1,
                 arguments: vec![],
                 requested_outputs: 1,

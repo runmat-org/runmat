@@ -120,7 +120,7 @@ impl<'a, R: SourceReader> ExecutionBundleBuilder<'a, R> {
         mut self,
         entries: Vec<(String, String)>,
     ) -> ArtifactResult<Self> {
-        super::environment::validate(&entries)?;
+        crate::environment::validate(&entries)?;
         self.portable_environment = entries;
         Ok(self)
     }

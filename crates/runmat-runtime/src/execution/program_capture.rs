@@ -37,3 +37,11 @@ fn capture_error(message: impl Into<String>) -> RuntimeError {
         .with_identifier("RunMat:ExecutionProgram")
         .build()
 }
+
+/// Freeze invocation state separately from the original compiler product.
+pub fn capture_deferred_environment(
+    runtime: &RuntimeContext,
+) -> Result<runmat_execution::EnvironmentSnapshot, RuntimeError> {
+    runmat_execution::EnvironmentSnapshot::new(runtime.environment_snapshot())
+        .map_err(|error| capture_error(error.to_string()))
+}

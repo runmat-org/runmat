@@ -268,6 +268,7 @@ pub fn build_analysis_task_submission(
     let identity = AnalysisTaskIdentity::new(workload.identity, dependency_identities)?;
     let task_id = TaskId::derive(&[identity.digest().bytes()]);
     let request = TaskRequest {
+        environment: runmat_execution::EnvironmentSnapshot::default(),
         id: task_id,
         scope_id: context.scope_id,
         pool_id: context.pool_id,

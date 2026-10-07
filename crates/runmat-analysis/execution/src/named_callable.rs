@@ -6,7 +6,7 @@ use runmat_execution::{
 use runmat_execution_artifact::{
     BundleCallable, ExecutableForm, ProgramArtifact, ProgramBuildRecipe,
     ProgramExecutionDescriptor, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
 };
 use runmat_types::{CapabilityRequirement, ProgramFunctionId};
 use std::collections::BTreeSet;
@@ -87,7 +87,8 @@ pub fn prepare_named_callable_descriptor(
     let artifact =
         ProgramArtifact::materialize(&recipe, ExecutableForm::ExecutableUnitV4, executable_bytes)?;
     let descriptor = ProgramExecutionDescriptor {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         recipe,
         artifact,
         function: entrypoint,

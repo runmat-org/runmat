@@ -119,7 +119,13 @@ pub(super) async fn complete(
                     runmat_hir::CallableFallbackPolicy::None,
                     runmat_runtime::call::descriptor::CallableCallKind::Direct,
                 );
-                let result = runtime
+                let invocation = runtime
+                    .clone()
+                    .with_invocation_environment(&call.environment)
+                    .map_err(|error| {
+                        execution_error(ExecutionServiceError::Failed(error.to_string()))
+                    })?;
+                let result = invocation
                     .scope(
                         runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor),
                     )

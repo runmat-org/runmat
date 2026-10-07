@@ -5,7 +5,7 @@ use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
 use runmat_execution::{Digest, OutputContract, TaskId};
 use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest, ProgramTarget,
-    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
 };
 use runmat_execution_runner::{DriverSnapshot, TaskSubmission};
 use runmat_execution_runner_native::NativeProgramSession;
@@ -36,7 +36,8 @@ async fn request(text: &str, selected: Option<&str>, outputs: u16) -> ProgramExe
         expected_artifact_id: None,
     };
     ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         function: envelope.manifest.identity.entrypoint_function.0 as usize,
         artifact: ProgramArtifact::materialize(
             &recipe,
@@ -64,6 +65,7 @@ async fn execute(
             request,
             TaskSubmission {
                 request: TaskRequest {
+                    environment: original.environment.clone(),
                     id: task_id,
                     scope_id: session.scope_id(),
                     pool_id: session.pool_id(),
@@ -117,6 +119,10 @@ async fn execute(
     );
     let evidence = completion.execution_evidence().unwrap();
     evidence.validate().unwrap();
+    assert_eq!(
+        evidence.task.submission.request.environment,
+        original.environment
+    );
     assert_eq!(evidence.task.submission.request.inputs, original.arguments);
     assert_eq!(
         evidence.task.submission.request.outputs,
@@ -177,7 +183,8 @@ async fn transitive_request() -> ProgramExecutionRequest {
     )
     .unwrap();
     ProgramExecutionRequest {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
         function: envelope.manifest.identity.entrypoint_function.0 as usize,
         arguments: vec![
             runmat_runtime::execution::value_codec::encode_inline_value(&Value::Num(5.0)).unwrap(),
@@ -189,6 +196,29 @@ async fn transitive_request() -> ProgramExecutionRequest {
 }
 
 pub(super) async fn verify(config: &NativeExecutionConfig) {
+    // The source session is already gone when this request reaches the actual worker.
+    // Its snapshot, including absent HOME, survives task storage and cold receipts.
+    let mut environment = request(
+        "function [value, absent] = originalEnvironment(); value = getenv('RUNMAT_ORIGINAL_WORKER'); absent = getenv('HOME'); setenv('RUNMAT_ORIGINAL_WORKER','worker-local'); end",
+        Some("originalEnvironment"), 2,
+    ).await;
+    environment.environment = runmat_execution::EnvironmentSnapshot::new(vec![(
+        "RUNMAT_ORIGINAL_WORKER".into(),
+        "captured".into(),
+    )])
+    .unwrap();
+    let host = std::env::var_os("RUNMAT_ORIGINAL_WORKER");
+    execute(
+        config,
+        environment,
+        vec![
+            Value::CharArray(runmat_value::CharArray::new_row("captured")),
+            Value::CharArray(runmat_value::CharArray::new_row("")),
+        ],
+    )
+    .await;
+    assert_eq!(std::env::var_os("RUNMAT_ORIGINAL_WORKER"), host);
+
     execute(config, transitive_request().await, vec![Value::Num(27.0)]).await;
     for outputs in [0, 1, 2] {
         let mut original = request(

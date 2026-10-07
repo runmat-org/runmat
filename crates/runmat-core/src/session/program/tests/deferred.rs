@@ -100,15 +100,22 @@ async fn deferred_capture_preserves_original_complete_product_in_both_executors(
             requested_outputs: 1,
         };
         let target = runmat_execution_artifact::ProgramTarget::portable("original-deferred-v4");
-        let (recipe, artifact, arguments) =
+        let request =
             runmat_vm::materialize_deferred_call(&call, outputs.clone(), target.clone()).unwrap();
-        assert_eq!(recipe.program_revision, unit.revision().program_revision);
         assert_eq!(
-            artifact.form,
+            request.recipe.program_revision,
+            unit.revision().program_revision
+        );
+        assert_eq!(request.environment, call.environment);
+        assert_eq!(
+            request.artifact.form,
             runmat_execution_artifact::ExecutableForm::ExecutableUnitV4
         );
-        assert_eq!(artifact.executable_unit().unwrap().unwrap(), captured);
-        assert_eq!(arguments.len(), 1);
+        assert_eq!(
+            request.artifact.executable_unit().unwrap().unwrap(),
+            captured
+        );
+        assert_eq!(request.arguments.len(), 1);
         for mutation in 0..3 {
             let mut invalid = call.clone();
             match mutation {
@@ -196,7 +203,7 @@ async fn raw_script_capture_has_original_product_and_restores_session_context() 
     assert_eq!(restored.source().text, source);
     let function = ProgramFunctionId(u32::try_from(call.function).unwrap());
     assert!(restored.function_analysis(function).is_some());
-    let (_, artifact, _) = runmat_vm::materialize_deferred_call(
+    let request = runmat_vm::materialize_deferred_call(
         &call,
         runmat_execution::OutputContract {
             requested_outputs: 1,
@@ -204,7 +211,12 @@ async fn raw_script_capture_has_original_product_and_restores_session_context() 
         runmat_execution_artifact::ProgramTarget::portable("raw-original"),
     )
     .unwrap();
-    assert_eq!(artifact.executable_unit().unwrap().unwrap(), envelope);
+    assert_eq!(
+        request.artifact.executable_unit().unwrap().unwrap(),
+        envelope
+    );
 }
 
 mod persistent;
+
+mod environment;
