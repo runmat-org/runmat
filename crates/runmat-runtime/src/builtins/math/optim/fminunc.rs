@@ -1370,6 +1370,29 @@ mod tests {
         )
     }
 
+    fn selected_bound(
+        id: usize,
+    ) -> (
+        crate::context::RuntimeContext,
+        Value,
+        crate::user_functions::BoundFunctionInvokerGuard,
+    ) {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, id);
+        let entry = runtime.enter();
+        let forwarder =
+            crate::user_functions::test_support::install_bound_forwarder(binding.clone());
+        drop(entry);
+        (
+            runtime,
+            crate::user_functions::test_support::exact_local_value(
+                &format!("objective_{id}"),
+                binding,
+            ),
+            forwarder,
+        )
+    }
+
     fn tensor(data: Vec<f64>) -> Value {
         Value::Tensor(Tensor::new(data, vec![3, 1]).unwrap())
     }
@@ -1392,9 +1415,11 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fminunc_quadratic_reaches_vector_minimum() {
-        let _bound = bound_forwarder(101);
+        let (runtime, objective, _bound) = selected_bound(101);
+        let _entry = runtime.enter();
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, requested_outputs| {
+            |function, args, requested_outputs| {
+                assert_eq!(function, 101);
                 assert_eq!(requested_outputs, 1);
                 let x = vector_from_value(&args[0]);
                 crate::sequence::single_value_future(async move {
@@ -1408,11 +1433,11 @@ mod tests {
                 })
             },
         )));
-        let result = block_on(fminunc_builtin(
-            bound(101),
+        let result = block_on(runtime.scope(fminunc_builtin(
+            objective,
             tensor(vec![0.0, 0.0, 0.0]),
             Vec::new(),
-        ))
+        )))
         .expect("fminunc");
         assert_close_vec(&vector_from_value(&result), &[1.0, 2.0, 3.0], 1.0e-4);
     }
@@ -1420,9 +1445,11 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fminunc_rosenbrock_converges_from_standard_start() {
-        let _bound = bound_forwarder(102);
+        let (runtime, objective, _bound) = selected_bound(102);
+        let _entry = runtime.enter();
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, requested_outputs| {
+            |function, args, requested_outputs| {
+                assert_eq!(function, 102);
                 assert_eq!(requested_outputs, 1);
                 let x = vector_from_value(&args[0]);
                 crate::sequence::single_value_future(async move {
@@ -1433,16 +1460,19 @@ mod tests {
             },
         )));
         let x0 = Value::Tensor(Tensor::new(vec![-1.2, 1.0], vec![2, 1]).unwrap());
-        let result = block_on(fminunc_builtin(bound(102), x0, Vec::new())).expect("fminunc");
+        let result =
+            block_on(runtime.scope(fminunc_builtin(objective, x0, Vec::new()))).expect("fminunc");
         assert_close_vec(&vector_from_value(&result), &[1.0, 1.0], 2.0e-3);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fminunc_handles_high_dimensional_smooth_objective() {
-        let _bound = bound_forwarder(103);
+        let (runtime, objective, _bound) = selected_bound(103);
+        let _entry = runtime.enter();
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, requested_outputs| {
+            |function, args, requested_outputs| {
+                assert_eq!(function, 103);
                 assert_eq!(requested_outputs, 1);
                 let x = vector_from_value(&args[0]);
                 crate::sequence::single_value_future(async move {
@@ -1459,7 +1489,8 @@ mod tests {
             },
         )));
         let x0 = Value::Tensor(Tensor::new(vec![0.0; 8], vec![8, 1]).unwrap());
-        let result = block_on(fminunc_builtin(bound(103), x0, Vec::new())).expect("fminunc");
+        let result =
+            block_on(runtime.scope(fminunc_builtin(objective, x0, Vec::new()))).expect("fminunc");
         assert_close_vec(
             &vector_from_value(&result),
             &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
@@ -1470,9 +1501,11 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fminunc_uses_objective_gradient_and_returns_six_outputs() {
-        let _bound = bound_forwarder(104);
+        let (runtime, objective, _bound) = selected_bound(104);
+        let _entry = runtime.enter();
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, requested_outputs| {
+            |function, args, requested_outputs| {
+                assert_eq!(function, 104);
                 assert_eq!(requested_outputs, 2);
                 let x = vector_from_value(&args[0]);
                 Box::pin(async move {
@@ -1500,11 +1533,11 @@ mod tests {
         opts.insert("TolX", Value::Num(1.0e-10));
         opts.insert("TolFun", Value::Num(1.0e-10));
         let _outputs = crate::output_count::push_output_count(Some(6));
-        let result = block_on(fminunc_builtin(
-            bound(104),
+        let result = block_on(runtime.scope(fminunc_builtin(
+            objective,
             tensor(vec![0.0, 0.0, 0.0]),
             vec![Value::Struct(opts)],
-        ))
+        )))
         .expect("fminunc");
         let Value::OutputList(outputs) = result else {
             panic!("expected output list");
@@ -1551,9 +1584,11 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fminunc_rejects_invalid_gradient_length() {
-        let _bound = bound_forwarder(105);
+        let (runtime, objective, _bound) = selected_bound(105);
+        let _entry = runtime.enter();
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, _args, requested_outputs| {
+            |function, _args, requested_outputs| {
+                assert_eq!(function, 105);
                 assert_eq!(requested_outputs, 2);
                 Box::pin(async {
                     crate::sequence::ValueSequence::comma_separated(vec![
@@ -1566,11 +1601,11 @@ mod tests {
         )));
         let mut opts = StructValue::new();
         opts.insert("SpecifyObjectiveGradient", Value::Bool(true));
-        let err = block_on(fminunc_builtin(
-            bound(105),
+        let err = block_on(runtime.scope(fminunc_builtin(
+            objective,
             tensor(vec![0.0, 0.0, 0.0]),
             vec![Value::Struct(opts)],
-        ))
+        )))
         .unwrap_err();
         assert!(err.message().contains("gradient length"));
     }
@@ -1578,9 +1613,11 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fminunc_scalar_input_returns_scalar() {
-        let _bound = bound_forwarder(106);
+        let (runtime, objective, _bound) = selected_bound(106);
+        let _entry = runtime.enter();
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, requested_outputs| {
+            |function, args, requested_outputs| {
+                assert_eq!(function, 106);
                 assert_eq!(requested_outputs, 1);
                 let x = match &args[0] {
                     Value::Num(value) => *value,
@@ -1592,7 +1629,8 @@ mod tests {
             },
         )));
         let result =
-            block_on(fminunc_builtin(bound(106), Value::Num(0.0), Vec::new())).expect("fminunc");
+            block_on(runtime.scope(fminunc_builtin(objective, Value::Num(0.0), Vec::new())))
+                .expect("fminunc");
         assert!(matches!(result, Value::Num(x) if (x - 4.0).abs() < 1.0e-4));
     }
 

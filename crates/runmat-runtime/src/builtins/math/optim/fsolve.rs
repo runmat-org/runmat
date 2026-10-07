@@ -692,13 +692,13 @@ mod tests {
 
     #[test]
     fn fsolve_returns_stationary_non_root_with_solver_status() {
-        let binding = crate::user_functions::test_support::exact_portable_binding(
-            44,
-            "fsolve stationary fixture",
-        );
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 44);
+        let entry = runtime.enter();
         let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, _requested_outputs| {
+            |function, args, _requested_outputs| {
+                assert_eq!(function, 44);
                 let x = match &args[0] {
                     Value::Num(value) => *value,
                     other => panic!("expected scalar numeric argument, got {other:?}"),
@@ -709,11 +709,12 @@ mod tests {
             },
         )));
         let _outputs = crate::output_count::push_output_count(Some(3));
-        let result = block_on(fsolve_builtin(
+        drop(entry);
+        let result = block_on(runtime.scope(fsolve_builtin(
             crate::user_functions::test_support::exact_local_value("no_real_root", binding),
             Value::Num(0.0),
             Vec::new(),
-        ))
+        )))
         .unwrap();
         let Value::OutputList(outputs) = result else {
             panic!("expected outputs")
@@ -723,12 +724,16 @@ mod tests {
 
     #[test]
     fn fsolve_vector_system_via_semantic_resolver() {
-        let _resolver =
-            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_name| {
-                Some(0)
-            })));
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _fixtures = crate::user_functions::test_support::install_exact_named_forwarders(
+            &runtime,
+            &[("system", 41)],
+        )
+        .unwrap();
+        let entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
-            std::sync::Arc::new(|_function, args, _requested_outputs| {
+            std::sync::Arc::new(|function, args, _requested_outputs| {
+                assert_eq!(function, 41);
                 let x = match &args[0] {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     _ => panic!("expected tensor input"),
@@ -744,12 +749,13 @@ mod tests {
                 })
             }),
         ));
+        drop(entry);
         let x0 = Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap();
-        let root = block_on(fsolve_builtin(
+        let root = block_on(runtime.scope(fsolve_builtin(
             Value::FunctionHandle("system".into()),
             Value::Tensor(x0),
             Vec::new(),
-        ))
+        )))
         .unwrap();
         match root {
             Value::Tensor(t) => {
@@ -770,12 +776,16 @@ mod tests {
     fn fsolve_preserves_row_vector_shape_for_callback() {
         let seen_shapes = Arc::new(Mutex::new(Vec::new()));
         let seen_shapes_for_invoker = Arc::clone(&seen_shapes);
-        let _resolver =
-            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_name| {
-                Some(0)
-            })));
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _fixtures = crate::user_functions::test_support::install_exact_named_forwarders(
+            &runtime,
+            &[("row_system", 42)],
+        )
+        .unwrap();
+        let entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            move |_function, args, _requested_outputs| {
+            move |function, args, _requested_outputs| {
+                assert_eq!(function, 42);
                 let (x, shape) = match &args[0] {
                     Value::Tensor(t) => (t.materialize_f64().clone(), t.shape().to_vec()),
                     other => panic!("expected tensor input, got {other:?}"),
@@ -789,12 +799,13 @@ mod tests {
                 })
             },
         )));
+        drop(entry);
         let x0 = Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap();
-        let root = block_on(fsolve_builtin(
+        let root = block_on(runtime.scope(fsolve_builtin(
             Value::FunctionHandle("row_system".into()),
             Value::Tensor(x0),
             Vec::new(),
-        ))
+        )))
         .unwrap();
         match root {
             Value::Tensor(t) => {
@@ -811,12 +822,16 @@ mod tests {
     fn fsolve_preserves_matrix_shape_for_callback() {
         let seen_shapes = Arc::new(Mutex::new(Vec::new()));
         let seen_shapes_for_invoker = Arc::clone(&seen_shapes);
-        let _resolver =
-            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_name| {
-                Some(0)
-            })));
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _fixtures = crate::user_functions::test_support::install_exact_named_forwarders(
+            &runtime,
+            &[("matrix_system", 45)],
+        )
+        .unwrap();
+        let entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            move |_function, args, _requested_outputs| {
+            move |function, args, _requested_outputs| {
+                assert_eq!(function, 45);
                 let (x, shape) = match &args[0] {
                     Value::Tensor(t) => (t.materialize_f64().clone(), t.shape().to_vec()),
                     other => panic!("expected tensor input, got {other:?}"),
@@ -831,12 +846,13 @@ mod tests {
                 })
             },
         )));
+        drop(entry);
         let x0 = Tensor::new(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
-        let root = block_on(fsolve_builtin(
+        let root = block_on(runtime.scope(fsolve_builtin(
             Value::FunctionHandle("matrix_system".into()),
             Value::Tensor(x0),
             Vec::new(),
-        ))
+        )))
         .unwrap();
         match root {
             Value::Tensor(t) => {
@@ -853,10 +869,9 @@ mod tests {
 
     #[test]
     fn fsolve_accepts_semantic_function_handle_callback() {
-        let binding = crate::user_functions::test_support::exact_portable_binding(
-            43,
-            "fsolve callback fixture",
-        );
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 43);
+        let entry = runtime.enter();
         let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
@@ -869,11 +884,12 @@ mod tests {
                 Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(x - 3.0)) })
             },
         )));
-        let root = block_on(fsolve_builtin(
+        drop(entry);
+        let root = block_on(runtime.scope(fsolve_builtin(
             crate::user_functions::test_support::exact_local_value("system_function", binding),
             Value::Num(1.0),
             Vec::new(),
-        ))
+        )))
         .unwrap();
         match root {
             Value::Num(n) => assert!((n - 3.0).abs() < 1.0e-5),

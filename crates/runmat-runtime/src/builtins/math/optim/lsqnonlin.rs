@@ -932,6 +932,27 @@ mod tests {
         Value::Tensor(Tensor::new(data, shape).unwrap())
     }
 
+    fn selected_residual(
+        function: usize,
+        name: &str,
+    ) -> (
+        crate::context::RuntimeContext,
+        Value,
+        crate::user_functions::BoundFunctionInvokerGuard,
+    ) {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, function);
+        let entry = runtime.enter();
+        let forwarder =
+            crate::user_functions::test_support::install_bound_forwarder(binding.clone());
+        drop(entry);
+        (
+            runtime,
+            crate::user_functions::test_support::exact_local_value(name, binding),
+            forwarder,
+        )
+    }
+
     #[test]
     fn lsqnonlin_real_array_reads_typed_integer_storage_exactly() {
         let input =
@@ -961,11 +982,11 @@ mod tests {
 
     #[test]
     fn lsqnonlin_vector_residual_recovers_parameters() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(1, "lsqnonlin fixture"),
-        ]);
+        let (runtime, objective, _bound) = selected_residual(1, "residual");
+        let _entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, requested_outputs| {
+            |function, args, requested_outputs| {
+                assert_eq!(function, 1);
                 assert_eq!(requested_outputs, 1);
                 let x = match &args[0] {
                     Value::Tensor(t) => t.materialize_f64().clone(),
@@ -979,20 +1000,10 @@ mod tests {
                 })
             },
         )));
-        let result = block_on(lsqnonlin_builtin(
-            Value::BoundFunctionHandle {
-                name: "residual".into(),
-                function: 1,
-                authority: crate::user_functions::test_support::exact_portable_binding(
-                    1,
-                    "lsqnonlin fixture",
-                )
-                .authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+        let result = block_on(runtime.scope(lsqnonlin_builtin(
+            objective,
             vec![tensor(vec![0.0, 0.0], vec![2, 1])],
-        ))
+        )))
         .expect("lsqnonlin");
         match result {
             Value::Tensor(t) => {
@@ -1006,11 +1017,11 @@ mod tests {
 
     #[test]
     fn lsqnonlin_respects_bounds_and_empty_constraint_placeholders() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(2, "lsqnonlin fixture"),
-        ]);
+        let (runtime, objective, _bound) = selected_residual(2, "bounded");
+        let _entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, _requested_outputs| {
+            |function, args, _requested_outputs| {
+                assert_eq!(function, 2);
                 let x = match &args[0] {
                     Value::Num(value) => *value,
                     other => panic!("expected scalar x, got {other:?}"),
@@ -1021,18 +1032,8 @@ mod tests {
             },
         )));
         let empty = Value::Tensor(Tensor::zeros(vec![0, 0]));
-        let result = block_on(lsqnonlin_builtin(
-            Value::BoundFunctionHandle {
-                name: "bounded".into(),
-                function: 2,
-                authority: crate::user_functions::test_support::exact_portable_binding(
-                    2,
-                    "lsqnonlin fixture",
-                )
-                .authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+        let result = block_on(runtime.scope(lsqnonlin_builtin(
+            objective,
             vec![
                 Value::Num(0.0),
                 Value::Num(-1.0),
@@ -1043,7 +1044,7 @@ mod tests {
                 empty.clone(),
                 empty,
             ],
-        ))
+        )))
         .expect("lsqnonlin");
         match result {
             Value::Num(value) => assert!((value - 1.0).abs() < 1.0e-8),
@@ -1053,11 +1054,11 @@ mod tests {
 
     #[test]
     fn lsqnonlin_accepts_empty_options_placeholder() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(22, "lsqnonlin fixture"),
-        ]);
+        let (runtime, objective, _bound) = selected_residual(22, "empty_options");
+        let _entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, _requested_outputs| {
+            |function, args, _requested_outputs| {
+                assert_eq!(function, 22);
                 let x = match &args[0] {
                     Value::Num(value) => *value,
                     other => panic!("expected scalar x, got {other:?}"),
@@ -1066,20 +1067,10 @@ mod tests {
             },
         )));
         let empty = Value::Tensor(Tensor::zeros(vec![0, 0]));
-        let result = block_on(lsqnonlin_builtin(
-            Value::BoundFunctionHandle {
-                name: "empty_options".into(),
-                function: 22,
-                authority: crate::user_functions::test_support::exact_portable_binding(
-                    22,
-                    "lsqnonlin fixture",
-                )
-                .authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+        let result = block_on(runtime.scope(lsqnonlin_builtin(
+            objective,
             vec![Value::Num(0.0), empty.clone(), empty.clone(), empty],
-        ))
+        )))
         .expect("lsqnonlin accepts [] options");
         match result {
             Value::Num(value) => assert!((value - 3.0).abs() < 1.0e-5),
@@ -1089,11 +1080,11 @@ mod tests {
 
     #[test]
     fn lsqnonlin_partial_bounds_apply_to_leading_variables() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(23, "lsqnonlin fixture"),
-        ]);
+        let (runtime, objective, _bound) = selected_residual(23, "partial_bounds");
+        let _entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, _requested_outputs| {
+            |function, args, _requested_outputs| {
+                assert_eq!(function, 23);
                 let x = match &args[0] {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected x tensor, got {other:?}"),
@@ -1104,20 +1095,10 @@ mod tests {
             },
         )));
         let empty = Value::Tensor(Tensor::zeros(vec![0, 0]));
-        let result = block_on(lsqnonlin_builtin(
-            Value::BoundFunctionHandle {
-                name: "partial_bounds".into(),
-                function: 23,
-                authority: crate::user_functions::test_support::exact_portable_binding(
-                    23,
-                    "lsqnonlin fixture",
-                )
-                .authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+        let result = block_on(runtime.scope(lsqnonlin_builtin(
+            objective,
             vec![tensor(vec![0.0, 0.0], vec![2, 1]), empty, Value::Num(1.0)],
-        ))
+        )))
         .expect("lsqnonlin partial bounds");
         match result {
             Value::Tensor(t) => {
@@ -1131,12 +1112,12 @@ mod tests {
 
     #[test]
     fn lsqnonlin_multi_output_includes_diagnostics_lambda_and_jacobian() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(3, "lsqnonlin fixture"),
-        ]);
+        let (runtime, objective, _bound) = selected_residual(3, "multi");
+        let _entry = runtime.enter();
         let _guard = crate::output_count::push_output_count(Some(7));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, _requested_outputs| {
+            |function, args, _requested_outputs| {
+                assert_eq!(function, 3);
                 let x = match &args[0] {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected x tensor, got {other:?}"),
@@ -1148,25 +1129,15 @@ mod tests {
         )));
         let mut options = StructValue::new();
         options.insert("Algorithm", Value::from("levenberg-marquardt"));
-        let result = block_on(lsqnonlin_builtin(
-            Value::BoundFunctionHandle {
-                name: "multi".into(),
-                function: 3,
-                authority: crate::user_functions::test_support::exact_portable_binding(
-                    3,
-                    "lsqnonlin fixture",
-                )
-                .authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+        let result = block_on(runtime.scope(lsqnonlin_builtin(
+            objective,
             vec![
                 tensor(vec![0.0, 0.0], vec![1, 2]),
                 Value::Tensor(Tensor::zeros(vec![0, 0])),
                 Value::Tensor(Tensor::zeros(vec![0, 0])),
                 Value::Struct(options),
             ],
-        ))
+        )))
         .expect("lsqnonlin");
         match result {
             Value::OutputList(outputs) => {
@@ -1197,12 +1168,12 @@ mod tests {
 
     #[test]
     fn lsqnonlin_accepts_problem_struct() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(4, "lsqnonlin fixture"),
-        ]);
+        let (runtime, objective, _bound) = selected_residual(4, "problem");
+        let _entry = runtime.enter();
         let _guard = crate::output_count::push_output_count(Some(2));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, _requested_outputs| {
+            |function, args, _requested_outputs| {
+                assert_eq!(function, 4);
                 let x = match &args[0] {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected x tensor, got {other:?}"),
@@ -1214,24 +1185,11 @@ mod tests {
         )));
         let mut problem = StructValue::new();
         problem.insert("solver", Value::from("lsqnonlin"));
-        problem.insert(
-            "objective",
-            Value::BoundFunctionHandle {
-                name: "problem".into(),
-                function: 4,
-                authority: crate::user_functions::test_support::exact_portable_binding(
-                    4,
-                    "lsqnonlin fixture",
-                )
-                .authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
-        );
+        problem.insert("objective", objective);
         problem.insert("x0", tensor(vec![0.0, 0.0], vec![2, 1]));
         problem.insert("lb", tensor(vec![1.0, 2.0], vec![2, 1]));
         problem.insert("ub", tensor(vec![10.0, 10.0], vec![2, 1]));
-        let result = block_on(lsqnonlin_builtin(Value::Struct(problem), Vec::new()))
+        let result = block_on(runtime.scope(lsqnonlin_builtin(Value::Struct(problem), Vec::new())))
             .expect("lsqnonlin problem");
         match result {
             Value::OutputList(outputs) => {

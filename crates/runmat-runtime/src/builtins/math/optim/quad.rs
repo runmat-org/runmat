@@ -751,6 +751,27 @@ mod tests {
     use runmat_value::{IntegerStorage, Tensor};
     use std::sync::Arc;
 
+    fn selected_integrand(
+        function: usize,
+        name: &str,
+    ) -> (
+        crate::context::RuntimeContext,
+        Value,
+        crate::user_functions::BoundFunctionInvokerGuard,
+    ) {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, function);
+        let entry = runtime.enter();
+        let forwarder =
+            crate::user_functions::test_support::install_bound_forwarder(binding.clone());
+        drop(entry);
+        (
+            runtime,
+            crate::user_functions::test_support::exact_local_value(name, binding),
+            forwarder,
+        )
+    }
+
     #[test]
     fn quad_integrates_sine_with_default_tolerance() {
         let result = block_on(quad_builtin(
@@ -768,11 +789,11 @@ mod tests {
 
     #[test]
     fn quad_respects_tighter_tolerance_on_polynomial() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(7, "quad fixture"),
-        ]);
+        let (runtime, integrand, _bound) = selected_integrand(7, "square");
+        let _entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, requested_outputs| {
+            |function, args, requested_outputs| {
+                assert_eq!(function, 7);
                 assert_eq!(requested_outputs, 1);
                 let x = match &args[0] {
                     Value::Num(value) => *value,
@@ -782,22 +803,12 @@ mod tests {
             },
         )));
 
-        let result = block_on(quad_builtin(
-            Value::BoundFunctionHandle {
-                name: "square".into(),
-                function: 7,
-                authority: crate::user_functions::test_support::exact_portable_binding(
-                    7,
-                    "quad fixture",
-                )
-                .authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+        let result = block_on(runtime.scope(quad_builtin(
+            integrand,
             Value::Num(0.0),
             Value::Num(1.0),
             vec![Value::Num(1.0e-10)],
-        ))
+        )))
         .expect("quad");
         match result {
             Value::Num(value) => assert!((value - (1.0 / 3.0)).abs() < 1.0e-10),
@@ -936,13 +947,13 @@ mod tests {
 
     #[test]
     fn quad_passes_wide_integer_extra_parameter_exactly() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(902, "quad fixture"),
-        ]);
+        let (runtime, integrand, _bound) = selected_integrand(902, "parameterized");
+        let _entry = runtime.enter();
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let expected = u64::MAX;
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            move |_function, args, _requested_outputs| {
+            move |function, args, _requested_outputs| {
+                assert_eq!(function, 902);
                 let Value::Tensor(parameter) = &args[1] else {
                     panic!("expected integer parameter")
                 };
@@ -959,18 +970,8 @@ mod tests {
         let parameter =
             Tensor::new_integer(IntegerStorage::U64(vec![expected]), vec![1, 1]).unwrap();
 
-        let result = block_on(quad_builtin(
-            Value::BoundFunctionHandle {
-                name: "parameterized".into(),
-                function: 902,
-                authority: crate::user_functions::test_support::exact_portable_binding(
-                    902,
-                    "quad fixture",
-                )
-                .authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+        let result = block_on(runtime.scope(quad_builtin(
+            integrand,
             Value::Num(0.0),
             Value::Num(1.0),
             vec![
@@ -978,7 +979,7 @@ mod tests {
                 Value::Num(0.0),
                 Value::Tensor(parameter),
             ],
-        ))
+        )))
         .expect("exact callback parameter");
 
         assert!(matches!(result, Value::Num(value) if (value - 0.5).abs() < 1.0e-6));
@@ -1033,9 +1034,8 @@ mod tests {
 
     #[test]
     fn quad_forwards_extra_arguments_after_tol_and_trace() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(42, "quad fixture"),
-        ]);
+        let (runtime, integrand, _bound) = selected_integrand(42, "scaled_line");
+        let _entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
                 assert_eq!(function, 42);
@@ -1055,18 +1055,8 @@ mod tests {
             },
         )));
 
-        let result = block_on(quad_builtin(
-            Value::BoundFunctionHandle {
-                name: "scaled_line".into(),
-                function: 42,
-                authority: crate::user_functions::test_support::exact_portable_binding(
-                    42,
-                    "quad fixture",
-                )
-                .authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+        let result = block_on(runtime.scope(quad_builtin(
+            integrand,
             Value::Num(0.0),
             Value::Num(2.0),
             vec![
@@ -1074,7 +1064,7 @@ mod tests {
                 Value::Tensor(Tensor::zeros(vec![0, 0])),
                 Value::Num(3.0),
             ],
-        ))
+        )))
         .expect("quad");
         match result {
             Value::Num(value) => assert!((value - 6.0).abs() < 1.0e-8),
@@ -1099,11 +1089,11 @@ mod tests {
 
     #[test]
     fn quad_handles_integrable_endpoint_shape() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(9, "quad fixture"),
-        ]);
+        let (runtime, integrand, _bound) = selected_integrand(9, "sqrt_fn");
+        let _entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, _requested_outputs| {
+            |function, args, _requested_outputs| {
+                assert_eq!(function, 9);
                 let x = match &args[0] {
                     Value::Num(value) => *value,
                     other => panic!("expected x, got {other:?}"),
@@ -1114,22 +1104,12 @@ mod tests {
             },
         )));
 
-        let result = block_on(quad_builtin(
-            Value::BoundFunctionHandle {
-                name: "sqrt_fn".into(),
-                function: 9,
-                authority: crate::user_functions::test_support::exact_portable_binding(
-                    9,
-                    "quad fixture",
-                )
-                .authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+        let result = block_on(runtime.scope(quad_builtin(
+            integrand,
             Value::Num(0.0),
             Value::Num(1.0),
             vec![Value::Num(1.0e-7)],
-        ))
+        )))
         .expect("quad");
         match result {
             Value::Num(value) => assert!((value - (2.0 / 3.0)).abs() < 1.0e-6),

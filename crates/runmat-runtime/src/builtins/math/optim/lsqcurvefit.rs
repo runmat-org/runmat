@@ -1043,6 +1043,27 @@ mod tests {
         Value::Tensor(Tensor::new(data, shape).unwrap())
     }
 
+    fn selected_model(
+        function: usize,
+        name: &str,
+    ) -> (
+        crate::context::RuntimeContext,
+        Value,
+        crate::user_functions::BoundFunctionInvokerGuard,
+    ) {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, function);
+        let entry = runtime.enter();
+        let forwarder =
+            crate::user_functions::test_support::install_bound_forwarder(binding.clone());
+        drop(entry);
+        (
+            runtime,
+            crate::user_functions::test_support::exact_local_value(name, binding),
+            forwarder,
+        )
+    }
+
     #[test]
     fn lsqcurvefit_real_array_reads_typed_integer_storage_exactly() {
         let input =
@@ -1108,13 +1129,13 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_passes_wide_integer_xdata_to_callback_exactly() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(901, "lsqcurvefit fixture"),
-        ]);
+        let (runtime, model, _bound) = selected_model(901, "wide_xdata");
+        let _entry = runtime.enter();
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let expected = u64::MAX;
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            move |_function, args, _requested_outputs| {
+            move |function, args, _requested_outputs| {
+                assert_eq!(function, 901);
                 let Value::Tensor(xdata) = &args[1] else {
                     panic!("expected exact integer xdata")
                 };
@@ -1127,23 +1148,13 @@ mod tests {
         )));
         let xdata = Tensor::new_integer(IntegerStorage::U64(vec![expected]), vec![1, 1]).unwrap();
 
-        let result = block_on(lsqcurvefit_builtin(
-            Value::BoundFunctionHandle {
-                name: "wide_xdata".into(),
-                function: 901,
-                authority: crate::user_functions::test_support::exact_portable_binding(
-                    901,
-                    "lsqcurvefit fixture",
-                )
-                .authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+        let result = block_on(runtime.scope(lsqcurvefit_builtin(
+            model,
             Value::Num(0.0),
             Value::Tensor(xdata),
             Value::Num(0.0),
             Vec::new(),
-        ))
+        )))
         .expect("exact xdata pass-through");
 
         assert!(matches!(result, Value::Num(value) if value == 0.0));
@@ -1151,12 +1162,12 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_automatic_resident_input_gathers_but_explicit_input_is_gated() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(904, "lsqcurvefit fixture"),
-        ]);
+        let (runtime, model, _bound) = selected_model(904, "zero_model");
+        let _entry = runtime.enter();
         test_support::with_test_provider(|provider| {
             let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
-                Arc::new(|_function, _args, _requested_outputs| {
+                Arc::new(|function, _args, _requested_outputs| {
+                    assert_eq!(function, 904);
                     Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(0.0)) })
                 }),
             ));
@@ -1171,23 +1182,13 @@ mod tests {
             let automatic = automatic
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
                 .expect("admit provenance view");
-            let result = block_on(lsqcurvefit_builtin(
-                Value::BoundFunctionHandle {
-                    name: "zero_model".into(),
-                    function: 904,
-                    authority: crate::user_functions::test_support::exact_portable_binding(
-                        904,
-                        "lsqcurvefit fixture",
-                    )
-                    .authority,
-                    source_role: runmat_types::FunctionSourceRole::Unknown,
-                    source_file: None,
-                },
+            let result = block_on(runtime.scope(lsqcurvefit_builtin(
+                model,
                 Value::GpuTensor(automatic),
                 Value::Num(0.0),
                 Value::Num(0.0),
                 Vec::new(),
-            ))
+            )))
             .expect("automatic resident initial point gathers");
             assert!(matches!(
                 result,
@@ -1206,13 +1207,13 @@ mod tests {
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
                 .expect("admit provenance view");
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = block_on(lsqcurvefit_builtin(
+            let error = block_on(runtime.scope(lsqcurvefit_builtin(
                 Value::FunctionHandle("unused".into()),
                 Value::GpuTensor(explicit),
                 Value::Num(0.0),
                 Value::Num(0.0),
                 Vec::new(),
-            ))
+            )))
             .expect_err("explicit resident input is gated before fallback");
             assert_eq!(
                 error.identifier(),
@@ -1223,11 +1224,11 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_linear_model_recovers_parameters() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(1, "lsqcurvefit fixture"),
-        ]);
+        let (runtime, model, _bound) = selected_model(1, "line");
+        let _entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, requested_outputs| {
+            |function, args, requested_outputs| {
+                assert_eq!(function, 1);
                 assert_eq!(requested_outputs, 1);
                 let p = match &args[0] {
                     Value::Tensor(t) => t.materialize_f64().clone(),
@@ -1245,23 +1246,13 @@ mod tests {
                 })
             },
         )));
-        let result = block_on(lsqcurvefit_builtin(
-            Value::BoundFunctionHandle {
-                name: "line".into(),
-                function: 1,
-                authority: crate::user_functions::test_support::exact_portable_binding(
-                    1,
-                    "lsqcurvefit fixture",
-                )
-                .authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+        let result = block_on(runtime.scope(lsqcurvefit_builtin(
+            model,
             tensor(vec![0.0, 0.0], vec![2, 1]),
             tensor(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]),
             tensor(vec![1.0, 3.0, 5.0, 7.0], vec![1, 4]),
             Vec::new(),
-        ))
+        )))
         .expect("lsqcurvefit");
         match result {
             Value::Tensor(t) => {
@@ -1275,11 +1266,11 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_exponential_model_recovers_parameters() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(2, "lsqcurvefit fixture"),
-        ]);
+        let (runtime, model, _bound) = selected_model(2, "exp_decay");
+        let _entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, _requested_outputs| {
+            |function, args, _requested_outputs| {
+                assert_eq!(function, 2);
                 let p = match &args[0] {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected params, got {other:?}"),
@@ -1304,23 +1295,13 @@ mod tests {
             .iter()
             .map(|x| 2.5 * (-0.7 * x).exp())
             .collect::<Vec<_>>();
-        let result = block_on(lsqcurvefit_builtin(
-            Value::BoundFunctionHandle {
-                name: "exp_decay".into(),
-                function: 2,
-                authority: crate::user_functions::test_support::exact_portable_binding(
-                    2,
-                    "lsqcurvefit fixture",
-                )
-                .authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+        let result = block_on(runtime.scope(lsqcurvefit_builtin(
+            model,
             tensor(vec![1.0, 0.1], vec![2, 1]),
             tensor(xdata.clone(), vec![1, xdata.len()]),
             tensor(ydata, vec![1, xdata.len()]),
             Vec::new(),
-        ))
+        )))
         .expect("lsqcurvefit");
         match result {
             Value::Tensor(t) => {
@@ -1333,11 +1314,11 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_respects_bounds() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(3, "lsqcurvefit fixture"),
-        ]);
+        let (runtime, model, _bound) = selected_model(3, "bounded_line");
+        let _entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, _requested_outputs| {
+            |function, args, _requested_outputs| {
+                assert_eq!(function, 3);
                 let p = match &args[0] {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected params, got {other:?}"),
@@ -1354,23 +1335,13 @@ mod tests {
                 })
             },
         )));
-        let result = block_on(lsqcurvefit_builtin(
-            Value::BoundFunctionHandle {
-                name: "bounded_line".into(),
-                function: 3,
-                authority: crate::user_functions::test_support::exact_portable_binding(
-                    3,
-                    "lsqcurvefit fixture",
-                )
-                .authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+        let result = block_on(runtime.scope(lsqcurvefit_builtin(
+            model,
             tensor(vec![0.5], vec![1, 1]),
             tensor(vec![1.0, 2.0, 3.0], vec![1, 3]),
             tensor(vec![2.0, 4.0, 6.0], vec![1, 3]),
             vec![Value::Tensor(Tensor::zeros(vec![0, 0])), Value::Num(1.0)],
-        ))
+        )))
         .expect("lsqcurvefit");
         match result {
             Value::Tensor(t) => assert!((t.materialize_f64()[0] - 1.0).abs() < 1.0e-8),
@@ -1381,12 +1352,12 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_multi_output_includes_diagnostics_lambda_and_jacobian() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(4, "lsqcurvefit fixture"),
-        ]);
+        let (runtime, model, _bound) = selected_model(4, "line_multi");
+        let _entry = runtime.enter();
         let _guard = crate::output_count::push_output_count(Some(7));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, _requested_outputs| {
+            |function, args, _requested_outputs| {
+                assert_eq!(function, 4);
                 let p = match &args[0] {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected params, got {other:?}"),
@@ -1403,23 +1374,13 @@ mod tests {
                 })
             },
         )));
-        let result = block_on(lsqcurvefit_builtin(
-            Value::BoundFunctionHandle {
-                name: "line_multi".into(),
-                function: 4,
-                authority: crate::user_functions::test_support::exact_portable_binding(
-                    4,
-                    "lsqcurvefit fixture",
-                )
-                .authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+        let result = block_on(runtime.scope(lsqcurvefit_builtin(
+            model,
             tensor(vec![0.0, 0.0], vec![1, 2]),
             tensor(vec![0.0, 1.0, 2.0], vec![1, 3]),
             tensor(vec![1.0, 3.0, 5.0], vec![1, 3]),
             Vec::new(),
-        ))
+        )))
         .expect("lsqcurvefit");
         match result {
             Value::OutputList(outputs) => {
@@ -1450,12 +1411,12 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_output_reports_selected_algorithm() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(45, "lsqcurvefit fixture"),
-        ]);
+        let (runtime, model, _bound) = selected_model(45, "line_algorithm");
+        let _entry = runtime.enter();
         let _guard = crate::output_count::push_output_count(Some(5));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, _requested_outputs| {
+            |function, args, _requested_outputs| {
+                assert_eq!(function, 45);
                 let p = match &args[0] {
                     Value::Num(p) => *p,
                     other => panic!("expected scalar param, got {other:?}"),
@@ -1474,18 +1435,8 @@ mod tests {
         )));
         let mut options = StructValue::new();
         options.insert("Algorithm", Value::from("trust-region-reflective"));
-        let result = block_on(lsqcurvefit_builtin(
-            Value::BoundFunctionHandle {
-                name: "line_algorithm".into(),
-                function: 45,
-                authority: crate::user_functions::test_support::exact_portable_binding(
-                    45,
-                    "lsqcurvefit fixture",
-                )
-                .authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+        let result = block_on(runtime.scope(lsqcurvefit_builtin(
+            model,
             Value::Num(0.0),
             tensor(vec![1.0, 2.0], vec![1, 2]),
             tensor(vec![2.0, 4.0], vec![1, 2]),
@@ -1494,7 +1445,7 @@ mod tests {
                 Value::Tensor(Tensor::zeros(vec![0, 0])),
                 Value::Struct(options),
             ],
-        ))
+        )))
         .expect("lsqcurvefit");
         match result {
             Value::OutputList(outputs) => match &outputs[4] {
@@ -1512,11 +1463,11 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_underdetermined_case_runs() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(5, "lsqcurvefit fixture"),
-        ]);
+        let (runtime, model, _bound) = selected_model(5, "underdetermined");
+        let _entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, args, _requested_outputs| {
+            |function, args, _requested_outputs| {
+                assert_eq!(function, 5);
                 let p = match &args[0] {
                     Value::Tensor(t) => t.materialize_f64().clone(),
                     other => panic!("expected params, got {other:?}"),
@@ -1526,23 +1477,13 @@ mod tests {
                 )
             },
         )));
-        let result = block_on(lsqcurvefit_builtin(
-            Value::BoundFunctionHandle {
-                name: "underdetermined".into(),
-                function: 5,
-                authority: crate::user_functions::test_support::exact_portable_binding(
-                    5,
-                    "lsqcurvefit fixture",
-                )
-                .authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+        let result = block_on(runtime.scope(lsqcurvefit_builtin(
+            model,
             tensor(vec![0.0, 0.0], vec![2, 1]),
             Value::Num(0.0),
             Value::Num(3.0),
             Vec::new(),
-        ))
+        )))
         .expect("lsqcurvefit");
         match result {
             Value::Tensor(t) => {
@@ -1554,33 +1495,23 @@ mod tests {
 
     #[test]
     fn lsqcurvefit_rejects_model_ydata_shape_mismatch() {
-        let _bound = crate::user_functions::test_support::install_bound_forwarders(vec![
-            crate::user_functions::test_support::exact_portable_binding(6, "lsqcurvefit fixture"),
-        ]);
+        let (runtime, model, _bound) = selected_model(6, "bad_shape");
+        let _entry = runtime.enter();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
-            |_function, _args, _requested_outputs| {
+            |function, _args, _requested_outputs| {
+                assert_eq!(function, 6);
                 crate::sequence::single_value_future(async move {
                     Ok(tensor(vec![1.0, 2.0], vec![1, 2]))
                 })
             },
         )));
-        let err = block_on(lsqcurvefit_builtin(
-            Value::BoundFunctionHandle {
-                name: "bad_shape".into(),
-                function: 6,
-                authority: crate::user_functions::test_support::exact_portable_binding(
-                    6,
-                    "lsqcurvefit fixture",
-                )
-                .authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            },
+        let err = block_on(runtime.scope(lsqcurvefit_builtin(
+            model,
             Value::Num(0.0),
             Value::Num(0.0),
             tensor(vec![1.0, 2.0], vec![2, 1]),
             Vec::new(),
-        ))
+        )))
         .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:lsqcurvefit:InvalidInput"));
     }
