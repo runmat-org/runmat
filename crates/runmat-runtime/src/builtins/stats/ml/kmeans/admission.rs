@@ -275,7 +275,7 @@ fn preflight_scalar(value: &Value, role: &str) -> BuiltinResult<()> {
 
 fn preflight_numeric_start(value: &Value) -> BuiltinResult<()> {
     let shape = match value {
-        Value::Tensor(tensor) => tensor.shape.as_slice(),
+        Value::Tensor(tensor) => tensor.shape(),
         Value::LogicalArray(array) => array.shape.as_slice(),
         Value::GpuTensor(handle) if handle.physical().storage() == GpuTensorStorage::Real => {
             handle.shape()

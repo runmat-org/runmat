@@ -323,6 +323,36 @@ fn malformed_public_headers_and_geometry_fail_before_solver() {
     assert!(preflight_cluster_count(&tensor(vec![1.0, 2.0], 1, 2)).is_err());
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn kmeans_preserves_rank_zero_and_rank_one_observation_geometry() {
+    let start = || Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap());
+
+    let rank_zero = Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap());
+    let Value::Tensor(indices) = block_on(kmeans_builtin(
+        rank_zero,
+        Value::Num(1.0),
+        vec![Value::from("Start"), start()],
+    ))
+    .expect("rank-zero input is one observation with one feature") else {
+        panic!("expected index tensor");
+    };
+    assert_eq!(indices.shape(), [1, 1]);
+    assert_eq!(indices.materialize_f64(), vec![1.0]);
+
+    let rank_one = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap());
+    let Value::Tensor(indices) = block_on(kmeans_builtin(
+        rank_one,
+        Value::Num(1.0),
+        vec![Value::from("Start"), start()],
+    ))
+    .expect("rank-one input is three observations with one feature") else {
+        panic!("expected index tensor");
+    };
+    assert_eq!(indices.shape(), [3, 1]);
+    assert_eq!(indices.materialize_f64(), vec![1.0, 1.0, 1.0]);
+}
+
 #[test]
 fn option_parsers_read_all_integer_storage_variants() {
     let storages = [
@@ -440,7 +470,7 @@ fn kmeans_clusters_numeric_matrix_with_outputs() {
     }
     match &out[1] {
         Value::Tensor(c) => {
-            assert_eq!(c.shape, vec![2, 2]);
+            assert_eq!(c.shape(), [2, 2]);
             assert!((c.materialize_f64()[0] - 0.1).abs() < 1.0e-12);
             assert!((c.materialize_f64()[1] - 9.9).abs() < 1.0e-12);
             assert!((c.materialize_f64()[2] - 0.05).abs() < 1.0e-12);
@@ -450,13 +480,13 @@ fn kmeans_clusters_numeric_matrix_with_outputs() {
     }
     match &out[2] {
         Value::Tensor(sumd) => {
-            assert_eq!(sumd.shape, vec![2, 1]);
+            assert_eq!(sumd.shape(), [2, 1]);
             assert!(sumd.materialize_f64().iter().all(|v| v.is_finite()));
         }
         other => panic!("sumd {other:?}"),
     }
     match &out[3] {
-        Value::Tensor(d) => assert_eq!(d.shape, vec![4, 2]),
+        Value::Tensor(d) => assert_eq!(d.shape(), [4, 2]),
         other => panic!("distances {other:?}"),
     }
 }
@@ -527,7 +557,7 @@ fn kmeans_treats_vector_as_column_and_nan_rows_as_missing() {
     let out = outputs(out);
     match &out[0] {
         Value::Tensor(idx) => {
-            assert_eq!(idx.shape, vec![5, 1]);
+            assert_eq!(idx.shape(), [5, 1]);
             assert!(idx.materialize_f64()[2].is_nan());
             assert!(idx.materialize_f64()[0].is_finite());
             assert!(idx.materialize_f64()[4].is_finite());
@@ -555,7 +585,7 @@ fn kmeans_supports_cityblock_and_replicates() {
     ))
     .unwrap();
     match out {
-        Value::Tensor(idx) => assert_eq!(idx.shape, vec![4, 1]),
+        Value::Tensor(idx) => assert_eq!(idx.shape(), [4, 1]),
         other => panic!("idx {other:?}"),
     }
 }
@@ -578,7 +608,7 @@ fn kmeans_infers_k_from_numeric_start_when_k_is_empty() {
     .unwrap();
     let out = outputs(out);
     match &out[1] {
-        Value::Tensor(c) => assert_eq!(c.shape, vec![2, 1]),
+        Value::Tensor(c) => assert_eq!(c.shape(), [2, 1]),
         other => panic!("centers {other:?}"),
     }
 }
@@ -597,7 +627,7 @@ fn kmeans_accepts_3d_numeric_starts_as_replicates() {
     .unwrap();
     let out = outputs(out);
     match &out[2] {
-        Value::Tensor(sumd) => assert_eq!(sumd.shape, vec![2, 1]),
+        Value::Tensor(sumd) => assert_eq!(sumd.shape(), [2, 1]),
         other => panic!("sumd {other:?}"),
     }
 }
@@ -642,7 +672,7 @@ fn kmeans_supports_cluster_start_and_online_phase() {
     ))
     .unwrap();
     match out {
-        Value::Tensor(idx) => assert_eq!(idx.shape, vec![4, 1]),
+        Value::Tensor(idx) => assert_eq!(idx.shape(), [4, 1]),
         other => panic!("idx {other:?}"),
     }
 }

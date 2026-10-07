@@ -60,23 +60,23 @@ pub(super) async fn parse_numeric_start_cooperative(
 ) -> BuiltinResult<StartSpec> {
     let tensor = tensor::value_into_tensor_for(NAME, value)
         .map_err(|err| invalid(format!("kmeans: {err}")))?;
-    if tensor.shape.len() > 3 {
+    let shape = tensor.shape();
+    if shape.len() > 3 {
         return Err(invalid(
             "kmeans: numeric Start must be a matrix or 3-D array",
         ));
     }
-    let cells = tensor
-        .shape
+    let cells = shape
         .iter()
         .try_fold(1usize, |count, dim| count.checked_mul(*dim))
         .ok_or_else(|| invalid("kmeans: numeric Start size overflow"))?;
     if cells > MAX_WORK_CELLS {
         return Err(invalid("kmeans: requested clustering work is too large"));
     }
-    if tensor.shape.len() == 3 {
-        let k = tensor.shape[0];
-        let cols = tensor.shape[1];
-        let reps = tensor.shape[2];
+    if shape.len() == 3 {
+        let k = shape[0];
+        let cols = shape[1];
+        let reps = shape[2];
         let mut pages = Vec::new();
         pages.try_reserve_exact(reps).map_err(|source| {
             super::internal_with_source(

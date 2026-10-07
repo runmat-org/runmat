@@ -12,7 +12,7 @@ use runmat_value::{Tensor, Value};
 /// download, and check the structural product before allocating row buffers.
 pub(super) fn preflight_observations(value: &Value) -> BuiltinResult<()> {
     let shape = match value {
-        Value::Tensor(tensor) => tensor.shape.as_slice(),
+        Value::Tensor(tensor) => tensor.shape(),
         Value::LogicalArray(array) => array.shape.as_slice(),
         Value::GpuTensor(handle) => {
             if handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real {
@@ -42,7 +42,7 @@ pub(super) fn preflight_observations(value: &Value) -> BuiltinResult<()> {
 
 pub(super) fn preflight_cluster_count(value: &Value) -> BuiltinResult<()> {
     let shape = match value {
-        Value::Tensor(tensor) => tensor.shape.as_slice(),
+        Value::Tensor(tensor) => tensor.shape(),
         Value::LogicalArray(array) => array.shape.as_slice(),
         Value::GpuTensor(handle) => {
             if handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real {
@@ -81,7 +81,7 @@ pub(super) fn preflight_effective_start(
         return Ok(());
     };
     let expected_cols = match x {
-        Value::Tensor(tensor) => observation_feature_count(&tensor.shape),
+        Value::Tensor(tensor) => observation_feature_count(tensor.shape()),
         Value::LogicalArray(array) => observation_feature_count(&array.shape),
         Value::GpuTensor(handle) => observation_feature_count(handle.shape()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => 1,
@@ -147,7 +147,7 @@ pub(super) async fn prepare_data_cooperative(
 ) -> BuiltinResult<PreparedData> {
     let tensor = tensor::value_into_tensor_for(NAME, value)
         .map_err(|err| invalid(format!("kmeans: {err}")))?;
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(invalid("kmeans: X must be a numeric vector or 2-D matrix"));
     }
     let (raw_rows, raw_cols) = tensor_rows_cols(&tensor);
@@ -221,7 +221,7 @@ pub(super) async fn prepare_data_cooperative(
 }
 
 pub(super) fn tensor_rows_cols(tensor: &Tensor) -> (usize, usize) {
-    match tensor.shape.as_slice() {
+    match tensor.shape() {
         [] => (1, 1),
         [n] => (*n, 1),
         [rows, cols, ..] => (*rows, *cols),

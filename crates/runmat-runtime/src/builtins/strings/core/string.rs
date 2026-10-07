@@ -522,14 +522,17 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
             values: vec![Value::String(complex_to_string(re, im))],
             shape: vec![1, 1],
         }),
-        Value::ComplexTensor(t) => Ok(ArgumentData {
-            values: t
-                .materialize_f64()
-                .into_iter()
-                .map(|(re, im)| Value::String(complex_to_string(re, im)))
-                .collect(),
-            shape: t.shape,
-        }),
+        Value::ComplexTensor(t) => {
+            let (storage, shape) = t.into_complex_storage_and_shape();
+            Ok(ArgumentData {
+                values: storage
+                    .materialize_f64()
+                    .into_iter()
+                    .map(|(re, im)| Value::String(complex_to_string(re, im)))
+                    .collect(),
+                shape,
+            })
+        }
         Value::LogicalArray(la) => Ok(ArgumentData {
             values: la
                 .data
@@ -743,7 +746,7 @@ fn char_array_to_string_array(
 }
 
 fn tensor_to_string_array(tensor: Tensor) -> BuiltinResult<StringArray> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor.into_numeric_storage().map_err(string_flow)?;
     let mut strings = Vec::with_capacity(storage.len());
     for idx in 0..storage.len() {
@@ -756,7 +759,7 @@ fn tensor_to_string_array(tensor: Tensor) -> BuiltinResult<StringArray> {
 }
 
 fn tensor_into_argument_data(tensor: Tensor) -> BuiltinResult<ArgumentData> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor.into_numeric_storage().map_err(string_flow)?;
     let mut values = Vec::with_capacity(storage.len());
     for idx in 0..storage.len() {
@@ -798,7 +801,10 @@ fn complex_tensor_to_string_array(tensor: ComplexTensor) -> BuiltinResult<String
     for idx in 0..len {
         strings.push(tensor.format_element(idx));
     }
-    StringArray::new(strings, tensor.shape).map_err(|e| string_flow(format!("string: {e}")))
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let result = StringArray::new(strings, shape).map_err(|e| string_flow(format!("string: {e}")));
+    drop(storage);
+    result
 }
 
 fn logical_array_to_string_array(logical: LogicalArray) -> BuiltinResult<StringArray> {
@@ -903,7 +909,7 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
 }
 
 fn complex_tensor_is_scalar(tensor: &ComplexTensor) -> bool {
-    tensor.shape.iter().product::<usize>() == 1
+    tensor.shape().iter().product::<usize>() == 1
 }
 
 fn ensure_sparse_dense_conversion(sparse: &SparseTensor, target: &str) -> BuiltinResult<()> {
@@ -987,6 +993,47 @@ pub(crate) mod tests {
             }
             other => panic!("expected string array, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn string_preserves_full_rank_zero_and_rank_one_tensor_shapes() {
+        let Value::StringArray(scalar) = string_builtin(
+            Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap()),
+            Vec::new(),
+        )
+        .unwrap() else {
+            panic!("expected string array");
+        };
+        assert!(scalar.shape.is_empty());
+        assert_eq!(scalar.data, vec!["7"]);
+
+        let Value::StringArray(vector) = string_builtin(
+            Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![2]).unwrap()),
+            Vec::new(),
+        )
+        .unwrap() else {
+            panic!("expected string array");
+        };
+        assert_eq!(vector.shape, vec![2]);
+        assert_eq!(vector.data, vec!["2", "3"]);
+
+        let complex = ComplexTensor::new(vec![(1.5, -2.0)], Vec::new()).unwrap();
+        let expected = complex.format_element(0);
+        let Value::StringArray(scalar) =
+            string_builtin(Value::ComplexTensor(complex), Vec::new()).unwrap()
+        else {
+            panic!("expected string array");
+        };
+        assert!(scalar.shape.is_empty());
+        assert_eq!(scalar.data, vec![expected]);
+
+        let argument = futures::executor::block_on(extract_argument_data(Value::ComplexTensor(
+            ComplexTensor::new(vec![(1.5, -2.0)], Vec::new()).unwrap(),
+        )))
+        .unwrap();
+        assert!(argument.shape.is_empty());
+        assert!(matches!(&argument.values[..], [Value::String(_)]));
     }
 
     #[test]
@@ -1427,7 +1474,7 @@ pub(crate) mod tests {
             let data = tensor.as_f64_slice().expect("double tensor");
             let view = runmat_accelerate_api::HostTensorView {
                 data,
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = string_builtin(Value::GpuTensor(handle), Vec::new())
@@ -1481,7 +1528,7 @@ pub(crate) mod tests {
         let data = tensor.as_f64_slice().expect("double tensor");
         let view = runmat_accelerate_api::HostTensorView {
             data,
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = runmat_accelerate_api::provider()
             .unwrap()

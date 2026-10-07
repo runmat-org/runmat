@@ -272,7 +272,7 @@ fn raw_boundary_shape(value: &Value) -> Option<Vec<usize>> {
         Value::StringArray(array) => Some(array.shape.clone()),
         Value::CharArray(array) => Some(vec![array.rows, 1]),
         Value::Cell(cell) => Some(cell.shape.clone()),
-        Value::Tensor(tensor) => Some(tensor.shape.clone()),
+        Value::Tensor(tensor) => Some(tensor.shape().to_vec()),
         Value::GpuTensor(handle) => Some(handle.shape().to_vec()),
         _ => None,
     }
@@ -895,14 +895,12 @@ impl BoundaryPositions {
                         )?,
                     });
                 }
-                Ok(Self {
-                    data,
-                    shape: if t.shape.is_empty() {
-                        vec![t.rows, t.cols.max(1)]
-                    } else {
-                        t.shape
-                    },
-                })
+                let shape = if t.shape().is_empty() {
+                    vec![0, 1]
+                } else {
+                    t.shape().to_vec()
+                };
+                Ok(Self { data, shape })
             }
             _ => Err(erase_between_error(&ERASE_BETWEEN_ERROR_BOUNDARY_TYPE)),
         }
@@ -948,6 +946,26 @@ pub(crate) mod tests {
         rest: Vec<Value>,
     ) -> BuiltinResult<Value> {
         futures::executor::block_on(super::erase_between_builtin(text, start, stop, rest))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn eraseBetween_rank_zero_position_retains_boundary_domain_shape() {
+        let positions = || Tensor::new(vec![2.0], Vec::new()).unwrap();
+        let parsed = BoundaryPositions::from_value(Value::Tensor(positions())).unwrap();
+        assert_eq!(parsed.data, vec![2]);
+        assert_eq!(parsed.shape, vec![0, 1]);
+        let output = erase_between_builtin(
+            Value::StringArray(StringArray::new(Vec::new(), vec![0, 1]).unwrap()),
+            Value::Tensor(positions()),
+            Value::Tensor(positions()),
+            Vec::new(),
+        )
+        .unwrap();
+        let Value::StringArray(output) = output else {
+            panic!("expected string array");
+        };
+        assert_eq!(output.shape, vec![0, 1]);
     }
 
     #[test]
