@@ -255,8 +255,8 @@ async fn ctranspose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 fn ctranspose_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    ensure_vector_or_matrix_shape(&tensor.shape)?;
-    let rank = tensor.shape.len();
+    ensure_vector_or_matrix_shape(tensor.shape())?;
+    let rank = tensor.shape().len();
     if rank == 0 {
         return Ok(tensor);
     }
@@ -270,8 +270,8 @@ fn ctranspose_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
             "ctranspose: complex integer input is not supported",
         ));
     }
-    ensure_vector_or_matrix_shape(&ct.shape)?;
-    let rank = ct.shape.len();
+    ensure_vector_or_matrix_shape(ct.shape())?;
+    let rank = ct.shape().len();
     let transposed = if rank == 0 {
         ct
     } else {
@@ -282,15 +282,15 @@ fn ctranspose_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
 }
 
 fn ctranspose_complex_tensor_preserve_complex(ct: ComplexTensor) -> BuiltinResult<ComplexTensor> {
-    ensure_vector_or_matrix_shape(&ct.shape)?;
-    let rank = ct.shape.len();
+    ensure_vector_or_matrix_shape(ct.shape())?;
+    let rank = ct.shape().len();
     let transposed = if rank == 0 {
         ct
     } else {
         let order = ctranspose_order(rank);
         permute_complex_tensor(NAME, ct, &order)?
     };
-    let shape = transposed.shape.clone();
+    let shape = transposed.shape().to_vec();
     let storage = match transposed.into_complex_storage() {
         ComplexStorage::F64(values) => {
             ComplexStorage::F64(values.into_iter().map(|(re, im)| (re, -im)).collect())
@@ -309,7 +309,7 @@ fn ctranspose_complex_tensor_preserve_complex(ct: ComplexTensor) -> BuiltinResul
 }
 
 fn ctranspose_complex_tensor_value(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = ct.shape.clone();
+    let shape = ct.shape().to_vec();
     match ct.into_complex_storage() {
         ComplexStorage::F64(values) => {
             let conj_data = values
@@ -664,7 +664,7 @@ pub(crate) mod tests {
         else {
             panic!("expected tensor");
         };
-        assert_eq!(result.shape, vec![3, 2]);
+        assert_eq!(result.shape(), [3, 2]);
         assert_eq!(
             result.integer_storage(),
             Some(&IntegerStorage::I64(vec![i64::MIN, 3, 5, 2, 4, i64::MAX]))
@@ -680,7 +680,7 @@ pub(crate) mod tests {
         else {
             panic!("expected tensor");
         };
-        assert_eq!(result.shape, vec![3, 0]);
+        assert_eq!(result.shape(), [3, 0]);
         assert_eq!(
             result.integer_storage(),
             Some(&IntegerStorage::U64(Vec::new()))
@@ -695,7 +695,7 @@ pub(crate) mod tests {
         else {
             panic!("expected tensor");
         };
-        assert_eq!(result.shape, vec![3, 2]);
+        assert_eq!(result.shape(), [3, 2]);
         assert_eq!(
             result.into_numeric_storage().unwrap(),
             runmat_value::NumericStorage::F32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
@@ -713,7 +713,7 @@ pub(crate) mod tests {
         let value = call_ctranspose(Value::Tensor(input)).expect("ctranspose");
         match value {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 2]);
+                assert_eq!(out.shape(), [3, 2]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -761,7 +761,7 @@ pub(crate) mod tests {
         let value = call_ctranspose(Value::ComplexTensor(ct)).expect("ctranspose");
         match value {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 assert_eq!(
                     out.materialize_f64(),
                     vec![(1.0, -2.0), (5.0, -0.0), (3.0, 4.0), (6.0, 7.0)]
@@ -779,7 +779,7 @@ pub(crate) mod tests {
         let value = call_ctranspose(Value::ComplexTensor(ct)).expect("ctranspose");
         match value {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_eq!(out.materialize_f64(), vec![(1.0, -0.0), (2.0, 0.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -919,7 +919,7 @@ pub(crate) mod tests {
         else {
             panic!("expected tensor");
         };
-        assert_eq!(result.shape, vec![2, 2, 1]);
+        assert_eq!(result.shape(), [2, 2, 1]);
         assert_eq!(result.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
     }
 
@@ -1023,12 +1023,12 @@ pub(crate) mod tests {
             let t = tensor(&[1.0, 4.0, 2.0, 5.0], &[2, 2]);
             let view = HostTensorView {
                 data: &t.materialize_f64(),
-                shape: &t.shape,
+                shape: t.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = call_ctranspose(Value::GpuTensor(handle)).expect("ctranspose");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), [2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 2.0, 4.0, 5.0]);
         });
     }
@@ -1239,7 +1239,7 @@ pub(crate) mod tests {
                 crate::builtins::math::fft::common::gather_gpu_complex_tensor(&out_handle, NAME),
             )
             .expect("gather complex");
-            assert_eq!(gathered.shape, expected.shape);
+            assert_eq!(gathered.shape(), expected.shape());
             assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
         });
     }
@@ -1265,7 +1265,7 @@ pub(crate) mod tests {
                 crate::builtins::math::fft::common::gather_gpu_complex_tensor(&out_handle, NAME),
             )
             .expect("gather complex");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), [2, 2]);
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![(1.0, -0.0), (3.0, -0.0), (2.0, 0.0), (4.0, 0.0)]
@@ -1320,12 +1320,12 @@ pub(crate) mod tests {
 
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_value = call_ctranspose(Value::GpuTensor(handle)).expect("gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         assert_eq!(gathered.materialize_f64(), cpu_tensor.materialize_f64());
     }
 
@@ -1368,7 +1368,7 @@ pub(crate) mod tests {
             crate::builtins::math::fft::common::gather_gpu_complex_tensor(&out_handle, NAME),
         )
         .expect("gather complex");
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 

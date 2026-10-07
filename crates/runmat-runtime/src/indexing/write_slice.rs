@@ -9,23 +9,34 @@ use crate::indexing::plan::IndexPlan;
 use crate::runtime_error::semantic_error as mex;
 use crate::RuntimeError;
 use runmat_value::{
-    ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType, NumericScalar,
-    NumericStorage, SparseTensor, StringArray, Tensor, Value,
+    ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType,
+    NumericScalar, NumericStorage, SparseTensor, StringArray, Tensor, Value,
 };
 
 fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
     mex("ShapeMismatch", format!("{context}: {err}"))
 }
 
+fn dense_delete_dimensions(shape: &[usize]) -> (usize, usize) {
+    match shape {
+        [] => (0, 0),
+        [cols] => (1, *cols),
+        [rows, cols, ..] => (*rows, *cols),
+    }
+}
+
 fn is_empty_delete_rhs(value: &Value) -> bool {
     matches!(
         value,
         Value::Tensor(t)
-            if tensor_element_len(t) == 0 || t.rows == 0 || t.cols == 0
+            if {
+                let (rows, cols) = dense_delete_dimensions(t.shape());
+                tensor_element_len(t) == 0 || rows == 0 || cols == 0
+            }
     ) || matches!(
         value,
         Value::ComplexTensor(t)
-            if complex_tensor_element_len(t) == 0 || t.rows == 0 || t.cols == 0
+            if complex_tensor_element_len(t) == 0 || t.rows() == 0 || t.cols() == 0
     )
 }
 
@@ -33,7 +44,7 @@ pub(crate) fn real_tensor_to_complex(
     tensor: Tensor,
     context: &str,
 ) -> Result<ComplexTensor, RuntimeError> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| map_slice_shape_error(context, error))?;
@@ -173,7 +184,7 @@ pub fn build_complex_rhs_view(
         Value::Num(n) => Ok(ComplexRhsView::Scalar((*n, 0.0))),
         Value::ComplexTensor(rt) => {
             let dims = selection_lengths.len();
-            let shape = validated_assignment_rhs_shape(&rt.shape, rt.len(), selection_lengths)?;
+            let shape = validated_assignment_rhs_shape(rt.shape(), rt.len(), selection_lengths)?;
             let mut rstrides = vec![0usize; dims];
             let mut racc = 1usize;
             for d in 0..dims {
@@ -523,7 +534,7 @@ fn materialize_integer_tensor_rhs_for_plan(
             .integer_storage()
             .expect("integer RHS must retain exact storage"),
     );
-    integer_gpu_rhs_indices_for_plan(&tensor.shape, plan)?
+    integer_gpu_rhs_indices_for_plan(tensor.shape(), plan)?
         .into_iter()
         .map(|index| {
             values
@@ -575,7 +586,7 @@ async fn materialize_complex_integer_rhs_for_plan(
                     })
                     .collect()
             };
-            materialize_complex_integer_values_for_plan(values, &tensor.shape, plan)
+            materialize_complex_integer_values_for_plan(values, tensor.shape(), plan)
         }
         _ => materialize_integer_rhs_for_plan(rhs, plan)
             .await
@@ -897,10 +908,10 @@ pub async fn assign_complex_with_plan(
     }
     if tensor.integer_storage().is_some() {
         let rhs_values = materialize_complex_integer_rhs_for_plan(rhs, plan).await?;
-        let storage = tensor
-            .integer_storage()
-            .cloned()
-            .expect("typed complex tensor must retain exact storage");
+        let (storage, shape) = tensor.into_complex_storage_and_shape();
+        let ComplexStorage::Integer(storage) = storage else {
+            unreachable!("typed complex tensor must retain exact storage");
+        };
         let real_values: Vec<IntegerAssignmentValue> =
             rhs_values.iter().map(|value| value.real.clone()).collect();
         let imag_values: Vec<IntegerAssignmentValue> =
@@ -910,7 +921,7 @@ pub async fn assign_complex_with_plan(
         integer_assignment::scatter(&mut real, plan, &real_values)?;
         integer_assignment::scatter(&mut imag, plan, &imag_values)?;
         return IntegerComplexStorage::new(real, imag)
-            .and_then(|storage| ComplexTensor::new_integer(storage, tensor.shape))
+            .and_then(|storage| ComplexTensor::new_integer(storage, shape))
             .map(Value::ComplexTensor)
             .map_err(|error| map_slice_shape_error("typed complex slice assign", error));
     }
@@ -933,15 +944,14 @@ pub fn delete_tensor_with_plan(
     if plan.indices.is_empty() {
         return Ok(Value::Tensor(t));
     }
-    if !(t.rows == 1 || t.cols == 1) {
+    let (rows, cols) = dense_delete_dimensions(t.shape());
+    if !(rows == 1 || cols == 1) {
         return Err(mex(
             "UnsupportedDeletion",
             "Linear deletion is only supported for vectors",
         ));
     }
     let positions = sorted_unique_positions_desc(plan, tensor_element_len(&t))?;
-    let rows = t.rows;
-    let cols = t.cols;
     let mut storage = t
         .into_numeric_storage()
         .map_err(|error| map_slice_shape_error("slice deletion", error))?;
@@ -968,7 +978,7 @@ pub fn delete_complex_with_plan(
     if plan.indices.is_empty() {
         return Ok(Value::ComplexTensor(t));
     }
-    if !(t.rows == 1 || t.cols == 1) {
+    if !(t.rows() == 1 || t.cols() == 1) {
         return Err(mex(
             "UnsupportedDeletion",
             "Linear deletion is only supported for vectors",
@@ -977,14 +987,14 @@ pub fn delete_complex_with_plan(
     let positions = sorted_unique_positions_desc(plan, complex_tensor_element_len(&t))?;
     if let Some(storage) = t.integer_storage().cloned() {
         let storage = delete_integer_complex_storage_positions(storage, &positions);
-        let shape = deleted_vector_shape(t.rows, t.cols, storage.len());
+        let shape = deleted_vector_shape(t.rows(), t.cols(), storage.len());
         return ComplexTensor::new_integer(storage, shape)
             .map(Value::ComplexTensor)
             .map_err(|error| map_slice_shape_error("complex slice deletion", error));
     }
     let dtype = t.numeric_dtype();
-    let rows = t.rows;
-    let cols = t.cols;
+    let rows = t.rows();
+    let cols = t.cols();
     let mut values = t.materialize_f64();
     for pos in positions {
         values.remove(pos);
@@ -1127,7 +1137,7 @@ pub async fn materialize_rhs_nd_real(
         Value::Bool(b) => RhsView::Scalar(if b { 1.0 } else { 0.0 }),
         Value::Tensor(t) => {
             let shape = validated_assignment_rhs_shape(
-                &t.shape,
+                t.shape(),
                 tensor_element_len(&t),
                 selection_lengths,
             )?;
@@ -1322,7 +1332,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(deleted.numeric_dtype(), NumericDType::F32);
-        assert_eq!(deleted.shape, vec![1, 2]);
+        assert_eq!(deleted.shape(), [1, 2]);
         assert_eq!(
             deleted.into_numeric_storage(),
             Ok(NumericStorage::F32(vec![
@@ -1330,6 +1340,50 @@ mod tests {
                 1.234_567_890_123_f64 as f32,
             ]))
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn rank_zero_and_rank_one_plan_deletion_keep_dense_vector_geometry() {
+        let rank_zero = Tensor::new(vec![7.0], vec![]).expect("rank-zero tensor");
+        let rank_zero_plan = IndexPlan::new(vec![0], vec![1], vec![1], 1, vec![]);
+        let rejected = delete_tensor_with_plan(
+            rank_zero.clone(),
+            &rank_zero_plan,
+            &Value::Tensor(rank_zero.clone()),
+        )
+        .expect_err("rank-zero cached geometry is not a vector");
+        assert_eq!(rejected.identifier(), Some("RunMat:UnsupportedDeletion"));
+
+        let rank_one = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).expect("rank-one tensor");
+        let rank_one_plan = IndexPlan::new(vec![1], vec![1], vec![1], 1, vec![3]);
+        let Value::Tensor(deleted) =
+            delete_tensor_with_plan(rank_one, &rank_one_plan, &Value::Tensor(rank_zero))
+                .expect("rank-zero RHS keeps cached-empty deletion admission")
+        else {
+            panic!("expected tensor");
+        };
+        assert_eq!(deleted.shape(), [1, 2]);
+        assert_eq!(deleted.materialize_f64(), vec![1.0, 3.0]);
+
+        let complex_rank_zero =
+            ComplexTensor::new(vec![(7.0, -7.0)], vec![]).expect("rank-zero complex tensor");
+        let empty = Value::Tensor(Tensor::zeros(vec![0, 0]));
+        let rejected = delete_complex_with_plan(complex_rank_zero, &rank_zero_plan, &empty)
+            .expect_err("rank-zero complex geometry is not a vector");
+        assert_eq!(rejected.identifier(), Some("RunMat:UnsupportedDeletion"));
+
+        let complex_rank_one =
+            ComplexTensor::new(vec![(1.0, -1.0), (2.0, -2.0), (3.0, -3.0)], vec![3])
+                .expect("rank-one complex tensor");
+        let Value::ComplexTensor(deleted) =
+            delete_complex_with_plan(complex_rank_one, &rank_one_plan, &empty)
+                .expect("rank-one complex deletion")
+        else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(deleted.shape(), [1, 2]);
+        assert_eq!(deleted.materialize_f64(), vec![(1.0, -1.0), (3.0, -3.0)]);
     }
 
     #[test]
@@ -1368,7 +1422,7 @@ mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(deleted.numeric_dtype(), NumericDType::F32);
-        assert_eq!(deleted.shape, vec![1, 2]);
+        assert_eq!(deleted.shape(), [1, 2]);
         assert_eq!(
             deleted.as_f32_slice().map(|values| values
                 .iter()
@@ -1394,7 +1448,7 @@ mod tests {
         else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.shape(), [1, 2]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![1, 3]))
@@ -1415,7 +1469,7 @@ mod tests {
         else {
             panic!("expected complex tensor");
         };
-        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.shape(), [1, 2]);
         assert_eq!(
             output.integer_storage().cloned(),
             Some(
@@ -1724,7 +1778,7 @@ mod tests {
         let Value::ComplexTensor(output) = result else {
             panic!("integer tensor should promote to complex tensor");
         };
-        assert_eq!(output.shape, vec![2, 1, 2]);
+        assert_eq!(output.shape(), [2, 1, 2]);
         assert_eq!(
             output
                 .integer_storage()
@@ -1957,7 +2011,7 @@ mod tests {
             output.integer_storage(),
             Some(&IntegerStorage::I64(vec![1, 3]))
         );
-        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.shape(), [1, 2]);
     }
 
     #[test]

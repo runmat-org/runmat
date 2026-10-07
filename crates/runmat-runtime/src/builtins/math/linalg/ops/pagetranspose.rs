@@ -196,14 +196,14 @@ async fn pagetranspose_value(value: Value) -> BuiltinResult<Value> {
             permute_gpu(NAME, handle, &order).await
         }
         Value::Tensor(t) => {
-            let order = page_transpose_order_for_shape_len(t.shape.len());
+            let order = page_transpose_order_for_shape_len(t.shape().len());
             Ok(tensor::tensor_into_value(permute_tensor(NAME, t, &order)?))
         }
         Value::SparseTensor(s) => Ok(Value::SparseTensor(
             transpose_real_sparse_tensor(s).map_err(|e| internal_error(format!("{NAME}: {e}")))?,
         )),
         Value::ComplexTensor(ct) => {
-            let order = page_transpose_order_for_shape_len(ct.shape.len());
+            let order = page_transpose_order_for_shape_len(ct.shape().len());
             Ok(Value::ComplexTensor(permute_complex_tensor(
                 NAME, ct, &order,
             )?))
@@ -392,7 +392,7 @@ mod tests {
             panic!("expected complex tensor");
         };
         let storage = result.integer_storage().expect("exact integer storage");
-        assert_eq!(result.shape, vec![3, 2, 2]);
+        assert_eq!(result.shape(), [3, 2, 2]);
         assert_eq!(
             storage.real,
             IntegerStorage::U64(vec![u64::MAX, 3, 5, 2, 4, 6, 7, 9, 11, 8, 10, 1_u64 << 63,])
@@ -509,7 +509,7 @@ mod tests {
         let value = call_one(Value::Tensor(tensor(&data, &[2, 3, 2]))).expect("pagetranspose");
         match value {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 2, 2]);
+                assert_eq!(out.shape(), [3, 2, 2]);
                 assert_eq!(
                     out.materialize_f64(),
                     vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0, 7.0, 9.0, 11.0, 8.0, 10.0, 12.0]
@@ -529,7 +529,7 @@ mod tests {
         .expect("pagetranspose");
         match value {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 2]);
+                assert_eq!(out.shape(), [3, 2]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -543,7 +543,7 @@ mod tests {
         let value = call_one(Value::ComplexTensor(ct)).expect("pagetranspose");
         match value {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_eq!(out.materialize_f64(), vec![(1.0, 2.0), (3.0, -4.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -642,7 +642,7 @@ mod tests {
 
         match call_one(Value::Tensor(tensor(&[], &[0, 3]))).expect("pagetranspose") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 0]);
+                assert_eq!(out.shape(), [3, 0]);
                 assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
