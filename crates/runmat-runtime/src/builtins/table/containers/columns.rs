@@ -35,13 +35,15 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
             Ok(out)
         }
         Value::ComplexTensor(tensor) => {
-            let mut out = Vec::with_capacity(tensor.cols);
-            for col in 0..tensor.cols {
+            let rows = tensor.rows();
+            let cols = tensor.cols();
+            let mut out = Vec::with_capacity(cols);
+            for col in 0..cols {
                 let value = if let Some(storage) = &tensor.integer_storage() {
-                    let mut real = Vec::with_capacity(tensor.rows);
-                    let mut imag = Vec::with_capacity(tensor.rows);
-                    for row in 0..tensor.rows {
-                        let index = row + col * tensor.rows;
+                    let mut real = Vec::with_capacity(rows);
+                    let mut imag = Vec::with_capacity(rows);
+                    for row in 0..rows {
+                        let index = row + col * rows;
                         real.push(
                             storage
                                 .real
@@ -67,12 +69,12 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
                                 .map_err(invalid_variable)?,
                         )
                         .map_err(invalid_variable)?,
-                        vec![tensor.rows, 1],
+                        vec![rows, 1],
                     )
                     .map_err(invalid_variable)?
                 } else {
-                    let start = col * tensor.rows;
-                    let end = start + tensor.rows;
+                    let start = col * rows;
+                    let end = start + rows;
                     match tensor.complex_storage() {
                         runmat_value::ComplexStorage::F64(values) => ComplexTensor::new(
                             values
@@ -84,7 +86,7 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
                                 .copied()
                                 .map(Into::into)
                                 .collect(),
-                            vec![tensor.rows, 1],
+                            vec![rows, 1],
                         )
                         .map_err(invalid_variable)?,
                         runmat_value::ComplexStorage::F32(values) => ComplexTensor::from_f32(
@@ -97,7 +99,7 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
                                 .copied()
                                 .map(Into::into)
                                 .collect(),
-                            vec![tensor.rows, 1],
+                            vec![rows, 1],
                         )
                         .map_err(invalid_variable)?,
                         runmat_value::ComplexStorage::Integer(_) => {
@@ -162,6 +164,26 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
 mod tests {
     use super::*;
     use runmat_value::{IntegerStorage, NumericStorage};
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn split_complex_columns_preserves_rank_boundaries_and_column_order() {
+        let scalar = ComplexTensor::new(vec![(7.0, 2.0)], Vec::new()).unwrap();
+        assert!(split_value_columns(Value::ComplexTensor(scalar))
+            .unwrap()
+            .is_empty());
+
+        let row = ComplexTensor::new(vec![(7.0, 2.0), (3.0, 4.0)], vec![2]).unwrap();
+        let columns = split_value_columns(Value::ComplexTensor(row)).unwrap();
+        assert_eq!(columns.len(), 2);
+        for (column, expected) in columns.iter().zip([(7.0, 2.0), (3.0, 4.0)]) {
+            let Value::ComplexTensor(tensor) = column else {
+                panic!("complex column")
+            };
+            assert_eq!(tensor.shape(), [1, 1]);
+            assert_eq!(tensor.materialize_f64(), vec![expected]);
+        }
+    }
 
     #[test]
     fn split_value_columns_preserves_native_single_storage() {

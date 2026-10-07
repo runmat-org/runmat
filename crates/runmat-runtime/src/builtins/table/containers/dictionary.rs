@@ -201,7 +201,7 @@ pub(in crate::builtins::table) fn dictionary_assign(
 
 fn dictionary_element_shape(value: &Value) -> Vec<usize> {
     match value {
-        Value::Tensor(tensor) => tensor.shape.clone(),
+        Value::Tensor(tensor) => tensor.shape().to_vec(),
         Value::LogicalArray(array) => array.shape.clone(),
         Value::StringArray(array) => array.shape.clone(),
         Value::Cell(array) => vec![array.rows, array.cols],
@@ -612,7 +612,7 @@ mod tests {
         let Value::Tensor(found) = dictionary_lookup(&object, &query).unwrap() else {
             panic!("expected configured integer tensor output");
         };
-        assert_eq!(found.shape, vec![2, 1]);
+        assert_eq!(found.shape(), [2, 1]);
         assert_eq!(
             found.integer_storage(),
             Some(&IntegerStorage::I16(vec![20, 10]))

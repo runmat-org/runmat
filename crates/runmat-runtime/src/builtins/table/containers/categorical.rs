@@ -519,7 +519,7 @@ pub(in crate::builtins::table) fn value_shape_or_column(
     value: &Value,
 ) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor.shape.clone()),
+        Value::Tensor(tensor) => Ok(tensor.shape().to_vec()),
         Value::StringArray(array) => Ok(array.shape.clone()),
         Value::LogicalArray(array) => Ok(array.shape.clone()),
         Value::Cell(cell) => Ok(cell.shape.clone()),
@@ -1055,7 +1055,7 @@ fn categorical_compare_operand(
                 .collect();
             Ok(CategoricalCompareOperand {
                 codes: mapped,
-                shape: codes.shape,
+                shape: codes.shape().to_vec(),
                 ordinal: categorical_is_ordinal(object),
             })
         }

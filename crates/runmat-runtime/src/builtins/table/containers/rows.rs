@@ -33,7 +33,7 @@ pub(in crate::builtins::table) fn row_value(value: &Value, row: usize) -> Builti
         }
         Value::Tensor(_) => select_rows(value, &[row]),
         Value::ComplexTensor(tensor)
-            if tensor.cols == 1
+            if tensor.cols() == 1
                 && matches!(
                     tensor.complex_storage(),
                     runmat_value::ComplexStorage::F64(_)

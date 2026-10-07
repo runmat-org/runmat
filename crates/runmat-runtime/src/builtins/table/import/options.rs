@@ -1219,7 +1219,7 @@ impl RangeSpec {
                 end_col: None,
             });
         }
-        if values.shape.as_slice() != [1, 2] {
+        if values.shape() != [1, 2] {
             return Err(invalid_argument(
                 "readtable: DataRange supports one 1-by-2 row interval; multiple Nx2 intervals are not yet supported",
             ));

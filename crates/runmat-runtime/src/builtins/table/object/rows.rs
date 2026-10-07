@@ -35,7 +35,7 @@ pub(crate) fn value_row_count(value: &Value) -> BuiltinResult<usize> {
     match value {
         Value::Tensor(tensor) => Ok(tensor.rows()),
         Value::GpuTensor(handle) => Ok(handle.shape().first().copied().unwrap_or(1)),
-        Value::ComplexTensor(tensor) => Ok(tensor.rows),
+        Value::ComplexTensor(tensor) => Ok(tensor.rows()),
         Value::StringArray(array) => Ok(array.rows()),
         Value::LogicalArray(array) => Ok(array.shape.first().copied().unwrap_or(array.data.len())),
         Value::Cell(cell) => Ok(cell.rows),
@@ -62,7 +62,7 @@ pub(crate) fn value_row_count(value: &Value) -> BuiltinResult<usize> {
 pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => {
-            let source_rows = tensor.shape.first().copied().unwrap_or(1);
+            let source_rows = tensor.shape().first().copied().unwrap_or(1);
             let lanes = tensor.len().checked_div(source_rows).unwrap_or(0);
             let mut indices = Vec::with_capacity(rows.len() * lanes);
             for lane in 0..lanes {
@@ -75,7 +75,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                     indices.push(row + lane * source_rows);
                 }
             }
-            let mut shape = tensor.shape.clone();
+            let mut shape = tensor.shape().to_vec();
             if shape.is_empty() {
                 shape = vec![rows.len(), 1];
             } else {
@@ -92,7 +92,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                 .map_err(invalid_variable)
         }
         Value::ComplexTensor(tensor) => {
-            let source_rows = tensor.shape.first().copied().unwrap_or(1);
+            let source_rows = tensor.shape().first().copied().unwrap_or(1);
             let lanes = tensor.len().checked_div(source_rows).unwrap_or(0);
             let mut indices = Vec::with_capacity(rows.len() * lanes);
             for lane in 0..lanes {
@@ -105,7 +105,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                     indices.push(row + lane * source_rows);
                 }
             }
-            let mut shape = tensor.shape.clone();
+            let mut shape = tensor.shape().to_vec();
             if shape.is_empty() {
                 shape = vec![rows.len(), 1];
             } else {

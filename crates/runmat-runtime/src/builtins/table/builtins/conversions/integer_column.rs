@@ -56,8 +56,8 @@ pub(super) fn integer_row(value: &Value) -> Option<(&runmat_value::IntegerStorag
     match value {
         Value::Int(value) => Some((integer_scalar_prototype(value), 1)),
         Value::Tensor(tensor)
-            if tensor.shape.len() <= 2
-                && tensor.shape.first().copied().unwrap_or(1) == 1
+            if tensor.shape().len() <= 2
+                && tensor.shape().first().copied().unwrap_or(1) == 1
                 && tensor.integer_storage().is_some() =>
         {
             Some((tensor.integer_storage().expect("checked"), tensor.len()))
