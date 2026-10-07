@@ -401,7 +401,7 @@ pub(crate) async fn initial_guess(name: &str, value: Value) -> BuiltinResult<Ini
             }
             Ok(InitialGuess {
                 values: finite_vec(name, values)?,
-                shape: tensor.shape,
+                shape: tensor.shape().to_vec(),
                 scalar: false,
             })
         }

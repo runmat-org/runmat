@@ -297,8 +297,8 @@ async fn parse_polynomial(context: &str, label: &str, value: Value) -> BuiltinRe
     let gathered = dispatcher::gather_if_needed_async(&value).await?;
     let (coeffs, orientation) = match gathered {
         Value::Tensor(tensor) => {
-            ensure_vector_shape(context, label, &tensor.shape)?;
-            let orientation = orientation_from_shape(&tensor.shape);
+            ensure_vector_shape(context, label, tensor.shape())?;
+            let orientation = orientation_from_shape(tensor.shape());
             if tensor::tensor_element_len(&tensor) == 0 {
                 (vec![Complex64::new(0.0, 0.0)], orientation)
             } else {
@@ -312,8 +312,8 @@ async fn parse_polynomial(context: &str, label: &str, value: Value) -> BuiltinRe
             }
         }
         Value::ComplexTensor(tensor) => {
-            ensure_vector_shape(context, label, &tensor.shape)?;
-            let orientation = orientation_from_shape(&tensor.shape);
+            ensure_vector_shape(context, label, tensor.shape())?;
+            let orientation = orientation_from_shape(tensor.shape());
             if tensor::complex_tensor_element_len(&tensor) == 0 {
                 (vec![Complex64::new(0.0, 0.0)], orientation)
             } else {
@@ -325,8 +325,8 @@ async fn parse_polynomial(context: &str, label: &str, value: Value) -> BuiltinRe
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(polyder_error)?;
-            ensure_vector_shape(context, label, &tensor.shape)?;
-            let orientation = orientation_from_shape(&tensor.shape);
+            ensure_vector_shape(context, label, tensor.shape())?;
+            let orientation = orientation_from_shape(tensor.shape());
             if tensor.is_empty() {
                 (vec![Complex64::new(0.0, 0.0)], orientation)
             } else {
@@ -427,8 +427,8 @@ pub(crate) mod tests {
             let Value::Tensor(expected) = expected else {
                 panic!("host derivative tensor required")
             };
-            assert_eq!(actual.shape, expected.shape);
-            assert_eq!(actual.shape, vec![2, 1]);
+            assert_eq!(actual.shape(), expected.shape());
+            assert_eq!(actual.shape(), &[2, 1]);
             assert_eq!(actual.materialize_f64(), vec![6.0, 2.0]);
         });
     }
@@ -477,7 +477,7 @@ pub(crate) mod tests {
         let result = derivative_single(Value::Tensor(tensor)).expect("polyder");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -496,7 +496,7 @@ pub(crate) mod tests {
         let result = derivative_single(Value::Tensor(tensor)).expect("polyder");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -540,7 +540,7 @@ pub(crate) mod tests {
             derivative_product(Value::Tensor(p), Value::Tensor(a)).expect("polyder product");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -560,7 +560,7 @@ pub(crate) mod tests {
             derivative_product(Value::Tensor(p), Value::Tensor(a)).expect("polyder product");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -580,7 +580,7 @@ pub(crate) mod tests {
         let eval = evaluate_quotient(Value::Tensor(u), Value::Tensor(v)).expect("polyder quotient");
         match eval.numerator() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -591,7 +591,7 @@ pub(crate) mod tests {
         }
         match eval.denominator() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -610,7 +610,7 @@ pub(crate) mod tests {
         let eval = evaluate_quotient(Value::Tensor(u), Value::Tensor(v)).expect("polyder quotient");
         match eval.numerator() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -622,7 +622,7 @@ pub(crate) mod tests {
         }
         match eval.denominator() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -641,7 +641,7 @@ pub(crate) mod tests {
         let result = derivative_single(Value::Tensor(tensor)).expect("polyder column");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.shape(), &[2, 1]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -660,7 +660,7 @@ pub(crate) mod tests {
         let result = derivative_single(Value::ComplexTensor(tensor)).expect("polyder complex");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 let expected = [Complex64::new(2.0, 4.0), Complex64::new(-3.0, 0.0)];
                 assert!(t.materialize_f64().iter().zip(expected.iter()).all(
                     |((re, im), expected)| {
@@ -724,7 +724,7 @@ pub(crate) mod tests {
 
             let view_p = runmat_accelerate_api::HostTensorView {
                 data: &p.materialize_f64(),
-                shape: &p.shape,
+                shape: p.shape(),
             };
             let handle_p = provider.upload(&view_p).expect("upload p");
             let result = derivative_product(Value::GpuTensor(handle_p), Value::Tensor(q))
@@ -732,7 +732,7 @@ pub(crate) mod tests {
             let Value::Tensor(host_tensor) = result else {
                 panic!("expected host tensor result");
             };
-            assert_eq!(host_tensor.shape, cpu_tensor.shape);
+            assert_eq!(host_tensor.shape(), cpu_tensor.shape());
             assert!(host_tensor
                 .materialize_f64()
                 .iter()
@@ -760,7 +760,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![2.0, 0.0, -5.0, 4.0], vec![1, 4]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = derivative_single(Value::GpuTensor(handle)).expect("polyder gpu");
@@ -768,7 +768,7 @@ pub(crate) mod tests {
                 panic!("expected GPU tensor result");
             };
             let gathered = test_support::gather(Value::GpuTensor(out_handle)).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), &[1, 3]);
             assert!(gathered
                 .materialize_f64()
                 .iter()
@@ -791,11 +791,11 @@ pub(crate) mod tests {
 
             let view_p = runmat_accelerate_api::HostTensorView {
                 data: &p.materialize_f64(),
-                shape: &p.shape,
+                shape: p.shape(),
             };
             let view_q = runmat_accelerate_api::HostTensorView {
                 data: &q.materialize_f64(),
-                shape: &q.shape,
+                shape: q.shape(),
             };
             let handle_p = provider.upload(&view_p).expect("upload p");
             let handle_q = provider.upload(&view_q).expect("upload q");
@@ -806,7 +806,7 @@ pub(crate) mod tests {
                 panic!("expected GPU tensor");
             };
             let gathered = test_support::gather(Value::GpuTensor(gpu_handle)).expect("gather");
-            assert_eq!(gathered.shape, expected_tensor.shape);
+            assert_eq!(gathered.shape(), expected_tensor.shape());
             assert!(gathered
                 .materialize_f64()
                 .iter()
@@ -832,11 +832,11 @@ pub(crate) mod tests {
 
             let view_u = runmat_accelerate_api::HostTensorView {
                 data: &u.materialize_f64(),
-                shape: &u.shape,
+                shape: u.shape(),
             };
             let view_v = runmat_accelerate_api::HostTensorView {
                 data: &v.materialize_f64(),
-                shape: &v.shape,
+                shape: v.shape(),
             };
             let handle_u = provider.upload(&view_u).expect("upload u");
             let handle_v = provider.upload(&view_v).expect("upload v");
@@ -845,8 +845,8 @@ pub(crate) mod tests {
                     .expect("gpu quotient");
             let gpu_num = test_support::gather(gpu_eval.numerator()).expect("gather num");
             let gpu_den = test_support::gather(gpu_eval.denominator()).expect("gather den");
-            assert_eq!(gpu_num.shape, expected_num.shape);
-            assert_eq!(gpu_den.shape, expected_den.shape);
+            assert_eq!(gpu_num.shape(), expected_num.shape());
+            assert_eq!(gpu_den.shape(), expected_den.shape());
             assert!(gpu_num
                 .materialize_f64()
                 .iter()
@@ -875,12 +875,12 @@ pub(crate) mod tests {
         };
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_result = derivative_single(Value::GpuTensor(handle)).expect("gpu polyder");
         let gathered = test_support::gather(gpu_result).expect("gather");
-        assert_eq!(gathered.shape, expected_tensor.shape);
+        assert_eq!(gathered.shape(), expected_tensor.shape());
         assert!(gathered
             .materialize_f64()
             .iter()
@@ -905,18 +905,18 @@ pub(crate) mod tests {
         };
         let view_p = runmat_accelerate_api::HostTensorView {
             data: &p.materialize_f64(),
-            shape: &p.shape,
+            shape: p.shape(),
         };
         let view_q = runmat_accelerate_api::HostTensorView {
             data: &q.materialize_f64(),
-            shape: &q.shape,
+            shape: q.shape(),
         };
         let handle_p = provider.upload(&view_p).expect("upload p");
         let handle_q = provider.upload(&view_q).expect("upload q");
         let gpu_result = derivative_product(Value::GpuTensor(handle_p), Value::GpuTensor(handle_q))
             .expect("gpu product");
         let gathered = test_support::gather(gpu_result).expect("gather");
-        assert_eq!(gathered.shape, expected_tensor.shape);
+        assert_eq!(gathered.shape(), expected_tensor.shape());
         assert!(gathered
             .materialize_f64()
             .iter()
@@ -946,11 +946,11 @@ pub(crate) mod tests {
         };
         let view_u = runmat_accelerate_api::HostTensorView {
             data: &u.materialize_f64(),
-            shape: &u.shape,
+            shape: u.shape(),
         };
         let view_v = runmat_accelerate_api::HostTensorView {
             data: &v.materialize_f64(),
-            shape: &v.shape,
+            shape: v.shape(),
         };
         let handle_u = provider.upload(&view_u).expect("upload u");
         let handle_v = provider.upload(&view_v).expect("upload v");
@@ -958,8 +958,8 @@ pub(crate) mod tests {
             .expect("gpu quotient");
         let gpu_num = test_support::gather(gpu_eval.numerator()).expect("gather num");
         let gpu_den = test_support::gather(gpu_eval.denominator()).expect("gather den");
-        assert_eq!(gpu_num.shape, expected_num.shape);
-        assert_eq!(gpu_den.shape, expected_den.shape);
+        assert_eq!(gpu_num.shape(), expected_num.shape());
+        assert_eq!(gpu_den.shape(), expected_den.shape());
         assert!(gpu_num
             .materialize_f64()
             .iter()

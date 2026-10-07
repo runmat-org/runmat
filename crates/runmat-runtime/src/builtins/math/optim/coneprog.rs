@@ -903,7 +903,7 @@ async fn numeric_vector(
         Value::Int(i) => vec![i.to_f64()],
         Value::Bool(flag) => vec![if flag { 1.0 } else { 0.0 }],
         Value::Tensor(tensor) => {
-            if tensor.shape.len() > 2 || (tensor.rows() != 1 && tensor.cols() != 1) {
+            if tensor.shape().len() > 2 || (tensor.rows() != 1 && tensor.cols() != 1) {
                 return Err(coneprog_error(
                     &ERROR_INVALID_INPUT,
                     format!("coneprog: {label} must be a vector"),
@@ -946,7 +946,7 @@ async fn numeric_matrix(label: &str, value: Value) -> BuiltinResult<Option<Matri
             }))
         }
         Value::Tensor(tensor) => {
-            if tensor.shape.len() > 2 {
+            if tensor.shape().len() > 2 {
                 return Err(coneprog_error(
                     &ERROR_INVALID_INPUT,
                     format!("coneprog: {label} must be a numeric matrix"),

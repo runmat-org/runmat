@@ -284,7 +284,7 @@ async fn parse_polynomial(value: Value) -> BuiltinResult<Polynomial> {
 }
 
 fn parse_tensor_coeffs(tensor: Tensor) -> BuiltinResult<Polynomial> {
-    ensure_vector_shape(&tensor.shape)?;
+    ensure_vector_shape(tensor.shape())?;
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| polyint_error(format!("polyint: {error}")))?;
@@ -308,7 +308,7 @@ fn parse_tensor_coeffs(tensor: Tensor) -> BuiltinResult<Polynomial> {
 }
 
 fn parse_complex_tensor_coeffs(tensor: &ComplexTensor) -> BuiltinResult<Polynomial> {
-    ensure_vector_shape(&tensor.shape)?;
+    ensure_vector_shape(tensor.shape())?;
     Ok(Polynomial {
         coeffs: tensor
             .materialize_f64()
@@ -468,7 +468,7 @@ pub(crate) mod tests {
         let result = polyint_builtin(Value::Tensor(tensor), Vec::new()).expect("polyint");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), &[1, 5]);
                 let expected = [0.75, -2.0 / 3.0, 2.5, 7.0, 0.0];
                 assert!(tensor::tensor_values_f64(&t)
                     .iter()
@@ -487,7 +487,7 @@ pub(crate) mod tests {
         let result = polyint_builtin(Value::Tensor(tensor), args).expect("polyint");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), &[1, 4]);
                 let expected = [4.0 / 3.0, 0.0, -8.0, 3.0];
                 assert!(tensor::tensor_values_f64(&t)
                     .iter()
@@ -532,7 +532,7 @@ pub(crate) mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected native-single tensor");
         };
-        assert_eq!(tensor.shape, vec![1, 4]);
+        assert_eq!(tensor.shape(), &[1, 4]);
         assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
         assert_eq!(
             tensor.into_numeric_storage().unwrap(),
@@ -546,7 +546,7 @@ pub(crate) mod tests {
         let result = polyint_builtin(Value::Num(5.0), Vec::new()).expect("polyint");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 let values = tensor::tensor_values_f64(&t);
                 assert!((values[0] - 5.0).abs() < 1e-12);
                 assert!(values[1].abs() < 1e-12);
@@ -580,7 +580,7 @@ pub(crate) mod tests {
         let result = polyint_builtin(Value::Tensor(tensor), Vec::new()).expect("polyint");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), &[1, 4]);
                 let expected = [2.0 / 3.0, 0.0, -6.0, 0.0];
                 assert!(tensor::tensor_values_f64(&t)
                     .iter()
@@ -600,7 +600,7 @@ pub(crate) mod tests {
         let result = polyint_builtin(Value::ComplexTensor(tensor), args).expect("polyint");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), &[1, 4]);
                 let expected = [(1.0 / 3.0, 2.0 / 3.0), (-1.5, 0.0), (0.0, 4.0), (0.0, -1.0)];
                 assert!(t.materialize_f64().iter().zip(expected.iter()).all(
                     |((lre, lim), (rre, rim))| {
@@ -678,7 +678,7 @@ pub(crate) mod tests {
             .expect("polyint");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 1]);
+                assert_eq!(t.shape(), &[1, 1]);
                 assert_eq!(t.materialize_f64().len(), 1);
                 let (re, im) = t.materialize_f64()[0];
                 assert!((re - 1.5).abs() < 1e-12);
@@ -698,7 +698,7 @@ pub(crate) mod tests {
             match result {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    assert_eq!(gathered.shape, vec![1, 4]);
+                    assert_eq!(gathered.shape(), &[1, 4]);
                     let expected = [1.0 / 3.0, -2.0, 6.0, 0.0];
                     assert!(tensor::tensor_values_f64(&gathered)
                         .iter()
@@ -753,7 +753,7 @@ pub(crate) mod tests {
                     let Value::ComplexTensor(ct) = gathered else {
                         panic!("expected complex tensor");
                     };
-                    assert_eq!(ct.shape, vec![1, 3]);
+                    assert_eq!(ct.shape(), &[1, 3]);
                     let expected = [(0.5, 0.0), (0.0, 0.0), (0.0, 2.0)];
                     assert!(ct.materialize_f64().iter().zip(expected.iter()).all(
                         |((lre, lim), (rre, rim))| {
@@ -785,7 +785,7 @@ pub(crate) mod tests {
             let Value::ComplexTensor(ct) = gathered else {
                 panic!("expected complex tensor");
             };
-            assert_eq!(ct.shape, vec![1, 3]);
+            assert_eq!(ct.shape(), &[1, 3]);
             let expected = [(0.5, 0.5), (2.0, -1.0), (2.0, 0.0)];
             assert!(ct.materialize_f64().iter().zip(expected.iter()).all(
                 |((lre, lim), (rre, rim))| {
@@ -814,7 +814,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(handle) => {
                     let gathered =
                         test_support::gather(Value::GpuTensor(handle)).expect("gather result");
-                    assert_eq!(gathered.shape, vec![1, 3]);
+                    assert_eq!(gathered.shape(), &[1, 3]);
                     let expected = [1.0, 0.0, 3.0];
                     assert!(tensor::tensor_values_f64(&gathered)
                         .iter()
@@ -847,7 +847,7 @@ pub(crate) mod tests {
             Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).unwrap(),
             other => panic!("unexpected cpu result {other:?}"),
         };
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
@@ -892,7 +892,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(gpu) = gathered else {
             panic!("expected complex tensor");
         };
-        assert_eq!(gpu.shape, cpu.shape);
+        assert_eq!(gpu.shape(), cpu.shape());
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

@@ -622,7 +622,7 @@ async fn numeric_vector(
         Value::Num(n) => vec![n],
         Value::Int(i) => vec![i.to_f64()],
         Value::Tensor(t) => {
-            let dims = t.shape.len();
+            let dims = t.shape().len();
             if dims > 2 || (t.rows() != 1 && t.cols() != 1) {
                 return Err(linprog_error_with_detail(
                     &LINPROG_ERROR_INVALID_INPUT,
@@ -669,7 +669,7 @@ async fn numeric_matrix(label: &str, value: Value) -> BuiltinResult<Option<Matri
             }))
         }
         Value::Tensor(t) => {
-            if t.shape.len() > 2 {
+            if t.shape().len() > 2 {
                 return Err(linprog_error_with_detail(
                     &LINPROG_ERROR_INVALID_INPUT,
                     format!("{label} must be a numeric matrix"),
@@ -1276,6 +1276,26 @@ mod tests {
         match value {
             V::OutputList(values) => values,
             other => vec![other],
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn public_invocation_accepts_rank_zero_and_rank_one_objective_vectors() {
+        for shape in [vec![], vec![1]] {
+            let objective = V::Tensor(Tensor::new(vec![1.0], shape).expect("objective"));
+            let output = block_on(linprog_builtin(
+                objective,
+                empty(),
+                empty(),
+                vec![empty(), empty(), V::Num(0.0), V::Num(1.0)],
+            ))
+            .expect("bounded scalar linear program");
+            let V::Tensor(solution) = output else {
+                panic!("expected solution tensor");
+            };
+            assert_eq!(solution.shape(), &[1, 1]);
+            assert_eq!(solution.materialize_f64(), vec![0.0]);
         }
     }
 

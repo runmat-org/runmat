@@ -818,7 +818,7 @@ async fn real_array(label: &str, value: Value) -> BuiltinResult<RealArray> {
         Value::Int(i) => finite_array(label, vec![i.to_f64()], vec![1, 1]),
         Value::Bool(flag) => finite_array(label, vec![if flag { 1.0 } else { 0.0 }], vec![1, 1]),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             finite_array(label, tensor::tensor_into_values_f64(tensor), shape)
         }
         Value::LogicalArray(LogicalArray { data, shape }) => finite_array(
@@ -1192,7 +1192,7 @@ mod tests {
             assert!(matches!(
                 result,
                 Value::Tensor(ref tensor)
-                    if tensor.shape == vec![1, 1]
+                    if tensor.shape() == [1, 1]
                         && matches!(tensor.numeric_value_at(0), Some(runmat_value::NumericScalar::F64(value)) if value == 0.0)
             ));
 
@@ -1265,7 +1265,7 @@ mod tests {
         .expect("lsqcurvefit");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.shape(), &[2, 1]);
                 assert!((t.materialize_f64()[0] - 2.0).abs() < 1.0e-5);
                 assert!((t.materialize_f64()[1] - 1.0).abs() < 1.0e-5);
             }
@@ -1425,7 +1425,7 @@ mod tests {
             Value::OutputList(outputs) => {
                 assert_eq!(outputs.len(), 7);
                 assert!(matches!(&outputs[1], Value::Num(resnorm) if *resnorm < 1.0e-10));
-                assert!(matches!(&outputs[2], Value::Tensor(t) if t.shape == vec![1, 3]));
+                assert!(matches!(&outputs[2], Value::Tensor(t) if t.shape() == [1, 3]));
                 assert!(matches!(&outputs[3], Value::Num(flag) if *flag > 0.0));
                 assert!(
                     matches!(&outputs[4], Value::Struct(output) if output.fields.contains_key("funcCount"))
@@ -1435,7 +1435,7 @@ mod tests {
                 );
                 match &outputs[6] {
                     Value::Tensor(j) => {
-                        assert_eq!(j.shape, vec![3, 2]);
+                        assert_eq!(j.shape(), &[3, 2]);
                         let expected = [0.0, 1.0, 2.0, 1.0, 1.0, 1.0];
                         for (actual, expected) in j.materialize_f64().iter().zip(expected) {
                             assert!((actual - expected).abs() < 1.0e-6);
