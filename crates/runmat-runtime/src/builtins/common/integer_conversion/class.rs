@@ -80,7 +80,7 @@ impl IntegerClassExt for IntegerClass {
     }
 
     fn cast_tensor(self, tensor: Tensor) -> Result<Tensor, String> {
-        let shape = tensor.shape.clone();
+        let shape = tensor.shape().to_vec();
         let storage = tensor.into_numeric_storage()?;
         let values = match storage {
             NumericStorage::F64(values) => values

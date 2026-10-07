@@ -119,7 +119,7 @@ async fn predictor_rows(x: &Value, cooperation: &mut FitCooperation) -> BuiltinR
     let shape = match x {
         Value::Tensor(tensor) => {
             ensure_exact_integer_tensor(tensor, "X", cooperation).await?;
-            tensor.shape.as_slice()
+            tensor.shape()
         }
         Value::LogicalArray(array) => array.shape.as_slice(),
         Value::GpuTensor(handle) if handle.physical().storage() == GpuTensorStorage::Real => {
@@ -148,7 +148,7 @@ async fn response_geometry(
     match y {
         Value::Tensor(tensor) => {
             ensure_exact_integer_tensor(tensor, "Y", cooperation).await?;
-            numeric_response_shape(&tensor.shape, tensor.len(), rows)
+            numeric_response_shape(tensor.shape(), tensor.len(), rows)
         }
         Value::GpuTensor(handle) if handle.physical().storage() == GpuTensorStorage::Real => {
             let shape = handle.shape();

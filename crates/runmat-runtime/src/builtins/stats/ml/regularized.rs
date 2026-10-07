@@ -7,7 +7,7 @@ use runmat_value::Value;
 /// with only singleton trailing dimensions allowed.
 pub(super) fn predictor_matrix_dimensions(value: &Value) -> Result<(usize, usize), String> {
     let shape = match value {
-        Value::Tensor(tensor) => &tensor.shape,
+        Value::Tensor(tensor) => tensor.shape(),
         Value::LogicalArray(array) => &array.shape,
         Value::GpuTensor(handle) => {
             return crate::builtins::common::linalg::matrix_dimensions_for("X", handle.shape())

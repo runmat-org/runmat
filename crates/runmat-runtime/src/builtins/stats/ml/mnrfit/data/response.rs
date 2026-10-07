@@ -25,7 +25,7 @@ pub(in super::super) async fn response_outcomes(
             if matches!(exactness, ResponseExactness::ValidateDownloaded) {
                 ensure_exact_integer_tensor(&tensor, "Y", cooperation).await?;
             }
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let mut values = reserved(tensor.len(), "numeric responses")?;
             for index in 0..tensor.len() {
                 values.push(tensor::tensor_value_f64(&tensor, index));

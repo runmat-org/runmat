@@ -19,7 +19,7 @@ pub(crate) fn align_floating_value_precision(
     };
     match value {
         Value::Tensor(tensor) if tensor.integer_storage().is_none() => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let values = tensor.materialize_f64();
             let tensor = if dtype == runmat_value::NumericDType::F32 {
                 Tensor::from_f32(
@@ -39,7 +39,7 @@ pub(crate) fn align_floating_value_precision(
         Value::ComplexTensor(tensor) => {
             let tensor = runmat_value::ComplexTensor::from_f64_values_with_dtype(
                 tensor.materialize_f64(),
-                tensor.shape.clone(),
+                tensor.shape().to_vec(),
                 dtype,
             )
             .map_err(|error| {

@@ -17,8 +17,8 @@ mod tests;
 
 pub fn shape(value: &Value) -> Option<Vec<usize>> {
     match value {
-        Value::Tensor(value) => Some(value.shape.clone()),
-        Value::ComplexTensor(value) => Some(value.shape.clone()),
+        Value::Tensor(value) => Some(value.shape().to_vec()),
+        Value::ComplexTensor(value) => Some(value.shape().to_vec()),
         Value::SparseTensor(value) => Some(value.shape()),
         Value::GpuTensor(value) => Some(value.shape().to_vec()),
         Value::StringArray(value) => Some(value.shape.clone()),

@@ -66,7 +66,7 @@ pub(super) fn restore(
                 provider,
                 &runmat_accelerate_api::HostLogicalTensorView {
                     data: &data,
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 },
                 &protected,
             )
@@ -191,6 +191,45 @@ pub(super) fn empty_read(
 mod tests {
     use super::*;
     use runmat_accelerate_api::{GpuTensorStorage, HostNumericDataView, HostNumericTensorView};
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn logical_restore_preserves_low_rank_shape_and_owner() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            for shape in [Vec::new(), vec![2]] {
+                let count = shape.iter().product::<usize>();
+                let input = runmat_accelerate_api::upload_logical_protecting(
+                    provider,
+                    &runmat_accelerate_api::HostLogicalTensorView {
+                        data: &vec![0; count],
+                        shape: &shape,
+                    },
+                    &[],
+                )
+                .expect("logical input");
+                let host = runmat_value::Tensor::new(vec![1.0; count], shape.clone()).unwrap();
+                let runmat_value::Value::GpuTensor(output) =
+                    restore(&input, runmat_value::Value::Tensor(host), &[]).unwrap()
+                else {
+                    panic!("resident logical output expected")
+                };
+                assert_eq!(output.shape(), shape.as_slice());
+                assert!(runmat_accelerate_api::handle_is_logical(&output));
+                assert!(!output.shares_allocation_with(&input));
+                assert!(runmat_accelerate_api::same_provider_instance(
+                    owner(&output).unwrap(),
+                    owner(&input).unwrap(),
+                ));
+                let gathered = futures::executor::block_on(gather(&output)).unwrap();
+                let runmat_value::Value::LogicalArray(gathered) = gathered else {
+                    panic!("logical host output expected")
+                };
+                assert_eq!(gathered.shape, shape);
+                assert_eq!(gathered.data.as_slice(), vec![1; count]);
+            }
+        });
+    }
+
     #[test]
     fn scalar_assignment_preserves_single_and_paired_integer_payloads() {
         crate::builtins::common::test_support::with_test_provider(|provider| {

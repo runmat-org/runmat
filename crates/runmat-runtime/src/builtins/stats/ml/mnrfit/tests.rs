@@ -42,6 +42,42 @@ fn output_list(value: Value) -> Vec<Value> {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn mnrfit_admission_preserves_low_rank_predictor_and_response_geometry() {
+    let scalar_x = Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap());
+    let scalar_y = Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap());
+    assert_eq!(
+        block_on(admission::preflight(
+            &scalar_x,
+            &scalar_y,
+            &mut FitCooperation::new(None),
+        ))
+        .expect("rank-zero predictors and responses pass geometry preflight"),
+        1
+    );
+
+    let vector_x = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2]).unwrap());
+    let vector_y = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap());
+    let prepared = block_on(admission::prepare(
+        vector_x,
+        vector_y,
+        &mut FitCooperation::new(None),
+    ))
+    .expect("rank-one predictor and categorical response pass admission");
+    assert_eq!(prepared.rows(), 2);
+
+    let nonmatrix_x = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 1, 2]).unwrap());
+    let matching_y = Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap());
+    let error = block_on(admission::preflight(
+        &nonmatrix_x,
+        &matching_y,
+        &mut FitCooperation::new(None),
+    ))
+    .expect_err("nonsingleton predictor tail remains invalid");
+    assert!(error.message().contains("nonempty numeric matrix"));
+}
+
 #[test]
 fn mnrfit_rejects_sparse_predictors_and_responses_at_admission() {
     let sparse_x =
@@ -87,7 +123,7 @@ fn mnrfit_binary_logistic_returns_coefficients_stats() {
     let Value::Tensor(b) = &values[0] else {
         panic!("expected B tensor");
     };
-    assert_eq!(b.shape, vec![2, 1]);
+    assert_eq!(b.shape(), &[2, 1]);
     assert!(b.materialize_f64()[1] < 0.0);
     assert!(matches!(&values[1], Value::Num(value) if value.is_finite()));
     let Value::Struct(stats) = &values[2] else {
@@ -183,7 +219,7 @@ fn mnrfit_multiclass_nominal_shape() {
     let Value::Tensor(b) = out else {
         panic!("expected B tensor");
     };
-    assert_eq!(b.shape, vec![2, 2]);
+    assert_eq!(b.shape(), &[2, 2]);
     assert!(b.materialize_f64().iter().all(|value| value.is_finite()));
 }
 
@@ -204,7 +240,7 @@ fn mnrfit_binomial_counts_and_weights() {
     let Value::Tensor(b) = out else {
         panic!("expected B tensor");
     };
-    assert_eq!(b.shape, vec![2, 1]);
+    assert_eq!(b.shape(), &[2, 1]);
     assert!(b.materialize_f64().iter().all(|value| value.is_finite()));
 }
 
@@ -230,7 +266,7 @@ fn mnrfit_grouped_multinomial_counts() {
     let Value::Tensor(b) = &values[0] else {
         panic!("expected B tensor");
     };
-    assert_eq!(b.shape, vec![2, 2]);
+    assert_eq!(b.shape(), &[2, 2]);
     assert!(matches!(&values[1], Value::Num(value) if value.is_finite() && *value >= 0.0));
     let Value::Struct(stats) = &values[2] else {
         panic!("expected stats struct");
@@ -256,7 +292,7 @@ fn constant_grouped_odds_have_known_intercept_zero_slope_and_zero_deviance() {
     let Value::Tensor(beta) = &values[0] else {
         panic!("grouped fit must return a coefficient matrix");
     };
-    assert_eq!(beta.shape, vec![2, 1]);
+    assert_eq!(beta.shape(), &[2, 1]);
     assert_eq!(beta.numeric_dtype(), runmat_value::NumericDType::F64);
     let coefficients = beta.materialize_f64();
     assert!((coefficients[0] + 3.0f64.ln()).abs() < 1.0e-6);
@@ -350,7 +386,7 @@ fn mnrfit_reads_typed_integer_class_vectors_exactly() {
     let Value::Tensor(b) = &values[0] else {
         panic!("expected B tensor");
     };
-    assert_eq!(b.shape, vec![2, 1]);
+    assert_eq!(b.shape(), &[2, 1]);
     assert!(b.materialize_f64().iter().all(|value| value.is_finite()));
     assert!(matches!(&values[1], Value::Num(value) if value.is_finite()));
 }
@@ -370,7 +406,7 @@ fn mnrfit_reads_typed_integer_grouped_counts_exactly() {
     let Value::Tensor(b) = out else {
         panic!("expected B tensor");
     };
-    assert_eq!(b.shape, vec![2, 1]);
+    assert_eq!(b.shape(), &[2, 1]);
     assert!(b.materialize_f64().iter().all(|value| value.is_finite()));
 }
 

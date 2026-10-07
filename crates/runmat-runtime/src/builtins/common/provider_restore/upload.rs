@@ -78,7 +78,7 @@ pub(crate) fn upload_value_protected(
             None,
         ),
         Value::Tensor(tensor) => (
-            tensor.shape.clone(),
+            tensor.shape().to_vec(),
             runmat_accelerate_api::GpuTensorStorage::Real,
             tensor
                 .integer_storage()
@@ -98,7 +98,7 @@ pub(crate) fn upload_value_protected(
             Some(runmat_accelerate_api::ProviderPrecision::F64),
         ),
         Value::ComplexTensor(tensor) => (
-            tensor.shape.clone(),
+            tensor.shape().to_vec(),
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
             None,
             Some(

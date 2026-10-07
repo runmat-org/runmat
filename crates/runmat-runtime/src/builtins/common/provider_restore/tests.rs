@@ -1,12 +1,86 @@
-use super::upload::upload_value_protected;
+use super::{precision::align_floating_value_precision, upload::upload_value_protected};
 use crate::builtins::common::test_support;
 use futures::executor::block_on;
-use runmat_accelerate_api::GpuTensorHandle;
-use runmat_value::{Tensor, Value};
+use runmat_accelerate_api::{
+    test_support::TestAllocationOwner, GpuTensorHandle, GpuTensorStorage, NumericElementType,
+};
+use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct F32OnlyProvider {
     upload_calls: AtomicUsize,
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn precision_alignment_preserves_low_rank_real_and_complex_shapes() {
+    let owner = TestAllocationOwner::new();
+    for (element_type, dtype) in [
+        (NumericElementType::F32, NumericDType::F32),
+        (NumericElementType::F64, NumericDType::F64),
+    ] {
+        let prototype = owner
+            .allocate_zeroed(vec![1, 1], element_type, GpuTensorStorage::Real)
+            .expect("floating-point prototype");
+
+        let real = Value::Tensor(Tensor::new(vec![1.25], Vec::new()).expect("rank-zero real"));
+        let Value::Tensor(real) =
+            align_floating_value_precision(real, &prototype.handle, "restore-test")
+                .expect("real precision alignment")
+        else {
+            panic!("real result expected")
+        };
+        assert_eq!(real.shape(), &[]);
+        assert_eq!(real.numeric_dtype(), dtype);
+        assert_eq!(real.materialize_f64(), vec![1.25]);
+
+        let complex = Value::ComplexTensor(
+            ComplexTensor::new(vec![(1.25, 2.5), (3.75, 4.5)], vec![2]).expect("rank-one complex"),
+        );
+        let Value::ComplexTensor(complex) =
+            align_floating_value_precision(complex, &prototype.handle, "restore-test")
+                .expect("complex precision alignment")
+        else {
+            panic!("complex result expected")
+        };
+        assert_eq!(complex.shape(), &[2]);
+        assert_eq!(complex.numeric_dtype(), dtype);
+        assert_eq!(complex.materialize_f64(), vec![(1.25, 2.5), (3.75, 4.5)]);
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn provider_restore_preserves_low_rank_shape_and_exact_owner() {
+    test_support::with_test_provider(|provider| {
+        for value in [
+            Value::Tensor(Tensor::new(vec![1.25], Vec::new()).expect("rank-zero real")),
+            Value::ComplexTensor(
+                ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![2])
+                    .expect("rank-one complex"),
+            ),
+        ] {
+            let expected_shape = match &value {
+                Value::Tensor(tensor) => tensor.shape(),
+                Value::ComplexTensor(tensor) => tensor.shape(),
+                _ => unreachable!("fixture is numeric"),
+            }
+            .to_vec();
+            let Value::GpuTensor(handle) =
+                upload_value_protected(provider, value, "restore-test", &[])
+                    .expect("provider restore")
+            else {
+                panic!("resident output expected")
+            };
+            assert_eq!(handle.shape(), expected_shape);
+            assert!(
+                crate::builtins::common::gpu_helpers::exact_provider_for_handle(&handle)
+                    .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(
+                        owner, provider
+                    ))
+            );
+        }
+    });
 }
 
 impl runmat_accelerate_api::AccelProvider for F32OnlyProvider {

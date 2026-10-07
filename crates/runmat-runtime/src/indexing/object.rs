@@ -200,7 +200,7 @@ fn assignment_scalar(rhs: &Value, class_name: &ClassIdentity) -> Result<Value, R
 }
 
 fn is_empty_delete_rhs(value: &Value) -> bool {
-    matches!(value, Value::Tensor(tensor) if tensor.shape.iter().copied().product::<usize>() == 0)
+    matches!(value, Value::Tensor(tensor) if tensor.shape().iter().copied().product::<usize>() == 0)
         || matches!(value, Value::ObjectArray(array) if array.is_empty())
 }
 
@@ -209,6 +209,15 @@ mod tests {
     use runmat_value::{ObjectInstance, Value};
 
     use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn numeric_delete_rhs_uses_exact_empty_shape_cardinality() {
+        let scalar = Value::Tensor(runmat_value::Tensor::new(vec![0.0], Vec::new()).unwrap());
+        let empty = Value::Tensor(runmat_value::Tensor::new(Vec::new(), vec![0]).unwrap());
+        assert!(!is_empty_delete_rhs(&scalar));
+        assert!(is_empty_delete_rhs(&empty));
+    }
 
     fn object(name: &str) -> Value {
         let mut object = ObjectInstance::new("parallel.FevalFuture");

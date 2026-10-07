@@ -56,7 +56,7 @@ pub(super) fn ensure_exact_integer_tensor(value: &Tensor, label: &str) -> Builti
 
 pub(super) fn value_to_real_vector(label: &str, value: Value) -> BuiltinResult<Vec<f64>> {
     let tensor = value_to_real_tensor(label, value)?;
-    if tensor.shape.iter().filter(|dim| **dim > 1).count() > 1 {
+    if tensor.shape().iter().filter(|dim| **dim > 1).count() > 1 {
         return Err(invalid_argument(format!("lasso: {label} must be a vector")));
     }
     Ok(tensor::tensor_into_values_f64(tensor))
@@ -180,7 +180,7 @@ pub(super) fn bounded_usize(value: &Value, label: &str, max: usize) -> BuiltinRe
 pub(super) fn numeric_vector(value: &Value, label: &str) -> BuiltinResult<Vec<f64>> {
     let data = match value {
         Value::Tensor(tensor) => {
-            if !is_vector_shape(&tensor.shape) {
+            if !is_vector_shape(tensor.shape()) {
                 return Err(invalid_argument(format!(
                     "lasso: {label} must be a numeric vector"
                 )));

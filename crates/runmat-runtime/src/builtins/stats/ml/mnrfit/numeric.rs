@@ -76,7 +76,14 @@ pub(super) async fn numeric_vector(
         other => other,
     };
     let tensor = numeric_tensor(label, value, cooperation).await?;
-    if tensor.shape.iter().copied().filter(|dim| *dim > 1).count() > 1 {
+    if tensor
+        .shape()
+        .iter()
+        .copied()
+        .filter(|dim| *dim > 1)
+        .count()
+        > 1
+    {
         return Err(invalid(format!("mnrfit: {label} must be a vector")));
     }
     let mut values = Vec::new();

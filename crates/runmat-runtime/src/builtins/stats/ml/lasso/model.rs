@@ -7,7 +7,7 @@ pub(super) fn lasso_compute(
 ) -> BuiltinResult<FitResult> {
     let x = value_to_real_tensor("X", x)?;
     let y_values = value_to_real_vector("y", y)?;
-    let (rows, cols) = crate::builtins::common::linalg::matrix_dimensions_for("X", &x.shape)
+    let (rows, cols) = crate::builtins::common::linalg::matrix_dimensions_for("X", x.shape())
         .map_err(|detail| invalid_argument(format!("lasso: {detail}")))?;
     if rows == 0 || cols == 0 {
         return Err(invalid_argument(

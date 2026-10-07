@@ -54,9 +54,9 @@ pub fn effective_rank(shape: &[usize]) -> usize {
 #[async_recursion::async_recursion(?Send)]
 pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError> {
     let dims = match value {
-        Value::Tensor(t) => normalize_shape(&t.shape),
+        Value::Tensor(t) => normalize_shape(t.shape()),
         Value::SparseTensor(t) => normalize_shape(&[t.rows, t.cols]),
-        Value::ComplexTensor(t) => normalize_shape(&t.shape),
+        Value::ComplexTensor(t) => normalize_shape(t.shape()),
         Value::LogicalArray(la) => normalize_shape(&la.shape),
         Value::StringArray(sa) => normalize_shape(&sa.shape),
         Value::SymbolicArray(sa) => normalize_shape(&sa.shape),
@@ -148,6 +148,29 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn dimensions_normalize_low_rank_real_and_complex_arrays() {
+        for value in [
+            Value::Tensor(Tensor::new(vec![1.0], Vec::new()).expect("rank-zero real")),
+            Value::ComplexTensor(
+                runmat_value::ComplexTensor::new(vec![(1.0, 2.0)], Vec::new())
+                    .expect("rank-zero complex"),
+            ),
+        ] {
+            assert_eq!(block_on(value_dimensions(&value)).unwrap(), vec![1, 1]);
+        }
+        for value in [
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).expect("rank-one real")),
+            Value::ComplexTensor(
+                runmat_value::ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![2])
+                    .expect("rank-one complex"),
+            ),
+        ] {
+            assert_eq!(block_on(value_dimensions(&value)).unwrap(), vec![1, 2]);
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_gpu_uses_shape_product() {
         let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
@@ -211,7 +234,7 @@ pub(crate) mod tests {
     #[test]
     fn dims_to_row_tensor_converts() {
         let tensor = dims_to_row_tensor(&[2, 4, 6]).unwrap();
-        assert_eq!(tensor.shape, vec![1, 3]);
+        assert_eq!(tensor.shape(), &[1, 3]);
         assert_eq!(tensor.materialize_f64(), vec![2.0, 4.0, 6.0]);
     }
 

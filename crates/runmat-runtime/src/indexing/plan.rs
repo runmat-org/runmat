@@ -693,7 +693,7 @@ where
                     }
                     Value::Tensor(idx_t) => {
                         if spec.dims == 1 {
-                            linear_output_shape = Some(idx_t.shape.clone());
+                            linear_output_shape = Some(idx_t.shape().to_vec());
                         }
                         let vv = numeric_tensor_indices(idx_t, None)?;
                         selectors.push(ExprSel::Indices(vv));
@@ -948,6 +948,32 @@ mod tests {
     use crate::indexing::selectors::{build_slice_selectors, SliceSelector};
     use crate::indexing::EndExpr;
     use runmat_value::{IntegerStorage, LogicalArray, Tensor, Value};
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn expression_numeric_selector_preserves_rank_one_output_geometry() {
+        let numeric = [Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![2, 1]), vec![2]).unwrap(),
+        )];
+        let plan = futures::executor::block_on(build_expr_index_plan(
+            ExprPlanSpec {
+                dims: 1,
+                colon_mask: 0,
+                end_mask: 0,
+                range_dims: &[],
+                range_params: &[],
+                range_start_exprs: &[],
+                range_step_exprs: &[],
+                range_end_exprs: &[],
+                numeric: &numeric,
+                shape: &[1, 2],
+            },
+            |_, _| async { Ok(0.0) },
+        ))
+        .expect("rank-one selector");
+        assert_eq!(plan.indices, vec![1, 0]);
+        assert_eq!(plan.output_shape, vec![2]);
+    }
 
     #[test]
     fn sparse_assignment_plan_expands_numeric_dimensions_but_keeps_colon_at_old_extent() {

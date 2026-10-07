@@ -4,6 +4,20 @@ use crate::indexing::selectors::SliceSelector;
 use futures::executor::block_on;
 use runmat_value::CharArray;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn numeric_shape_dispatch_preserves_low_rank_metadata() {
+    for input_shape in [Vec::new(), vec![2]] {
+        let count = input_shape.iter().product::<usize>();
+        let real = Value::Tensor(Tensor::new(vec![7.0; count], input_shape.clone()).unwrap());
+        let complex = Value::ComplexTensor(
+            runmat_value::ComplexTensor::new(vec![(7.0, 1.0); count], input_shape.clone()).unwrap(),
+        );
+        assert_eq!(shape(&real), Some(input_shape.clone()));
+        assert_eq!(shape(&complex), Some(input_shape));
+    }
+}
+
 #[test]
 fn repeated_scalar_reads_preserve_runtime_family_and_shape() {
     let plan = build_index_plan(
@@ -16,7 +30,7 @@ fn repeated_scalar_reads_preserve_runtime_family_and_shape() {
     )
     .expect("plan");
     assert!(
-        matches!(read_with_plan(Value::Num(4.0), &plan).unwrap(), Value::Tensor(v) if v.shape == [1, 3])
+        matches!(read_with_plan(Value::Num(4.0), &plan).unwrap(), Value::Tensor(v) if v.shape() == [1, 3])
     );
     assert!(
         matches!(read_with_plan(Value::Bool(true), &plan).unwrap(), Value::LogicalArray(v) if *v.data == [1, 1, 1])
@@ -48,7 +62,7 @@ fn numeric_assignment_growth_uses_the_shared_checked_plan_shape() {
     .unwrap() else {
         panic!("scalar growth must materialize a numeric tensor")
     };
-    assert_eq!(scalar.shape, vec![1, 2]);
+    assert_eq!(scalar.shape(), &[1, 2]);
     assert_eq!(scalar.materialize_f64(), vec![1.0, 3.0]);
 
     let vector = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
@@ -61,7 +75,7 @@ fn numeric_assignment_growth_uses_the_shared_checked_plan_shape() {
     .unwrap() else {
         panic!("vector growth must retain a numeric tensor")
     };
-    assert_eq!(vector.shape, vec![1, 4]);
+    assert_eq!(vector.shape(), &[1, 4]);
     assert_eq!(vector.materialize_f64(), vec![1.0, 2.0, 0.0, 9.0]);
 
     let matrix = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -79,6 +93,6 @@ fn numeric_assignment_growth_uses_the_shared_checked_plan_shape() {
     .unwrap() else {
         panic!("matrix growth must retain a numeric tensor")
     };
-    assert_eq!(matrix.shape, vec![2, 3]);
+    assert_eq!(matrix.shape(), &[2, 3]);
     assert_eq!(matrix.materialize_f64(), vec![1.0, 2.0, 0.0, 0.0, 7.0, 0.0]);
 }

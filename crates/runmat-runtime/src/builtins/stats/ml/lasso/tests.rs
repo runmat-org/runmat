@@ -31,6 +31,35 @@ fn row_field<'a>(info: &'a StructValue, name: &str) -> &'a Tensor {
     tensor
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn lasso_admission_and_vector_parsers_preserve_low_rank_geometry() {
+    let scalar_x = tensor(vec![2.0], Vec::new());
+    assert_eq!(predictor_matrix_dimensions(&scalar_x).unwrap(), (1, 1));
+    let vector_x = tensor(vec![1.0, 2.0], vec![2]);
+    assert_eq!(predictor_matrix_dimensions(&vector_x).unwrap(), (2, 1));
+    let nonmatrix_x = tensor(vec![1.0, 2.0], vec![1, 1, 2]);
+    assert!(predictor_matrix_dimensions(&nonmatrix_x).is_err());
+
+    let scalar_y = tensor(vec![3.0], Vec::new());
+    assert_eq!(value_to_real_vector("y", scalar_y).unwrap(), vec![3.0]);
+    let vector_y = tensor(vec![3.0, 4.0], vec![2]);
+    assert_eq!(value_to_real_vector("y", vector_y).unwrap(), vec![3.0, 4.0]);
+
+    let lambda_scalar = tensor(vec![0.25], Vec::new());
+    assert_eq!(
+        numeric_vector(&lambda_scalar, "Lambda").unwrap(),
+        vec![0.25]
+    );
+    let lambda_vector = tensor(vec![0.25, 0.5], vec![2]);
+    assert_eq!(
+        numeric_vector(&lambda_vector, "Lambda").unwrap(),
+        vec![0.25, 0.5]
+    );
+    let lambda_matrix = tensor(vec![0.1, 0.2, 0.3, 0.4], vec![2, 2]);
+    assert!(numeric_vector(&lambda_matrix, "Lambda").is_err());
+}
+
 #[test]
 fn explicit_lambda_recovers_sparse_coefficients_with_intercept() {
     let x = tensor(
@@ -55,7 +84,7 @@ fn explicit_lambda_recovers_sparse_coefficients_with_intercept() {
     let Value::Tensor(coeffs) = out else {
         panic!("expected coefficient tensor");
     };
-    assert_eq!(coeffs.shape, vec![2, 1]);
+    assert_eq!(coeffs.shape(), &[2, 1]);
     assert!((coeffs.materialize_f64()[0] - 2.0).abs() < 1.0e-8);
     assert!(coeffs.materialize_f64()[1].abs() < 1.0e-8);
 }
@@ -147,7 +176,7 @@ fn alpha_weights_and_fitinfo_output_are_supported() {
     let Value::Tensor(coeffs) = b else {
         panic!("expected coefficients");
     };
-    assert_eq!(coeffs.shape, vec![2, 2]);
+    assert_eq!(coeffs.shape(), &[2, 2]);
     let Value::Struct(info) = fit_info else {
         panic!("expected FitInfo struct");
     };
@@ -183,7 +212,7 @@ fn lasso_reads_typed_integer_storage_exactly() {
     let Value::Tensor(coeffs) = out else {
         panic!("expected coefficient tensor");
     };
-    assert_eq!(coeffs.shape, vec![1, 1]);
+    assert_eq!(coeffs.shape(), &[1, 1]);
     assert!((coeffs.materialize_f64()[0] - 2.0).abs() < 1.0e-8);
 }
 
@@ -320,7 +349,7 @@ fn dfmax_filters_cv_fields_consistently() {
     let lambda = row_field(&info, "Lambda");
     let mse = row_field(&info, "MSE");
     let se = row_field(&info, "SE");
-    assert_eq!(coeffs.cols, lambda.materialize_f64().len());
+    assert_eq!(coeffs.cols(), lambda.materialize_f64().len());
     assert_eq!(mse.materialize_f64().len(), lambda.materialize_f64().len());
     assert_eq!(se.materialize_f64().len(), lambda.materialize_f64().len());
     let Some(Value::Num(index_min_mse)) = info.fields.get("IndexMinMSE") else {
