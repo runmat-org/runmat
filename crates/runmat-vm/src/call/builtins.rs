@@ -519,7 +519,6 @@ async fn eval_workspace_source(
         Ok(crate::interpreter::api::InterpreterOutcome::Completed(completion)) => {
             let vars = completion.values;
             if let Some(snapshot) = updated_workspace {
-                let result_vars = snapshot.vars.clone();
                 replace_workspace_target_vars_and_state(
                     target,
                     snapshot.vars,
@@ -529,10 +528,8 @@ async fn eval_workspace_source(
                     effects.workspace_report.clone(),
                 )
                 .map_err(|err| dynamic_workspace_commit_error(builtin, err))?;
-                result_vars
-            } else {
-                vars
             }
+            vars
         }
         Err(err) => {
             if commit_workspace_on_error {
