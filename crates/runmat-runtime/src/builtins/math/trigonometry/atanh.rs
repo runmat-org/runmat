@@ -379,7 +379,7 @@ pub(crate) mod tests {
         let result = atanh_builtin(Value::Tensor(tensor)).expect("atanh");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 let expected = [
                     0.0,
                     0.5493061443340549,
@@ -405,7 +405,7 @@ pub(crate) mod tests {
 
         match atanh_builtin(Value::Tensor(tensor)).expect("atanh") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 assert!(
                     out.materialize_f64()[0].is_infinite()
                         && out.materialize_f64()[0].is_sign_negative()
@@ -485,7 +485,7 @@ pub(crate) mod tests {
 
         match atanh_builtin(Value::Tensor(tensor)).expect("atanh") {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), &[1, 2]);
                 let expected = atanh_real_outside_domain(2.0);
                 assert!((out.materialize_f64()[0].0 - expected.0).abs() < 1e-12);
                 assert!((out.materialize_f64()[0].1 - expected.1).abs() < 1e-12);
@@ -517,7 +517,7 @@ pub(crate) mod tests {
         let result = atanh_builtin(Value::Tensor(tensor)).expect("atanh");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 let expected = [
                     atanh_real_outside_domain(2.0),
                     atanh_real_outside_domain(-3.0),
@@ -543,7 +543,7 @@ pub(crate) mod tests {
         let result = atanh_builtin(Value::ComplexTensor(complex)).expect("atanh");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 for (actual, input) in t.materialize_f64().iter().zip(inputs.iter()) {
                     let expected = input.atanh();
                     assert!((actual.0 - expected.re).abs() < 1e-12);
@@ -585,7 +585,7 @@ pub(crate) mod tests {
         let result = atanh_builtin(Value::CharArray(chars)).expect("atanh");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 // 'A' = 65, 'B' = 66 -> complex outputs
                 for (idx, (re, im)) in t.materialize_f64().iter().enumerate() {
                     let value = (65 + idx) as f64;
@@ -606,7 +606,7 @@ pub(crate) mod tests {
         let result = atanh_builtin(Value::LogicalArray(logical)).expect("atanh");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert!(t.materialize_f64()[0] == 0.0);
                 assert!(t.materialize_f64()[1].is_infinite());
             }
@@ -622,7 +622,7 @@ pub(crate) mod tests {
                 Tensor::new(vec![-0.5, -0.25, 0.25, 0.5], vec![2, 2]).expect("tensor construction");
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = atanh_builtin(Value::GpuTensor(handle)).expect("atanh");
@@ -632,7 +632,7 @@ pub(crate) mod tests {
                 .iter()
                 .map(|&x| x.atanh())
                 .collect();
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), &[2, 2]);
             for (actual, exp) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((actual - exp).abs() < 1e-12);
             }
@@ -647,7 +647,7 @@ pub(crate) mod tests {
                 .expect("tensor construction");
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = atanh_builtin(Value::GpuTensor(handle)).expect("atanh");
@@ -661,7 +661,7 @@ pub(crate) mod tests {
                         .copied()
                         .map(f64::atanh)
                         .collect();
-                    assert_eq!(gathered.shape, vec![2, 2]);
+                    assert_eq!(gathered.shape(), &[2, 2]);
                     for (actual, exp) in gathered.materialize_f64().iter().zip(expected.iter()) {
                         assert!((actual - exp).abs() < 1e-12);
                     }
@@ -678,7 +678,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.5, 2.0], vec![2, 1]).expect("tensor construction");
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = atanh_builtin(Value::GpuTensor(handle)).expect("atanh");
@@ -695,7 +695,7 @@ pub(crate) mod tests {
             };
             match result {
                 Value::ComplexTensor(t) => {
-                    assert_eq!(t.shape, vec![2, 1]);
+                    assert_eq!(t.shape(), &[2, 1]);
                     let expected: Vec<(f64, f64)> = tensor
                         .materialize_f64()
                         .iter()
@@ -726,7 +726,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.5, 2.0], vec![2, 1]).expect("tensor construction");
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let error = block_on(super::atanh_builtin(Value::GpuTensor(handle)))
@@ -757,13 +757,13 @@ pub(crate) mod tests {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
 
         let result = atanh_builtin(Value::GpuTensor(handle)).expect("atanh");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, tensor.shape);
+        assert_eq!(gathered.shape(), tensor.shape());
 
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,

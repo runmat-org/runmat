@@ -368,7 +368,7 @@ pub(crate) mod tests {
         let result = acosh_builtin(Value::Tensor(tensor)).expect("acosh");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
                 let expected = [
                     (0.0, 1.0471975511965976),
                     (0.0, 0.0),
@@ -392,7 +392,7 @@ pub(crate) mod tests {
 
         match acosh_builtin(Value::Tensor(tensor)).expect("acosh") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 let expected = [0.0, 2.0f64.acosh(), 3.0f64.acosh()];
                 for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
@@ -411,7 +411,7 @@ pub(crate) mod tests {
 
         match acosh_builtin(Value::Tensor(tensor)).expect("acosh") {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), &[1, 2]);
                 assert_eq!(out.materialize_f64()[0], (0.0, std::f64::consts::FRAC_PI_2));
                 assert!((out.materialize_f64()[1].0 - 2.0f64.acosh()).abs() < 1e-12);
                 assert_eq!(out.materialize_f64()[1].1, 0.0);
@@ -427,7 +427,7 @@ pub(crate) mod tests {
         let result = acosh_builtin(Value::LogicalArray(logical)).expect("acosh");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 let expected = [
                     (0.0, 0.0),
                     (0.0, std::f64::consts::FRAC_PI_2),
@@ -450,7 +450,7 @@ pub(crate) mod tests {
         let result = acosh_builtin(Value::CharArray(chars)).expect("acosh");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 let expected: Vec<f64> =
                     "Az".chars().map(|ch| (ch as u32 as f64).acosh()).collect();
                 for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
@@ -458,7 +458,7 @@ pub(crate) mod tests {
                 }
             }
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 let expected: Vec<Complex64> = "Az"
                     .chars()
                     .map(|ch| Complex64::new(ch as u32 as f64, 0.0).acosh())
@@ -483,7 +483,7 @@ pub(crate) mod tests {
                 assert!((im - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
             }
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 1]);
+                assert_eq!(t.shape(), &[1, 1]);
                 let (re, im) = t.materialize_f64()[0];
                 assert!(re.abs() < 1e-12);
                 assert!((im - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
@@ -501,7 +501,7 @@ pub(crate) mod tests {
         let result = acosh_builtin(Value::ComplexTensor(complex)).expect("acosh");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 for (actual, input) in t.materialize_f64().iter().zip(inputs.iter()) {
                     let expected = input.acosh();
                     assert!((actual.0 - expected.re).abs() < 1e-12);
@@ -586,12 +586,12 @@ pub(crate) mod tests {
                 Tensor::new(vec![1.0, 2.0, 5.0, 10.0], vec![4, 1]).expect("tensor construction");
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = acosh_builtin(Value::GpuTensor(handle)).expect("acosh");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), &[4, 1]);
             for (actual, expected) in gathered
                 .materialize_f64()
                 .iter()
@@ -610,7 +610,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.5, 2.0], vec![2, 1]).expect("tensor construction");
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = acosh_builtin(Value::GpuTensor(handle)).expect("acosh");
@@ -619,7 +619,7 @@ pub(crate) mod tests {
                 .expect("gather complex result");
             match gathered {
                 Value::ComplexTensor(t) => {
-                    assert_eq!(t.shape, vec![2, 1]);
+                    assert_eq!(t.shape(), &[2, 1]);
                     let expected = [
                         Complex64::new(0.5, 0.0).acosh(),
                         Complex64::new(2.0, 0.0).acosh(),
@@ -646,14 +646,14 @@ pub(crate) mod tests {
         let cpu = acosh_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu = block_on(acosh_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
             Value::Tensor(ct) => {
-                assert_eq!(gathered.shape, ct.shape);
+                assert_eq!(gathered.shape(), ct.shape());
                 let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

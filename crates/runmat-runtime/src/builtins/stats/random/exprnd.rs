@@ -191,7 +191,7 @@ fn build_output(data: Vec<f64>, parsed: ParsedExprnd) -> BuiltinResult<Value> {
             &handle,
             &source,
             provider,
-            &output.shape,
+            output.shape(),
             required_precision,
         ) {
             return Err(gpu_helpers::reject_gpu_output(

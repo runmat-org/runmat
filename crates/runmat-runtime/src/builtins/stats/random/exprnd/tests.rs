@@ -80,7 +80,7 @@ fn exprnd_matrix_dims() {
     let result = block_on(exprnd_builtin(args)).expect("exprnd");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![3, 4]);
+            assert_eq!(t.shape(), &[3, 4]);
             assert!(t.materialize_f64().iter().all(|&v| v > 0.0));
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -95,7 +95,7 @@ fn exprnd_size_vec() {
     let args = vec![Value::Num(1.0), Value::Tensor(size)];
     let result = block_on(exprnd_builtin(args)).expect("exprnd");
     match result {
-        Value::Tensor(t) => assert_eq!(t.shape, vec![3, 4]),
+        Value::Tensor(t) => assert_eq!(t.shape(), &[3, 4]),
         other => panic!("expected tensor, got {other:?}"),
     }
 }
@@ -111,7 +111,7 @@ fn exprnd_reads_typed_integer_mu_and_size_exactly() {
         block_on(exprnd_builtin(vec![Value::Tensor(mu), Value::Tensor(size)])).expect("exprnd");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 3]);
+            assert_eq!(t.shape(), &[2, 3]);
             assert!(t.materialize_f64().iter().all(|&v| v > 0.0));
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -166,9 +166,31 @@ fn exprnd_array_mu_preserves_shape_and_native_single() {
     let Value::Tensor(tensor) = result else {
         panic!("expected tensor output");
     };
-    assert_eq!(tensor.shape, vec![2, 2]);
+    assert_eq!(tensor.shape(), &[2, 2]);
     assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
     assert!(tensor.materialize_f64().iter().all(|value| *value > 0.0));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn exprnd_normalizes_rank_zero_and_rank_one_mu_shapes() {
+    let _guard = random::test_guard();
+    reset();
+
+    let scalar = block_on(exprnd_builtin(vec![Value::Tensor(
+        Tensor::new(vec![1.0], Vec::new()).unwrap(),
+    )]))
+    .expect("rank-zero mu");
+    assert!(matches!(scalar, Value::Num(value) if value >= 0.0));
+
+    let vector = block_on(exprnd_builtin(vec![Value::Tensor(
+        Tensor::new(vec![1.0, 2.0], vec![2]).unwrap(),
+    )]))
+    .expect("rank-one mu");
+    let Value::Tensor(vector) = vector else {
+        panic!("rank-one output");
+    };
+    assert_eq!(vector.shape(), &[2, 1]);
 }
 
 #[test]
@@ -197,7 +219,7 @@ fn exprnd_normalizes_empty_and_trailing_singleton_sizes() {
     let Value::Tensor(empty) = empty else {
         panic!("expected empty tensor");
     };
-    assert_eq!(empty.shape, vec![0, 3]);
+    assert_eq!(empty.shape(), &[0, 3]);
     assert_eq!(before.state, random::snapshot().unwrap().state);
 
     let output = block_on(exprnd_builtin(vec![
@@ -210,7 +232,7 @@ fn exprnd_normalizes_empty_and_trailing_singleton_sizes() {
     let Value::Tensor(output) = output else {
         panic!("expected tensor");
     };
-    assert_eq!(output.shape, vec![3, 1]);
+    assert_eq!(output.shape(), &[3, 1]);
 }
 
 #[test]
@@ -366,7 +388,7 @@ fn exprnd_resident_single_mean_stays_host_when_owner_is_physically_f64() {
         let Value::Tensor(output) = output else {
             panic!("expected host single output");
         };
-        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(output.shape(), &[2, 1]);
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
         assert!(output.materialize_f64().iter().all(|value| *value > 0.0));
     });

@@ -80,7 +80,7 @@ fn encode(
             let (element_type, data) = encode_complex_storage(value.complex_storage());
             InlineValue::Dense(DenseValue {
                 element_type,
-                shape: shape(&value.shape, path)?,
+                shape: shape(value.shape(), path)?,
                 little_endian_data: data,
             })
         }
@@ -352,7 +352,7 @@ fn encode_tensor(value: &Tensor, path: &str) -> Result<DenseValue, ValueCodecErr
     };
     Ok(DenseValue {
         element_type,
-        shape: shape(&value.shape, path)?,
+        shape: shape(value.shape(), path)?,
         little_endian_data,
     })
 }

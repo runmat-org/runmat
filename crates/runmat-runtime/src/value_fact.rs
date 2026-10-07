@@ -27,7 +27,7 @@ pub fn value_fact(value: &Value) -> ValueFact {
         Value::CharArray(value) => dense(ValueKindFact::Character, &value.shape),
         Value::Tensor(value) => dense(
             numeric_kind(dtype_class(value.numeric_dtype()), NumericDomain::Real),
-            &value.shape,
+            value.shape(),
         ),
         Value::SparseTensor(value) => {
             let kind = value
@@ -39,7 +39,7 @@ pub fn value_fact(value: &Value) -> ValueFact {
         }
         Value::ComplexTensor(value) => dense(
             numeric_kind(dtype_class(value.numeric_dtype()), NumericDomain::Complex),
-            &value.shape,
+            value.shape(),
         ),
         Value::Symbolic(_) => scalar(ValueKindFact::Symbolic),
         Value::SymbolicArray(value) => dense(ValueKindFact::Symbolic, &value.shape),
@@ -477,7 +477,31 @@ mod tests {
     use super::*;
     use runmat_accelerate_api::test_support::TestAllocationOwner;
     use runmat_accelerate_api::{GpuTensorStorage, NumericElementType};
-    use runmat_value::{CellArray, ForeignRef, ForeignResourceKey, Tensor};
+    use runmat_value::{CellArray, ComplexTensor, ForeignRef, ForeignResourceKey, Tensor};
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn dense_numeric_facts_preserve_low_rank_shape_and_domain() {
+        for dimensions in [Vec::new(), vec![2]] {
+            let len = dimensions.iter().product::<usize>();
+            let real = Value::Tensor(Tensor::from_f32(vec![1.0; len], dimensions.clone()).unwrap());
+            let complex = Value::ComplexTensor(
+                ComplexTensor::new(vec![(1.0, 2.0); len], dimensions.clone()).unwrap(),
+            );
+            for (value, class, domain) in [
+                (real, NumericClass::Single, NumericDomain::Real),
+                (complex, NumericClass::Double, NumericDomain::Complex),
+            ] {
+                let fact = value_fact(&value);
+                assert_eq!(fact.shape, shape(&dimensions));
+                assert_eq!(
+                    fact.kind,
+                    ValueKindFact::Numeric(NumericFact { class, domain })
+                );
+                assert_eq!(fact.storage, StorageFact::Dense);
+            }
+        }
+    }
 
     #[test]
     fn preserves_recursive_numeric_class_and_shape() {

@@ -592,7 +592,7 @@ fn ensure_rng_state_extensions(args: &[Value]) -> BuiltinResult<()> {
 
 fn parse_state_scalar(value: &Value) -> BuiltinResult<u64> {
     match value {
-        Value::Tensor(t) => match tensor::element_count(&t.shape) {
+        Value::Tensor(t) => match tensor::element_count(t.shape()) {
             1 => {
                 if let Some(int) = t.integer_storage().and_then(|storage| storage.value_at(0)) {
                     int.try_to_u64().ok_or_else(|| {
@@ -909,6 +909,32 @@ pub(crate) mod tests {
         )
         .expect("state word");
         assert!(parse_state_scalar(&Value::Tensor(wide_word)).is_err());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn rng_restores_rank_zero_and_rank_one_state_tensors() {
+        let _guard = random::test_guard();
+        random::reset_rng();
+
+        for (state, expected) in [
+            (Tensor::new(vec![7.0], Vec::new()).unwrap(), 7_u64),
+            (
+                Tensor::new(vec![3.0, 4.0], vec![2]).unwrap(),
+                3_u64 | (4_u64 << 32),
+            ),
+        ] {
+            let Value::Struct(mut snapshot) =
+                block_on(rng_builtin(Vec::new())).expect("rng snapshot")
+            else {
+                panic!("rng snapshot struct");
+            };
+            snapshot
+                .fields
+                .insert("State".to_string(), Value::Tensor(state));
+            block_on(rng_builtin(vec![Value::Struct(snapshot)])).expect("restore state");
+            assert_eq!(random::snapshot().unwrap().state, expected);
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

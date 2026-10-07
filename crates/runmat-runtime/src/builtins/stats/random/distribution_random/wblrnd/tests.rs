@@ -48,7 +48,7 @@ fn accepts_scalar_expansion_and_explicit_size_forms() {
     let Value::Tensor(output) = output else {
         panic!("expected tensor output");
     };
-    assert_eq!(output.shape, vec![1, 2]);
+    assert_eq!(output.shape(), &[1, 2]);
     assert!(output.materialize_f64().iter().all(|value| *value > 0.0));
 
     let output = block_on(wblrnd_builtin(vec![
@@ -61,7 +61,7 @@ fn accepts_scalar_expansion_and_explicit_size_forms() {
     let Value::Tensor(output) = output else {
         panic!("expected tensor output");
     };
-    assert_eq!(output.shape, vec![2, 4]);
+    assert_eq!(output.shape(), &[2, 4]);
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn runmat_extensions_preserve_exact_values_and_single_selection() {
         panic!("expected single tensor");
     };
     assert_eq!(output.numeric_dtype(), NumericDType::F32);
-    assert_eq!(output.shape, vec![1, 2]);
+    assert_eq!(output.shape(), &[1, 2]);
 
     let logical = block_on(wblrnd_builtin(vec![
         Value::LogicalArray(LogicalArray::new(vec![1, 1], vec![1, 2]).unwrap()),
@@ -152,7 +152,7 @@ fn runmat_extensions_preserve_exact_values_and_single_selection() {
     let Value::Tensor(logical) = logical else {
         panic!("expected logical-extension tensor output");
     };
-    assert_eq!(logical.shape, vec![1, 2]);
+    assert_eq!(logical.shape(), &[1, 2]);
     assert_eq!(logical.numeric_dtype(), NumericDType::F64);
 
     let exact = block_on(wblrnd_builtin(vec![
@@ -223,7 +223,7 @@ fn normalizes_sizes_and_checks_each_nonscalar_parameter() {
     let Value::Tensor(square) = square else {
         panic!("expected square tensor");
     };
-    assert_eq!(square.shape, vec![3, 3]);
+    assert_eq!(square.shape(), &[3, 3]);
 
     let empty = block_on(wblrnd_builtin(vec![
         Value::Num(2.0),
@@ -235,7 +235,7 @@ fn normalizes_sizes_and_checks_each_nonscalar_parameter() {
     let Value::Tensor(empty) = empty else {
         panic!("expected empty tensor");
     };
-    assert_eq!(empty.shape, vec![0, 4]);
+    assert_eq!(empty.shape(), &[0, 4]);
 
     for arguments in [
         vec![

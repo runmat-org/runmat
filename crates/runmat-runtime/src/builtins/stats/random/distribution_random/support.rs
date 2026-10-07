@@ -132,7 +132,7 @@ impl RandomBoundary {
 
     async fn parse_shape_value(&self, value: &Value) -> BuiltinResult<Vec<usize>> {
         let tensor = self.value_to_tensor(value).await?;
-        if tensor.len() > 1 && !(tensor.shape.len() == 1 || tensor.shape.first() == Some(&1)) {
+        if tensor.len() > 1 && !(tensor.shape().len() == 1 || tensor.shape().first() == Some(&1)) {
             return Err(self.invalid("size vector must be a row vector"));
         }
         (0..tensor.len())

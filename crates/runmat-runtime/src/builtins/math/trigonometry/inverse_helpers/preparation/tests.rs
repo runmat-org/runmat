@@ -152,7 +152,7 @@ fn floating_trig_preparation_preserves_empty_nd_shape_single_and_values() {
             let Value::Tensor(result) = result else {
                 panic!("typed tensor expected")
             };
-            assert_eq!(result.shape, shape);
+            assert_eq!(result.shape(), shape.as_slice());
             assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::F32);
             for (&actual, source) in result.as_f32_slice().unwrap().iter().zip(data) {
                 let expected = match *name {

@@ -35,7 +35,7 @@ fn accepts_broadcast_and_explicit_size_forms() {
     let Value::Tensor(output) = output else {
         panic!("expected tensor output");
     };
-    assert_eq!(output.shape, vec![1, 3]);
+    assert_eq!(output.shape(), &[1, 3]);
     assert!(output.materialize_f64().iter().all(|value| *value >= 0.0));
 
     let output = block_on(gamrnd_builtin(vec![
@@ -48,7 +48,7 @@ fn accepts_broadcast_and_explicit_size_forms() {
     let Value::Tensor(output) = output else {
         panic!("expected tensor output");
     };
-    assert_eq!(output.shape, vec![2, 4]);
+    assert_eq!(output.shape(), &[2, 4]);
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn preserves_single_from_either_parameter_and_with_integer_extensions() {
             panic!("expected native-single tensor");
         };
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
-        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.shape(), &[1, 2]);
     }
 
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
@@ -131,7 +131,7 @@ fn integer_sizes_are_exact_and_sampling_boundaries_reject_loss() {
     let Value::Tensor(output) = output else {
         panic!("expected tensor output");
     };
-    assert_eq!(output.shape, vec![2, 3]);
+    assert_eq!(output.shape(), &[2, 3]);
 
     let error = block_on(gamrnd_builtin(vec![
         integer_tensor(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]),
@@ -167,7 +167,7 @@ fn applies_documented_size_normalization_and_shape_constraints() {
     let Value::Tensor(square) = square else {
         panic!("expected square tensor");
     };
-    assert_eq!(square.shape, vec![3, 3]);
+    assert_eq!(square.shape(), &[3, 3]);
 
     let empty = block_on(gamrnd_builtin(vec![
         Value::Num(2.0),
@@ -179,7 +179,7 @@ fn applies_documented_size_normalization_and_shape_constraints() {
     let Value::Tensor(empty) = empty else {
         panic!("expected empty tensor");
     };
-    assert_eq!(empty.shape, vec![0, 4]);
+    assert_eq!(empty.shape(), &[0, 4]);
     assert!(empty.is_empty());
 
     let trailing = block_on(gamrnd_builtin(vec![
@@ -191,7 +191,7 @@ fn applies_documented_size_normalization_and_shape_constraints() {
     let Value::Tensor(trailing) = trailing else {
         panic!("expected tensor output");
     };
-    assert_eq!(trailing.shape, vec![3, 1]);
+    assert_eq!(trailing.shape(), &[3, 1]);
 
     let column_size = Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap());
     let error = block_on(gamrnd_builtin(vec![

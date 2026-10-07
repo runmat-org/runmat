@@ -279,6 +279,47 @@ pub(crate) mod tests {
         block_on(super::acos_builtin(value))
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn acos_preserves_low_rank_real_and_complex_promotion_shapes() {
+        let scalar = acos_builtin(Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap()))
+            .expect("rank-zero real acos");
+        let Value::Num(scalar) = scalar else {
+            panic!("expected real scalar")
+        };
+        assert!((scalar - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+
+        let vector = acos_builtin(Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2]).unwrap()))
+            .expect("rank-one real acos");
+        let Value::Tensor(vector) = vector else {
+            panic!("expected rank-one real tensor")
+        };
+        assert_eq!(vector.shape(), &[2]);
+        let real_values = vector.materialize_f64();
+        assert!((real_values[0] - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+        assert_eq!(real_values[1], 0.0);
+
+        let promoted_scalar =
+            acos_builtin(Value::Tensor(Tensor::new(vec![2.0], Vec::new()).unwrap()))
+                .expect("rank-zero complex promotion");
+        let Value::Complex(real, imaginary) = promoted_scalar else {
+            panic!("expected complex scalar")
+        };
+        assert_eq!(real, 0.0);
+        assert_eq!(imaginary, -2.0f64.acosh());
+
+        let promoted = acos_builtin(Value::Tensor(Tensor::new(vec![0.0, 2.0], vec![2]).unwrap()))
+            .expect("rank-one complex promotion");
+        let Value::ComplexTensor(promoted) = promoted else {
+            panic!("expected rank-one complex tensor")
+        };
+        assert_eq!(promoted.shape(), &[2]);
+        let values = promoted.materialize_f64();
+        assert!((values[0].0 - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+        assert_eq!(values[0].1, 0.0);
+        assert_eq!(values[1], (0.0, -2.0f64.acosh()));
+    }
+
     #[test]
     fn acos_extensions_and_output_arity_are_gated() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -439,7 +480,7 @@ pub(crate) mod tests {
         let result = acos_builtin(Value::Tensor(tensor)).expect("acos matrix");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 let expected = [
                     0.0f64.acos(),
                     (-0.5f64).acos(),
@@ -465,7 +506,7 @@ pub(crate) mod tests {
 
         match acos_builtin(Value::Tensor(tensor)).expect("acos") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 let expected = [std::f64::consts::PI, std::f64::consts::FRAC_PI_2, 0.0];
                 for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
@@ -484,7 +525,7 @@ pub(crate) mod tests {
 
         match acos_builtin(Value::Tensor(tensor)).expect("acos") {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), &[1, 2]);
                 let expected = acos_real_matlab(2.0);
                 assert!((out.materialize_f64()[0].0 - expected.0).abs() < 1e-12);
                 assert!((out.materialize_f64()[0].1 - expected.1).abs() < 1e-12);
@@ -621,7 +662,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 0.5, -0.75, 1.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let Value::GpuTensor(result_handle) =
@@ -636,7 +677,7 @@ pub(crate) mod tests {
                 })
             );
             let gathered = test_support::gather(Value::GpuTensor(result_handle)).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), &[2, 2]);
             let expected = [
                 0.0f64.acos(),
                 0.5f64.acos(),
@@ -656,7 +697,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0 + 5e-13, -1.3], vec![2, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let Value::GpuTensor(result_handle) =
@@ -675,7 +716,7 @@ pub(crate) mod tests {
                 .expect("gather complex result");
             match gathered {
                 Value::ComplexTensor(ct) => {
-                    assert_eq!(ct.shape, vec![2, 1]);
+                    assert_eq!(ct.shape(), &[2, 1]);
                 }
                 Value::Complex(_, _) => {}
                 other => panic!("expected complex result, got {other:?}"),
@@ -695,14 +736,14 @@ pub(crate) mod tests {
         let cpu = acos_real(Value::Tensor(t.clone())).expect("acos cpu");
         let view = runmat_accelerate_api::HostTensorView {
             data: &t.materialize_f64(),
-            shape: &t.shape,
+            shape: t.shape(),
         };
         let h = provider.upload(&view).unwrap();
         let gpu = block_on(acos_gpu(h)).expect("acos gpu");
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
-                assert_eq!(gt.shape, ct.shape);
+                assert_eq!(gt.shape(), ct.shape());
                 let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-3,

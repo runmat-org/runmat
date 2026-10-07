@@ -22,7 +22,7 @@ pub(super) async fn parse_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedE
         exprnd_error_with(&EXPRND_ERROR_INVALID_ARGUMENT, format!("exprnd: {err}"))
     })?;
     let mu_tensor = value_to_mu_tensor(gathered)?;
-    let mu_shape = normalize_shape(mu_tensor.shape.clone());
+    let mu_shape = normalize_shape(mu_tensor.shape().to_vec());
     let mu = tensor::tensor_into_values_f64(mu_tensor);
     let shape = if args.len() == 1 {
         mu_shape.clone()
@@ -132,7 +132,7 @@ pub(super) fn dimensions_from_host_value(value: &Value) -> BuiltinResult<Vec<usi
         Value::Int(value) => Ok(vec![integer_dimension(value)?]),
         Value::Tensor(tensor) => {
             let vector = tensor.len() <= 1
-                || tensor.shape.iter().filter(|extent| **extent != 1).count() <= 1;
+                || tensor.shape().iter().filter(|extent| **extent != 1).count() <= 1;
             if !vector {
                 return Err(exprnd_error_with(
                     &EXPRND_ERROR_INVALID_ARGUMENT,

@@ -48,7 +48,7 @@ fn accepts_scalar_expansion_and_explicit_size_forms() {
     let Value::Tensor(output) = output else {
         panic!("expected tensor output");
     };
-    assert_eq!(output.shape, vec![1, 2]);
+    assert_eq!(output.shape(), &[1, 2]);
     assert!((0.0..=5.0).contains(&output.materialize_f64()[0]));
     assert!((0.0..=10.0).contains(&output.materialize_f64()[1]));
 
@@ -62,7 +62,7 @@ fn accepts_scalar_expansion_and_explicit_size_forms() {
     let Value::Tensor(output) = output else {
         panic!("expected tensor output");
     };
-    assert_eq!(output.shape, vec![2, 4]);
+    assert_eq!(output.shape(), &[2, 4]);
 }
 
 #[test]
@@ -224,7 +224,7 @@ fn applies_size_normalization_and_checks_both_parameter_shapes() {
     let Value::Tensor(square) = square else {
         panic!("expected square tensor");
     };
-    assert_eq!(square.shape, vec![3, 3]);
+    assert_eq!(square.shape(), &[3, 3]);
 
     let empty = block_on(binornd_builtin(vec![
         Value::Num(2.0),
@@ -236,7 +236,7 @@ fn applies_size_normalization_and_checks_both_parameter_shapes() {
     let Value::Tensor(empty) = empty else {
         panic!("expected empty tensor");
     };
-    assert_eq!(empty.shape, vec![0, 4]);
+    assert_eq!(empty.shape(), &[0, 4]);
     assert!(empty.is_empty());
 
     for arguments in [
@@ -259,6 +259,42 @@ fn applies_size_normalization_and_checks_both_parameter_shapes() {
             BINORND_ERROR_INVALID_ARGUMENT.identifier
         );
     }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn binornd_size_tensor_preserves_rank_zero_rank_one_and_row_only_policy() {
+    let _guard = reset();
+
+    let square = block_on(binornd_builtin(vec![
+        Value::Num(2.0),
+        Value::Num(0.5),
+        Value::Tensor(Tensor::new(vec![2.0], Vec::new()).unwrap()),
+    ]))
+    .expect("rank-zero scalar size");
+    let Value::Tensor(square) = square else {
+        panic!("square output");
+    };
+    assert_eq!(square.shape(), &[2, 2]);
+
+    let rectangle = block_on(binornd_builtin(vec![
+        Value::Num(2.0),
+        Value::Num(0.5),
+        Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![2]).unwrap()),
+    ]))
+    .expect("rank-one size vector");
+    let Value::Tensor(rectangle) = rectangle else {
+        panic!("rectangular output");
+    };
+    assert_eq!(rectangle.shape(), &[2, 3]);
+
+    let error = block_on(binornd_builtin(vec![
+        Value::Num(2.0),
+        Value::Num(0.5),
+        Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap()),
+    ]))
+    .expect_err("column size vector remains invalid");
+    assert!(error.message().contains("size vector must be a row vector"));
 }
 
 #[test]

@@ -356,7 +356,7 @@ pub(crate) mod tests {
         let result = asin_builtin(Value::Tensor(tensor)).expect("asin matrix");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 let expected = [0.0, (-0.5f64).asin(), (0.75f64).asin(), 1.0f64.asin()];
                 for (a, b) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12);
@@ -377,7 +377,7 @@ pub(crate) mod tests {
 
         match asin_builtin(Value::Tensor(tensor)).expect("asin") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 let expected = [
                     -std::f64::consts::FRAC_PI_2,
                     0.0,
@@ -400,7 +400,7 @@ pub(crate) mod tests {
 
         match asin_builtin(Value::Tensor(tensor)).expect("asin") {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), &[1, 2]);
                 let expected = Complex64::new(2.0, 0.0).asin();
                 assert!((out.materialize_f64()[0].0 - expected.re).abs() < 1e-12);
                 assert!((out.materialize_f64()[0].1 - expected.im).abs() < 1e-12);
@@ -501,7 +501,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 0.5, -0.75, 1.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let Value::GpuTensor(result_handle) =
@@ -516,7 +516,7 @@ pub(crate) mod tests {
                 })
             );
             let gathered = test_support::gather(Value::GpuTensor(result_handle)).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), &[2, 2]);
             let expected = [0.0, 0.5f64.asin(), (-0.75f64).asin(), 1.0f64.asin()];
             for (a, b) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((a - b).abs() < 1e-12);
@@ -531,7 +531,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0 + 5e-13, -1.3], vec![2, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let Value::GpuTensor(result_handle) =
@@ -550,7 +550,7 @@ pub(crate) mod tests {
                 .expect("gather complex result");
             match gathered {
                 Value::ComplexTensor(ct) => {
-                    assert_eq!(ct.shape, vec![2, 1]);
+                    assert_eq!(ct.shape(), &[2, 1]);
                 }
                 Value::Complex(_, _) => {}
                 other => panic!("expected complex result, got {other:?}"),
@@ -570,14 +570,14 @@ pub(crate) mod tests {
         let cpu = asin_real(Value::Tensor(t.clone())).expect("asin cpu");
         let view = runmat_accelerate_api::HostTensorView {
             data: &t.materialize_f64(),
-            shape: &t.shape,
+            shape: t.shape(),
         };
         let h = provider.upload(&view).unwrap();
         let gpu = block_on(asin_gpu(h)).expect("asin gpu");
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
-                assert_eq!(gt.shape, ct.shape);
+                assert_eq!(gt.shape(), ct.shape());
                 let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-3,

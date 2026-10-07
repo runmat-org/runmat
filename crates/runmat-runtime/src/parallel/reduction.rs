@@ -126,8 +126,8 @@ fn logical_identity(prototype: &Value, value: bool) -> Result<Value, RuntimeErro
 fn numeric_shape(value: &Value) -> Option<Vec<usize>> {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Complex(_, _) => Some(vec![1, 1]),
-        Value::Tensor(value) => Some(value.shape.clone()),
-        Value::ComplexTensor(value) => Some(value.shape.clone()),
+        Value::Tensor(value) => Some(value.shape().to_vec()),
+        Value::ComplexTensor(value) => Some(value.shape().to_vec()),
         _ => None,
     }
 }

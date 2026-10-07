@@ -28,6 +28,26 @@ mod tests {
         validate_durable_preparation, ValueCodecError,
     };
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn dense_low_rank_values_round_trip_without_shape_or_class_conversion() {
+        for dimensions in [Vec::new(), vec![2]] {
+            let len = dimensions.iter().product::<usize>();
+            let real = Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX; len]), dimensions.clone())
+                    .unwrap(),
+            );
+            let complex = Value::ComplexTensor(
+                ComplexTensor::from_f32(vec![(0.25, -0.5); len], dimensions).unwrap(),
+            );
+            for source in [real, complex] {
+                let encoded = encode_inline_value(&source).unwrap();
+                let decoded = decode_inline_value(&encoded).unwrap();
+                assert_eq!(decoded, source);
+            }
+        }
+    }
+
     #[test]
     fn durable_nested_values_keep_character_pages_and_reject_context_bound_callables() {
         let chars = Value::CharArray(
@@ -297,7 +317,7 @@ mod tests {
             decoded_values[1],
             runmat_value::ComplexElement(f32::MAX, f32::MIN_POSITIVE)
         );
-        assert_eq!(decoded_single.shape, vec![1, 2]);
+        assert_eq!(decoded_single.shape(), &[1, 2]);
 
         let integer_components = [
             (

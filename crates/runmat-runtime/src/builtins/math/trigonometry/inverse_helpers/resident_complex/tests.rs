@@ -38,7 +38,7 @@ fn check(provider: &'static dyn AccelProvider, single: bool) {
         else {
             panic!("{name}: complex array required");
         };
-        assert_eq!(actual.shape, input.shape, "{name}");
+        assert_eq!(actual.shape(), input.shape(), "{name}");
         assert_eq!(
             actual.numeric_dtype(),
             if single {

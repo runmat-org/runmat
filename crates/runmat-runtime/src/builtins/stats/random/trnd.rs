@@ -285,7 +285,7 @@ async fn parse_args(
         .map_err(|err| trnd_error(&ERROR_INVALID_ARGUMENT, format!("trnd: {err}")))?;
     let nu = tensor::value_into_tensor_for(BUILTIN_NAME, nu_value)
         .map_err(|err| trnd_error(&ERROR_INVALID_ARGUMENT, format!("trnd: {err}")))?;
-    let nu_shape = nu.shape.clone();
+    let nu_shape = nu.shape().to_vec();
     let nu = tensor::tensor_into_values_f64(nu);
     if nu.iter().any(|value| value.is_nan() || *value <= 0.0) {
         return Err(trnd_error(
@@ -404,7 +404,7 @@ mod tests {
         ]))
         .expect("trnd");
         match out {
-            Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![3, 4]),
+            Value::Tensor(tensor) => assert_eq!(tensor.shape(), &[3, 4]),
             other => panic!("expected tensor, got {other:?}"),
         }
 
@@ -412,9 +412,31 @@ mod tests {
         let out = block_on(trnd_builtin(vec![Value::Num(5.0), Value::Tensor(size)]))
             .expect("trnd size vector");
         match out {
-            Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![2, 3]),
+            Value::Tensor(tensor) => assert_eq!(tensor.shape(), &[2, 3]),
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn trnd_normalizes_rank_zero_and_rank_one_nu_shapes() {
+        let _guard = random::test_guard();
+        let _guard = reset();
+
+        let scalar = block_on(trnd_builtin(vec![Value::Tensor(
+            Tensor::new(vec![5.0], Vec::new()).unwrap(),
+        )]))
+        .expect("rank-zero nu");
+        assert!(matches!(scalar, Value::Num(value) if value.is_finite()));
+
+        let vector = block_on(trnd_builtin(vec![Value::Tensor(
+            Tensor::new(vec![5.0, 6.0], vec![2]).unwrap(),
+        )]))
+        .expect("rank-one nu");
+        let Value::Tensor(vector) = vector else {
+            panic!("rank-one output");
+        };
+        assert_eq!(vector.shape(), &[2, 1]);
     }
 
     #[test]
@@ -422,7 +444,7 @@ mod tests {
         let nu = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let out = block_on(trnd_builtin(vec![Value::Tensor(nu.clone())])).expect("trnd");
         match out {
-            Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![3, 1]),
+            Value::Tensor(tensor) => assert_eq!(tensor.shape(), &[3, 1]),
             other => panic!("expected tensor, got {other:?}"),
         }
 
@@ -444,7 +466,7 @@ mod tests {
         let out = block_on(trnd_builtin(vec![Value::Tensor(nu)])).expect("trnd");
         match out {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![3, 1]);
+                assert_eq!(tensor.shape(), &[3, 1]);
                 assert!(tensor
                     .materialize_f64()
                     .iter()
@@ -458,7 +480,7 @@ mod tests {
         let out =
             block_on(trnd_builtin(vec![Value::Tensor(nu), Value::Tensor(size)])).expect("trnd");
         match out {
-            Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![2, 3]),
+            Value::Tensor(tensor) => assert_eq!(tensor.shape(), &[2, 3]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -536,7 +558,7 @@ mod tests {
             let Value::Tensor(tensor) = out else {
                 panic!("expected tensor output");
             };
-            assert_eq!(tensor.shape, vec![2, 3]);
+            assert_eq!(tensor.shape(), &[2, 3]);
         }
     }
 
@@ -550,7 +572,7 @@ mod tests {
             panic!("expected native-single tensor");
         };
         assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
-        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(tensor.shape(), &[2, 1]);
         assert!(tensor
             .materialize_f64()
             .iter()

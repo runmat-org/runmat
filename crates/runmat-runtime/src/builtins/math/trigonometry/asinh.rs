@@ -216,6 +216,22 @@ pub(crate) mod tests {
         block_on(super::asinh_builtin(value))
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn asinh_preserves_rank_zero_scalar_and_rank_one_real_shape() {
+        let scalar = asinh_builtin(Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap()))
+            .expect("rank-zero asinh");
+        assert_eq!(scalar, Value::Num(0.0));
+
+        let vector = asinh_builtin(Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2]).unwrap()))
+            .expect("rank-one asinh");
+        let Value::Tensor(vector) = vector else {
+            panic!("expected rank-one real tensor")
+        };
+        assert_eq!(vector.shape(), &[2]);
+        assert_eq!(vector.materialize_f64(), vec![0.0, 1.0f64.asinh()]);
+    }
+
     #[test]
     fn asinh_extensions_and_output_arity_are_gated() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -299,7 +315,7 @@ pub(crate) mod tests {
         let result = asinh_builtin(Value::Tensor(tensor)).expect("asinh");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 let expected = [
                     0.0,
                     -0.48121182505960347,
@@ -325,7 +341,7 @@ pub(crate) mod tests {
 
         match asinh_builtin(Value::Tensor(tensor)).expect("asinh") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 let expected = [-1.0f64.asinh(), 0.0, 1.0f64.asinh()];
                 for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
@@ -374,7 +390,7 @@ pub(crate) mod tests {
         let result = asinh_builtin(Value::ComplexTensor(complex)).expect("asinh");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 for (actual, input) in t.materialize_f64().iter().zip(inputs.iter()) {
                     let expected = input.asinh();
                     assert!((actual.0 - expected.re).abs() < 1e-12);
@@ -392,7 +408,7 @@ pub(crate) mod tests {
         let result = asinh_builtin(Value::CharArray(chars)).expect("asinh");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 let expected = [(('a' as u32) as f64).asinh(), (('z' as u32) as f64).asinh()];
                 for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - exp).abs() < 1e-12);
@@ -410,7 +426,7 @@ pub(crate) mod tests {
                 Tensor::new(vec![0.0, 0.5, 1.0, 2.0], vec![2, 2]).expect("tensor construction");
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = asinh_builtin(Value::GpuTensor(handle)).expect("asinh");
@@ -420,7 +436,7 @@ pub(crate) mod tests {
                 .iter()
                 .map(|&v| v.asinh())
                 .collect::<Vec<_>>();
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), &[2, 2]);
             for (actual, exp) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((actual - exp).abs() < 1e-12);
             }
@@ -435,7 +451,7 @@ pub(crate) mod tests {
         let result = asinh_builtin(Value::LogicalArray(logical)).expect("asinh");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 let expected = [
                     1.0f64.asinh(),
                     0.0f64.asinh(),
@@ -474,14 +490,14 @@ pub(crate) mod tests {
         let cpu = asinh_real(Value::Tensor(tensor.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu = block_on(asinh_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
             Value::Tensor(ct) => {
-                assert_eq!(gathered.shape, ct.shape);
+                assert_eq!(gathered.shape(), ct.shape());
                 let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

@@ -77,10 +77,10 @@ fn invalid_dimension() -> RuntimeError {
 async fn read_column(source: &Value, column: usize) -> Result<Value, RuntimeError> {
     match source {
         Value::Tensor(value) => {
-            read_tensor_slice_from_plan(value, &column_plan(&value.shape, column)?)
+            read_tensor_slice_from_plan(value, &column_plan(value.shape(), column)?)
         }
         Value::ComplexTensor(value) => {
-            read_complex_slice_from_plan(value, &column_plan(&value.shape, column)?)
+            read_complex_slice_from_plan(value, &column_plan(value.shape(), column)?)
         }
         Value::SparseTensor(value) => {
             read_sparse_slice_from_plan(value, &column_plan(&value.shape(), column)?)

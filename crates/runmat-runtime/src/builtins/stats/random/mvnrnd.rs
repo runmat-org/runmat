@@ -449,14 +449,14 @@ fn ensure_exact_integer_tensor(tensor: &Tensor) -> BuiltinResult<()> {
 }
 
 fn parse_means(mu: &Tensor) -> BuiltinResult<Vec<Vec<f64>>> {
-    if mu.shape.len() > 2 {
+    if mu.shape().len() > 2 {
         return Err(invalid("mvnrnd: mu must be a vector or 2-D matrix"));
     }
     let values = tensor::tensor_values_f64(mu);
     if values.iter().any(|value| !value.is_finite()) {
         return Err(invalid("mvnrnd: mu values must be finite"));
     }
-    match mu.shape.as_slice() {
+    match mu.shape() {
         [] => Ok(vec![vec![values[0]]]),
         [len] => Ok(vec![values[..*len].to_vec()]),
         [rows, cols] if *rows == 1 => Ok(vec![(0..*cols).map(|col| values[col]).collect()]),
@@ -476,7 +476,7 @@ fn parse_covariances(sigma: &Tensor, dimension: usize) -> BuiltinResult<Vec<DMat
     if values.iter().any(|value| !value.is_finite()) {
         return Err(invalid("mvnrnd: Sigma values must be finite"));
     }
-    match sigma.shape.as_slice() {
+    match sigma.shape() {
         [] if dimension == 1 => Ok(vec![DMatrix::from_element(1, 1, values[0])]),
         [1] if dimension == 1 => Ok(vec![DMatrix::from_element(1, 1, values[0])]),
         [rows, cols] if *rows == 1 && *cols == dimension => {
@@ -653,11 +653,34 @@ mod tests {
         .expect("mvnrnd");
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![5, 2]);
+                assert_eq!(t.shape(), &[5, 2]);
                 assert!(t.materialize_f64().iter().all(|value| value.is_finite()));
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn mvnrnd_preserves_rank_zero_scalar_and_rank_one_mean_geometry() {
+        let _guard = reset_rng();
+
+        let scalar = block_on(mvnrnd_builtin(vec![
+            tensor(vec![0.0], Vec::new()),
+            tensor(vec![1.0], Vec::new()),
+        ]))
+        .expect("rank-zero univariate distribution");
+        assert!(matches!(scalar, Value::Num(value) if value.is_finite()));
+
+        let vector = block_on(mvnrnd_builtin(vec![
+            tensor(vec![0.0, 1.0], vec![2]),
+            tensor(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]),
+        ]))
+        .expect("rank-one mean vector");
+        let Value::Tensor(vector) = vector else {
+            panic!("rank-one multivariate output");
+        };
+        assert_eq!(vector.shape(), &[1, 2]);
     }
 
     #[test]
@@ -685,7 +708,7 @@ mod tests {
         ]))
         .expect("mvnrnd");
         match out {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![3, 2]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[3, 2]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -699,7 +722,7 @@ mod tests {
         ]))
         .expect("mvnrnd");
         match out {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![3, 1]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[3, 1]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -720,7 +743,7 @@ mod tests {
         ]))
         .expect("mvnrnd");
         match out {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 2]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[2, 2]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -734,7 +757,7 @@ mod tests {
         ]))
         .expect("mvnrnd");
         match out {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 2]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[2, 2]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -750,7 +773,7 @@ mod tests {
         .expect("mvnrnd");
         match out {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 2]);
+                assert_eq!(t.shape(), &[3, 2]);
                 for row in 0..3 {
                     assert!(
                         (t.materialize_f64()[row] - t.materialize_f64()[3 + row]).abs() < 1.0e-10
@@ -887,7 +910,7 @@ mod tests {
         let host = crate::builtins::common::test_support::gather(Value::GpuTensor(out))
             .expect("gather automatic output");
         assert_eq!(host.numeric_dtype(), NumericDType::F64);
-        assert_eq!(host.shape, vec![2, 2]);
+        assert_eq!(host.shape(), &[2, 2]);
         let handle = handle
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .expect("validated provenance");
