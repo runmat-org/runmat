@@ -1,5 +1,13 @@
 use super::*;
 
+fn onnx_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 pub(super) fn build_export_graph(
     network: &ObjectInstance,
     layers: &[Value],
@@ -57,7 +65,8 @@ pub(super) fn build_export_graph(
                     )
                 })?;
                 let weights = model::tensor_property(layer, "Weights", EXPORT_ONNX)?;
-                if weights.shape.len() > 2 || weights.cols as i64 != input_features {
+                let (weight_rows, weight_cols) = onnx_matrix_dimensions(&weights);
+                if weights.shape().len() > 2 || weight_cols as i64 != input_features {
                     return Err(deep_learning_error(
                         EXPORT_ONNX,
                         format!(
@@ -66,18 +75,18 @@ pub(super) fn build_export_graph(
                     ));
                 }
                 let bias = model::tensor_property(layer, "Bias", EXPORT_ONNX)?;
-                if bias.len() != weights.rows {
+                if bias.len() != weight_rows {
                     return Err(deep_learning_error(
                         EXPORT_ONNX,
                         format!(
                             "exportONNXNetwork: fullyConnectedLayer Bias must have {} elements",
-                            weights.rows
+                            weight_rows
                         ),
                     ));
                 }
                 let output_size =
                     model::positive_property_usize(layer, "OutputSize", EXPORT_ONNX)? as i64;
-                if output_size as usize != weights.rows {
+                if output_size as usize != weight_rows {
                     return Err(deep_learning_error(
                         EXPORT_ONNX,
                         "exportONNXNetwork: fullyConnectedLayer OutputSize must match Weights rows",
@@ -85,8 +94,6 @@ pub(super) fn build_export_graph(
                 }
                 let weight_name = format!("{layer_name}.Weights");
                 let bias_name = format!("{layer_name}.Bias");
-                let weight_rows = weights.rows;
-                let weight_cols = weights.cols;
                 export_dtype = Some(merge_export_dtype(export_dtype, weights.numeric_dtype()));
                 export_dtype = Some(merge_export_dtype(export_dtype, bias.numeric_dtype()));
                 initializers.push(Initializer {
@@ -289,8 +296,7 @@ fn tensor_storage(tensor: Tensor) -> BuiltinResult<NumericStorage> {
 }
 
 pub(super) fn tensor_to_row_major_2d(tensor: Tensor) -> BuiltinResult<NumericStorage> {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
+    let (rows, cols) = onnx_matrix_dimensions(&tensor);
     let mut indices = Vec::with_capacity(rows * cols);
     for row in 0..rows {
         for col in 0..cols {

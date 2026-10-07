@@ -348,16 +348,25 @@ fn parse_ribbon_args(args: Vec<Value>) -> BuiltinResult<ParsedRibbon> {
     Ok(ParsedRibbon { x, y, width, style })
 }
 
+fn ribbon_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 fn ribbon_data_from_value(value: &Value) -> BuiltinResult<RibbonData> {
     let tensor = Tensor::try_from(value)
         .map_err(|err| invalid_argument(format!("Y must be numeric: {err}")))?;
     if tensor_utils::tensor_element_len(&tensor) == 0 {
         return Err(invalid_argument("Y must be non-empty"));
     }
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(invalid_argument("Y must be a vector or 2-D matrix"));
     }
-    if tensor.shape.len() == 1 || tensor.rows == 1 || tensor.cols == 1 {
+    let (rows, cols) = ribbon_matrix_dimensions(&tensor);
+    if tensor.shape().len() == 1 || rows == 1 || cols == 1 {
         let storage = tensor.into_numeric_storage().map_err(invalid_argument)?;
         return Ok(RibbonData {
             rows: storage.len(),
@@ -365,8 +374,6 @@ fn ribbon_data_from_value(value: &Value) -> BuiltinResult<RibbonData> {
             storage,
         });
     }
-    let rows = tensor.rows;
-    let cols = tensor.cols;
     let storage = tensor.into_numeric_storage().map_err(invalid_argument)?;
     Ok(RibbonData {
         rows,
@@ -378,7 +385,8 @@ fn ribbon_data_from_value(value: &Value) -> BuiltinResult<RibbonData> {
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<NumericStorage> {
     let tensor =
         Tensor::try_from(value).map_err(|err| invalid_argument(format!("{name}: {err}")))?;
-    if tensor.shape.len() > 2 || (tensor.rows > 1 && tensor.cols > 1) {
+    let (rows, cols) = ribbon_matrix_dimensions(&tensor);
+    if tensor.shape().len() > 2 || (rows > 1 && cols > 1) {
         return Err(invalid_argument(format!("{name} must be a vector")));
     }
     tensor.into_numeric_storage().map_err(invalid_argument)
@@ -553,6 +561,24 @@ mod tests {
     fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize) -> Value {
         let tensor = Tensor::new_integer(storage, vec![rows, cols]).expect("integer tensor");
         Value::Tensor(tensor)
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn ribbon_data_preserves_dense_rank_boundaries() {
+        let scalar = Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap());
+        let parsed = ribbon_data_from_value(&scalar).unwrap();
+        assert_eq!((parsed.rows, parsed.cols), (0, 0));
+        assert_eq!(parsed.storage.materialize_f64(), vec![7.0]);
+        assert_eq!(
+            numeric_vector(&scalar, "X").unwrap().materialize_f64(),
+            vec![7.0]
+        );
+
+        let vector = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap());
+        let parsed = ribbon_data_from_value(&vector).unwrap();
+        assert_eq!((parsed.rows, parsed.cols), (3, 1));
+        assert_eq!(parsed.storage.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {

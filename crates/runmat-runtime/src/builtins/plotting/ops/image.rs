@@ -406,7 +406,7 @@ pub(crate) fn image_channel_count(value: &Value) -> Option<usize> {
         Value::GpuTensor(handle) => handle.shape().get(2).copied(),
         other => Tensor::try_from(other)
             .ok()
-            .and_then(|tensor| tensor.shape.get(2).copied()),
+            .and_then(|tensor| tensor.shape().get(2).copied()),
     }
 }
 
@@ -447,7 +447,7 @@ pub(crate) async fn classify_image_input(
                     })?
                 }
             };
-            if tensor.shape.len() >= 3 {
+            if tensor.shape().len() >= 3 {
                 let (rows, cols) = truecolor_shape(&tensor, builtin)?;
                 Ok((
                     rows,
@@ -626,9 +626,10 @@ fn truecolor_gpu_shape(
 }
 
 fn truecolor_shape(tensor: &Tensor, builtin: &'static str) -> crate::BuiltinResult<(usize, usize)> {
-    let rows = tensor.shape.first().copied().unwrap_or(tensor.rows);
-    let cols = tensor.shape.get(1).copied().unwrap_or(tensor.cols);
-    let channels = tensor.shape.get(2).copied().unwrap_or(1);
+    let shape = tensor.shape();
+    let rows = shape.first().copied().unwrap_or(0);
+    let cols = shape.get(1).or_else(|| shape.first()).copied().unwrap_or(0);
+    let channels = shape.get(2).copied().unwrap_or(1);
     if rows == 0 || cols == 0 || (channels != 3 && channels != 4) {
         return Err(crate::builtins::plotting::plotting_error(
             builtin,
@@ -726,7 +727,7 @@ pub(crate) fn build_truecolor_image_surface(
 ) -> crate::BuiltinResult<SurfacePlot> {
     let rows = y_axis.len();
     let cols = x_axis.len();
-    let channels = tensor.shape.get(2).copied().unwrap_or(3);
+    let channels = tensor.shape().get(2).copied().unwrap_or(3);
     let dtype = tensor.numeric_dtype();
     let mut grid = vec![vec![glam::Vec4::ZERO; rows]; cols];
     for row in 0..rows {
@@ -801,6 +802,24 @@ mod tests {
             vec![2, 2, 3],
         )
         .expect("truecolor image")
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn image_input_preserves_indexed_rank_boundaries() {
+        let row = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap());
+        let (rows, cols, kind, retained) =
+            futures::executor::block_on(classify_image_input(&row, "image")).unwrap();
+        assert_eq!((rows, cols), (1, 3));
+        assert!(matches!(kind, ImageInputKind::Indexed(_)));
+        assert_eq!(retained.shape(), [3]);
+
+        let scalar = Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap());
+        let error = match futures::executor::block_on(classify_image_input(&scalar, "image")) {
+            Ok(_) => panic!("rank-zero image has no indexed grid extent"),
+            Err(error) => error,
+        };
+        assert!(error.message().contains("at least a 2-D grid"));
     }
 
     fn typed_truecolor_tensor() -> Tensor {
@@ -934,7 +953,7 @@ mod tests {
             .expect("retained CData");
         let retained = Tensor::try_from(&retained).unwrap();
         assert_eq!(retained.numeric_dtype(), NumericDType::I8);
-        assert_eq!(retained.shape, vec![2, 3, 3]);
+        assert_eq!(retained.shape(), [2, 3, 3]);
         assert_eq!(
             get_builtin(vec![
                 Value::Num(handle),

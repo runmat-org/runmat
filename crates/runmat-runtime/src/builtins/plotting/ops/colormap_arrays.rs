@@ -51,34 +51,42 @@ pub(crate) fn colormap_tensor(map: ColorMap, len: usize) -> Tensor {
     rgb_tensor_from_colors(&colors)
 }
 
+fn colormap_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 pub(crate) fn parse_rgb_colormap_tensor(
     tensor: &Tensor,
     builtin: &'static str,
 ) -> BuiltinResult<(ColorMap, usize)> {
-    if tensor.cols != 3 || tensor_utils::tensor_element_len(tensor) != tensor.rows.saturating_mul(3)
-    {
+    let (rows, cols) = colormap_matrix_dimensions(tensor);
+    if cols != 3 || tensor_utils::tensor_element_len(tensor) != rows.saturating_mul(3) {
         return Err(invalid(
             builtin,
             "RGB colormap arrays must be m-by-3 numeric matrices",
         ));
     }
-    if tensor.rows == 0 {
+    if rows == 0 {
         return Err(invalid(
             builtin,
             "RGB colormap arrays must contain at least one color",
         ));
     }
-    if tensor.rows > MAX_PALETTE_LENGTH {
+    if rows > MAX_PALETTE_LENGTH {
         return Err(invalid(builtin, "RGB colormap array is too large"));
     }
 
-    let mut colors = Vec::with_capacity(tensor.rows);
+    let mut colors = Vec::with_capacity(rows);
     let uint8_map = tensor.numeric_dtype() == runmat_value::NumericDType::U8;
-    for row in 0..tensor.rows {
+    for row in 0..rows {
         let mut color = [
             tensor_utils::tensor_value_f64(tensor, row),
-            tensor_utils::tensor_value_f64(tensor, tensor.rows + row),
-            tensor_utils::tensor_value_f64(tensor, 2 * tensor.rows + row),
+            tensor_utils::tensor_value_f64(tensor, rows + row),
+            tensor_utils::tensor_value_f64(tensor, 2 * rows + row),
         ];
         if uint8_map {
             for component in &mut color {
@@ -100,7 +108,7 @@ pub(crate) fn parse_rgb_colormap_tensor(
         .collect::<Vec<_>>();
     let map = ColorMap::from_rgb_rows(listed)
         .expect("validated RGB colormap array should produce a listed colormap");
-    Ok((map, tensor.rows))
+    Ok((map, rows))
 }
 
 fn parse_length_arg(args: &[Value], builtin: &'static str) -> BuiltinResult<usize> {
@@ -197,6 +205,22 @@ fn invalid(builtin: &'static str, detail: impl AsRef<str>) -> RuntimeError {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
+}
+
+#[cfg(test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rgb_colormap_preserves_dense_rank_boundaries() {
+    let row = Tensor::new(vec![1.0, 0.0, 0.0], vec![3]).unwrap();
+    let (_, rows) = parse_rgb_colormap_tensor(&row, "colormap").unwrap();
+    assert_eq!(rows, 1);
+
+    let scalar = Tensor::new(vec![1.0], Vec::new()).unwrap();
+    let error = match parse_rgb_colormap_tensor(&scalar, "colormap") {
+        Ok(_) => panic!("rank-zero tensor has no RGB columns"),
+        Err(error) => error,
+    };
+    assert!(error.message().contains("m-by-3 numeric matrices"));
 }
 
 #[cfg(test)]

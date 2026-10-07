@@ -1353,17 +1353,18 @@ impl BarMatrixData {
 }
 
 fn tensor_to_bar_input(tensor: Tensor, config: BarRenderConfig) -> BuiltinResult<BarTensorInput> {
-    if tensor.shape.is_empty() {
+    let shape = tensor.shape();
+    if shape.is_empty() {
         return Err(config.invalid("input cannot be empty"));
     }
-    if tensor.shape.len() == 1 || tensor.rows <= 1 || tensor.cols <= 1 {
+    if shape.len() == 1 || shape[0] <= 1 || shape[1] <= 1 {
         return Ok(BarTensorInput::Vector(numeric_vector(tensor)));
     }
-    if tensor.shape.len() != 2 {
+    if shape.len() != 2 {
         return Err(config.invalid("matrix inputs must be 2-D"));
     }
-    let rows = tensor.shape[0];
-    let cols = tensor.shape[1];
+    let rows = shape[0];
+    let cols = shape[1];
     if rows == 0 || cols == 0 {
         return Err(config.invalid("input cannot be empty"));
     }
@@ -1519,6 +1520,23 @@ pub(crate) mod tests {
         Tensor::new(data.to_vec(), vec![rows, cols]).expect("bar test matrix")
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn bar_host_input_preserves_rank_zero_rejection_and_rank_one_vector() {
+        let scalar = Tensor::new(vec![7.0], Vec::new()).unwrap();
+        let error = match tensor_to_bar_input(scalar, BAR_CONFIG) {
+            Ok(_) => panic!("rank-zero bar input is rejected"),
+            Err(error) => error,
+        };
+        assert!(error.message().contains("input cannot be empty"));
+
+        let row = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
+        let BarTensorInput::Vector(values) = tensor_to_bar_input(row, BAR_CONFIG).unwrap() else {
+            panic!("rank-one bar input is a vector")
+        };
+        assert_eq!(values, vec![1.0, 2.0, 3.0]);
+    }
+
     fn poisoned_integer_matrix(storage: IntegerStorage, rows: usize, cols: usize) -> Tensor {
         Tensor::new_integer(storage, vec![rows, cols]).expect("integer matrix")
     }
@@ -1662,7 +1680,7 @@ pub(crate) mod tests {
         .expect("matrix bar");
         match output {
             Value::Tensor(handles) => {
-                assert_eq!(handles.shape, vec![1, 2]);
+                assert_eq!(handles.shape(), [1, 2]);
                 assert_eq!(handles.len(), 2);
             }
             other => panic!("expected a two-handle row vector, got {other:?}"),

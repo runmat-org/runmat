@@ -257,6 +257,14 @@ fn parse_color_order(value: &Value) -> BuiltinResult<Vec<Vec4>> {
     }
 }
 
+fn colororder_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 fn colors_from_tensor(tensor: &Tensor) -> BuiltinResult<Vec<Vec4>> {
     let len = tensor_utils::tensor_element_len(tensor);
     if len == 0 {
@@ -264,21 +272,22 @@ fn colors_from_tensor(tensor: &Tensor) -> BuiltinResult<Vec<Vec4>> {
             "color array must contain at least one color",
         ));
     }
-    if len == 3 && (tensor.rows == 1 || tensor.cols == 1) {
+    let (rows, cols) = colororder_matrix_dimensions(tensor);
+    if len == 3 && (rows == 1 || cols == 1) {
         return Ok(vec![rgb_triplet(
             tensor_utils::tensor_value_f64(tensor, 0),
             tensor_utils::tensor_value_f64(tensor, 1),
             tensor_utils::tensor_value_f64(tensor, 2),
         )?]);
     }
-    if tensor.cols != 3 {
+    if cols != 3 {
         return Err(colororder_err("numeric color array must be m-by-3"));
     }
-    let mut colors = Vec::with_capacity(tensor.rows);
-    for row in 0..tensor.rows {
+    let mut colors = Vec::with_capacity(rows);
+    for row in 0..rows {
         let r = tensor_utils::tensor_value_f64(tensor, row);
-        let g = tensor_utils::tensor_value_f64(tensor, tensor.rows + row);
-        let b = tensor_utils::tensor_value_f64(tensor, 2 * tensor.rows + row);
+        let g = tensor_utils::tensor_value_f64(tensor, rows + row);
+        let b = tensor_utils::tensor_value_f64(tensor, 2 * rows + row);
         colors.push(rgb_triplet(r, g, b)?);
     }
     Ok(colors)
@@ -449,6 +458,22 @@ mod tests {
     use crate::builtins::plotting::{clear_figure, clone_figure, reset_hold_state_for_run};
     use runmat_value::{IntegerStorage, StringArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn colororder_numeric_rgb_preserves_dense_rank_boundaries() {
+        let row = Tensor::new(vec![1.0, 0.0, 0.0], vec![3]).unwrap();
+        assert_eq!(
+            colors_from_tensor(&row).unwrap(),
+            vec![Vec4::new(1.0, 0.0, 0.0, 1.0)]
+        );
+
+        let scalar = Tensor::new(vec![1.0], Vec::new()).unwrap();
+        assert!(colors_from_tensor(&scalar)
+            .expect_err("rank-zero tensor has no RGB columns")
+            .message()
+            .contains("m-by-3"));
+    }
+
     fn setup_plot_tests() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
         ensure_plot_test_env();
@@ -611,8 +636,8 @@ mod tests {
 
         let gem = colororder_builtin(vec![Value::String("default".into())]).unwrap();
         let tensor = Tensor::try_from(&gem).unwrap();
-        assert_eq!(tensor.cols, 3);
-        assert!(tensor.rows >= 7);
+        assert_eq!(tensor.cols(), 3);
+        assert!(tensor.rows() >= 7);
     }
 
     #[test]

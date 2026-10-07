@@ -711,10 +711,8 @@ fn from_explicit_args(
     };
     let mut z_input = contour_surface_input(z_value, name)?;
     let (rows, cols) = z_input.grid_shape(name)?;
-    let (x_axis, y_axis, transpose_z) = if x_tensor.rows == rows
-        && x_tensor.cols == cols
-        && y_tensor.rows == rows
-        && y_tensor.cols == cols
+    let (x_axis, y_axis, transpose_z) = if contour_matrix_dimensions(&x_tensor) == (rows, cols)
+        && contour_matrix_dimensions(&y_tensor) == (rows, cols)
     {
         extract_contour_meshgrid_axes(&x_tensor, &y_tensor, rows, cols, name)?
     } else {
@@ -796,12 +794,21 @@ fn tensor_has_two_distinct_values(tensor: &Tensor) -> bool {
         .is_some_and(|rest| rest.iter().any(|value| *value != values[0]))
 }
 
+fn contour_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 fn validated_contour_axis_vector(
     tensor: &Tensor,
     axis: &str,
     name: &'static str,
 ) -> BuiltinResult<Vec<f64>> {
-    if tensor.rows != 1 && tensor.cols != 1 {
+    let (rows, cols) = contour_matrix_dimensions(tensor);
+    if rows != 1 && cols != 1 {
         return Err(plotting_error(
             name,
             format!("{name}: {axis} must be a vector or meshgrid matrix"),
@@ -823,7 +830,8 @@ fn extract_contour_meshgrid_axes(
     cols: usize,
     name: &'static str,
 ) -> BuiltinResult<(Vec<f64>, Vec<f64>, bool)> {
-    if x.rows != rows || x.cols != cols || y.rows != rows || y.cols != cols {
+    if contour_matrix_dimensions(x) != (rows, cols) || contour_matrix_dimensions(y) != (rows, cols)
+    {
         return Err(plotting_error(
             name,
             format!("{name}: when X and Y are matrices, they must match the shape of Z"),
@@ -2607,6 +2615,24 @@ pub(crate) mod tests {
         Tensor::new(data.to_vec(), shape).expect("contour test tensor")
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn contour_explicit_axes_preserve_dense_rank_boundaries() {
+        let x = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap());
+        let y = Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![2]).unwrap());
+        let z = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
+        let parsed = parse_contour_args("contour", x, vec![y.clone(), z.clone()]).unwrap();
+        assert_eq!(parsed.x_axis, vec![1.0, 2.0]);
+        assert_eq!(parsed.y_axis, vec![10.0, 20.0]);
+
+        let scalar_x = Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap());
+        let error = match parse_contour_args("contour", scalar_x, vec![y, z]) {
+            Ok(_) => panic!("rank-zero X is not a contour coordinate vector"),
+            Err(error) => error,
+        };
+        assert!(error.message().contains("vector or meshgrid matrix"));
+    }
+
     fn all_integer_z_storages() -> [IntegerStorage; 8] {
         [
             IntegerStorage::I8(vec![0, 1, 2, 3]),
@@ -2867,7 +2893,7 @@ pub(crate) mod tests {
         let SurfaceDataInput::Host(z) = args.z_input else {
             panic!("transposed Z must use exact client storage");
         };
-        assert_eq!(z.shape, vec![3, 2]);
+        assert_eq!(z.shape(), [3, 2]);
         assert_eq!(
             z.integer_storage(),
             Some(&IntegerStorage::U64(vec![

@@ -42,7 +42,7 @@ pub(in crate::builtins::deep_learning) fn backward(
         axes,
         options,
     )?;
-    if output_gradient.shape != g.output_shape
+    if output_gradient.shape() != g.output_shape
         || &cache.source_axes != axes
         || cache.output_axes != g.output_axes
         || output_gradient.numeric_dtype() != input.numeric_dtype()
@@ -56,7 +56,7 @@ pub(in crate::builtins::deep_learning) fn backward(
         .into_iter()
         .flatten()
     {
-        if gradient.shape != state_shape || gradient.numeric_dtype() != input.numeric_dtype() {
+        if gradient.shape() != state_shape || gradient.numeric_dtype() != input.numeric_dtype() {
             return Err(RecurrentError::Invalid(
                 "terminal hidden/cell gradients must match output state shape and precision",
             ));
@@ -129,22 +129,25 @@ pub(in crate::builtins::deep_learning) fn backward(
     let (dx, dw, dr, db, dh0, dc0) = gradients;
     let default_state_shape = vec![g.directions * options.hidden_size, g.state_batch];
     Ok(RecurrentGradients {
-        input: Tensor::from_numeric_storage(dx, input.shape.clone())
+        input: Tensor::from_numeric_storage(dx, input.shape().to_vec())
             .map_err(RecurrentError::Storage)?,
-        input_weights: Tensor::from_numeric_storage(dw, input_weights.shape.clone())
+        input_weights: Tensor::from_numeric_storage(dw, input_weights.shape().to_vec())
             .map_err(RecurrentError::Storage)?,
-        recurrent_weights: Tensor::from_numeric_storage(dr, recurrent_weights.shape.clone())
+        recurrent_weights: Tensor::from_numeric_storage(dr, recurrent_weights.shape().to_vec())
             .map_err(RecurrentError::Storage)?,
-        bias: Tensor::from_numeric_storage(db, bias.shape.clone())
+        bias: Tensor::from_numeric_storage(db, bias.shape().to_vec())
             .map_err(RecurrentError::Storage)?,
         initial_hidden: Tensor::from_numeric_storage(
             dh0,
-            initial_hidden.map_or_else(|| default_state_shape.clone(), |state| state.shape.clone()),
+            initial_hidden.map_or_else(
+                || default_state_shape.clone(),
+                |state| state.shape().to_vec(),
+            ),
         )
         .map_err(RecurrentError::Storage)?,
         initial_cell: Tensor::from_numeric_storage(
             dc0,
-            initial_cell.map_or(default_state_shape, |state| state.shape.clone()),
+            initial_cell.map_or(default_state_shape, |state| state.shape().to_vec()),
         )
         .map_err(RecurrentError::Storage)?,
     })

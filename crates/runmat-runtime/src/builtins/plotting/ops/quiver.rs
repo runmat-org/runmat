@@ -1029,6 +1029,14 @@ fn default_quiver_grid_shape(
     Ok((rows, cols))
 }
 
+fn quiver_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 fn tensor_shape_from_value(
     value: &Value,
     builtin: &'static str,
@@ -1043,9 +1051,10 @@ fn tensor_shape_from_value(
         _ => {
             let tensor = Tensor::try_from(value)
                 .map_err(|e| plotting_error(builtin, format!("quiver: {e}")))?;
+            let (rows, cols) = quiver_matrix_dimensions(&tensor);
             Ok((
-                tensor.rows.max(1),
-                tensor.cols.max(1),
+                rows.max(1),
+                cols.max(1),
                 tensor_utils::tensor_element_len(&tensor),
             ))
         }
@@ -1059,10 +1068,8 @@ fn materialize_quiver_components(
     v: Tensor,
     builtin: &'static str,
 ) -> crate::BuiltinResult<QuiverComponents> {
-    let u_rows = u.rows;
-    let u_cols = u.cols;
-    let v_rows = v.rows;
-    let v_cols = v.cols;
+    let (u_rows, u_cols) = quiver_matrix_dimensions(&u);
+    let (v_rows, v_cols) = quiver_matrix_dimensions(&v);
     let x_len = tensor_utils::tensor_element_len(&x);
     let y_len = tensor_utils::tensor_element_len(&y);
     let u_len = tensor_utils::tensor_element_len(&u);
@@ -1169,6 +1176,32 @@ mod tests {
     fn int_tensor(data: &[i16], shape: Vec<usize>) -> Tensor {
         Tensor::new_integer(runmat_value::IntegerStorage::I16(data.to_vec()), shape)
             .expect("integer tensor")
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn quiver_default_grid_preserves_dense_rank_boundaries() {
+        let scalar = Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap());
+        assert_eq!(
+            default_quiver_grid_shape(&scalar, &scalar, "quiver").unwrap(),
+            (1, 1)
+        );
+
+        let vector = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap());
+        let (rows, cols) = default_quiver_grid_shape(&vector, &vector, "quiver").unwrap();
+        assert_eq!((rows, cols), (1, 3));
+        assert_eq!(
+            implicit_quiver_grid_tensor(rows, cols, true)
+                .unwrap()
+                .materialize_f64(),
+            vec![1.0, 2.0, 3.0]
+        );
+        assert_eq!(
+            implicit_quiver_grid_tensor(rows, cols, false)
+                .unwrap()
+                .materialize_f64(),
+            vec![1.0, 1.0, 1.0]
+        );
     }
 
     #[test]

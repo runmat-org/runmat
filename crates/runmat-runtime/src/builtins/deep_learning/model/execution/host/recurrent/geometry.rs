@@ -98,7 +98,7 @@ impl Geometry {
         axes: &AxisPlan,
         options: RecurrentOptions,
     ) -> Result<Self, RecurrentError> {
-        if axes.shape() != input.shape || input.len() != axes.element_count() {
+        if axes.shape() != input.shape() || input.len() != axes.element_count() {
             return Err(RecurrentError::Invalid(
                 "input axes and payload must match shape",
             ));
@@ -118,11 +118,11 @@ impl Geometry {
         Self::from_shapes(
             axes,
             RecurrentParameterShapes {
-                input_weights: &input_weights.shape,
-                recurrent_weights: &recurrent_weights.shape,
-                bias: &bias.shape,
-                initial_hidden: initial_hidden.map(|tensor| tensor.shape.as_slice()),
-                initial_cell: initial_cell.map(|tensor| tensor.shape.as_slice()),
+                input_weights: input_weights.shape(),
+                recurrent_weights: recurrent_weights.shape(),
+                bias: bias.shape(),
+                initial_hidden: initial_hidden.map(Tensor::shape),
+                initial_cell: initial_cell.map(Tensor::shape),
             },
             dtype,
             options,

@@ -77,8 +77,8 @@ fn record_multiply(lhs: &Payload, rhs: &Payload, out: Tensor) -> BuiltinResult<O
             rhs: rhs.node,
             lhs_data: lhs_values,
             rhs_data: rhs_values,
-            lhs_shape: lhs.tensor.shape.clone(),
-            rhs_shape: rhs.tensor.shape.clone(),
+            lhs_shape: lhs.tensor.shape().to_vec(),
+            rhs_shape: rhs.tensor.shape().to_vec(),
         },
     )?))
 }
@@ -112,8 +112,8 @@ pub(crate) fn dlarray_rdivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<V
                     rhs: rhs.node,
                     lhs_data: lhs_values,
                     rhs_data: rhs_values,
-                    lhs_shape: lhs.tensor.shape.clone(),
-                    rhs_shape: rhs.tensor.shape.clone(),
+                    lhs_shape: lhs.tensor.shape().to_vec(),
+                    rhs_shape: rhs.tensor.shape().to_vec(),
                 },
             )?))
         },
@@ -187,13 +187,13 @@ pub(crate) fn dlarray_mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Va
     }
     if lhs
         .tensor
-        .shape
+        .shape()
         .iter()
         .skip(2)
         .any(|dimension| *dimension != 1)
         || rhs
             .tensor
-            .shape
+            .shape()
             .iter()
             .skip(2)
             .any(|dimension| *dimension != 1)
@@ -209,7 +209,7 @@ pub(crate) fn dlarray_mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Va
     let out = if dtype == NumericDType::F64 {
         computed
     } else {
-        let shape = computed.shape.clone();
+        let shape = computed.shape().to_vec();
         let NumericStorage::F64(values) = computed
             .into_numeric_storage()
             .map_err(|err| deep_learning_error("mtimes", err))?
@@ -265,7 +265,7 @@ pub(crate) fn dlarray_sum_builtin(input: Value, rest: Vec<Value>) -> BuiltinResu
                     out.clone(),
                     NodeKind::SumAll {
                         input: id,
-                        input_shape: payload.tensor.shape.clone(),
+                        input_shape: payload.tensor.shape().to_vec(),
                     },
                 )
             })
