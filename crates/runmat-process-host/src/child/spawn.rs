@@ -38,6 +38,13 @@ pub async fn spawn(spec: HostCommand) -> ProcessHostResult<ChildProcess> {
                 .stderr(Stdio::null());
             false
         }
+        StdioPolicy::StartupDiagnostics => {
+            command
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped());
+            false
+        }
         StdioPolicy::Files { stdout, stderr } => {
             let stdout = append_file(stdout)?;
             let stderr = append_file(stderr)?;
@@ -72,11 +79,13 @@ pub async fn spawn(spec: HostCommand) -> ProcessHostResult<ChildProcess> {
         let stdout = process.child_stdout().ok_or_else(|| {
             ProcessHostError::Protocol("child stdout was unavailable after piped spawn".into())
         })?;
+        process.install_stdio(ChildStdio { stdin, stdout });
+    }
+    if piped || spec.stdio == StdioPolicy::StartupDiagnostics {
         let stderr_reader = process.child_stderr().ok_or_else(|| {
             ProcessHostError::Protocol("child stderr was unavailable after piped spawn".into())
         })?;
-        process.captured_stderr().drain(stderr_reader);
-        process.install_stdio(ChildStdio { stdin, stdout });
+        process.captured_stderr().drain(stderr_reader)?;
     }
     Ok(process)
 }

@@ -27,6 +27,13 @@ pub enum NativeExecutionError {
         #[source]
         source: std::io::Error,
     },
+    #[error("local supervisor startup failed: {cause}; exit={exit:?}; stderr={stderr}")]
+    SupervisorStartup {
+        #[source]
+        cause: Box<NativeExecutionError>,
+        exit: Option<runmat_process_host::ProcessExit>,
+        stderr: Box<runmat_process_host::StderrSnapshot>,
+    },
     #[error("local supervisor rejected the request ({code}): {message}")]
     SupervisorRejected { code: String, message: String },
     #[error("native bounded encoding failed: {0}")]

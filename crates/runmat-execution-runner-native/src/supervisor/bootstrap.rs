@@ -51,6 +51,15 @@ pub(super) fn read_profile(path: &Path) -> NativeExecutionResult<LocalSupervisor
     LocalSupervisorConfig::new(profile.execution, paths)
 }
 
+/// The launcher supplies the frozen profile only to its actual detached child.
+/// Library-owned supervisors must never replace their caller's standard streams.
+pub(super) fn release_startup_diagnostics() -> NativeExecutionResult<()> {
+    if std::env::var_os(PROFILE_ENV).is_some() {
+        runmat_process_host::release_startup_stderr()?;
+    }
+    Ok(())
+}
+
 fn invalid(message: impl Into<String>) -> NativeExecutionError {
     NativeExecutionError::Configuration(message.into())
 }

@@ -139,3 +139,51 @@ async fn over_limit_request_rejects_before_opening_a_channel() {
         if error.kind == runmat_canonical_codec::CanonicalCodecErrorKind::ResourceLimit));
     assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
 }
+
+#[tokio::test]
+async fn original_failed_startup_retains_exit_and_bounded_raw_stderr() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("original-supervisor");
+    std::fs::write(
+        &path,
+        b"#!/bin/sh\nprintf 'original startup error with long suffix' >&2\ndd if=/dev/zero bs=1048576 count=1 1>&2 2>/dev/null\nexit 23\n",
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let mut execution = crate::NativeExecutionConfig::for_current_executable().unwrap();
+    execution.executable = path;
+    execution.max_stderr_bytes = 8;
+    let config = LocalSupervisorConfig::new(
+        execution,
+        SupervisorPaths::new(temp.path().join("authority")).unwrap(),
+    )
+    .unwrap();
+    let error = LocalSupervisorClient::new(config)
+        .connect_or_start()
+        .await
+        .unwrap_err();
+    let NativeExecutionError::SupervisorStartup {
+        cause,
+        exit,
+        stderr,
+    } = error
+    else {
+        panic!("lost original startup failure: {error}");
+    };
+    assert_eq!(
+        exit.map(|status| status.code),
+        Some(Some(23)),
+        "cause={cause:?}, stderr={stderr:?}"
+    );
+    assert_eq!(stderr.bytes.as_ref(), b"original");
+    assert_eq!(
+        stderr.observed_bytes,
+        Some(b"original startup error with long suffix".len() as u64 + 1024 * 1024)
+    );
+    assert!(stderr.truncated);
+    assert_eq!(
+        stderr.completion,
+        runmat_process_host::StderrCompletion::EndOfStream
+    );
+}

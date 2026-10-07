@@ -326,10 +326,52 @@ and its adjacent chain link can require more memory than the requested output by
 bounded by original capture controls. The journal reserves worst-case logical JSON
 storage against original scratch limits before launch. Filesystem blocks/inodes,
 whole-parent allocations and measured RSS remain separate unqualified obligations.
-No capture, task or physics limits are raised. Remote/browser delivery and supervisor
-bootstrap diagnostics remain open. The actual native witness passes: three original UTF-8/stdout/stderr/control writes
+No capture, task or physics limits are raised. Remote/browser delivery and full
+startup/platform qualification remain open; scoped bootstrap diagnostics follow below. The actual native witness passes: three original UTF-8/stdout/stderr/control writes
 are read live in four-byte pages, retained after abrupt publisher exit, then read from
 a cold supervisor with the same original lost attempt. It preserves Interrupted capture
 and unknown physical execution/resource evidence; no replay or successful result is
 inferred. Unit tests also reject stale assignment fences, substituted/missing records,
 invalid cursors and inadequate scratch reservations.
+
+
+### Bounded native supervisor startup diagnostics (scoped verification)
+
+A detached supervisor uses the shared process host's `StartupDiagnostics` policy:
+null stdin/stdout and bounded stderr capture under the original `max_stderr_bytes`.
+The reader continuously drains the source pipe after its retained prefix fills; excess
+bytes mark truncation. Original raw bytes, observed-byte count (or overflow), EOF and
+read failure remain distinct. No capture does not claim a live reader, and capture
+cannot be rebound to a second source. Rendered text is a lossy display of raw bytes.
+
+The service replaces its startup stderr with the null device before accepting the
+first authenticated readiness request. This explicit entrypoint handoff lets the
+running daemon outlive the launching client without retaining its diagnostic pipe.
+A failed Windows handoff restores the original stream; if restoration also fails,
+the still-open original descriptor preserves the cause before release.
+Library-owned supervisors do not replace their caller's streams. Unix uses descriptor
+replacement; Windows updates CRT fd2 and the Win32 standard handle. These are process
+entrypoint operations, not session console policies. Windows handling follows the
+[CRT descriptor](https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/dup-dup2)
+and [standard-handle](https://learn.microsoft.com/en-us/windows/console/setstdhandle)
+contracts; actual Windows lifecycle execution remains a qualification gate.
+
+A failed startup returns the original cause, bounded raw diagnostic prefix and any
+observed child exit. The original five-second readiness budget also bounds drain waits;
+a timeout or missing exit does not prove child or descendant quiescence. Existing
+credential/profile/connected-peer rejection cannot authorize a replacement launch.
+Source stderr capture does not imply a program console transcript, measured parent
+RSS, a durable task result or whole-platform qualification.
+
+Shared host tests pass 30/30; the supervisor recheck passes 35/35. The failed-startup
+fixture emits over 1 MiB under an eight-byte retention cap, with original exit23, raw
+prefix, exact observed-byte count and EOF retained. The actual native process witness
+passes producer exit, cold initialization, cancellation and original durable-prefix
+recovery. Owned library/test strict lint passes; Windows library/test lint also passes
+as compile evidence. Actual Windows and Linux lifecycle execution remain open.
+
+The first simultaneous supervisor/process/lint run passed 34 tests and failed the new
+case's exit assertion: no exit was observed. That run did not print its underlying cause,
+so it is not attributed to scheduling or a specific reader failure. Enhanced diagnostics,
+an isolated same-criteria case, and the full default-concurrency recheck pass. The initial
+failure remains recorded; stressed startup/resource qualification is not established.

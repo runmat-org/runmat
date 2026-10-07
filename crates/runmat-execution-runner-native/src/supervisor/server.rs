@@ -132,6 +132,7 @@ async fn run_listener(
     fs::set_permissions(&paths.socket, fs::Permissions::from_mode(0o600)).map_err(protocol_io)?;
     let token_owner = fs::metadata(&paths.token).map_err(protocol_io)?.uid();
     let token = Arc::new(token);
+    super::bootstrap::release_startup_diagnostics()?;
     let mut connections = futures::stream::FuturesUnordered::new();
     loop {
         let (stream, _) = tokio::select! {
@@ -167,6 +168,9 @@ async fn run_listener(
             .reject_remote_clients(true)
             .create(&paths.pipe)
             .map_err(protocol_io)?;
+        if first {
+            super::bootstrap::release_startup_diagnostics()?;
+        }
         first = false;
         loop {
             tokio::select! {

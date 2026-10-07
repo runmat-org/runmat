@@ -2,9 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use runmat_execution::JobId;
-use runmat_process_host::environment::EnvironmentPolicy;
 use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
-use runmat_process_host::{ChildLifetime, HiddenMode, HostCommand, StdioPolicy};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use super::auth::read_token;
@@ -48,36 +46,7 @@ impl LocalSupervisorClient {
             Err(error) if endpoint_absent(&error) => {}
             Err(error) => return Err(error),
         }
-        let profile = super::bootstrap::publish_profile(&self.config)?;
-        let mut command = HostCommand::new(&self.config.execution.executable);
-        command.arguments = vec![HiddenMode::LocalSupervisor.marker().into()];
-        command.environment_policy = EnvironmentPolicy::Inherit;
-        command.environment.insert(
-            super::bootstrap::PROFILE_ENV.into(),
-            profile
-                .to_str()
-                .expect("validated bootstrap environment path")
-                .into(),
-        );
-        command.lifetime = ChildLifetime::Detached;
-        command.stdio = StdioPolicy::Null;
-        command.max_stderr_bytes = self.config.execution.max_stderr_bytes;
-        let child = command.spawn().await?;
-        drop(child);
-        // Preserve the original five-second readiness budget, including I/O.
-        // A connected peer that stops responding cannot extend it indefinitely.
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                match self.ping().await {
-                    Ok(()) => return Ok(()),
-                    Err(error) if endpoint_absent(&error) => {}
-                    Err(error) => return Err(error),
-                }
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-        })
-        .await
-        .map_err(|_| readiness_timeout())?
+        self.start_original_supervisor().await
     }
 
     pub async fn ping(&self) -> NativeExecutionResult<()> {
@@ -318,3 +287,5 @@ fn readiness_timeout() -> NativeExecutionError {
         ),
     }
 }
+
+mod startup;
