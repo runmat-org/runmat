@@ -456,7 +456,7 @@ impl WgpuProvider {
         };
         let output = self.upload_numeric_exec(&HostNumericTensorView {
             data,
-            shape: &result.shape,
+            shape: result.shape(),
             storage: GpuTensorStorage::Real,
         })?;
         if let Some(recorder) = observed {

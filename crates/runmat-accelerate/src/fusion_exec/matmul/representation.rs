@@ -15,14 +15,14 @@ pub(super) fn shape(value: &Value, provider: &'static dyn AccelProvider) -> Opti
                 } =>
         {
             if tensor
-                .shape
+                .shape()
                 .iter()
                 .try_fold(1usize, |n, d| n.checked_mul(*d))?
                 != tensor.len()
             {
                 return None;
             }
-            &tensor.shape
+            tensor.shape()
         }
         Value::GpuTensor(handle) => {
             let element = match precision {

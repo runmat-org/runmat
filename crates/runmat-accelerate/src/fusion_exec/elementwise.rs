@@ -290,7 +290,7 @@ async fn execute_elementwise_outputs(
                     }
                     let data = t.materialize_f64();
                     let started = Instant::now();
-                    let handle = allocations.upload(provider, &data, &t.shape)?;
+                    let handle = allocations.upload(provider, &data, t.shape())?;
                     observer.upload(
                         started,
                         physical_upload_bytes(provider.precision(), data.len()),

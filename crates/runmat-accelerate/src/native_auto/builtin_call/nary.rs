@@ -6,7 +6,7 @@ pub(super) fn broadcast_elements(values: &[Value]) -> Option<usize> {
     for value in values {
         let dimensions = match value {
             Value::Num(_) => vec![1, 1],
-            Value::Tensor(tensor) => tensor.shape.clone(),
+            Value::Tensor(tensor) => tensor.shape().to_vec(),
             Value::GpuTensor(handle) => handle.shape().to_vec(),
             _ => return None,
         };
@@ -30,6 +30,17 @@ pub(super) fn broadcast_elements(values: &[Value]) -> Option<usize> {
 mod tests {
     use super::*;
     use runmat_value::Tensor;
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn low_rank_operands_retain_broadcast_work_cardinality() {
+        let scalar = Value::Tensor(Tensor::from_f32(vec![1.0], Vec::new()).unwrap());
+        assert_eq!(broadcast_elements(std::slice::from_ref(&scalar)), Some(1));
+        let vector = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![2]).unwrap());
+        assert_eq!(broadcast_elements(&[scalar, vector]), Some(2));
+        let empty = Value::Tensor(Tensor::from_f32(Vec::new(), vec![0]).unwrap());
+        assert_eq!(broadcast_elements(&[empty]), Some(0));
+    }
+
     #[test]
     fn all_operands_contribute_to_nary_broadcast_work() {
         let inputs = [

@@ -419,19 +419,19 @@ impl WgpuProvider {
         let perm_vector_data = perm_vector_tensor.materialize_f64();
         let q = self.upload_exec(&HostTensorView {
             data: &q_data,
-            shape: &q_tensor.shape,
+            shape: q_tensor.shape(),
         })?;
         let r = self.upload_exec(&HostTensorView {
             data: &r_data,
-            shape: &r_tensor.shape,
+            shape: r_tensor.shape(),
         })?;
         let perm_matrix = self.upload_exec(&HostTensorView {
             data: &perm_matrix_data,
-            shape: &perm_matrix_tensor.shape,
+            shape: perm_matrix_tensor.shape(),
         })?;
         let perm_vector = self.upload_exec(&HostTensorView {
             data: &perm_vector_data,
-            shape: &perm_vector_tensor.shape,
+            shape: perm_vector_tensor.shape(),
         })?;
 
         Ok(ProviderQrResult {
@@ -515,7 +515,7 @@ impl WgpuProvider {
         let factor_data = factor_tensor.materialize_f64();
         let factor = self.upload_exec(&HostTensorView {
             data: &factor_data,
-            shape: &factor_tensor.shape,
+            shape: factor_tensor.shape(),
         })?;
         Ok(ProviderCholResult {
             factor,

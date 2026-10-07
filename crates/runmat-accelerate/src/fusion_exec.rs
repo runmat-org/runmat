@@ -164,7 +164,7 @@ fn ensure_gpu_tensor(
             let data = tensor.materialize_f64();
             let view = HostTensorView {
                 data: &data,
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let started = Instant::now();
             let handle = provider.upload(&view)?;
@@ -552,7 +552,7 @@ fn runtime_broadcast_shape(values: &[Value]) -> Option<Vec<usize>> {
     for value in values {
         match value {
             Value::GpuTensor(handle) => shapes.push(handle.shape().to_vec()),
-            Value::Tensor(tensor) => shapes.push(tensor.shape.clone()),
+            Value::Tensor(tensor) => shapes.push(tensor.shape().to_vec()),
             Value::Num(_) | Value::Int(_) => shapes.push(Vec::new()),
             _ => return None,
         }
@@ -689,7 +689,7 @@ pub fn execute_reduction_with_shape_placed(
                 let data = t.materialize_f64();
                 let view = HostTensorView {
                     data: &data,
-                    shape: &t.shape,
+                    shape: t.shape(),
                 };
                 let started = Instant::now();
                 let handle = provider.upload(&view)?;

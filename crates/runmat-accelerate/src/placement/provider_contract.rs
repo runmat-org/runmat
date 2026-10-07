@@ -132,7 +132,7 @@ pub(crate) fn tensor_representation(
         Value::Tensor(tensor) => (
             provider_element_type(tensor.numeric_dtype()),
             ProviderStorage::DenseReal,
-            tensor.shape.clone(),
+            tensor.shape().to_vec(),
             ProviderResidency::Host,
         ),
         Value::GpuTensor(handle) => {
@@ -662,6 +662,23 @@ fn dense_feasibility_with_bytes(
 
 #[cfg(test)]
 mod tests {
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn native_single_representation_keeps_full_low_rank_shape() {
+        use super::*;
+        for (shape, values) in [(Vec::new(), vec![1.0_f32]), (vec![2], vec![1.0_f32, 2.0])] {
+            let value =
+                Value::Tensor(runmat_value::Tensor::from_f32(values, shape.clone()).unwrap());
+            for precision in [ProviderPrecision::F32, ProviderPrecision::F64] {
+                let representation = tensor_representation(&value, precision).unwrap();
+                assert_eq!(representation.shape, shape);
+                assert_eq!(representation.element_type, ProviderElementType::F32);
+                assert_eq!(representation.storage, ProviderStorage::DenseReal);
+                assert_eq!(representation.residency, ProviderResidency::Host);
+            }
+        }
+    }
+
     #[test]
     fn authored_double_scalar_representation_does_not_follow_provider_precision() {
         use super::*;

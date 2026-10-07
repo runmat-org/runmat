@@ -711,7 +711,7 @@ fn provider_prior(evaluation: &DecisionEvaluation) -> ExecutionCostEstimate {
 
 fn value_shape(value: &Value) -> Option<&[usize]> {
     match value {
-        Value::Tensor(t) => Some(&t.shape),
+        Value::Tensor(t) => Some(t.shape()),
         Value::GpuTensor(handle) => Some(handle.shape()),
         _ => None,
     }
@@ -2380,7 +2380,7 @@ async fn compare_elemwise(
     let template_data = template.materialize_f64();
     let view = HostTensorView {
         data: template_data.as_slice(),
-        shape: template.shape.as_slice(),
+        shape: template.shape(),
     };
     let ha = provider.upload(&view)?;
     let hb = provider.upload(&view)?;
@@ -2444,7 +2444,7 @@ async fn compare_reduction(
     let template_data = template.materialize_f64();
     let view = HostTensorView {
         data: template_data.as_slice(),
-        shape: template.shape.as_slice(),
+        shape: template.shape(),
     };
     let h = provider.upload(&view)?;
     let start = Instant::now();
@@ -2534,11 +2534,11 @@ async fn compare_matmul(
     let data_b = tb.materialize_f64();
     let view_a = HostTensorView {
         data: data_a.as_slice(),
-        shape: ta.shape.as_slice(),
+        shape: ta.shape(),
     };
     let view_b = HostTensorView {
         data: data_b.as_slice(),
-        shape: tb.shape.as_slice(),
+        shape: tb.shape(),
     };
     let ha = provider.upload(&view_a)?;
     let hb = provider.upload(&view_b)?;

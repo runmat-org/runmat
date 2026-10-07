@@ -38,20 +38,20 @@ impl WgpuProvider {
         let left_data = left_tensor.as_ref().map(Tensor::materialize_f64);
         let eigenvalues = self.upload_exec(&HostTensorView {
             data: &eigenvalues_data,
-            shape: &eigenvalues_tensor.shape,
+            shape: eigenvalues_tensor.shape(),
         })?;
         let diagonal = self.upload_exec(&HostTensorView {
             data: &diagonal_data,
-            shape: &diagonal_tensor.shape,
+            shape: diagonal_tensor.shape(),
         })?;
         let right = self.upload_exec(&HostTensorView {
             data: &right_data,
-            shape: &right_tensor.shape,
+            shape: right_tensor.shape(),
         })?;
         let left = match (left_tensor, left_data) {
             (Some(tensor), Some(data)) => Some(self.upload_exec(&HostTensorView {
                 data: &data,
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             })?),
             _ => None,
         };

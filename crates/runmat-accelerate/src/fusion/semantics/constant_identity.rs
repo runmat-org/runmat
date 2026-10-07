@@ -92,7 +92,7 @@ pub(super) fn exact_constant_digest(value: &Value) -> Result<Digest> {
             data: &array.data,
         },
         Value::Tensor(tensor) => ConstantPayload::Tensor {
-            shape: &tensor.shape,
+            shape: tensor.shape(),
             data: (0..tensor.len())
                 .map(|index| {
                     tensor
@@ -103,7 +103,7 @@ pub(super) fn exact_constant_digest(value: &Value) -> Result<Digest> {
                 .collect::<Result<Vec<_>>>()?,
         },
         Value::ComplexTensor(tensor) => ConstantPayload::ComplexTensor {
-            shape: &tensor.shape,
+            shape: tensor.shape(),
             data: (0..tensor.len())
                 .map(|index| {
                     tensor
@@ -131,4 +131,33 @@ pub(super) fn exact_constant_digest(value: &Value) -> Result<Digest> {
         _ => return Err(anyhow!("fusion constant has no exact source identity")),
     };
     Ok(Digest::sha256(serde_json::to_vec(&payload)?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_value::{ComplexTensor, IntegerStorage, Tensor};
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn numeric_constant_identity_includes_rank_and_exact_native_storage() {
+        let scalar = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), Vec::new()).unwrap(),
+        );
+        let vector = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1]).unwrap(),
+        );
+        assert_ne!(
+            exact_constant_digest(&scalar).unwrap(),
+            exact_constant_digest(&vector).unwrap()
+        );
+        let complex =
+            Value::ComplexTensor(ComplexTensor::from_f32(vec![(1.0, -0.0)], Vec::new()).unwrap());
+        let matrix =
+            Value::ComplexTensor(ComplexTensor::from_f32(vec![(1.0, -0.0)], vec![1, 1]).unwrap());
+        assert_ne!(
+            exact_constant_digest(&complex).unwrap(),
+            exact_constant_digest(&matrix).unwrap()
+        );
+    }
 }

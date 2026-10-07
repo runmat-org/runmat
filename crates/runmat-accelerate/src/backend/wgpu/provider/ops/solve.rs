@@ -45,7 +45,7 @@ impl WgpuProvider {
         let solution_data = solution.materialize_f64();
         let handle = self.upload_exec(&HostTensorView {
             data: &solution_data,
-            shape: &solution.shape,
+            shape: solution.shape(),
         })?;
 
         Ok(ProviderLinsolveResult {
@@ -61,7 +61,7 @@ impl WgpuProvider {
         let result_data = result.materialize_f64();
         self.upload_exec(&HostTensorView {
             data: &result_data,
-            shape: &result.shape,
+            shape: result.shape(),
         })
     }
 
@@ -77,7 +77,7 @@ impl WgpuProvider {
         let result_data = result.materialize_f64();
         self.upload_exec(&HostTensorView {
             data: &result_data,
-            shape: &result.shape,
+            shape: result.shape(),
         })
     }
 
@@ -178,7 +178,7 @@ impl WgpuProvider {
         let result_data = result.materialize_f64();
         let handle = self.upload_exec(&HostTensorView {
             data: &result_data,
-            shape: &result.shape,
+            shape: result.shape(),
         })?;
         Ok(handle)
     }
@@ -216,7 +216,7 @@ impl WgpuProvider {
         let result_data = result.materialize_f64();
         let handle = self.upload_exec(&HostTensorView {
             data: &result_data,
-            shape: &result.shape,
+            shape: result.shape(),
         })?;
         Ok(handle)
     }

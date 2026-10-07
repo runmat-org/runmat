@@ -75,7 +75,7 @@ pub async fn execute_matmul_epilogue_placed(
             Value::Tensor(tensor) => {
                 let started = Instant::now();
                 let data = tensor.materialize_f64();
-                let handle = allocations.upload(provider, &data, &tensor.shape)?;
+                let handle = allocations.upload(provider, &data, tensor.shape())?;
                 selection
                     .observer
                     .upload(started, host_f64_bytes(data.len()));

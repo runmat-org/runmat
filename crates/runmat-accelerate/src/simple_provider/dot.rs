@@ -52,12 +52,64 @@ impl InProcessProvider {
         // The operation-owned host kernel defines mixed-class arithmetic and
         // final rounding. Do not widen the authoritative Single payloads.
         let output = dot_host_real_for_provider(&lhs_tensor, &rhs_tensor, dim)?;
-        let shape = output.shape.clone();
+        let shape = output.shape().to_vec();
         let data = match output.into_numeric_storage().map_err(anyhow::Error::msg)? {
             runmat_value::NumericStorage::F32(values) => InProcessNumericData::F32(values),
             runmat_value::NumericStorage::F64(values) => InProcessNumericData::F64(values),
             _ => return Err(anyhow!("dot floating kernel returned nonfloating storage")),
         };
         self.allocate_numeric_data(data, shape, GpuTensorStorage::Real)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn native_single_dot_preserves_low_rank_owner_and_output_contract() {
+        let provider = InProcessProvider::new();
+        for (shape, lhs_values, rhs_values, expected_shape, expected_values) in [
+            (
+                Vec::new(),
+                vec![2.0_f32],
+                vec![3.0_f32],
+                vec![1, 0],
+                Vec::new(),
+            ),
+            (
+                vec![2],
+                vec![2.0_f32, 3.0_f32],
+                vec![4.0_f32, 5.0_f32],
+                vec![1, 1],
+                vec![23.0_f32],
+            ),
+        ] {
+            let lhs = provider
+                .allocate_numeric_data(
+                    InProcessNumericData::F32(lhs_values),
+                    shape.clone(),
+                    GpuTensorStorage::Real,
+                )
+                .expect("single left input");
+            let rhs = provider
+                .allocate_numeric_data(
+                    InProcessNumericData::F32(rhs_values),
+                    shape,
+                    GpuTensorStorage::Real,
+                )
+                .expect("single right input");
+            let output =
+                futures::executor::block_on(provider.dot(&lhs, &rhs, None)).expect("native dot");
+            assert_eq!(output.physical().element_type(), NumericElementType::F32);
+            let downloaded = futures::executor::block_on(provider.download_numeric(&output))
+                .expect("download dot output");
+            assert_eq!(downloaded.shape, expected_shape);
+            assert_eq!(downloaded.data, HostNumericDataOwned::F32(expected_values));
+            output.release().expect("release dot output");
+            lhs.release().expect("release left input");
+            rhs.release().expect("release right input");
+        }
     }
 }

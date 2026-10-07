@@ -1719,7 +1719,7 @@ fn factorial_scalar_host(value: f64) -> f64 {
 }
 
 fn tensor_to_weight_vector(tensor: &Tensor) -> Result<Vec<f64>> {
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(anyhow!("covariance: weight vector must be 1-D"));
     }
     let rows = tensor.rows();
@@ -5411,7 +5411,7 @@ impl AccelProvider for InProcessProvider {
         let spec =
             runmat_runtime::builtins::image::filters::fspecial::spec_from_request(&request.filter);
         let tensor = spec.generate_tensor().map_err(|err| anyhow!(err))?;
-        self.allocate_tensor(tensor.materialize_f64(), tensor.shape.clone())
+        self.allocate_tensor(tensor.materialize_f64(), tensor.shape().to_vec())
     }
 
     fn imfilter<'a>(
@@ -5506,7 +5506,7 @@ impl AccelProvider for InProcessProvider {
             let result_data = result.materialize_f64();
             let view = HostTensorView {
                 data: &result_data,
-                shape: &result.shape,
+                shape: result.shape(),
             };
             self.upload(&view).map_err(Into::into)
         })
@@ -5527,7 +5527,7 @@ impl AccelProvider for InProcessProvider {
             let result_data = result.materialize_f64();
             let view = HostTensorView {
                 data: &result_data,
-                shape: &result.shape,
+                shape: result.shape(),
             };
             self.upload(&view).map_err(Into::into)
         })
@@ -7577,7 +7577,7 @@ impl AccelProvider for InProcessProvider {
             Tensor::new(data, handle.shape().to_vec()).map_err(|e| anyhow!("diff_dim: {e}"))?;
         let diffed =
             diff_tensor_host(tensor, order, Some(dim + 1)).map_err(|e| anyhow!("diff_dim: {e}"))?;
-        let shape = diffed.shape.clone();
+        let shape = diffed.shape().to_vec();
         self.allocate_tensor(diffed.materialize_f64(), shape)
     }
 
@@ -7609,7 +7609,7 @@ impl AccelProvider for InProcessProvider {
                 .map_err(|e| anyhow!("gradient_dim: {e}"))?;
             let gradiented =
                 gradient_complex_tensor_host(tensor, dim + 1, spacing).map_err(|e| anyhow!(e))?;
-            let shape = gradiented.shape.clone();
+            let shape = gradiented.shape().to_vec();
             let data = gradiented.materialize_f64();
             let mut interleaved = Vec::with_capacity(data.len() * 2);
             for (re, im) in data {
@@ -7627,7 +7627,7 @@ impl AccelProvider for InProcessProvider {
             Tensor::new(data, handle.shape().to_vec()).map_err(|e| anyhow!("gradient_dim: {e}"))?;
         let gradiented =
             gradient_real_tensor_host(tensor, dim + 1, spacing).map_err(|e| anyhow!(e))?;
-        let shape = gradiented.shape.clone();
+        let shape = gradiented.shape().to_vec();
         self.allocate_tensor(gradiented.materialize_f64(), shape)
     }
 
@@ -7677,7 +7677,7 @@ impl AccelProvider for InProcessProvider {
             let gradiented =
                 gradient_complex_tensor_host_with_coordinates(tensor, dim + 1, coordinate_data)
                     .map_err(|e| anyhow!(e))?;
-            let shape = gradiented.shape.clone();
+            let shape = gradiented.shape().to_vec();
             let data = gradiented.materialize_f64();
             let mut interleaved = Vec::with_capacity(data.len() * 2);
             for (re, im) in data {
@@ -7696,7 +7696,7 @@ impl AccelProvider for InProcessProvider {
         let gradiented =
             gradient_real_tensor_host_with_coordinates(tensor, dim + 1, coordinate_data)
                 .map_err(|e| anyhow!(e))?;
-        let shape = gradiented.shape.clone();
+        let shape = gradiented.shape().to_vec();
         self.allocate_tensor(gradiented.materialize_f64(), shape)
     }
 
@@ -8612,8 +8612,10 @@ impl AccelProvider for InProcessProvider {
             .await
             .map_err(runtime_flow_to_provider_error)?;
             let factor_tensor = tensor_from_value("chol", eval.factor())?;
-            let factor =
-                self.allocate_tensor(factor_tensor.materialize_f64(), factor_tensor.shape.clone())?;
+            let factor = self.allocate_tensor(
+                factor_tensor.materialize_f64(),
+                factor_tensor.shape().to_vec(),
+            )?;
             Ok(ProviderCholResult {
                 factor,
                 info: eval.flag_index() as u32,
@@ -8656,16 +8658,16 @@ impl AccelProvider for InProcessProvider {
             let perm_vector_tensor = tensor_from_value("qr", eval.permutation_vector())?;
 
             let q_handle =
-                self.allocate_tensor(q_tensor.materialize_f64(), q_tensor.shape.clone())?;
+                self.allocate_tensor(q_tensor.materialize_f64(), q_tensor.shape().to_vec())?;
             let r_handle =
-                self.allocate_tensor(r_tensor.materialize_f64(), r_tensor.shape.clone())?;
+                self.allocate_tensor(r_tensor.materialize_f64(), r_tensor.shape().to_vec())?;
             let perm_matrix_handle = self.allocate_tensor(
                 perm_matrix_tensor.materialize_f64(),
-                perm_matrix_tensor.shape.clone(),
+                perm_matrix_tensor.shape().to_vec(),
             )?;
             let perm_vector_handle = self.allocate_tensor(
                 perm_vector_tensor.materialize_f64(),
-                perm_vector_tensor.shape.clone(),
+                perm_vector_tensor.shape().to_vec(),
             )?;
 
             Ok(ProviderQrResult {
@@ -9010,7 +9012,7 @@ impl AccelProvider for InProcessProvider {
             self.telemetry
                 .record_upload_bytes((solution.len() * std::mem::size_of::<f64>()) as u64);
 
-            let shape = solution.shape.clone();
+            let shape = solution.shape().to_vec();
             let data = solution.materialize_f64();
             let handle = self.allocate_tensor(data, shape)?;
             Ok(ProviderLinsolveResult {
@@ -9036,7 +9038,7 @@ impl AccelProvider for InProcessProvider {
             let tensor =
                 Tensor::new(data, matrix.shape().to_vec()).map_err(|e| anyhow!("inv: {e}"))?;
             let result = inv_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
-            let shape = result.shape.clone();
+            let shape = result.shape().to_vec();
             let data = result.materialize_f64();
             self.allocate_tensor(data, shape)
         })
@@ -9059,7 +9061,7 @@ impl AccelProvider for InProcessProvider {
                 Tensor::new(data, matrix.shape().to_vec()).map_err(|e| anyhow!("pinv: {e}"))?;
             let result = pinv_host_real_for_provider(&tensor, options.tolerance)
                 .map_err(|e| anyhow!("{e}"))?;
-            let shape = result.shape.clone();
+            let shape = result.shape().to_vec();
             let data = result.materialize_f64();
             self.allocate_tensor(data, shape)
         })
@@ -9256,7 +9258,7 @@ impl AccelProvider for InProcessProvider {
             self.telemetry
                 .record_upload_bytes((result.len() * std::mem::size_of::<f64>()) as u64);
 
-            let shape = result.shape.clone();
+            let shape = result.shape().to_vec();
             let data = result.materialize_f64();
             self.allocate_tensor(data, shape).map_err(Into::into)
         })
@@ -9299,7 +9301,7 @@ impl AccelProvider for InProcessProvider {
             self.telemetry
                 .record_upload_bytes((result.len() * std::mem::size_of::<f64>()) as u64);
 
-            let shape = result.shape.clone();
+            let shape = result.shape().to_vec();
             let data = result.materialize_f64();
             self.allocate_tensor(data, shape).map_err(Into::into)
         })

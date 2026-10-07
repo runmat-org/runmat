@@ -54,7 +54,7 @@ impl InProcessProvider {
             runmat_accelerate_api::handle_is_explicit(image),
             "imfilter",
         )?;
-        let shape = result.shape.clone();
+        let shape = result.shape().to_vec();
         let data = match result
             .into_numeric_storage()
             .map_err(|error| anyhow!(error))?
@@ -74,6 +74,40 @@ impl InProcessProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn native_single_imfilter_retains_class_shape_and_allocation_lifetimes() {
+        let provider = InProcessProvider::new();
+        let image = provider
+            .allocate_numeric_data(
+                InProcessNumericData::F32(vec![2.0]),
+                vec![1, 1],
+                GpuTensorStorage::Real,
+            )
+            .expect("single image");
+        let kernel = provider
+            .allocate_numeric_data(
+                InProcessNumericData::F32(vec![3.0]),
+                vec![1, 1],
+                GpuTensorStorage::Real,
+            )
+            .expect("single kernel");
+        let output = futures::executor::block_on(provider.imfilter(
+            &image,
+            &kernel,
+            &ImfilterOptions::default(),
+        ))
+        .expect("native imfilter");
+        assert_eq!(output.physical().element_type(), NumericElementType::F32);
+        let downloaded = futures::executor::block_on(provider.download_numeric(&output))
+            .expect("download imfilter output");
+        assert_eq!(downloaded.shape, vec![1, 1]);
+        assert_eq!(downloaded.data, HostNumericDataOwned::F32(vec![6.0]));
+        output.release().expect("release imfilter output");
+        image.release().expect("release image");
+        kernel.release().expect("release kernel");
+    }
 
     #[test]
     fn unsupported_image_class_does_not_mask_foreign_kernel_owner() {
