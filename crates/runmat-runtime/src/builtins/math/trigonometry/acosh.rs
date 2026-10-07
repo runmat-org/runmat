@@ -85,7 +85,11 @@ async fn acosh_builtin(value: Value) -> BuiltinResult<Value> {
         &ACOSH_LOGICAL_INPUT_EXTENSION,
         &ACOSH_CHARACTER_INPUT_EXTENSION,
     )?;
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, "acosh")?;
+    crate::builtins::common::validation::reject_typed_complex_integer_for(
+        &value,
+        runmat_builtins::ACOSH_CATALOG_ENTRY.identity,
+        &runmat_builtins::ACOSH_ERROR_INVALID_INPUT,
+    )?;
     crate::builtins::common::real_unary_preparation::execute(
         &runmat_builtins::ACOSH_CATALOG_ENTRY,
         runmat_types::RealUnaryPredicate::AtLeastOne,

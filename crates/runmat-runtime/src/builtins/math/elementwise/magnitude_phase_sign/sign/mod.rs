@@ -23,6 +23,7 @@ const BUILTIN_NAME: &str = OPERATION.name();
     builtin_path = "crate::builtins::math::elementwise::magnitude_phase_sign::sign"
 )]
 async fn sign_builtin(value: Value) -> BuiltinResult<Value> {
+    OPERATION.reject_complex_integer(&value)?;
     match value {
         Value::GpuTensor(handle) => provider::evaluate(handle).await,
         Value::Int(value) => Ok(Value::Int(host::sign_integer_scalar(value))),
@@ -30,10 +31,7 @@ async fn sign_builtin(value: Value) -> BuiltinResult<Value> {
             let (re_out, im_out) = host::sign_complex(re, im);
             Ok(Value::Complex(re_out, im_out))
         }
-        Value::ComplexTensor(ct) => {
-            crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "sign")?;
-            host::sign_complex_tensor(ct)
-        }
+        Value::ComplexTensor(ct) => host::sign_complex_tensor(ct),
         Value::CharArray(ca) => host::sign_char_array(ca),
         Value::String(_) | Value::StringArray(_) => Err(OPERATION.error(
             &SIGN_ERROR_INVALID_INPUT,

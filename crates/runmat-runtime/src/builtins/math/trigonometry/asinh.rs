@@ -91,7 +91,11 @@ async fn asinh_builtin(value: Value) -> BuiltinResult<Value> {
         &ASINH_LOGICAL_INPUT_EXTENSION,
         &ASINH_CHARACTER_INPUT_EXTENSION,
     )?;
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, "asinh")?;
+    crate::builtins::common::validation::reject_typed_complex_integer_for(
+        &value,
+        runmat_builtins::ASINH_CATALOG_ENTRY.identity,
+        &runmat_builtins::ASINH_ERROR_INVALID_INPUT,
+    )?;
     super::inverse_helpers::preparation::unary(
         runmat_builtins::ASINH_CATALOG_ENTRY.identity,
         value,

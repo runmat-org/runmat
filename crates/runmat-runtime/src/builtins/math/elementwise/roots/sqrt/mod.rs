@@ -32,6 +32,17 @@ async fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
         &runmat_builtins::SQRT_ERROR_TOO_MANY_OUTPUTS,
         "sqrt",
     )?;
+    if crate::builtins::common::validation::is_typed_complex_integer(&value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SQRT_INTEGER_INPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+        crate::builtins::common::validation::reject_typed_complex_integer_for(
+            &value,
+            runmat_builtins::SQRT_CATALOG_ENTRY.identity,
+            &runmat_builtins::SQRT_ERROR_INVALID_INPUT,
+        )?;
+    }
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &value,
         &SQRT_INTEGER_INPUT_EXTENSION,

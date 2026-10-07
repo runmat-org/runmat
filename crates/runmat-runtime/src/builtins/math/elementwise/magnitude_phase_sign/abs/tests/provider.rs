@@ -1,5 +1,36 @@
 use super::*;
 
+#[test]
+fn abs_rejects_resident_complex_integer_before_provider_lookup() {
+    let _guard = test_support::accel_test_lock();
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 2],
+            runmat_accelerate_api::NumericElementType::U64,
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+        )
+        .expect("owned complex integer allocation");
+    assert!(runmat_accelerate_api::provider().is_none());
+    let error = abs_builtin(Value::GpuTensor(allocation.handle.clone()))
+        .expect_err("complex integers are rejected before requiring a provider");
+    assert_eq!(error.identifier(), ABS_ERROR_INVALID_INPUT.identifier);
+    assert!(error
+        .message()
+        .contains("typed complex integer input is not supported"));
+    assert_eq!(allocation.probe.retirements(), 0);
+    assert!(allocation.handle.allocation_lease().validate_live().is_ok());
+    assert_eq!(
+        runmat_accelerate_api::handle_integer_type(&allocation.handle),
+        Some(runmat_accelerate_api::IntegerElementType::U64)
+    );
+    assert_eq!(
+        runmat_accelerate_api::handle_storage(&allocation.handle),
+        runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+    );
+    drop(allocation.handle);
+    assert_eq!(allocation.probe.retirements(), 1);
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn abs_gpu_provider_roundtrip() {

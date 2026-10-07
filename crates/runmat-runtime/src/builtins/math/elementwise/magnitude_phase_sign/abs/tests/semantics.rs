@@ -50,9 +50,10 @@ fn abs_preserves_native_single_and_rejects_typed_complex_integer() {
     .unwrap();
     let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
     let error = abs_builtin(Value::ComplexTensor(tensor)).unwrap_err();
+    assert_eq!(error.identifier(), ABS_ERROR_INVALID_INPUT.identifier);
     assert!(error
         .message()
-        .contains("complex numbers with integer types"));
+        .contains("typed complex integer input is not supported"));
 }
 
 #[test]

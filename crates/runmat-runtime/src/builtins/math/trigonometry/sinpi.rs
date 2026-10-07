@@ -79,7 +79,11 @@ async fn sinpi_builtin(value: Value) -> BuiltinResult<Value> {
             BUILTIN_NAME,
         )?;
     }
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, "sinpi")?;
+    crate::builtins::common::validation::reject_typed_complex_integer_for(
+        &value,
+        runmat_builtins::SINPI_CATALOG_ENTRY.identity,
+        &runmat_builtins::SINPI_ERROR_INVALID_INPUT,
+    )?;
     match value {
         Value::GpuTensor(handle) => sinpi_gpu(handle).await,
         Value::Complex(re, im) => {

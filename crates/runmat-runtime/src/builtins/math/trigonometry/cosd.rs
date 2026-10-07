@@ -91,7 +91,11 @@ async fn cosd_builtin(value: Value) -> BuiltinResult<Value> {
         "cosd",
     )?;
     ensure_extensions(&value)?;
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, "cosd")?;
+    crate::builtins::common::validation::reject_typed_complex_integer_for(
+        &value,
+        runmat_builtins::COSD_CATALOG_ENTRY.identity,
+        &runmat_builtins::COSD_ERROR_INVALID_INPUT,
+    )?;
     match value {
         Value::GpuTensor(handle) => cosd_gpu(handle).await,
         Value::Complex(re, im) => {

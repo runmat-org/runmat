@@ -94,9 +94,10 @@ pub use membership::{
 };
 mod integer;
 pub use integer::{
-    ensure_runmat_integer_f64_boundary, integer_is_exact_f64, is_typed_complex_integer,
-    native_integer_value_is_exact_f64, native_integer_value_is_exact_f64_async,
-    prepare_direct_integer_f64_boundary, reject_typed_complex_integer,
+    ensure_runmat_integer_f64_boundary, ensure_runmat_real_integer_f64_boundary,
+    integer_is_exact_f64, is_typed_complex_integer, native_integer_value_is_exact_f64,
+    native_integer_value_is_exact_f64_async, prepare_direct_integer_f64_boundary,
+    reject_typed_complex_integer, reject_typed_complex_integer_for,
     reject_typed_complex_integer_tensor, value_contains_explicit_gpu,
     value_contains_native_integer_class, value_has_logical_class, value_has_native_integer_class,
     IntegerBoundaryFailure, PreparedIntegerBoundary, PreparedIntegerPayload,

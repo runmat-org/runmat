@@ -98,7 +98,6 @@ async fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let template = parse_output_template(&rest)?;
     let template = admit_output_template(template)?;
     ensure_cos_extensions(&value, &rest).await?;
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, "cos")?;
     if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Cos) {
         return apply_output_template(symbolic, &template, &[]).await;
     }
@@ -147,10 +146,11 @@ async fn cos_admitted(value: Value, protected: Vec<GpuTensorHandle>) -> BuiltinR
 }
 
 async fn ensure_cos_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+    crate::builtins::common::validation::ensure_runmat_real_integer_f64_boundary(
         value,
         &COS_INTEGER_INPUT_EXTENSION,
-        BUILTIN_NAME,
+        runmat_builtins::COS_CATALOG_ENTRY.identity,
+        &runmat_builtins::COS_ERROR_INVALID_INPUT,
         "X",
     )
     .await?;

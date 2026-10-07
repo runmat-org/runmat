@@ -119,3 +119,28 @@ fn sqrt_wgpu_matches_cpu_elementwise() {
         other => panic!("unexpected cpu result {other:?}"),
     }
 }
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn complex_integer_rejection_preserves_policy_before_provider_lookup() {
+    let _guard = crate::builtins::common::test_support::accel_test_lock();
+    for (extensions, identifier) in [
+        (true, runmat_builtins::SQRT_ERROR_INVALID_INPUT.identifier),
+        (false, SQRT_INTEGER_INPUT_EXTENSION.error_identifier),
+    ] {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(extensions);
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 2],
+                runmat_accelerate_api::NumericElementType::U64,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            )
+            .unwrap();
+        assert!(runmat_accelerate_api::provider().is_none());
+        let error = sqrt_builtin(Value::GpuTensor(allocation.handle.clone())).unwrap_err();
+        assert_eq!(error.identifier(), identifier);
+        assert_eq!(allocation.probe.retirements(), 0);
+        assert!(allocation.handle.allocation_lease().validate_live().is_ok());
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
+    }
+}

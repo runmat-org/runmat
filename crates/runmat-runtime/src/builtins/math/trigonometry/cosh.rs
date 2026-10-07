@@ -90,14 +90,14 @@ async fn cosh_builtin(value: Value) -> BuiltinResult<Value> {
         &COSH_LOGICAL_INPUT_EXTENSION,
         &COSH_CHARACTER_INPUT_EXTENSION,
     )?;
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+    crate::builtins::common::validation::ensure_runmat_real_integer_f64_boundary(
         &value,
         &COSH_INTEGER_INPUT_EXTENSION,
-        BUILTIN_NAME,
+        runmat_builtins::COSH_CATALOG_ENTRY.identity,
+        &runmat_builtins::COSH_ERROR_INVALID_INPUT,
         "X",
     )
     .await?;
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, "cosh")?;
     super::inverse_helpers::preparation::unary(
         runmat_builtins::COSH_CATALOG_ENTRY.identity,
         value,

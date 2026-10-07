@@ -79,7 +79,11 @@ async fn acos_builtin(value: Value) -> BuiltinResult<Value> {
         &ACOS_LOGICAL_INPUT_EXTENSION,
         &ACOS_CHARACTER_INPUT_EXTENSION,
     )?;
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, "acos")?;
+    crate::builtins::common::validation::reject_typed_complex_integer_for(
+        &value,
+        runmat_builtins::ACOS_CATALOG_ENTRY.identity,
+        &runmat_builtins::ACOS_ERROR_INVALID_INPUT,
+    )?;
     crate::builtins::common::real_unary_preparation::execute(
         &runmat_builtins::ACOS_CATALOG_ENTRY,
         runmat_types::RealUnaryPredicate::ClosedUnitInterval,

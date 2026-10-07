@@ -26,7 +26,13 @@ pub(super) async fn apply(
         &value,
         conversion.name,
     )?;
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, conversion.name)?;
+    if crate::builtins::common::validation::is_typed_complex_integer(&value) {
+        return Err(error_with_detail(
+            conversion,
+            conversion.invalid_input,
+            "operations involving complex numbers with integer types are not supported",
+        ));
+    }
     match value {
         Value::GpuTensor(handle) => apply_gpu(conversion, handle).await,
         Value::Complex(re, im) => Ok(Value::Complex(

@@ -4,10 +4,7 @@ pub(super) fn abs_host_value(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Int(value) => Ok(Value::Int(abs_integer_scalar(value))),
         Value::Complex(re, im) => Ok(Value::Num(complex_magnitude(re, im))),
-        Value::ComplexTensor(ct) => {
-            crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "abs")?;
-            abs_complex_tensor(ct)
-        }
+        Value::ComplexTensor(ct) => abs_complex_tensor(ct),
         other => abs_real(other),
     }
 }

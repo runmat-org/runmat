@@ -4,7 +4,7 @@ use super::{
     build_runtime_error, handle_integer_type, handle_is_logical, handle_storage, BuiltinResult,
     ComplexTensor, GpuTensorStorage, IntValue, RuntimeError, Value,
 };
-use runmat_builtins::BuiltinExtensionDescriptor;
+use runmat_builtins::{BuiltinCatalogIdentity, BuiltinErrorDescriptor, BuiltinExtensionDescriptor};
 
 mod prepared;
 pub use prepared::{
@@ -20,6 +20,22 @@ pub fn is_typed_complex_integer(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(handle)
             if handle_integer_type(handle).is_some()
                 && handle_storage(handle) == GpuTensorStorage::ComplexInterleaved)
+}
+
+/// Keep a class rejection attached to its selected catalog error owner.
+pub fn reject_typed_complex_integer_for(
+    value: &Value,
+    builtin: BuiltinCatalogIdentity,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<()> {
+    if is_typed_complex_integer(value) {
+        return Err(crate::runtime_descriptor_error_with_detail(
+            builtin.name,
+            error,
+            "typed complex integer input is not supported",
+        ));
+    }
+    Ok(())
 }
 
 /// Reject a value that would otherwise enter a floating complex operation.
@@ -196,6 +212,14 @@ pub async fn ensure_runmat_integer_f64_boundary(
         return Ok(());
     }
     crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)?;
+    ensure_integer_f64_exactness(value, builtin, role).await
+}
+
+async fn ensure_integer_f64_exactness(
+    value: &Value,
+    builtin: &'static str,
+    role: &str,
+) -> BuiltinResult<()> {
     if !native_integer_value_is_exact_f64_async(value).await? {
         return Err(build_runtime_error(format!(
             "{builtin}: integer {role} values must be exactly representable as double"
@@ -203,6 +227,25 @@ pub async fn ensure_runmat_integer_f64_boundary(
         .with_builtin(builtin)
         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .build());
+    }
+    Ok(())
+}
+
+/// Admit a real-integer extension and reject unsupported complex storage before
+/// exactness preparation can download a resident payload.
+pub async fn ensure_runmat_real_integer_f64_boundary(
+    value: &Value,
+    extension: &'static BuiltinExtensionDescriptor,
+    builtin: runmat_builtins::BuiltinCatalogIdentity,
+    invalid_input: &'static runmat_builtins::BuiltinErrorDescriptor,
+    role: &str,
+) -> BuiltinResult<()> {
+    if value_has_native_integer_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(extension, builtin.name)?;
+    }
+    reject_typed_complex_integer_for(value, builtin, invalid_input)?;
+    if value_has_native_integer_class(value) {
+        ensure_integer_f64_exactness(value, builtin.name, role).await?;
     }
     Ok(())
 }

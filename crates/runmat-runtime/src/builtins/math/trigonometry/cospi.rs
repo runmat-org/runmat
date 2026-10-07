@@ -61,7 +61,11 @@ async fn cospi_builtin(value: Value) -> BuiltinResult<Value> {
         "cospi",
     )?;
     ensure_extensions(&value)?;
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, "cospi")?;
+    crate::builtins::common::validation::reject_typed_complex_integer_for(
+        &value,
+        runmat_builtins::COSPI_CATALOG_ENTRY.identity,
+        &runmat_builtins::COSPI_ERROR_INVALID_INPUT,
+    )?;
     match value {
         Value::GpuTensor(handle) => cospi_gpu(handle).await,
         Value::Complex(re, im) => {

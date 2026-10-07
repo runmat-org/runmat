@@ -80,10 +80,6 @@ fn evaluate_complex(
     operation: ExponentialOperation,
     tensor: ComplexTensor,
 ) -> BuiltinResult<Value> {
-    crate::builtins::common::validation::reject_typed_complex_integer_tensor(
-        &tensor,
-        operation.name(),
-    )?;
     let (storage, shape) = tensor.into_complex_storage_and_shape();
     let storage = match storage {
         ComplexStorage::F64(values) => ComplexStorage::F64(
@@ -98,7 +94,12 @@ fn evaluate_complex(
                 .map(|(real, imag)| operation.apply_complex_f32(real, imag))
                 .collect(),
         ),
-        ComplexStorage::Integer(_) => unreachable!("complex integer input rejected above"),
+        ComplexStorage::Integer(_) => {
+            return Err(super::errors::invalid(
+                operation,
+                "operations involving complex numbers with integer types are not supported",
+            ));
+        }
     };
     ComplexTensor::from_complex_storage(storage, shape)
         .map(Value::ComplexTensor)

@@ -79,7 +79,11 @@ async fn asin_builtin(value: Value) -> BuiltinResult<Value> {
         &ASIN_LOGICAL_INPUT_EXTENSION,
         &ASIN_CHARACTER_INPUT_EXTENSION,
     )?;
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, "asin")?;
+    crate::builtins::common::validation::reject_typed_complex_integer_for(
+        &value,
+        runmat_builtins::ASIN_CATALOG_ENTRY.identity,
+        &runmat_builtins::ASIN_ERROR_INVALID_INPUT,
+    )?;
     crate::builtins::common::real_unary_preparation::execute(
         &runmat_builtins::ASIN_CATALOG_ENTRY,
         runmat_types::RealUnaryPredicate::ClosedUnitInterval,

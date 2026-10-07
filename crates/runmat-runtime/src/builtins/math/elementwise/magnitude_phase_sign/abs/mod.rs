@@ -26,6 +26,7 @@ async fn abs_builtin(value: Value) -> BuiltinResult<Value> {
         return Err(OPERATION.error(&ABS_ERROR_TOO_MANY_OUTPUTS, "expected at most one output"));
     }
     extensions::ensure(&value)?;
+    OPERATION.reject_complex_integer(&value)?;
     match value {
         Value::Symbolic(expr) => Ok(symbolic_expr_to_value(
             runmat_value::SymbolicExpr::function_call("abs", vec![expr]),
@@ -33,10 +34,7 @@ async fn abs_builtin(value: Value) -> BuiltinResult<Value> {
         Value::GpuTensor(handle) => provider::evaluate(handle).await,
         Value::Int(value) => Ok(Value::Int(host::abs_integer_scalar(value))),
         Value::Complex(re, im) => Ok(Value::Num(host::complex_magnitude(re, im))),
-        Value::ComplexTensor(ct) => {
-            crate::builtins::common::validation::reject_typed_complex_integer_tensor(&ct, "abs")?;
-            host::abs_complex_tensor(ct)
-        }
+        Value::ComplexTensor(ct) => host::abs_complex_tensor(ct),
         Value::SparseTensor(sparse) => host::abs_sparse_tensor(sparse),
         Value::CharArray(ca) => host::abs_char_array(ca),
         Value::String(_) | Value::StringArray(_) => {

@@ -88,14 +88,14 @@ async fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
         &SINH_LOGICAL_INPUT_EXTENSION,
         &SINH_CHARACTER_INPUT_EXTENSION,
     )?;
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+    crate::builtins::common::validation::ensure_runmat_real_integer_f64_boundary(
         &value,
         &SINH_INTEGER_INPUT_EXTENSION,
-        BUILTIN_NAME,
+        runmat_builtins::SINH_CATALOG_ENTRY.identity,
+        &runmat_builtins::SINH_ERROR_INVALID_INPUT,
         "X",
     )
     .await?;
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, "sinh")?;
     super::inverse_helpers::preparation::unary(
         runmat_builtins::SINH_CATALOG_ENTRY.identity,
         value,

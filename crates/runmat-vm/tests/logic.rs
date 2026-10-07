@@ -880,21 +880,61 @@ fn typed_complex_integer_gpuarray_preserves_exact_descriptor_metadata() {
 #[test]
 fn typed_complex_integer_analytic_operations_are_rejected_before_f64_coercion() {
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
-    for builtin in [
-        "abs", "angle", "exp", "expm1", "gamma", "log", "log10", "log1p", "log2", "sign", "sqrt",
-        "acos", "acosh", "asin", "asinh", "atan", "atanh", "cos", "cosd", "cosh", "cospi",
-        "deg2rad", "rad2deg", "sin", "sind", "sinh", "sinpi", "tan", "tand", "tanh",
+    for (builtin, expected_message) in [
+        ("abs", "typed complex integer input is not supported"),
+        ("angle", "expected single or double input"),
+        (
+            "exp",
+            "operations involving complex numbers with integer types are not supported",
+        ),
+        (
+            "expm1",
+            "operations involving complex numbers with integer types are not supported",
+        ),
+        ("gamma", "expected real single or double input"),
+        ("log", "typed complex integer input is not supported"),
+        ("log10", "typed complex integer input is not supported"),
+        ("log1p", "typed complex integer input is not supported"),
+        ("log2", "typed complex integer input is not supported"),
+        ("sign", "typed complex integer input is not supported"),
+        ("sqrt", "typed complex integer input is not supported"),
+        ("acos", "typed complex integer input is not supported"),
+        ("acosh", "typed complex integer input is not supported"),
+        ("asin", "typed complex integer input is not supported"),
+        ("asinh", "typed complex integer input is not supported"),
+        ("atan", "typed complex integer input is not supported"),
+        ("atanh", "typed complex integer input is not supported"),
+        ("cos", "typed complex integer input is not supported"),
+        ("cosd", "typed complex integer input is not supported"),
+        ("cosh", "typed complex integer input is not supported"),
+        ("cospi", "typed complex integer input is not supported"),
+        (
+            "deg2rad",
+            "operations involving complex numbers with integer types are not supported",
+        ),
+        (
+            "rad2deg",
+            "operations involving complex numbers with integer types are not supported",
+        ),
+        ("sin", "typed complex integer input is not supported"),
+        ("sind", "typed complex integer input is not supported"),
+        ("sinh", "typed complex integer input is not supported"),
+        ("sinpi", "typed complex integer input is not supported"),
+        ("tan", "typed complex integer input is not supported"),
+        ("tand", "typed complex integer input is not supported"),
+        ("tanh", "typed complex integer input is not supported"),
     ] {
         let source =
             format!("z = complex(uint64(9223372036854775808), uint64(1)); out = {builtin}(z);");
         let err = execute_source(&source).expect_err(builtin);
+        let expected_identifier = format!("RunMat:{builtin}:InvalidInput");
+        assert_eq!(
+            err.identifier(),
+            Some(expected_identifier.as_str()),
+            "{builtin} returned an unexpected error identifier: {err}"
+        );
         assert!(
-            err.to_string().contains(
-                "operations involving complex numbers with integer types are not supported"
-            ) || err
-                .to_string()
-                .contains("expected real single or double input")
-                || err.to_string().contains("expected single or double input"),
+            err.to_string().contains(expected_message),
             "{builtin} returned an unexpected error: {err}"
         );
     }
@@ -2176,7 +2216,8 @@ fn sparse_slice_indexing_preserves_sparse_outputs() {
     assert!(matches!(
         &vars[11],
         Value::Tensor(tensor)
-            if tensor.shape() == vec![9, 1]
+            if tensor.shape() == vec![1, 9]
+                && tensor.numeric_dtype() == NumericDType::F64
                 && tensor.materialize_f64() == vec![10.0, 0.0, 30.0, 0.0, 0.0, 0.0, 0.0, 23.0, 0.0]
     ));
     assert!(logical_truth(&vars[12]));
@@ -2220,7 +2261,7 @@ fn sparse_integer_script_surface_is_runmat_mode_only() {
 fn typed_sparse_slice_indexing_preserves_uint64_storage() {
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let vars = execute_source(
-        "s = sparse([1 3 2], [1 1 3], uint64([1 9223372036854775808 4]), 3, 3); a = s(3,1); z = s(2,1); lin = s(:); pick = s([1 3 8]); sub = s([3 1], [1 3]); empty = s([],1);",
+        "s = sparse([1 3 2], [1 1 3], uint64([1 9223372036854775808 4]), 3, 3); a = s(3,1); z = s(2,1); lin = s(:); pick = s([1 3 8]); sub = s([3 1], [1 3]); empty = s([],1); range = s(1:end); dense_range = full(range);",
     )
     .unwrap();
 
@@ -2269,6 +2310,31 @@ fn typed_sparse_slice_indexing_preserves_uint64_storage() {
         Value::SparseTensor(sparse)
             if sparse.shape() == vec![0, 1]
                 && sparse.integer_storage() == Some(&IntegerStorage::U64(vec![]))
+    ));
+    assert!(matches!(
+        &vars[7],
+        Value::SparseTensor(sparse)
+            if sparse.shape() == vec![1, 9]
+                && sparse.row_indices == vec![0, 0, 0]
+                && sparse.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![1, 9_223_372_036_854_775_808, 4]))
+    ));
+    assert!(matches!(
+        &vars[8],
+        Value::Tensor(tensor)
+            if tensor.shape() == vec![1, 9]
+                && tensor.integer_storage()
+                    == Some(&IntegerStorage::U64(vec![
+                        1,
+                        0,
+                        9_223_372_036_854_775_808,
+                        0,
+                        0,
+                        0,
+                        0,
+                        4,
+                        0,
+                    ]))
     ));
 }
 

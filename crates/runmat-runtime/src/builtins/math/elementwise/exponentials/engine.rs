@@ -5,6 +5,9 @@ use crate::BuiltinResult;
 
 use super::operation::ExponentialOperation;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) async fn execute(operation: ExponentialOperation, value: Value) -> BuiltinResult<Value> {
     if let Some(function) = operation.symbolic_function() {
         if let Some(symbolic) = symbolic_function(&value, function) {
@@ -24,6 +27,12 @@ pub(super) async fn execute_non_table(
     operation: ExponentialOperation,
     value: Value,
 ) -> BuiltinResult<Value> {
+    if crate::builtins::common::validation::is_typed_complex_integer(&value) {
+        return Err(super::errors::invalid(
+            operation,
+            "operations involving complex numbers with integer types are not supported",
+        ));
+    }
     match value {
         Value::GpuTensor(handle) => super::provider::evaluate(operation, handle).await,
         Value::SparseTensor(sparse) => super::sparse::evaluate(operation, sparse),

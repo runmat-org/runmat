@@ -20,18 +20,11 @@ const BUILTIN_NAME: &str = OPERATION.name();
     builtin_path = "crate::builtins::math::elementwise::magnitude_phase_sign::angle"
 )]
 async fn angle_builtin(value: Value) -> BuiltinResult<Value> {
+    OPERATION.reject_complex_integer(&value)?;
     match value {
         Value::GpuTensor(handle) => provider::evaluate(handle).await,
         Value::Complex(re, im) => Ok(Value::Num(host::angle_scalar(re, im))),
-        Value::ComplexTensor(ct) => {
-            if ct.integer_storage().is_some() {
-                return Err(OPERATION.error(
-                    &ANGLE_ERROR_INVALID_INPUT,
-                    "expected single or double input",
-                ));
-            }
-            host::angle_complex_tensor(ct)
-        }
+        Value::ComplexTensor(ct) => host::angle_complex_tensor(ct),
         Value::Int(_)
         | Value::Bool(_)
         | Value::LogicalArray(_)

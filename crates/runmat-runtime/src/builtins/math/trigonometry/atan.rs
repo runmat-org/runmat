@@ -103,7 +103,11 @@ async fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
     let template = parse_output_template(&rest)?;
     let template = admit_output_template(template)?;
-    crate::builtins::common::validation::reject_typed_complex_integer(&value, "atan")?;
+    crate::builtins::common::validation::reject_typed_complex_integer_for(
+        &value,
+        runmat_builtins::ATAN_CATALOG_ENTRY.identity,
+        &runmat_builtins::ATAN_ERROR_INVALID_INPUT,
+    )?;
     let original = match &value {
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
