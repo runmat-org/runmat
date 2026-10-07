@@ -36,9 +36,18 @@ pub struct StructuralRecoveryStatistics {
     pub root_mean_square_error: f64,
 }
 
+/// Rotation-invariant volume L2 norm of a physical symmetric stress tensor.
+/// Indicators and total_error have units Pa * m^(3/2), not energy or relative error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StructuralRecoveryNorm {
+    StressTensorFrobeniusL2,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StructuralRecoveryEstimate {
+    pub norm: StructuralRecoveryNorm,
     pub solver_artifact_digest: StableDigest,
     pub stress_topology_id: String,
     pub total_error: f64,

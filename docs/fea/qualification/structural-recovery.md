@@ -9,7 +9,7 @@ fall by at least 10% per rung; the final peak-displacement change must be less
 than 0.25 times the preceding change. These are separate mandatory assertions.
 
 The latest original run retains estimator values approximately
-`372.95, 270.29, 195.79`, and peak displacements
+`390.13, 287.06, 204.91`, and peak displacements
 `3.10020e-8, 3.40295e-8, 3.48526e-8 m`. The estimator assertion passes;
 the displacement assertion fails, with change ratio approximately `0.271869`.
 Neither the meshes nor the criterion has been replaced.
@@ -31,20 +31,57 @@ resultant load `(0, -1000, 0) N`, moment `(500, 0, -1000) N m` about the origin,
 zero clamp displacement, and `2 * strain_energy = load_work`.
 
 This evidence rules out sparse-solve error as the explanation for the failed
-original displacement ratio. It does **not** independently validate stiffness
-assembly or certify continuum error: the dense calculation consumes the same
-assembled stiffness. It does not justify changing the integration rule,
-preconditioner, solver tolerance or original qualification criterion. Assembly
-accuracy and spatial approximation remain candidates for investigation. Rising
-near-clamp point-stress peaks alone do not establish a singularity diagnosis.
+original displacement ratio. It does not certify continuum error: the dense
+calculation consumes the same assembled stiffness.
+
+## Independent affine stiffness check
+
+A separate reference constructs physical barycentric gradients from corner
+coordinates, identifies midsides by their physical edge coordinates, and
+integrates the quadratic stiffness polynomial using closed-form moments:
+`integral(lambda_r * lambda_s) = V * (1 + delta_rs) / 20`.
+It shares neither production shape gradients nor quadrature rules. The isotropic
+elasticity coefficients come directly from the original physical specification.
+
+All global stiffness entries, including zeros, match on the three original
+meshes: 6,561, 140,625 and 1,058,841 entries. Relative Frobenius differences are
+`1.86e-16, 2.01e-16, 2.40e-16`; maximum coefficient differences normalized to
+the largest coefficient are at most `4.62e-16`. This establishes agreement with
+the independent affine polynomial integral on these meshes. It does not prove
+curved-element integration, arbitrary materials or continuum approximation.
+Neither the checked stiffness integration nor the sparse solve explains the
+failed peak-change ratio. The spatial approximation remains unqualified; no
+singularity diagnosis is inferred from rising near-clamp stress peaks.
+
+## Rotation-invariant recovery metric
+
+Stress components are physical tensor values `[xx, yy, zz, yz, xz, xy]`.
+The volume L2 Frobenius norm counts each shear component twice, reflecting its
+two entries in the symmetric matrix. Treating those six values as a vector
+incorrectly changed the original two-element indicator from `0.5` to
+`0.4330127` after a 45-degree tensor rotation. Both element and integration-point
+paths now use the tensor norm, including the relative roundoff floor. Tests cover
+all three coordinate planes, Tet4/Tet10, both layouts, indicators and marking.
+
+The raw total/indicators have units `Pa * m^(3/2)`; they are neither strain energy
+nor a dimensionless error. Required `StressTensorFrobeniusL2` metadata names the
+norm. Adaptation iteration schema/domain V2 binds it; old schema, missing norm
+and unknown norm records reject. Cold metadata validation is not mathematical
+reverification of imported stress fields. Finite source values whose squared
+norms overflow reject rather than acquiring a zero-error verdict through an
+infinite roundoff floor.
+
+The corrected metric changes the estimator values above. Peak displacements,
+meshes, residual targets, resource caps and the original `0.25` convergence
+criterion are unchanged; its original failure remains visible.
 
 ## Ownership and remaining gates
 
 The qualification coordinator retains original test names and delegates mesh
 construction, manufactured solutions, curved patches and heterogeneous material
 references to separate modules. Extraction preserves the nine original test and
-mesh-helper function bodies after whitespace normalization. The dense reference
-is confined to tests; it is neither a new production solver nor a certification
+mesh-helper function bodies after whitespace normalization. The dense and closed-form references
+are confined to tests; it is neither a new production solver nor a certification
 or resource-admission path.
 
 The original cantilever convergence gate remains failed. This diagnostic adds no

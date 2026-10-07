@@ -17,5 +17,5 @@ pub use iteration::{
 pub use structural_recovery::{
     estimate_structural_recovery_error, StructuralRecoveryEstimate,
     StructuralRecoveryEstimatorError, StructuralRecoveryEstimatorOptions,
-    StructuralRecoveryIndicator, StructuralRecoveryStatistics,
+    StructuralRecoveryIndicator, StructuralRecoveryNorm, StructuralRecoveryStatistics,
 };

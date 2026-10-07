@@ -249,3 +249,5 @@ fn tetrahedron10_integration_point_estimator_preserves_linear_recovery() {
     assert!(estimate.total_error < 1.0e-13);
     assert!(estimate.marked_element_identities.is_empty());
 }
+
+mod rotation;

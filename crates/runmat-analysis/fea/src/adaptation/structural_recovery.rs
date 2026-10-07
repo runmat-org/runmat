@@ -19,7 +19,8 @@ mod contract;
 
 pub use contract::{
     StructuralRecoveryEstimate, StructuralRecoveryEstimatorError,
-    StructuralRecoveryEstimatorOptions, StructuralRecoveryIndicator, StructuralRecoveryStatistics,
+    StructuralRecoveryEstimatorOptions, StructuralRecoveryIndicator, StructuralRecoveryNorm,
+    StructuralRecoveryStatistics,
 };
 
 const STRESS_COMPONENT_COUNT: usize = 6;
@@ -120,16 +121,14 @@ pub fn estimate_structural_recovery_error(
                 *recovered += sum / weight / element.node_ids.len() as f64;
             }
         }
-        let error_squared = stress_by_element
+        let original = stress_by_element
             .get(&element.element_id)
-            .ok_or(StructuralRecoveryEstimatorError::InvalidStressField)?
-            .iter()
-            .zip(recovered)
-            .map(|(value, recovered)| (value - recovered).powi(2))
-            .sum::<f64>()
-            * element_volumes
-                .get(&element.element_id)
-                .ok_or(StructuralRecoveryEstimatorError::InvalidElementGeometry)?;
+            .ok_or(StructuralRecoveryEstimatorError::InvalidStressField)?;
+        let error_squared = stress_norm_squared(std::array::from_fn(|component| {
+            original[component] - recovered[component]
+        })) * element_volumes
+            .get(&element.element_id)
+            .ok_or(StructuralRecoveryEstimatorError::InvalidElementGeometry)?;
         let error = error_squared.sqrt();
         if !error.is_finite() {
             return Err(StructuralRecoveryEstimatorError::InvalidStressField);
@@ -145,6 +144,16 @@ pub fn estimate_structural_recovery_error(
         indicators,
         options,
     )
+}
+
+/// Physical stress is [xx, yy, zz, yz, xz, xy], with tensor shear components.
+/// The symmetric matrix contains each shear component twice.
+fn stress_norm_squared(values: [f64; STRESS_COMPONENT_COUNT]) -> f64 {
+    values
+        .into_iter()
+        .enumerate()
+        .map(|(component, value)| (if component < 3 { 1.0 } else { 2.0 }) * value * value)
+        .sum()
 }
 
 fn finish_estimate(
@@ -180,6 +189,7 @@ fn finish_estimate(
         root_mean_square_error: (total_squared / count).sqrt(),
     };
     let estimate = StructuralRecoveryEstimate {
+        norm: StructuralRecoveryNorm::StressTensorFrobeniusL2,
         solver_artifact_digest,
         stress_topology_id: stress_topology_id.to_owned(),
         total_error: total_squared.sqrt(),
@@ -286,19 +296,15 @@ fn estimate_integration_point_recovery_error(
                                     .map(|node| barycentric[node] * nodal[node][component])
                                     .sum::<f64>()
                             });
-                        sample
-                            .iter()
-                            .zip(recovered)
-                            .map(|(value, recovered)| (value - recovered).powi(2))
-                            .sum::<f64>()
-                            * volume
+                        stress_norm_squared(std::array::from_fn(|component| {
+                            sample[component] - recovered[component]
+                        })) * volume
                             / INTEGRATION_POINT_COUNT as f64
                     })
                     .sum::<f64>();
                 let reference = samples
                     .iter()
-                    .flat_map(|sample| sample.iter())
-                    .map(|value| value * value)
+                    .map(|sample| stress_norm_squared(*sample))
                     .sum::<f64>()
                     * volume
                     / INTEGRATION_POINT_COUNT as f64;
@@ -319,24 +325,23 @@ fn estimate_integration_point_recovery_error(
                     .zip(samples)
                     .map(|((barycentric, weight), sample)| {
                         let recovered = interpolate_nodal_samples(nodal, *barycentric);
-                        sample
-                            .iter()
-                            .zip(recovered)
-                            .map(|(value, recovered)| (value - recovered).powi(2))
-                            .sum::<f64>()
-                            * weight
+                        stress_norm_squared(std::array::from_fn(|component| {
+                            sample[component] - recovered[component]
+                        })) * weight
                     })
                     .sum::<f64>();
                 let reference = integration
                     .iter()
                     .zip(samples)
-                    .map(|((_, weight), sample)| {
-                        sample.iter().map(|value| value * value).sum::<f64>() * weight
-                    })
+                    .map(|((_, weight), sample)| stress_norm_squared(*sample) * weight)
                     .sum::<f64>();
                 (error, reference)
             }
         };
+        // Overflow cannot become zero error through an infinite roundoff floor.
+        if !error_squared.is_finite() || !reference_squared.is_finite() {
+            return Err(StructuralRecoveryEstimatorError::InvalidStressField);
+        }
         let noise_floor = RECOVERY_ROUNDOFF_RELATIVE_TOLERANCE.powi(2) * reference_squared;
         let error = if error_squared <= noise_floor {
             0.0

@@ -10,7 +10,7 @@ use runmat_meshing_core::{
 use super::*;
 use crate::adaptation::{
     SolverFieldTransferEvidence, SolverFieldTransferMethod, StructuralRecoveryIndicator,
-    StructuralRecoveryStatistics,
+    StructuralRecoveryNorm, StructuralRecoveryStatistics,
 };
 use crate::assembly::solver_solid::tests::artifact;
 
@@ -177,6 +177,7 @@ fn estimate(target: &SolverMeshArtifact) -> StructuralRecoveryEstimate {
         .collect::<Vec<_>>();
     indicators.sort_by_key(|indicator| indicator.element_stable_identity);
     StructuralRecoveryEstimate {
+        norm: StructuralRecoveryNorm::StressTensorFrobeniusL2,
         solver_artifact_digest: target.canonical_digest,
         stress_topology_id: "elements".into(),
         total_error: sum_squared.sqrt(),
@@ -282,6 +283,18 @@ fn iteration_binds_canonical_solver_mesh_lineage_transfer_and_evidence() {
         StructuralAdaptationIteration::canonical_decode(&trailing),
         Err(StructuralAdaptationIterationError::Codec(_))
     ));
+    let mut prior_norm_schema = iteration.clone();
+    prior_norm_schema.schema_version = 1;
+    assert!(matches!(
+        prior_norm_schema.validate(),
+        Err(StructuralAdaptationIterationError::InvalidIterationChain)
+    ));
+    assert!(previous_evidence(
+        Some(&prior_norm_schema),
+        target.canonical_digest,
+        &quantity.quantity_id
+    )
+    .is_err());
     let mut tampered = iteration.clone();
     tampered.estimator.total_error *= 2.0;
     assert_eq!(

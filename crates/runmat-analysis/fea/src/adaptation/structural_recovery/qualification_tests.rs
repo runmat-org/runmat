@@ -26,6 +26,9 @@ mod cantilever_refinement;
 #[path = "qualification_tests/cantilever_equilibrium.rs"]
 mod cantilever_equilibrium;
 
+#[path = "qualification_tests/cantilever_stiffness.rs"]
+mod cantilever_stiffness;
+
 #[path = "qualification_tests/interface.rs"]
 mod interface;
 
