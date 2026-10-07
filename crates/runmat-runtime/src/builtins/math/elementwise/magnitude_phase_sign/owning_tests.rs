@@ -55,6 +55,40 @@ impl AccelProvider for Provider {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn public_unary_dispatch_preserves_rank_zero_and_rank_one_real_geometry() {
+    for (name, scalar_expected) in [
+        ("abs", 2.0),
+        ("angle", std::f64::consts::PI),
+        ("sign", -1.0),
+    ] {
+        let scalar = futures::executor::block_on(crate::call_builtin_async(
+            name,
+            &[Value::Tensor(
+                runmat_value::Tensor::new(vec![-2.0], Vec::new()).unwrap(),
+            )],
+        ))
+        .expect("rank-zero real unary input");
+        let Value::Num(scalar) = scalar else {
+            panic!("{name}: expected scalar output")
+        };
+        assert!((scalar - scalar_expected).abs() < 1.0e-12, "{name}");
+
+        let vector = futures::executor::block_on(crate::call_builtin_async(
+            name,
+            &[Value::Tensor(
+                runmat_value::Tensor::new(vec![-2.0, 2.0], vec![2]).unwrap(),
+            )],
+        ))
+        .expect("rank-one real unary input");
+        let Value::Tensor(vector) = vector else {
+            panic!("{name}: expected rank-one tensor output")
+        };
+        assert_eq!(vector.shape(), &[2], "{name}");
+    }
+}
+
 #[test]
 fn unary_dispatch_preserves_provider_failure_and_rejects_physical_alias() {
     for name in ["abs", "angle", "sign"] {

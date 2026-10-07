@@ -65,9 +65,9 @@ fn parse_tensor(current: &[String], values: &Tensor) -> crate::BuiltinResult<Vec
 
 fn is_vector(values: &Tensor) -> bool {
     values.is_empty()
-        || (values.shape.len() <= 2
+        || (values.shape().len() <= 2
             && values
-                .shape
+                .shape()
                 .iter()
                 .filter(|dimension| **dimension > 1)
                 .count()

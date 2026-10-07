@@ -66,4 +66,5 @@ fn numeric_u8_download_does_not_acquire_logical_interpretation() {
     assert!(
         matches!(value.integer_storage(), Some(IntegerStorage::U8(values)) if values == &[0, 2])
     );
+    assert_eq!(value.shape(), &[1, 2]);
 }

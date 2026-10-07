@@ -1,6 +1,30 @@
 use super::*;
 use runmat_value::{CellArray, CharArray, StringArray, Tensor};
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn numeric_permutations_accept_rank_zero_and_rank_one_vectors() {
+    let _outputs = crate::output_count::push_output_count(None);
+    for (input, order, expected) in [
+        (
+            structure(&[("a", 1.0.into())]),
+            Tensor::new(vec![1.0], Vec::new()).unwrap(),
+            vec!["a"],
+        ),
+        (
+            structure(&[("a", 1.0.into()), ("b", 2.0.into())]),
+            Tensor::new(vec![2.0, 1.0], vec![2]).unwrap(),
+            vec!["b", "a"],
+        ),
+    ] {
+        let Value::Struct(output) = call(Value::Struct(input), vec![Value::Tensor(order)]).unwrap()
+        else {
+            panic!("ordered structure");
+        };
+        assert_eq!(field_order(&output), expected);
+    }
+}
+
 #[test]
 fn default_uses_ascii_order() {
     let input = structure(&[

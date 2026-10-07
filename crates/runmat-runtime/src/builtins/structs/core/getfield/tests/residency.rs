@@ -82,7 +82,7 @@ async fn getfield_gpu_tensor_indexing_case() {
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let view = HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let handle = provider.upload(&view).expect("upload");
 
@@ -109,7 +109,7 @@ async fn getfield_gpu_tensor_indexing_case() {
     let Value::Tensor(indexed) = indexed else {
         panic!("expected class-preserving scalar tensor");
     };
-    assert_eq!(indexed.shape, vec![1, 1]);
+    assert_eq!(indexed.shape(), &[1, 1]);
     assert_eq!(indexed.numeric_dtype(), runmat_value::NumericDType::F32);
     assert_eq!(indexed.materialize_f64(), vec![3.0]);
 }

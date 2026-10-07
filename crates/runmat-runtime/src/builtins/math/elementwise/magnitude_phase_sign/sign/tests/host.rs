@@ -65,7 +65,7 @@ fn sign_tensor_mixed_values() {
     let result = sign_builtin(Value::Tensor(tensor)).unwrap();
     match result {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![2, 2]);
+            assert_eq!(out.shape(), &[2, 2]);
             assert_eq!(out.materialize_f64(), vec![-1.0, 0.0, 0.0, 1.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -92,7 +92,7 @@ fn sign_complex_tensor_handles_zero() {
     let result = sign_builtin(Value::ComplexTensor(tensor)).unwrap();
     match result {
         Value::ComplexTensor(out) => {
-            assert_eq!(out.shape, vec![2, 1]);
+            assert_eq!(out.shape(), &[2, 1]);
             assert_eq!(out.materialize_f64()[0], (0.0, 0.0));
             let (re, im) = out.materialize_f64()[1];
             assert!((re - 0.7071067811865475).abs() < 1e-12);
@@ -109,7 +109,7 @@ fn sign_character_array() {
     let result = sign_builtin(Value::CharArray(ca)).unwrap();
     match result {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![1, 6]);
+            assert_eq!(out.shape(), &[1, 6]);
             assert!(out
                 .materialize_f64()
                 .iter()
@@ -126,7 +126,7 @@ fn sign_logical_array() {
     let result = sign_builtin(Value::LogicalArray(logical)).unwrap();
     match result {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![2, 2]);
+            assert_eq!(out.shape(), &[2, 2]);
             assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),

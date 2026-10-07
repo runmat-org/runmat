@@ -64,7 +64,7 @@ fn abs_tensor_elements() {
     let result = abs_builtin(Value::Tensor(tensor)).expect("abs");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -88,7 +88,7 @@ fn abs_complex_tensor_to_real_tensor() {
     let result = abs_builtin(Value::ComplexTensor(complex)).expect("abs");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 1]);
+            assert_eq!(t.shape(), &[2, 1]);
             assert!((t.materialize_f64()[0] - 5.0).abs() < 1e-12);
             assert!((t.materialize_f64()[1] - (2f64).sqrt()).abs() < 1e-12);
         }
@@ -104,7 +104,7 @@ fn abs_char_array_codes() {
     let result = abs_builtin(Value::CharArray(char_array)).expect("abs");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), &[1, 2]);
             assert_eq!(t.materialize_f64(), vec![65.0, 122.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),

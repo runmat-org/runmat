@@ -57,7 +57,7 @@ fn getfield_linear_indexing_follows_matlab_orientation_rules() {
         vec![3, 1],
         vec![2, 1],
     );
-    assert_eq!(row_from_column.shape, vec![1, 2]);
+    assert_eq!(row_from_column.shape(), &[1, 2]);
     assert_eq!(
         row_from_column.integer_storage(),
         Some(&IntegerStorage::U64(vec![u64::MAX, u64::MAX - 2]))
@@ -69,7 +69,7 @@ fn getfield_linear_indexing_follows_matlab_orientation_rules() {
         vec![3, 1],
         vec![1, 2],
     );
-    assert_eq!(column_from_row.shape, vec![2, 1]);
+    assert_eq!(column_from_row.shape(), &[2, 1]);
 
     let matrix_from_row = select_numeric(
         vec![u64::MAX - 3, u64::MAX - 2, u64::MAX - 1, u64::MAX],
@@ -77,26 +77,26 @@ fn getfield_linear_indexing_follows_matlab_orientation_rules() {
         vec![4, 1],
         vec![1, 2],
     );
-    assert_eq!(matrix_from_row.shape, vec![1, 2]);
+    assert_eq!(matrix_from_row.shape(), &[1, 2]);
     let matrix_from_column = select_numeric(
         vec![u64::MAX - 3, u64::MAX - 2, u64::MAX - 1, u64::MAX],
         vec![2, 2],
         vec![4, 1],
         vec![2, 1],
     );
-    assert_eq!(matrix_from_column.shape, vec![2, 1]);
+    assert_eq!(matrix_from_column.shape(), &[2, 1]);
     let matrix_from_matrix = select_numeric(
         vec![u64::MAX - 3, u64::MAX - 2, u64::MAX - 1, u64::MAX],
         vec![2, 2],
         vec![1, 2, 3, 4],
         vec![2, 2],
     );
-    assert_eq!(matrix_from_matrix.shape, vec![2, 2]);
+    assert_eq!(matrix_from_matrix.shape(), &[2, 2]);
 
     let scalar_from_row = select_numeric(vec![u64::MAX], vec![1, 1], vec![1, 1], vec![1, 2]);
-    assert_eq!(scalar_from_row.shape, vec![1, 2]);
+    assert_eq!(scalar_from_row.shape(), &[1, 2]);
     let scalar_from_column = select_numeric(vec![u64::MAX], vec![1, 1], vec![1, 1], vec![2, 1]);
-    assert_eq!(scalar_from_column.shape, vec![2, 1]);
+    assert_eq!(scalar_from_column.shape(), &[2, 1]);
 
     let empty_from_row = select_numeric(
         vec![u64::MAX - 2, u64::MAX - 1, u64::MAX],
@@ -104,7 +104,7 @@ fn getfield_linear_indexing_follows_matlab_orientation_rules() {
         Vec::new(),
         vec![0, 1],
     );
-    assert_eq!(empty_from_row.shape, vec![1, 0]);
+    assert_eq!(empty_from_row.shape(), &[1, 0]);
     assert_eq!(
         empty_from_row.integer_storage(),
         Some(&IntegerStorage::U64(Vec::new()))
@@ -115,20 +115,20 @@ fn getfield_linear_indexing_follows_matlab_orientation_rules() {
         Vec::new(),
         vec![1, 0],
     );
-    assert_eq!(empty_from_matrix.shape, vec![1, 0]);
+    assert_eq!(empty_from_matrix.shape(), &[1, 0]);
 
     let logical_row = select_logical(vec![1, 4], vec![1, 0, 1, 0], vec![4, 1]);
-    assert_eq!(logical_row.shape, vec![1, 2]);
+    assert_eq!(logical_row.shape(), &[1, 2]);
     assert_eq!(
         logical_row.integer_storage(),
         Some(&IntegerStorage::U64(vec![u64::MAX - 3, u64::MAX - 1]))
     );
     let logical_column = select_logical(vec![4, 1], vec![1, 0, 1, 0], vec![1, 4]);
-    assert_eq!(logical_column.shape, vec![2, 1]);
+    assert_eq!(logical_column.shape(), &[2, 1]);
     let logical_matrix = select_logical(vec![2, 2], vec![1, 0, 1, 0], vec![2, 2]);
-    assert_eq!(logical_matrix.shape, vec![2, 1]);
+    assert_eq!(logical_matrix.shape(), &[2, 1]);
     let logical_empty_row = select_logical(vec![1, 4], vec![0, 0, 0, 0], vec![4, 1]);
-    assert_eq!(logical_empty_row.shape, vec![1, 0]);
+    assert_eq!(logical_empty_row.shape(), &[1, 0]);
     let logical_empty_matrix = select_logical(vec![2, 2], vec![0, 0, 0, 0], vec![2, 2]);
-    assert_eq!(logical_empty_matrix.shape, vec![0, 1]);
+    assert_eq!(logical_empty_matrix.shape(), &[0, 1]);
 }

@@ -18,7 +18,7 @@ fn getfield_vector_index_selector_reads_typed_integer_storage_exactly() {
     .expect("vector index");
     match result {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), &[1, 2]);
             assert_eq!(tensor.materialize_f64(), vec![20.0, 10.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -48,7 +48,7 @@ fn getfield_vector_index_preserves_typed_integer_target_storage() {
     .expect("vector index");
     match result {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), &[1, 2]);
             assert_eq!(
                 tensor.integer_storage(),
                 Some(&IntegerStorage::U64(vec![u64::MAX, u64::MAX - 1]))
@@ -81,7 +81,7 @@ fn getfield_vector_index_preserves_single_target_storage() {
     .expect("vector index");
     match result {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), &[1, 2]);
             assert_eq!(
                 tensor.into_numeric_storage().expect("single storage"),
                 NumericStorage::F32(vec![2.5, 1.25])
@@ -113,7 +113,7 @@ fn getfield_logical_index_selectors_preserve_integer_target_storage() {
     let Value::Tensor(tensor) = result else {
         panic!("expected tensor result");
     };
-    assert_eq!(tensor.shape, vec![1, 2]);
+    assert_eq!(tensor.shape(), &[1, 2]);
     assert_eq!(
         tensor.integer_storage(),
         Some(&IntegerStorage::U64(vec![u64::MAX - 2, u64::MAX]))
@@ -154,6 +154,6 @@ fn getfield_logical_index_selectors_preserve_integer_target_storage() {
     let Value::Tensor(tensor) = result else {
         panic!("expected empty typed tensor");
     };
-    assert_eq!(tensor.shape, vec![1, 0]);
+    assert_eq!(tensor.shape(), &[1, 0]);
     assert_eq!(tensor.integer_storage(), Some(&IntegerStorage::U64(vec![])));
 }

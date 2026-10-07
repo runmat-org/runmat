@@ -7,12 +7,12 @@ fn sign_gpu_provider_roundtrip() {
         let tensor = Tensor::new(vec![-3.0, -0.5, 0.0, 2.5], vec![2, 2]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = sign_builtin(Value::GpuTensor(handle)).expect("sign");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 2]);
+        assert_eq!(gathered.shape(), &[2, 2]);
         assert_eq!(gathered.materialize_f64(), vec![-1.0, -1.0, 0.0, 1.0]);
     });
 }
@@ -43,7 +43,7 @@ fn sign_gpu_complex_input_stays_resident_when_provider_supports_sign() {
             Value::ComplexTensor(tensor) => tensor,
             other => panic!("expected complex tensor, got {other:?}"),
         };
-        assert_eq!(actual.shape, expected.shape);
+        assert_eq!(actual.shape(), expected.shape());
         for (got, want) in actual
             .materialize_f64()
             .iter()
@@ -114,7 +114,7 @@ fn sign_wgpu_matches_cpu() {
     let cpu = sign_real(Value::Tensor(tensor.clone())).unwrap();
     let view = runmat_accelerate_api::HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let handle = runmat_accelerate_api::provider()
         .unwrap()
@@ -124,7 +124,7 @@ fn sign_wgpu_matches_cpu() {
     let gathered = test_support::gather(gpu).expect("gather");
     match (cpu, gathered) {
         (Value::Tensor(ct), gt) => {
-            assert_eq!(gt.shape, ct.shape);
+            assert_eq!(gt.shape(), ct.shape());
             for (a, b) in gt.materialize_f64().iter().zip(ct.materialize_f64().iter()) {
                 if a.is_nan() && b.is_nan() {
                     continue;
@@ -186,7 +186,7 @@ fn sign_wgpu_complex_matches_cpu_and_stays_resident() {
         Value::ComplexTensor(tensor) => tensor,
         other => panic!("expected complex tensor, got {other:?}"),
     };
-    assert_eq!(actual.shape, expected.shape);
+    assert_eq!(actual.shape(), expected.shape());
     let tol = match provider.precision() {
         runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
         runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

@@ -103,7 +103,7 @@ fn parse_component(
                     })
                     .collect::<Result<Vec<_>, _>>()?
             };
-            Ok(IndexComponent::Vector(indices, array.shape.clone()))
+            Ok(IndexComponent::Vector(indices, array.shape().to_vec()))
         }
         _ => parse_scalar(value).map(IndexComponent::Scalar),
     }

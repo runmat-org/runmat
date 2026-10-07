@@ -19,7 +19,7 @@ pub(super) fn abs_real(value: Value) -> BuiltinResult<Value> {
 }
 
 pub(super) fn abs_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|e| OPERATION.error(&ABS_ERROR_INTERNAL, e))?;
@@ -112,8 +112,8 @@ pub(super) fn abs_integer_storage(storage: &IntegerStorage) -> IntegerStorage {
 }
 
 pub(super) fn abs_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = ct.shape.clone();
-    let storage = match ct.into_complex_storage() {
+    let (storage, shape) = ct.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(values) => NumericStorage::F64(
             values
                 .into_iter()

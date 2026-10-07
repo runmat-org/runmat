@@ -7,7 +7,7 @@ pub(super) fn sign_real(value: Value) -> BuiltinResult<Value> {
 }
 
 pub(super) fn sign_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|e| OPERATION.error(&SIGN_ERROR_INTERNAL, e))?;
@@ -85,8 +85,8 @@ pub(super) fn sign_char_array(ca: CharArray) -> BuiltinResult<Value> {
 }
 
 pub(super) fn sign_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = ct.shape.clone();
-    let storage = match ct.into_complex_storage() {
+    let (storage, shape) = ct.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(values) => ComplexStorage::F64(
             values
                 .into_iter()

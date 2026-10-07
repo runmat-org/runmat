@@ -7,12 +7,12 @@ fn abs_gpu_provider_roundtrip() {
         let tensor = Tensor::new(vec![-2.0, -1.0, 0.0, 3.0], vec![4, 1]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = abs_builtin(Value::GpuTensor(handle)).expect("abs");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![4, 1]);
+        assert_eq!(gathered.shape(), &[4, 1]);
         assert_eq!(gathered.materialize_f64(), vec![2.0, 1.0, 0.0, 3.0]);
     });
 }
@@ -65,7 +65,7 @@ fn abs_complex_gpu_provider_stays_resident() {
             runmat_accelerate_api::GpuTensorStorage::Real
         );
         let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), &[2, 1]);
         assert!((gathered.materialize_f64()[0] - 5.0).abs() < 1e-12);
         assert!((gathered.materialize_f64()[1] - (2f64).sqrt()).abs() < 1e-12);
     });
@@ -83,7 +83,7 @@ fn abs_wgpu_matches_cpu_elementwise() {
     let cpu = abs_real(Value::Tensor(tensor.clone())).unwrap();
     let view = runmat_accelerate_api::HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let h = runmat_accelerate_api::provider()
         .unwrap()
@@ -93,7 +93,7 @@ fn abs_wgpu_matches_cpu_elementwise() {
     let gathered = test_support::gather(gpu).expect("gather");
     match (cpu, gathered) {
         (Value::Tensor(ct), gt) => {
-            assert_eq!(gt.shape, ct.shape);
+            assert_eq!(gt.shape(), ct.shape());
             let tol = match runmat_accelerate_api::provider().unwrap().precision() {
                 runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                 runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
@@ -149,7 +149,7 @@ fn abs_wgpu_complex_preserves_infinity_with_nan_lane() {
     let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
     let gpu = block_on(super::super::provider::evaluate(handle)).unwrap();
     let gathered = test_support::gather(gpu).expect("gather");
-    assert_eq!(gathered.shape, vec![2, 1]);
+    assert_eq!(gathered.shape(), &[2, 1]);
     assert!(
         gathered.materialize_f64()[0].is_infinite()
             && gathered.materialize_f64()[0].is_sign_positive()

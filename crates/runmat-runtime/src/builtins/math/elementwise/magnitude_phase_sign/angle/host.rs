@@ -7,7 +7,7 @@ pub(super) fn angle_real(value: Value) -> BuiltinResult<Value> {
 }
 
 pub(super) fn angle_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| OPERATION.error(&ANGLE_ERROR_INTERNAL, error))?;
@@ -30,8 +30,8 @@ pub(super) fn angle_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 pub(super) fn angle_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = ct.shape.clone();
-    let storage = match ct.into_complex_storage() {
+    let (storage, shape) = ct.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(values) => NumericStorage::F64(
             values
                 .into_iter()

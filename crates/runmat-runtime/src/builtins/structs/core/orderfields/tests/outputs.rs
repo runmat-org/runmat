@@ -11,7 +11,7 @@ fn returns_permutation_as_second_output() {
     let Value::Tensor(permutation) = &outputs[1] else {
         panic!("expected permutation tensor")
     };
-    assert_eq!(permutation.shape, [3, 1]);
+    assert_eq!(permutation.shape(), &[3, 1]);
     assert_eq!(permutation.materialize_f64(), [2.0, 3.0, 1.0]);
 }
 

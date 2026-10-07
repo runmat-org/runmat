@@ -52,7 +52,7 @@ fn angle_tensor_values() {
     let result = angle_builtin(Value::Tensor(tensor)).expect("angle");
     match result {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![2, 2]);
+            assert_eq!(out.shape(), &[2, 2]);
             assert!((out.materialize_f64()[0] - 0.0).abs() < 1e-12);
             assert!((out.materialize_f64()[1] - PI).abs() < 1e-12);
             assert_eq!(out.materialize_f64()[2], 0.0);

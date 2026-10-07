@@ -61,7 +61,7 @@ fn abs_complex_single_preserves_native_class_shape_and_empty_storage() {
     let Value::Tensor(output) = abs_builtin(Value::ComplexTensor(complex)).unwrap() else {
         panic!("expected single magnitude tensor");
     };
-    assert_eq!(output.shape, vec![2, 1]);
+    assert_eq!(output.shape(), &[2, 1]);
     assert_eq!(
         output.into_numeric_storage().unwrap(),
         NumericStorage::F32(vec![5.0, 13.0])
@@ -71,7 +71,7 @@ fn abs_complex_single_preserves_native_class_shape_and_empty_storage() {
     let Value::Tensor(output) = abs_builtin(Value::ComplexTensor(empty)).unwrap() else {
         panic!("expected empty single magnitude tensor");
     };
-    assert_eq!(output.shape, vec![0, 3]);
+    assert_eq!(output.shape(), &[0, 3]);
     assert_eq!(
         output.into_numeric_storage().unwrap(),
         NumericStorage::F32(Vec::new())

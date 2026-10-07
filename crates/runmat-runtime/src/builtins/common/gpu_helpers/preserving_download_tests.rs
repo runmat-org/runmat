@@ -19,6 +19,50 @@ fn release_all(handles: impl IntoIterator<Item = GpuTensorHandle>) {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn native_upload_and_download_preserve_low_rank_shape_class_and_owner() {
+    test_support::with_test_provider(|provider| {
+        let real = Tensor::new(vec![2.5], Vec::new()).unwrap();
+        let real_handle = upload_tensor(provider, &real).expect("rank-zero real upload");
+        let real_descriptor = real_handle.wire_descriptor();
+        assert!(runmat_accelerate_api::same_provider_instance(
+            exact_provider_for_handle(&real_handle).expect("real owner"),
+            provider,
+        ));
+        let native = block_on(download_native_values_async(provider, &real_handle))
+            .expect("rank-zero native download");
+        assert!(native.shape.is_empty());
+        assert_eq!(native.data, vec![NumericScalar::F64(2.5)]);
+        assert!(real.shape().is_empty());
+        assert_eq!(real_handle.wire_descriptor(), real_descriptor);
+
+        let complex = ComplexTensor::from_f32(vec![(1.25, -2.5), (3.5, 4.25)], vec![2])
+            .expect("rank-one complex source");
+        let complex_handle =
+            upload_complex_tensor(provider, &complex).expect("rank-one complex upload");
+        let complex_descriptor = complex_handle.wire_descriptor();
+        assert!(runmat_accelerate_api::same_provider_instance(
+            exact_provider_for_handle(&complex_handle).expect("complex owner"),
+            provider,
+        ));
+        let downloaded = block_on(download_value_preserving_residency_async(
+            provider,
+            &complex_handle,
+        ))
+        .expect("rank-one complex download");
+        let Value::ComplexTensor(downloaded) = downloaded else {
+            panic!("complex storage retained")
+        };
+        assert_eq!(downloaded.shape(), &[2]);
+        assert_eq!(downloaded.numeric_dtype(), NumericDType::F32);
+        assert_eq!(downloaded.complex_storage(), complex.complex_storage());
+        assert_eq!(complex.shape(), &[2]);
+        assert_eq!(complex_handle.wire_descriptor(), complex_descriptor);
+        release_all([real_handle, complex_handle]);
+    });
+}
+
 struct ReturningUploadProvider<'a> {
     inner: &'a dyn AccelProvider,
     outputs: Mutex<Vec<GpuTensorHandle>>,
@@ -716,7 +760,7 @@ fn preserving_download_restores_residency_and_preserves_immutable_class() {
         panic!("double tensor")
     };
     assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
-    assert_eq!(tensor.shape, vec![1, 2]);
+    assert_eq!(tensor.shape(), &[1, 2]);
     assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]);
     assert_eq!(allocation.handle.wire_descriptor(), original);
     assert!(!runmat_accelerate_api::handle_is_logical(

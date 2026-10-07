@@ -23,7 +23,7 @@ fn nested_resident_handle_remains_resident() {
         let handle = provider
             .upload(&HostTensorView {
                 data: &values,
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             })
             .unwrap();
         let input = structure(&[("z", Value::GpuTensor(handle.clone())), ("a", 1.0.into())]);

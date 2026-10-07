@@ -105,7 +105,7 @@ fn setfield_gpu_tensor_indexing_gathers_to_host() {
             let values = st.fields.get("values").expect("values field");
             match values {
                 Value::Tensor(tensor) => {
-                    assert_eq!(tensor.shape, vec![2, 2]);
+                    assert_eq!(tensor.shape(), &[2, 2]);
                     assert_eq!(tensor.numeric_value_at(3), Some(NumericScalar::F32(99.0)));
                 }
                 other => panic!("expected tensor after gather, got {other:?}"),

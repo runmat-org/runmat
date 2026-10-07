@@ -505,7 +505,7 @@ pub async fn download_native_values_async(
                 .collect::<crate::BuiltinResult<Vec<_>>>()?;
             Ok(HostNativeTensorOwned {
                 data,
-                shape: tensor.shape,
+                shape: tensor.shape().to_vec(),
             })
         }
         Value::LogicalArray(logical) => Ok(HostNativeTensorOwned {
@@ -722,7 +722,7 @@ pub fn upload_complex_tensor_protecting(
         .map_err(|error| build_runtime_error(format!("gpu upload: {error}")).build())?;
     let transfer = HostNumericTensorView {
         data: data.as_view(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
         storage: GpuTensorStorage::ComplexInterleaved,
     };
     runmat_accelerate_api::upload_numeric_protecting(provider, &transfer, protected).map_err(
@@ -786,7 +786,7 @@ pub fn upload_tensor_protecting_typed(
 ) -> runmat_accelerate_api::NumericUploadResult<GpuTensorHandle> {
     let transfer = HostNumericTensorView {
         data: tensor_numeric_view(tensor),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
         storage: GpuTensorStorage::Real,
     };
     runmat_accelerate_api::upload_numeric_protecting(provider, &transfer, protected)

@@ -7,7 +7,7 @@ fn angle_gpu_provider_roundtrip() {
         let tensor = Tensor::new(vec![1.0, -1.0, 0.5, -0.5], vec![2, 2]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = angle_builtin(Value::GpuTensor(handle)).expect("angle");
@@ -17,7 +17,7 @@ fn angle_gpu_provider_roundtrip() {
             .iter()
             .map(|&v| angle_scalar(v, 0.0))
             .collect();
-        assert_eq!(gathered.shape, vec![2, 2]);
+        assert_eq!(gathered.shape(), &[2, 2]);
         for (actual, target) in gathered.materialize_f64().iter().zip(expected.iter()) {
             assert!((actual - target).abs() < 1e-12);
         }
@@ -37,7 +37,7 @@ fn angle_complex_gpu_provider_roundtrip() {
             gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload complex");
         let result = angle_builtin(Value::GpuTensor(handle)).expect("angle");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, complex.shape);
+        assert_eq!(gathered.shape(), complex.shape());
         for (actual, (re, im)) in gathered
             .materialize_f64()
             .iter()
@@ -105,7 +105,7 @@ fn angle_wgpu_matches_cpu() {
     let cpu = angle_tensor(tensor.clone()).unwrap();
     let view = runmat_accelerate_api::HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let handle = runmat_accelerate_api::provider()
         .unwrap()
@@ -115,7 +115,7 @@ fn angle_wgpu_matches_cpu() {
     let gathered = test_support::gather(gpu).expect("gather");
     match (Value::Tensor(cpu), gathered) {
         (Value::Tensor(ct), gt) => {
-            assert_eq!(gt.shape, ct.shape);
+            assert_eq!(gt.shape(), ct.shape());
             let tol = match runmat_accelerate_api::provider().unwrap().precision() {
                 runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                 runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
@@ -145,7 +145,7 @@ fn angle_wgpu_complex_matches_cpu() {
     let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
     let result = block_on(super::super::provider::evaluate(handle)).unwrap();
     let gathered = test_support::gather(result).expect("gather");
-    assert_eq!(gathered.shape, complex.shape);
+    assert_eq!(gathered.shape(), complex.shape());
     let tol = match provider.precision() {
         runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
         runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
