@@ -19,7 +19,7 @@ pub(super) fn labels_from_value(name: EncodingBuiltin, value: Value) -> BuiltinR
             labels: (0..tensor.len())
                 .map(|index| tensor.numeric_value_at(index).and_then(numeric_label))
                 .collect(),
-            shape: normalized_shape(&tensor.shape),
+            shape: normalized_shape(tensor.shape()),
             kind: LabelKind::Numeric,
             categories: None,
         }),
@@ -93,7 +93,7 @@ pub(super) fn labels_from_value(name: EncodingBuiltin, value: Value) -> BuiltinR
 pub(super) fn dummyvar_groups(value: Value) -> BuiltinResult<Vec<LabelArray>> {
     match value {
         Value::Tensor(tensor)
-            if tensor.shape.len() <= 2 && tensor.rows() > 1 && tensor.cols() > 1 =>
+            if tensor.shape().len() <= 2 && tensor.rows() > 1 && tensor.cols() > 1 =>
         {
             let rows = tensor.rows();
             let cols = tensor.cols();
@@ -440,7 +440,7 @@ pub(super) fn format_number(value: f64) -> String {
 
 pub(super) fn categorical_shape(object: &ObjectInstance) -> Vec<usize> {
     match object.properties.get("Codes") {
-        Some(Value::Tensor(tensor)) => normalized_shape(&tensor.shape),
+        Some(Value::Tensor(tensor)) => normalized_shape(tensor.shape()),
         _ => vec![1, 1],
     }
 }

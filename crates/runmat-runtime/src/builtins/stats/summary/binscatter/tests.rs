@@ -115,8 +115,29 @@ fn binscatter_preserves_every_documented_integer_data_class() {
                 panic!("expected typed {property}");
             };
             assert_eq!(data.integer_storage(), Some(&expected));
-            assert_eq!(data.shape, vec![2, 1]);
+            assert_eq!(data.shape(), &[2, 1]);
         }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn binscatter_public_path_accepts_rank_zero_and_rank_one_vectors() {
+    let _guard = lock_plot_registry();
+    ensure_plot_test_env();
+    reset_hold_state_for_run();
+
+    for (shape, values) in [(Vec::new(), vec![1.0]), (vec![2], vec![1.0, 2.0])] {
+        let _ = clear_figure(None);
+        let x = Value::Tensor(Tensor::new(values.clone(), shape.clone()).unwrap());
+        let y = Value::Tensor(Tensor::new(values, shape).unwrap());
+        let handle = futures::executor::block_on(binscatter_builtin(vec![
+            x,
+            y,
+            Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
+        ]))
+        .expect("numeric vector geometry");
+        assert!(handle.is_finite());
     }
 }
 
@@ -332,7 +353,7 @@ fn binscatter_counts_and_registers_chart_state() {
     let Value::Tensor(values) = props else {
         panic!("expected Values tensor");
     };
-    assert_eq!(values.shape, vec![2, 2]);
+    assert_eq!(values.shape(), &[2, 2]);
     assert_eq!(values.materialize_f64(), vec![2.0, 0.0, 0.0, 2.0]);
 
     let figure = clone_figure(current_figure_handle()).unwrap();

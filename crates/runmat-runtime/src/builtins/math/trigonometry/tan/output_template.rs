@@ -238,7 +238,7 @@ async fn convert_to_gpu_complex(
             let data = values.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
             let complex = ComplexTensor::from_f64_values_with_dtype(
                 data,
-                tensor.shape.clone(),
+                tensor.shape().to_vec(),
                 complex_floating_output_dtype(tensor.numeric_dtype()),
             )
             .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
@@ -281,7 +281,7 @@ pub(super) async fn convert_to_host_complex(value: Value) -> BuiltinResult<Value
             let data = values.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
             let complex = ComplexTensor::from_f64_values_with_dtype(
                 data,
-                tensor.shape.clone(),
+                tensor.shape().to_vec(),
                 complex_floating_output_dtype(tensor.numeric_dtype()),
             )
             .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;

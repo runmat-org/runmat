@@ -77,7 +77,7 @@ fn validate_host_percentages(value: &Value) -> BuiltinResult<()> {
 
 fn validate_role(value: &Value, role: QqplotInputRole, argument_count: usize) -> BuiltinResult<()> {
     let (shape, len) = match value {
-        Value::Tensor(tensor) => (Some(tensor.shape.as_slice()), Some(tensor.len())),
+        Value::Tensor(tensor) => (Some(tensor.shape()), Some(tensor.len())),
         Value::LogicalArray(array) => (Some(array.shape.as_slice()), Some(array.len())),
         Value::GpuTensor(handle) => {
             if handle.physical().storage() != GpuTensorStorage::Real {

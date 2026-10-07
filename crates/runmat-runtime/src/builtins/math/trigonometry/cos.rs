@@ -262,20 +262,20 @@ fn cos_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
             .iter()
             .map(|&v| v.cos())
             .collect();
-        return Tensor::from_f32(data, tensor.shape.clone())
+        return Tensor::from_f32(data, tensor.shape().to_vec())
             .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e));
     }
     let data = tensor::tensor_values_f64_cow(&tensor)
         .iter()
         .map(|&v| v.cos())
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
+    Tensor::new(data, tensor.shape().to_vec())
         .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))
 }
 
 fn cos_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = ct.shape.clone();
-    let tensor = match ct.into_complex_storage() {
+    let (storage, shape) = ct.into_complex_storage_and_shape();
+    let tensor = match storage {
         ComplexStorage::F32(values) => ComplexTensor::from_f32(
             values
                 .into_iter()
@@ -558,13 +558,35 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn cos_preserves_rank_zero_scalarization_and_rank_one_shape() {
+        let scalar = cos_builtin(
+            Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap()),
+            Vec::new(),
+        )
+        .expect("rank-zero cos");
+        assert_eq!(scalar, Value::Num(1.0));
+
+        let vector = cos_builtin(
+            Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![2]).unwrap()),
+            Vec::new(),
+        )
+        .expect("rank-one cos");
+        let Value::Tensor(vector) = vector else {
+            panic!("expected rank-one tensor")
+        };
+        assert_eq!(vector.shape(), &[2]);
+        assert_eq!(vector.materialize_f64(), vec![1.0, 1.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cos_tensor_elements() {
         let tensor = Tensor::new(vec![0.0, std::f64::consts::PI], vec![2, 1]).unwrap();
         let result = cos_builtin(Value::Tensor(tensor), Vec::new()).expect("cos");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.shape(), &[2, 1]);
                 assert!((t.materialize_f64()[0] - 1.0).abs() < 1e-12);
                 assert!((t.materialize_f64()[1] + 1.0).abs() < 1e-12);
             }
@@ -582,7 +604,7 @@ pub(crate) mod tests {
         let result = cos_builtin(Value::Tensor(tensor), Vec::new()).expect("cos");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 let expected = [1.0, 1.0f64.cos(), 2.0f64.cos()];
                 for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
@@ -606,7 +628,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(out) = result else {
             panic!("expected complex tensor result");
         };
-        assert_eq!(out.shape, vec![3, 1]);
+        assert_eq!(out.shape(), &[3, 1]);
         assert_eq!(
             out.materialize_f64(),
             vec![(-3.0, 0.0), (0.0, 0.0), (5.0, 0.0)]
@@ -644,7 +666,7 @@ pub(crate) mod tests {
         let result = cos_builtin(Value::CharArray(chars), Vec::new()).expect("cos");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 for (idx, ch) in ['a', 'b', 'c'].into_iter().enumerate() {
                     let expected = (ch as u32 as f64).cos();
                     assert!((t.materialize_f64()[idx] - expected).abs() < 1e-12);
@@ -661,13 +683,13 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = cos_builtin(Value::GpuTensor(handle), Vec::new()).expect("cos");
             let gathered = test_support::gather(result).expect("gather");
             let expected: Vec<f64> = tensor.materialize_f64().iter().map(|&v| v.cos()).collect();
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), &[4, 1]);
             assert_eq!(gathered.materialize_f64(), expected);
         });
     }
@@ -760,7 +782,7 @@ pub(crate) mod tests {
                 Value::ComplexTensor(out) => out,
                 other => panic!("expected complex output, got {other:?}"),
             };
-            assert_eq!(out.shape, vec![1, 2]);
+            assert_eq!(out.shape(), &[1, 2]);
             for (idx, &(re, im)) in input.materialize_f64().iter().enumerate() {
                 assert!((out.materialize_f64()[idx].0 - cos_complex_re(re, im)).abs() < 1e-12);
                 assert!((out.materialize_f64()[idx].1 - cos_complex_im(re, im)).abs() < 1e-12);
@@ -792,7 +814,7 @@ pub(crate) mod tests {
             let Value::ComplexTensor(out) = gathered else {
                 panic!("expected gathered complex tensor, got {gathered:?}");
             };
-            assert_eq!(out.shape, vec![2, 1]);
+            assert_eq!(out.shape(), &[2, 1]);
             for (idx, &re) in input.materialize_f64().iter().enumerate() {
                 assert!((out.materialize_f64()[idx].0 - re.cos()).abs() < 1e-12);
                 assert!(out.materialize_f64()[idx].1.abs() < 1e-12);
@@ -806,7 +828,7 @@ pub(crate) mod tests {
             let input = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
             let input_view = HostTensorView {
                 data: &input.materialize_f64(),
-                shape: &input.shape,
+                shape: input.shape(),
             };
             let input_handle = provider.upload(&input_view).expect("upload input");
             let proto_tensor = ComplexTensor::new(vec![(0.0, 1.0)], vec![1, 1]).unwrap();
@@ -829,7 +851,7 @@ pub(crate) mod tests {
             let Value::ComplexTensor(out) = gathered else {
                 panic!("expected gathered complex tensor, got {gathered:?}");
             };
-            assert_eq!(out.shape, vec![2, 1]);
+            assert_eq!(out.shape(), &[2, 1]);
             for (idx, &re) in input.materialize_f64().iter().enumerate() {
                 assert!((out.materialize_f64()[idx].0 - re.cos()).abs() < 1e-12);
                 assert!(out.materialize_f64()[idx].1.abs() < 1e-12);
@@ -857,7 +879,7 @@ pub(crate) mod tests {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
                     let expected: Vec<f64> =
                         tensor.materialize_f64().iter().map(|&v| v.cos()).collect();
-                    assert_eq!(gathered.shape, vec![4, 1]);
+                    assert_eq!(gathered.shape(), &[4, 1]);
                     assert_eq!(gathered.materialize_f64(), expected);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
@@ -917,7 +939,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = cos_builtin(
@@ -929,7 +951,7 @@ pub(crate) mod tests {
                 Value::Tensor(t) => {
                     let expected: Vec<f64> =
                         tensor.materialize_f64().iter().map(|&v| v.cos()).collect();
-                    assert_eq!(t.shape, vec![2, 1]);
+                    assert_eq!(t.shape(), &[2, 1]);
                     assert_eq!(t.materialize_f64(), expected);
                 }
                 Value::GpuTensor(_) => panic!("expected host result"),
@@ -964,7 +986,7 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 let expected: Vec<f64> =
                     tensor.materialize_f64().iter().map(|&v| v.cos()).collect();
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), &[2, 1]);
                 assert_eq!(out.materialize_f64(), expected);
             }
             other => panic!("unexpected result {other:?}"),
@@ -1022,14 +1044,14 @@ pub(crate) mod tests {
         let cpu = cos_real(Value::Tensor(t.clone())).unwrap();
         let view = HostTensorView {
             data: &t.materialize_f64(),
-            shape: &t.shape,
+            shape: t.shape(),
         };
         let h = provider.upload(&view).unwrap();
         let gpu = block_on(cos_gpu(h, &[])).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
-                assert_eq!(gt.shape, ct.shape);
+                assert_eq!(gt.shape(), ct.shape());
                 let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

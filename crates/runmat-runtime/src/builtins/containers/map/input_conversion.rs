@@ -66,9 +66,9 @@ pub(super) async fn flatten_keys(
             builtin,
         )),
         Value::Tensor(t) => {
-            if !t.shape.is_empty()
+            if !t.shape().is_empty()
                 && tensor::tensor_element_len(t) != 1
-                && !is_vector_shape(&t.shape)
+                && !is_vector_shape(t.shape())
             {
                 return Err(map_error(
                     "containers.Map: numeric keys must be scalar or vector shaped",
@@ -115,8 +115,8 @@ pub(super) async fn flatten_values(
         Value::CharArray(ca) => Ok(char_array_rows(ca, builtin)?),
         Value::LogicalArray(arr) => Ok(arr.data.iter().map(|&b| Value::Bool(b != 0)).collect()),
         Value::Tensor(t) => {
-            if !t.shape.is_empty()
-                && !is_vector_shape(&t.shape)
+            if !t.shape().is_empty()
+                && !is_vector_shape(t.shape())
                 && tensor::tensor_element_len(t) != 1
             {
                 return Err(map_error(

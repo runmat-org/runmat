@@ -8,7 +8,7 @@ pub(super) fn normal_series_from_tensor(
     x: Tensor,
     pvec: Option<Vec<f64>>,
 ) -> BuiltinResult<Vec<Series>> {
-    let shape = tensor::default_shape_for(&x.shape, tensor::tensor_element_len(&x));
+    let shape = tensor::default_shape_for(x.shape(), tensor::tensor_element_len(&x));
     let columns = columns_from_tensor(x, &shape)?;
     columns
         .into_iter()
@@ -27,8 +27,8 @@ pub(super) fn two_sample_series_from_tensors(
     y: Tensor,
     pvec: Option<Vec<f64>>,
 ) -> BuiltinResult<Vec<Series>> {
-    let x_shape = tensor::default_shape_for(&x.shape, tensor::tensor_element_len(&x));
-    let y_shape = tensor::default_shape_for(&y.shape, tensor::tensor_element_len(&y));
+    let x_shape = tensor::default_shape_for(x.shape(), tensor::tensor_element_len(&x));
+    let y_shape = tensor::default_shape_for(y.shape(), tensor::tensor_element_len(&y));
     let x_columns = columns_from_tensor(x, &x_shape)?;
     let y_columns = columns_from_tensor(y, &y_shape)?;
     if x_columns.is_empty() || y_columns.is_empty() {

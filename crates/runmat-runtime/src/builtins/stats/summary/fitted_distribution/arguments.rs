@@ -192,9 +192,9 @@ pub(super) fn broadcast_tensors_for(
     let Some(first) = inputs.first() else {
         return Ok((Vec::new(), vec![1, 1]));
     };
-    let mut shape = first.shape.clone();
+    let mut shape = first.shape().to_vec();
     for tensor in inputs.iter().skip(1) {
-        shape = broadcast::broadcast_shapes(builtin, &shape, &tensor.shape)
+        shape = broadcast::broadcast_shapes(builtin, &shape, tensor.shape())
             .map_err(|err| invalid_for(builtin, err))?;
     }
     let mut values = Vec::with_capacity(inputs.len());
@@ -213,7 +213,7 @@ pub(super) fn broadcast_tensor_to(
     if len == 0 {
         return Ok(Vec::new());
     }
-    let in_shape = broadcast::align_shape(&tensor.shape, out_shape.len());
+    let in_shape = broadcast::align_shape(tensor.shape(), out_shape.len());
     let strides = broadcast::compute_strides(&in_shape);
     let mut out = Vec::with_capacity(len);
     let input_len = tensor::tensor_element_len(tensor);

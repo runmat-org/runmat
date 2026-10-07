@@ -63,7 +63,7 @@ pub async fn build_component_selectors(
                 let selector = match &materialized {
                     Value::Tensor(tensor) => SliceSelector::LinearIndices {
                         values: numeric_tensor_indices(tensor, Some(total_len))?,
-                        output_shape: tensor.shape.clone(),
+                        output_shape: tensor.shape().to_vec(),
                     },
                     Value::LogicalArray(_) => {
                         let values = indices_from_value_linear(&materialized, total_len).await?;
@@ -149,7 +149,7 @@ fn index_scalar_from_host_value(value: &Value) -> Option<IndexScalar> {
     match value {
         Value::Num(n) => exact_index_from_f64(*n).map(IndexScalar::Signed),
         Value::Int(int_val) => Some(IndexScalar::from_int(int_val)),
-        Value::Tensor(t) if tensor::is_scalar_tensor(t) && is_scalar_shape(&t.shape) => {
+        Value::Tensor(t) if tensor::is_scalar_tensor(t) && is_scalar_shape(t.shape()) => {
             if let Some(storage) = t.integer_storage() {
                 storage
                     .value_at(0)
@@ -359,7 +359,7 @@ pub async fn build_slice_selectors(
             let indices = numeric_tensor_indices(idx_t, Some(total_len))?;
             selectors.push(SliceSelector::LinearIndices {
                 values: indices,
-                output_shape: idx_t.shape.clone(),
+                output_shape: idx_t.shape().to_vec(),
             });
         } else if let Value::LogicalArray(_) = &materialized {
             // MATLAB linear logical indexing always yields a column vector.
@@ -473,8 +473,8 @@ pub async fn build_scalar_selectors(raw_indices: &[Value]) -> VmResult<Vec<Slice
 #[cfg(test)]
 mod tests {
     use super::{
-        build_scalar_selectors, build_slice_selectors, indices_from_value_linear,
-        selector_from_value_dim, SliceSelector,
+        build_component_selectors, build_scalar_selectors, build_slice_selectors,
+        indices_from_value_linear, selector_from_value_dim, SliceSelector,
     };
     use runmat_value::{IntValue, IntegerStorage, LogicalArray, Tensor, Value};
 
@@ -596,6 +596,42 @@ mod tests {
             futures::executor::block_on(selector_from_value_dim(&Value::Tensor(indices), 2))
                 .expect("typed integer vector selector");
         assert!(matches!(selector, SliceSelector::Indices(values) if values == vec![2, 1]));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn numeric_linear_selectors_preserve_exact_low_rank_output_shape() {
+        for (shape, values) in [(Vec::new(), vec![2]), (vec![2], vec![2, 1])] {
+            let input = Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U16(values.clone()), shape.clone()).unwrap(),
+            );
+            let components = [crate::object::indexing::ObjectIndexComponent::Value(
+                input.clone(),
+            )];
+            let component_selectors =
+                futures::executor::block_on(build_component_selectors(&components, &[2, 2], false))
+                    .unwrap();
+            let slice_selectors =
+                futures::executor::block_on(build_slice_selectors(1, 0, 0, &[input], &[2, 2]))
+                    .unwrap();
+            for selectors in [component_selectors, slice_selectors] {
+                let [SliceSelector::LinearIndices {
+                    values: indices,
+                    output_shape,
+                }] = selectors.as_slice()
+                else {
+                    panic!("expected numeric linear selector");
+                };
+                assert_eq!(
+                    indices,
+                    &values
+                        .iter()
+                        .map(|value| usize::from(*value))
+                        .collect::<Vec<_>>()
+                );
+                assert_eq!(output_shape, &shape);
+            }
+        }
     }
 
     #[test]

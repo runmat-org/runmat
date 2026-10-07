@@ -29,12 +29,34 @@ fn normal_distribution_broadcasts_parameters() {
     .unwrap();
     match out {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), &[1, 2]);
             assert_close(tensor.materialize_f64()[0], 0.5, 1e-12);
             assert_close(tensor.materialize_f64()[1], 0.841_344_746_068_543, 1e-12);
         }
         other => panic!("expected tensor, got {other:?}"),
     }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn normal_distribution_canonicalizes_low_rank_inputs_through_scalar_broadcasting() {
+    let scalar = block_on(normcdf::normcdf_builtin(
+        Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap()),
+        Vec::new(),
+    ))
+    .unwrap();
+    assert_eq!(scalar, Value::Num(0.5));
+
+    let Value::Tensor(vector) = block_on(normcdf::normcdf_builtin(
+        Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2]).unwrap()),
+        vec![Value::Num(0.0), Value::Num(1.0)],
+    ))
+    .unwrap() else {
+        panic!("rank-one input must produce a broadcast tensor");
+    };
+    assert_eq!(vector.shape(), &[1, 2]);
+    assert_close(vector.materialize_f64()[0], 0.5, 1e-12);
+    assert_close(vector.materialize_f64()[1], 0.841_344_746_068_543, 1e-12);
 }
 
 #[test]

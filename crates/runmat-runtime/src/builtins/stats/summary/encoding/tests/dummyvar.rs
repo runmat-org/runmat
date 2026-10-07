@@ -9,7 +9,7 @@ fn dummyvar_encodes_numeric_columns_and_missing() {
     .unwrap() else {
         panic!("tensor");
     };
-    assert_eq!(out.shape, vec![3, 4]);
+    assert_eq!(out.shape(), &[3, 4]);
     assert_f64_slice_eq_nan(
         &out.materialize_f64(),
         &[
@@ -50,7 +50,7 @@ fn dummyvar_encodes_cell_grouping_variables() {
     .unwrap() else {
         panic!("tensor");
     };
-    assert_eq!(out.shape, vec![3, 4]);
+    assert_eq!(out.shape(), &[3, 4]);
     assert_eq!(
         out.materialize_f64(),
         vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]
@@ -70,7 +70,7 @@ fn dummyvar_treats_row_cellstr_as_one_grouping_vector() {
     .unwrap() else {
         panic!("tensor");
     };
-    assert_eq!(out.shape, vec![3, 2]);
+    assert_eq!(out.shape(), &[3, 2]);
     assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
 }
 
@@ -81,8 +81,27 @@ fn dummyvar_treats_numeric_row_vector_as_one_grouping_vector() {
     else {
         panic!("tensor");
     };
-    assert_eq!(out.shape, vec![3, 2]);
+    assert_eq!(out.shape(), &[3, 2]);
     assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn dummyvar_preserves_rank_zero_and_rank_one_grouping_geometry() {
+    let Value::Tensor(scalar) = block_on(dummyvar_builtin(tensor(vec![2.0], Vec::new()))).unwrap()
+    else {
+        panic!("tensor");
+    };
+    assert_eq!(scalar.shape(), &[1, 2]);
+    assert_eq!(scalar.materialize_f64(), vec![0.0, 1.0]);
+
+    let Value::Tensor(vector) =
+        block_on(dummyvar_builtin(tensor(vec![1.0, 2.0, 1.0], vec![3]))).unwrap()
+    else {
+        panic!("tensor");
+    };
+    assert_eq!(vector.shape(), &[3, 2]);
+    assert_eq!(vector.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
 }
 
 #[test]
@@ -95,7 +114,7 @@ fn dummyvar_reads_typed_integer_labels_exactly() {
     .unwrap() else {
         panic!("tensor");
     };
-    assert_eq!(out.shape, vec![3, 4]);
+    assert_eq!(out.shape(), &[3, 4]);
     assert_eq!(
         out.materialize_f64(),
         vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]
@@ -122,7 +141,7 @@ fn dummyvar_supports_all_integer_classes_in_extension_mode() {
             panic!("expected double tensor")
         };
         assert!(output.integer_storage().is_none());
-        assert_eq!(output.shape, vec![3, 2]);
+        assert_eq!(output.shape(), &[3, 2]);
         assert_eq!(output.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
     }
 }
@@ -207,7 +226,7 @@ fn dummyvar_grouping_detection_uses_typed_integer_storage_len() {
         panic!("tensor");
     };
 
-    assert_eq!(out.shape, vec![3, 4]);
+    assert_eq!(out.shape(), &[3, 4]);
     assert_eq!(
         out.materialize_f64(),
         vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]
@@ -230,6 +249,6 @@ fn dummyvar_nd_arrays_flatten_one_grouping_variable() {
         else {
             panic!("dummyvar must return a double matrix");
         };
-        assert_eq!(output.shape, expected_shape);
+        assert_eq!(output.shape(), expected_shape.as_slice());
     }
 }

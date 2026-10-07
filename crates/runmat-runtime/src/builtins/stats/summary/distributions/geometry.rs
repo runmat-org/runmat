@@ -106,9 +106,9 @@ pub(super) fn broadcast_tensors(
     let Some(first) = inputs.first() else {
         return Ok((Vec::new(), vec![1, 1]));
     };
-    let mut shape = first.shape.clone();
+    let mut shape = first.shape().to_vec();
     for tensor in inputs.iter().skip(1) {
-        shape = broadcast::broadcast_shapes(name, &shape, &tensor.shape)
+        shape = broadcast::broadcast_shapes(name, &shape, tensor.shape())
             .map_err(|err| normal_error(name, err))?;
     }
     let mut values = Vec::new();
@@ -139,7 +139,7 @@ pub(super) fn broadcast_tensor_to(
     if len == 0 {
         return Ok(Vec::new());
     }
-    let in_shape = broadcast::align_shape(&tensor.shape, out_shape.len());
+    let in_shape = broadcast::align_shape(tensor.shape(), out_shape.len());
     let strides = broadcast::compute_strides(&in_shape);
     let mut out = Vec::new();
     out.try_reserve_exact(len)

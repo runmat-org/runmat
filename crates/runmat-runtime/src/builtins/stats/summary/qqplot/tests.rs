@@ -62,6 +62,28 @@ fn qqplot_scalar_typed_integer_sample_uses_storage_len_for_default_shape() {
     assert_eq!(series[0].observed, vec![42.0]);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn qqplot_public_path_preserves_rank_zero_and_rank_one_samples() {
+    let _guard = setup();
+    for (sample, expected) in [
+        (
+            Value::Tensor(Tensor::new(vec![4.0], Vec::new()).unwrap()),
+            vec![4.0],
+        ),
+        (
+            Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2]).unwrap()),
+            vec![1.0, 3.0],
+        ),
+    ] {
+        let handles = tensor_data(block_on(qqplot_builtin(vec![sample])).unwrap());
+        let observed = tensor_data(
+            get_builtin(vec![Value::Num(handles[0]), Value::String("YData".into())]).unwrap(),
+        );
+        assert_eq!(observed, expected);
+    }
+}
+
 #[test]
 fn qqplot_normal_vector_returns_data_reference_and_quartile_handles() {
     let _guard = setup();

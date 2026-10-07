@@ -33,7 +33,7 @@ pub(super) fn admit_host_visible(args: &[Value]) -> BuiltinResult<Option<ParsedI
                 return Err(invalid("binscatter: x and y must be real numeric vectors"));
             }
             let shape = match value {
-                Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
+                Value::Tensor(tensor) => Some(tensor.shape()),
                 Value::LogicalArray(array) => Some(array.shape.as_slice()),
                 _ => None,
             };
@@ -95,7 +95,7 @@ pub(super) fn admit_host_visible(args: &[Value]) -> BuiltinResult<Option<ParsedI
 
 fn validate_selected_host_data(value: &Value, name: &str) -> BuiltinResult<()> {
     let shape = match value {
-        Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
+        Value::Tensor(tensor) => Some(tensor.shape()),
         Value::LogicalArray(array) => Some(array.shape.as_slice()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => None,
         _ => return Err(invalid(format!("binscatter: {name} must be numeric"))),
@@ -218,7 +218,7 @@ pub(super) fn numeric_data_from_value(value: Value, context: &str) -> BuiltinRes
 }
 
 pub(super) fn ensure_vector_tensor(tensor: &Tensor, context: &str) -> BuiltinResult<()> {
-    if tensor.shape.iter().filter(|&&dim| dim > 1).count() > 1 {
+    if tensor.shape().iter().filter(|&&dim| dim > 1).count() > 1 {
         return Err(invalid(format!(
             "binscatter: {context} must be a real numeric vector"
         )));

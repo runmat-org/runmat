@@ -17,7 +17,7 @@ fn pdf_broadcasts_parameters_preserves_single_and_restores_residency() {
         panic!("expected single tensor");
     };
     assert_eq!(density.numeric_dtype(), NumericDType::F32);
-    assert_eq!(density.shape, vec![2, 1]);
+    assert_eq!(density.shape(), &[2, 1]);
 
     test_support::with_test_provider(|provider| {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
@@ -34,7 +34,7 @@ fn pdf_broadcasts_parameters_preserves_single_and_restores_residency() {
         .expect("resident integer pdf");
         assert!(matches!(density, Value::GpuTensor(_)));
         let gathered = test_support::gather(density).expect("gather pdf");
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), &[2, 1]);
     });
 }
 

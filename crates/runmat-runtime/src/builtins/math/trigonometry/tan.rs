@@ -265,20 +265,20 @@ fn tan_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
             .iter()
             .map(|&v| v.tan())
             .collect();
-        return Tensor::from_f32(data, tensor.shape.clone())
+        return Tensor::from_f32(data, tensor.shape().to_vec())
             .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e));
     }
     let data = tensor::tensor_values_f64_cow(&tensor)
         .iter()
         .map(|&v| v.tan())
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
+    Tensor::new(data, tensor.shape().to_vec())
         .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))
 }
 
 fn tan_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = ct.shape.clone();
-    let tensor = match ct.into_complex_storage() {
+    let (storage, shape) = ct.into_complex_storage_and_shape();
+    let tensor = match storage {
         ComplexStorage::F32(values) => ComplexTensor::from_f32(
             values
                 .into_iter()
@@ -422,13 +422,35 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn tan_preserves_rank_zero_scalarization_and_rank_one_shape() {
+        let scalar = tan_builtin(
+            Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap()),
+            Vec::new(),
+        )
+        .expect("rank-zero tan");
+        assert_eq!(scalar, Value::Num(0.0));
+
+        let vector = tan_builtin(
+            Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![2]).unwrap()),
+            Vec::new(),
+        )
+        .expect("rank-one tan");
+        let Value::Tensor(vector) = vector else {
+            panic!("expected rank-one tensor")
+        };
+        assert_eq!(vector.shape(), &[2]);
+        assert_eq!(vector.materialize_f64(), vec![0.0, 0.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn tan_tensor_elements() {
         let tensor = Tensor::new(vec![0.0, std::f64::consts::FRAC_PI_4], vec![2, 1]).unwrap();
         let result = tan_builtin(Value::Tensor(tensor), Vec::new()).expect("tan");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), &[2, 1]);
                 assert!((out.materialize_f64()[0] - 0.0).abs() < 1e-12);
                 assert!((out.materialize_f64()[1] - 1.0).abs() < 1e-12);
             }
@@ -447,7 +469,7 @@ pub(crate) mod tests {
         let result = tan_builtin(Value::Tensor(tensor), Vec::new()).expect("tan");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 let expected = [0.0, 1.0f64.tan(), 2.0f64.tan()];
                 for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
@@ -471,7 +493,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(out) = result else {
             panic!("expected complex tensor result");
         };
-        assert_eq!(out.shape, vec![3, 1]);
+        assert_eq!(out.shape(), &[3, 1]);
         assert_eq!(
             out.materialize_f64(),
             vec![(-3.0, 0.0), (0.0, 0.0), (5.0, 0.0)]
@@ -533,7 +555,7 @@ pub(crate) mod tests {
         let result = tan_builtin(Value::CharArray(chars), Vec::new()).expect("tan");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 let expected: Vec<f64> = ['A', 'B']
                     .iter()
                     .map(|&ch| (ch as u32 as f64).tan())
@@ -553,13 +575,13 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 0.2, -0.3, 1.0], vec![4, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = tan_builtin(Value::GpuTensor(handle), Vec::new()).expect("tan");
             let gathered = test_support::gather(result).expect("gather");
             let expected: Vec<f64> = tensor.materialize_f64().iter().map(|&v| v.tan()).collect();
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), &[4, 1]);
             assert_eq!(gathered.materialize_f64(), expected);
         });
     }
@@ -583,7 +605,7 @@ pub(crate) mod tests {
             assert_eq!(handle.device_id(), source_device);
             let gathered = test_support::gather(result).expect("gather result");
             assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
-            assert_eq!(gathered.shape, vec![3, 1]);
+            assert_eq!(gathered.shape(), &[3, 1]);
         });
     }
 
@@ -649,7 +671,7 @@ pub(crate) mod tests {
                 Value::ComplexTensor(out) => out,
                 other => panic!("expected complex output, got {other:?}"),
             };
-            assert_eq!(out.shape, vec![1, 2]);
+            assert_eq!(out.shape(), &[1, 2]);
             for (idx, &(re, im)) in input.materialize_f64().iter().enumerate() {
                 let (expected_re, expected_im) = tan_complex_components(re, im);
                 assert!((out.materialize_f64()[idx].0 - expected_re).abs() < 1e-12);
@@ -683,7 +705,7 @@ pub(crate) mod tests {
             let Value::ComplexTensor(out) = gathered else {
                 panic!("expected gathered complex tensor, got {gathered:?}");
             };
-            assert_eq!(out.shape, vec![2, 1]);
+            assert_eq!(out.shape(), &[2, 1]);
             for (idx, &re) in input.materialize_f64().iter().enumerate() {
                 assert!((out.materialize_f64()[idx].0 - re.tan()).abs() < 1e-12);
                 assert!(out.materialize_f64()[idx].1.abs() < 1e-12);
@@ -698,7 +720,7 @@ pub(crate) mod tests {
             let input = Tensor::new(vec![0.0, 0.5], vec![2, 1]).unwrap();
             let input_view = HostTensorView {
                 data: &input.materialize_f64(),
-                shape: &input.shape,
+                shape: input.shape(),
             };
             let input_handle = provider.upload(&input_view).expect("upload input");
             let proto_tensor = ComplexTensor::new(vec![(0.0, 1.0)], vec![1, 1]).unwrap();
@@ -721,7 +743,7 @@ pub(crate) mod tests {
             let Value::ComplexTensor(out) = gathered else {
                 panic!("expected gathered complex tensor, got {gathered:?}");
             };
-            assert_eq!(out.shape, vec![2, 1]);
+            assert_eq!(out.shape(), &[2, 1]);
             for (idx, &re) in input.materialize_f64().iter().enumerate() {
                 assert!((out.materialize_f64()[idx].0 - re.tan()).abs() < 1e-12);
                 assert!(out.materialize_f64()[idx].1.abs() < 1e-12);
@@ -750,7 +772,7 @@ pub(crate) mod tests {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
                     let expected: Vec<f64> =
                         tensor.materialize_f64().iter().map(|&v| v.tan()).collect();
-                    assert_eq!(gathered.shape, vec![3, 1]);
+                    assert_eq!(gathered.shape(), &[3, 1]);
                     assert_eq!(gathered.materialize_f64(), expected);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
@@ -766,7 +788,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 0.5], vec![2, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = tan_builtin(
@@ -778,7 +800,7 @@ pub(crate) mod tests {
                 Value::Tensor(t) => {
                     let expected: Vec<f64> =
                         tensor.materialize_f64().iter().map(|&v| v.tan()).collect();
-                    assert_eq!(t.shape, vec![2, 1]);
+                    assert_eq!(t.shape(), &[2, 1]);
                     assert_eq!(t.materialize_f64(), expected);
                 }
                 Value::GpuTensor(_) => panic!("expected host result"),
@@ -813,7 +835,7 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 let expected: Vec<f64> =
                     tensor.materialize_f64().iter().map(|&v| v.tan()).collect();
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), &[2, 1]);
                 assert_eq!(out.materialize_f64(), expected);
             }
             other => panic!("unexpected result {other:?}"),
@@ -873,14 +895,14 @@ pub(crate) mod tests {
         let cpu = tan_real(Value::Tensor(tensor.clone())).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).unwrap();
         let gpu = block_on(tan_gpu(handle, &[])).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
-                assert_eq!(gt.shape, ct.shape);
+                assert_eq!(gt.shape(), ct.shape());
                 let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

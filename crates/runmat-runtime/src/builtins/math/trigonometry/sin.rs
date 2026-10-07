@@ -264,20 +264,20 @@ fn sin_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
             .iter()
             .map(|&value| value.sin())
             .collect();
-        return Tensor::from_f32(data, tensor.shape.clone())
+        return Tensor::from_f32(data, tensor.shape().to_vec())
             .map_err(|error| sin_error_with_detail(&SIN_ERROR_INTERNAL, error));
     }
     let data = tensor::tensor_values_f64_cow(&tensor)
         .iter()
         .map(|&v| v.sin())
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
+    Tensor::new(data, tensor.shape().to_vec())
         .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))
 }
 
 fn sin_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = ct.shape.clone();
-    let tensor = match ct.into_complex_storage() {
+    let (storage, shape) = ct.into_complex_storage_and_shape();
+    let tensor = match storage {
         ComplexStorage::F32(values) => ComplexTensor::from_f32(
             values
                 .into_iter()
@@ -373,13 +373,35 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn sin_preserves_rank_zero_scalarization_and_rank_one_shape() {
+        let scalar = block_on(sin_builtin(
+            Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap()),
+            Vec::new(),
+        ))
+        .expect("rank-zero sin");
+        assert_eq!(scalar, Value::Num(0.0));
+
+        let vector = block_on(sin_builtin(
+            Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![2]).unwrap()),
+            Vec::new(),
+        ))
+        .expect("rank-one sin");
+        let Value::Tensor(vector) = vector else {
+            panic!("expected rank-one tensor")
+        };
+        assert_eq!(vector.shape(), &[2]);
+        assert_eq!(vector.materialize_f64(), vec![0.0, 0.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_tensor_elements() {
         let tensor = Tensor::new(vec![0.0, std::f64::consts::PI], vec![2, 1]).unwrap();
         let result = block_on(sin_builtin(Value::Tensor(tensor), Vec::new())).expect("sin");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.shape(), &[2, 1]);
                 assert!((t.materialize_f64()[0] - 0.0).abs() < 1e-12);
                 assert!((t.materialize_f64()[1] - 0.0).abs() < 1e-12);
             }
@@ -397,7 +419,7 @@ pub(crate) mod tests {
             panic!("expected tensor result, got {result:?}");
         };
         assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
-        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(output.shape(), &[2, 1]);
         assert_eq!(output.as_f32_slice(), Some([0.0, 1.0].as_slice()));
     }
 
@@ -412,7 +434,7 @@ pub(crate) mod tests {
         let result = block_on(sin_builtin(Value::Tensor(tensor), Vec::new())).expect("sin");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 let expected = [0.0, 1.0f64.sin(), 2.0f64.sin()];
                 for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
@@ -436,7 +458,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(out) = result else {
             panic!("expected complex tensor result");
         };
-        assert_eq!(out.shape, vec![3, 1]);
+        assert_eq!(out.shape(), &[3, 1]);
         assert_eq!(
             out.materialize_f64(),
             vec![(-3.0, 0.0), (0.0, 0.0), (5.0, 0.0)]
@@ -479,7 +501,7 @@ pub(crate) mod tests {
             panic!("expected complex tensor result, got {result:?}");
         };
         assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
-        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.shape(), &[1, 2]);
         for (actual, input) in output.materialize_f64().iter().zip(input.materialize_f64()) {
             assert!((actual.0 - sin_complex_re(input.0, input.1)).abs() < 1e-6);
             assert!((actual.1 - sin_complex_im(input.0, input.1)).abs() < 1e-6);
@@ -494,7 +516,7 @@ pub(crate) mod tests {
         let result = block_on(sin_builtin(Value::CharArray(chars), Vec::new())).expect("sin");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 for (idx, ch) in ['a', 'b', 'c'].into_iter().enumerate() {
                     let expected = (ch as u32 as f64).sin();
                     assert!((t.materialize_f64()[idx] - expected).abs() < 1e-12);
@@ -511,13 +533,13 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = block_on(sin_builtin(Value::GpuTensor(handle), Vec::new())).expect("sin");
             let gathered = test_support::gather(result).expect("gather");
             let expected: Vec<f64> = tensor.materialize_f64().iter().map(|&v| v.sin()).collect();
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), &[4, 1]);
             assert_eq!(gathered.materialize_f64(), expected);
         });
     }
@@ -565,7 +587,7 @@ pub(crate) mod tests {
             panic!("expected complex tensor result, got {result:?}");
         };
         assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
-        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.shape(), &[1, 2]);
         let values = output.as_f32_slice().expect("single complex storage");
         assert_eq!(<(f32, f32)>::from(values[0]), (0.0, 0.0));
         assert_eq!(<(f32, f32)>::from(values[1]), (1.0, 0.0));
@@ -592,7 +614,7 @@ pub(crate) mod tests {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
                     let expected: Vec<f64> =
                         tensor.materialize_f64().iter().map(|&v| v.sin()).collect();
-                    assert_eq!(gathered.shape, vec![4, 1]);
+                    assert_eq!(gathered.shape(), &[4, 1]);
                     assert_eq!(gathered.materialize_f64(), expected);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
@@ -652,7 +674,7 @@ pub(crate) mod tests {
                 Value::ComplexTensor(out) => out,
                 other => panic!("expected complex output, got {other:?}"),
             };
-            assert_eq!(out.shape, vec![1, 2]);
+            assert_eq!(out.shape(), &[1, 2]);
             for (idx, &(re, im)) in input.materialize_f64().iter().enumerate() {
                 assert!((out.materialize_f64()[idx].0 - sin_complex_re(re, im)).abs() < 1e-12);
                 assert!((out.materialize_f64()[idx].1 - sin_complex_im(re, im)).abs() < 1e-12);
@@ -685,7 +707,7 @@ pub(crate) mod tests {
             let Value::ComplexTensor(out) = gathered else {
                 panic!("expected gathered complex tensor, got {gathered:?}");
             };
-            assert_eq!(out.shape, vec![2, 1]);
+            assert_eq!(out.shape(), &[2, 1]);
             for (idx, &re) in input.materialize_f64().iter().enumerate() {
                 assert!((out.materialize_f64()[idx].0 - re.sin()).abs() < 1e-12);
                 assert!(out.materialize_f64()[idx].1.abs() < 1e-12);
@@ -700,7 +722,7 @@ pub(crate) mod tests {
             let input = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
             let input_view = HostTensorView {
                 data: &input.materialize_f64(),
-                shape: &input.shape,
+                shape: input.shape(),
             };
             let input_handle = provider.upload(&input_view).expect("upload input");
             let proto_tensor = ComplexTensor::new(vec![(0.0, 1.0)], vec![1, 1]).unwrap();
@@ -723,7 +745,7 @@ pub(crate) mod tests {
             let Value::ComplexTensor(out) = gathered else {
                 panic!("expected gathered complex tensor, got {gathered:?}");
             };
-            assert_eq!(out.shape, vec![2, 1]);
+            assert_eq!(out.shape(), &[2, 1]);
             for (idx, &re) in input.materialize_f64().iter().enumerate() {
                 assert!((out.materialize_f64()[idx].0 - re.sin()).abs() < 1e-12);
                 assert!(out.materialize_f64()[idx].1.abs() < 1e-12);
@@ -739,7 +761,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = block_on(sin_builtin(
@@ -751,7 +773,7 @@ pub(crate) mod tests {
                 Value::Tensor(t) => {
                     let expected: Vec<f64> =
                         tensor.materialize_f64().iter().map(|&v| v.sin()).collect();
-                    assert_eq!(t.shape, vec![2, 1]);
+                    assert_eq!(t.shape(), &[2, 1]);
                     assert_eq!(t.materialize_f64(), expected);
                 }
                 Value::GpuTensor(_) => panic!("expected host result"),
@@ -787,7 +809,7 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 let expected: Vec<f64> =
                     tensor.materialize_f64().iter().map(|&v| v.sin()).collect();
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), &[2, 1]);
                 assert_eq!(out.materialize_f64(), expected);
             }
             other => panic!("unexpected result {other:?}"),
@@ -823,14 +845,14 @@ pub(crate) mod tests {
         let cpu = sin_real(Value::Tensor(t.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &t.materialize_f64(),
-            shape: &t.shape,
+            shape: t.shape(),
         };
         let h = provider.upload(&view).unwrap();
         let gpu = block_on(sin_gpu(h, &[])).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
-                assert_eq!(gt.shape, ct.shape);
+                assert_eq!(gt.shape(), ct.shape());
                 let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

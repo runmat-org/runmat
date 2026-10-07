@@ -108,7 +108,7 @@ fn cdf_broadcasts_parameters_supports_upper_and_preserves_single() {
         panic!("single output must retain its class");
     };
     assert_eq!(result.numeric_dtype(), NumericDType::F32);
-    assert_eq!(result.shape, vec![2, 1]);
+    assert_eq!(result.shape(), &[2, 1]);
     let values = result.materialize_f64();
     assert!((values[0] - 0.5).abs() < f64::from(f32::EPSILON));
     assert!((values[1] - 0.158_655_253_931_457).abs() < f64::from(f32::EPSILON));

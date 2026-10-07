@@ -118,6 +118,30 @@ fn vector_map_keys_and_values_read_typed_integer_storage_exactly() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn map_numeric_admission_preserves_low_rank_and_exact_integer_values() {
+    for shape in [Vec::new(), vec![1], vec![1, 1]] {
+        let map = containers_map_builtin(vec![
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), shape.clone()).unwrap(),
+            ),
+            Value::Tensor(Tensor::new_integer(IntegerStorage::I32(vec![11]), shape).unwrap()),
+        ])
+        .expect("singleton key and value");
+        let keys = crate::make_cell(vec![Value::Int(IntValue::U64(u64::MAX))], 1, 1).unwrap();
+        let Value::Cell(values) = containers_map_values(map, vec![keys]).unwrap() else {
+            panic!("expected selected map values");
+        };
+        assert_eq!(values.data, vec![Value::Int(IntValue::I32(11))]);
+    }
+    for shape in [vec![2, 2], vec![2, 1, 2]] {
+        let matrix = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], shape).unwrap());
+        assert!(block_on(flatten_keys(&matrix, KeyType::Double, BUILTIN_CONSTRUCTOR)).is_err());
+        assert!(block_on(flatten_values(&matrix, BUILTIN_CONSTRUCTOR)).is_err());
+    }
+}
+
 #[test]
 fn value_type_logical_reads_typed_integer_tensor_storage_exactly() {
     let tensor = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
