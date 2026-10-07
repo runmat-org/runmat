@@ -566,7 +566,7 @@ async fn randn_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Bui
             data: tensor
                 .as_f64_slice()
                 .expect("randn fallback constructs double storage"),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         if let Ok(gpu) = provider.upload(&view) {
             return Ok(Value::GpuTensor(gpu));
@@ -672,7 +672,7 @@ pub(crate) mod tests {
         let result = block_on(randn_builtin(args)).expect("randn");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 let expected = random::expected_normal_sequence(4);
                 for (observed, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((*observed - *exp).abs() < 1e-12);
@@ -691,7 +691,7 @@ pub(crate) mod tests {
         let result = block_on(randn_builtin(vec![Value::Tensor(size_vec)])).expect("randn");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3, 4]);
+                assert_eq!(t.shape(), &[2, 3, 4]);
                 let expected = random::expected_normal_sequence(24);
                 assert_eq!(t.materialize_f64().len(), expected.len());
                 for (observed, exp) in t.materialize_f64().iter().zip(expected.iter()) {
@@ -718,7 +718,7 @@ pub(crate) mod tests {
         else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![2, 3]);
+        assert_eq!(output.shape(), &[2, 3]);
         drop(_runmat);
 
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -753,7 +753,7 @@ pub(crate) mod tests {
         let result = block_on(randn_builtin(vec![Value::Num(0.0)])).expect("randn");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 0]);
+                assert_eq!(t.shape(), &[0, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
@@ -769,7 +769,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.numeric_dtype(), NumericDType::F32);
-                assert_eq!(t.shape, vec![1, 1]);
+                assert_eq!(t.shape(), &[1, 1]);
             }
             Value::Num(_) => {
                 // Fallback scalar path remains F64-backed but should definitely not allocate on GPU.
@@ -865,7 +865,7 @@ pub(crate) mod tests {
         let result = block_on(randn_builtin(args)).expect("randn");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.shape(), &[2, 1]);
                 let expected = random::expected_complex_normal_sequence(2);
                 for ((re, im), (eref, eim)) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((*re - *eref).abs() < 1e-12);
@@ -949,7 +949,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let args = vec![
@@ -963,7 +963,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(gpu) => {
                     assert_eq!(gpu.shape(), vec![2, 2]);
                     let gathered = test_support::gather(Value::GpuTensor(gpu)).expect("gather");
-                    assert_eq!(gathered.shape, vec![2, 2]);
+                    assert_eq!(gathered.shape(), &[2, 2]);
                     for value in gathered.materialize_f64() {
                         assert!(value.is_finite());
                     }
@@ -1006,7 +1006,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().unwrap();
         let handle = provider.upload(&view).expect("upload");
@@ -1015,7 +1015,7 @@ pub(crate) mod tests {
         match result {
             Value::GpuTensor(h) => {
                 let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather to host");
-                assert_eq!(gathered.shape, vec![2, 2]);
+                assert_eq!(gathered.shape(), &[2, 2]);
                 for v in gathered.materialize_f64() {
                     assert!(v.is_finite());
                 }
@@ -1037,7 +1037,7 @@ pub(crate) mod tests {
             .expect("wgpu random_normal hook");
         let gathered =
             test_support::gather(Value::GpuTensor(handle)).expect("gather random_normal output");
-        assert_eq!(gathered.shape, vec![4, 4]);
+        assert_eq!(gathered.shape(), &[4, 4]);
         assert!(
             gathered
                 .materialize_f64()

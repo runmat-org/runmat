@@ -269,7 +269,7 @@ fn parse_size_tensor(value: &Tensor) -> BuiltinResult<Vec<usize>> {
     if value.is_empty() {
         return Ok(vec![0, 0]);
     }
-    validate_row_or_scalar_shape(&value.shape)?;
+    validate_row_or_scalar_shape(value.shape())?;
     if value.len() == 1 {
         let dim = parse_size_scalar(&Value::Tensor(value.clone()))?;
         return Ok(vec![dim, dim]);

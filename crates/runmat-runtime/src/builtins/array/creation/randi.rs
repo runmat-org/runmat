@@ -1144,7 +1144,7 @@ fn int_value_to_i128(value: IntValue) -> i128 {
 }
 
 fn is_vector_like(tensor: &Tensor) -> bool {
-    tensor.rows() == 1 || tensor.cols() == 1 || tensor.shape.len() == 1
+    tensor.rows() == 1 || tensor.cols() == 1 || tensor.shape().len() == 1
 }
 
 fn keyword_of(value: &Value) -> Option<String> {
@@ -1183,7 +1183,7 @@ async fn extract_dims(value: &Value) -> crate::BuiltinResult<Option<Vec<usize>>>
 
 fn shape_from_value(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
     match value {
-        Value::Tensor(t) => Ok(t.shape.clone()),
+        Value::Tensor(t) => Ok(t.shape().to_vec()),
         Value::ComplexTensor(_) => {
             Err(builtin_error("randi: complex prototypes are not supported"))
         }
@@ -1217,6 +1217,27 @@ pub(crate) mod tests {
             .into_iter()
             .map(|offset| bounds.lower + offset as i128)
             .collect()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn randi_vector_admission_keeps_getter_policy() {
+        let rank_zero = Tensor::new(vec![3.0], vec![]).expect("rank-zero scalar");
+        let rank_one = Tensor::new(vec![2.0, 5.0], vec![2]).expect("rank-one bounds");
+        let row = Tensor::new(vec![2.0, 5.0], vec![1, 2]).expect("row bounds");
+        let column = Tensor::new(vec![2.0, 5.0], vec![2, 1]).expect("column bounds");
+        let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("matrix bounds");
+        let nd_column =
+            Tensor::new(vec![2.0, 5.0, 7.0, 9.0], vec![2, 1, 2]).expect("N-D column projection");
+        let nd_matrix =
+            Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2, 1]).expect("N-D matrix projection");
+        assert!(is_vector_like(&rank_zero));
+        assert!(is_vector_like(&rank_one));
+        assert!(is_vector_like(&row));
+        assert!(is_vector_like(&column));
+        assert!(!is_vector_like(&matrix));
+        assert!(is_vector_like(&nd_column));
+        assert!(!is_vector_like(&nd_matrix));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1264,7 +1285,7 @@ pub(crate) mod tests {
         let result = block_on(randi_builtin(args)).expect("randi");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), &[2, 3]);
                 let expected = expected_sequence(&Bounds::new(3, 8).unwrap(), 6);
                 for (observed, exp) in t
                     .materialize_f64()
@@ -1319,7 +1340,7 @@ pub(crate) mod tests {
             let Value::Tensor(tensor) = result else {
                 panic!("expected integer tensor");
             };
-            assert_eq!(tensor.shape, vec![2, 3]);
+            assert_eq!(tensor.shape(), &[2, 3]);
             let storage = tensor.integer_storage().expect("exact integer storage");
             assert!(IntegerClass::from_storage(storage) == target);
             assert!(storage
@@ -1761,7 +1782,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(gpu) => {
                     let gathered =
                         test_support::gather(Value::GpuTensor(gpu)).expect("gather to host");
-                    assert_eq!(gathered.shape, vec![1, 1]);
+                    assert_eq!(gathered.shape(), &[1, 1]);
                     for value in gathered.materialize_f64() {
                         assert!((1.0..=4.0).contains(&value));
                     }
@@ -1792,7 +1813,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(gpu) => {
                     let gathered =
                         test_support::gather(Value::GpuTensor(gpu)).expect("gather override");
-                    assert_eq!(gathered.shape, vec![3, 1]);
+                    assert_eq!(gathered.shape(), &[3, 1]);
                     for value in gathered.materialize_f64() {
                         assert!((1.0..=4.0).contains(&value));
                     }
@@ -1962,7 +1983,7 @@ pub(crate) mod tests {
             Value::GpuTensor(gpu) => {
                 let gathered =
                     test_support::gather(Value::GpuTensor(gpu)).expect("gather gpu result");
-                assert_eq!(gathered.shape, vec![1, 1]);
+                assert_eq!(gathered.shape(), &[1, 1]);
                 for value in gathered.materialize_f64() {
                     assert!(
                         (1.0..=8.0).contains(&value),

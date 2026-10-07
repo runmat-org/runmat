@@ -638,7 +638,7 @@ async fn create_array_dims(value: &Value) -> Result<Option<Vec<usize>>, String> 
     match value {
         Value::Num(value) if value.is_finite() && *value < 0.0 => Ok(Some(vec![0])),
         Value::Int(value) if value.try_to_i64().is_some_and(|value| value < 0) => Ok(Some(vec![0])),
-        Value::Tensor(tensor) if tensor.rows == 1 || tensor.len() == 1 => {
+        Value::Tensor(tensor) if matches!(tensor.shape(), [_] | [1, ..]) || tensor.len() == 1 => {
             if let Some(storage) = tensor.integer_storage() {
                 let dims = storage
                     .exact_values()
@@ -1141,7 +1141,7 @@ pub(crate) mod tests {
                 panic!("complex output")
             };
             assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::F32);
-            assert_eq!(result.shape, vec![2, 3]);
+            assert_eq!(result.shape(), &[2, 3]);
             for index in 0..6 {
                 let number = tensor::complex_tensor_value_complex64(&result, index);
                 assert_eq!((number.re, number.im), (1.5, -2.25));
@@ -1219,7 +1219,7 @@ pub(crate) mod tests {
         let result = block_on(fill_builtin(Value::Num(2.5), args)).expect("fill");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
+                assert_eq!(t.shape(), &[3, 3]);
                 assert!(t.materialize_f64().iter().all(|&x| (x - 2.5).abs() < 1e-12));
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1233,7 +1233,7 @@ pub(crate) mod tests {
         let result = block_on(fill_builtin(Value::Num(-4.0), args)).expect("fill");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 4]);
+                assert_eq!(t.shape(), &[2, 4]);
                 assert!(t.materialize_f64().iter().all(|&x| (x + 4.0).abs() < 1e-12));
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1248,7 +1248,7 @@ pub(crate) mod tests {
             block_on(fill_builtin(Value::Num(10.0), vec![Value::Tensor(sz)])).expect("fill");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3, 4]);
+                assert_eq!(t.shape(), &[2, 3, 4]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -1315,7 +1315,7 @@ pub(crate) mod tests {
         .expect("fill");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -1354,7 +1354,7 @@ pub(crate) mod tests {
             ))
             .expect("fill");
             let output = test_support::gather(result).expect("gather");
-            assert_eq!(output.shape, vec![2, 2]);
+            assert_eq!(output.shape(), &[2, 2]);
             assert_eq!(output.integer_storage(), Some(&expected));
         }
 
@@ -1391,7 +1391,7 @@ pub(crate) mod tests {
             ))
             .expect("fill integer class");
             let output = test_support::gather(result).expect("gather");
-            assert_eq!(output.shape, vec![2, 3]);
+            assert_eq!(output.shape(), &[2, 3]);
             assert_eq!(output.integer_storage(), Some(&expected));
         }
     }
@@ -1405,7 +1405,7 @@ pub(crate) mod tests {
         ))
         .expect("fill uint64");
         let output = test_support::gather(result).expect("gather");
-        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(output.shape(), &[1, 3]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![wide, wide, wide]))
@@ -1428,7 +1428,7 @@ pub(crate) mod tests {
         ))
         .expect("exact uint64 fill");
         let output = test_support::gather(result).expect("gather");
-        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(output.shape(), &[1, 3]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![wide, wide, wide]))
@@ -1573,7 +1573,7 @@ pub(crate) mod tests {
         .expect("fill");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -1600,7 +1600,7 @@ pub(crate) mod tests {
 
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert_eq!(t.materialize_f64(), vec![(3.0, -2.0); 4]);
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -1627,7 +1627,7 @@ pub(crate) mod tests {
             panic!("expected complex tensor");
         };
         assert_eq!(tensor.numeric_dtype(), runmat_value::NumericDType::F64);
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(tensor.materialize_f64(), vec![(1.0, 1.0); 4]);
     }
 
@@ -1638,7 +1638,7 @@ pub(crate) mod tests {
         let result = block_on(fill_builtin(Value::Num(1.5), args)).expect("fill");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), &[2, 3]);
                 assert!(t.materialize_f64().iter().all(|&x| (x - 1.5).abs() < 1e-12));
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1653,7 +1653,7 @@ pub(crate) mod tests {
         let result = block_on(fill_builtin(Value::Num(4.2), args)).expect("fill");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert!(t.materialize_f64().iter().all(|&x| (x - 4.2).abs() < 1e-12));
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1706,7 +1706,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let args = vec![
@@ -1742,10 +1742,32 @@ pub(crate) mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.shape, vec![2, 3]);
+        assert_eq!(tensor.shape(), &[2, 3]);
         assert_eq!(
             tensor.integer_storage(),
             Some(&IntegerStorage::U64(vec![9_007_199_254_740_993; 6]))
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn create_array_dims_preserves_rank_zero_and_rank_one_row_policy() {
+        let scalar = Tensor::new(vec![-2.0], vec![]).expect("rank-zero scalar");
+        assert_eq!(
+            block_on(create_array_dims(&Value::Tensor(scalar))).expect("scalar dimensions"),
+            Some(vec![0])
+        );
+
+        let rank_one = Tensor::new(vec![-2.0, 3.0], vec![2]).expect("rank-one vector");
+        assert_eq!(
+            block_on(create_array_dims(&Value::Tensor(rank_one))).expect("rank-one dimensions"),
+            Some(vec![0, 3])
+        );
+
+        let column = Tensor::new(vec![-2.0, 3.0], vec![2, 1]).expect("column vector");
+        assert_eq!(
+            block_on(create_array_dims(&Value::Tensor(column))).expect("column admission"),
+            None
         );
     }
 
@@ -1760,7 +1782,7 @@ pub(crate) mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected empty tensor");
         };
-        assert_eq!(tensor.shape, vec![0, 4]);
+        assert_eq!(tensor.shape(), &[0, 4]);
         assert_eq!(tensor.integer_storage(), Some(&IntegerStorage::U8(vec![])));
     }
 
@@ -1863,7 +1885,7 @@ pub(crate) mod tests {
             panic!("expected complex double tensor");
         };
         assert_eq!(tensor.numeric_dtype(), runmat_value::NumericDType::F64);
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(tensor.materialize_f64(), vec![(1.0, 2.0); 4]);
     }
 
@@ -1924,7 +1946,7 @@ pub(crate) mod tests {
             panic!("expected complex integer tensor");
         };
         let storage = tensor.integer_storage().expect("integer storage");
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(storage.real, IntegerStorage::U64(vec![0; 4]));
         assert_eq!(storage.imag, IntegerStorage::U64(vec![0; 4]));
     }
@@ -1972,7 +1994,7 @@ pub(crate) mod tests {
         match result {
             Value::GpuTensor(handle) => {
                 let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                assert_eq!(gathered.shape, vec![2, 3]);
+                assert_eq!(gathered.shape(), &[2, 3]);
                 for entry in gathered.materialize_f64() {
                     assert!((entry - target).abs() < 1e-12);
                 }

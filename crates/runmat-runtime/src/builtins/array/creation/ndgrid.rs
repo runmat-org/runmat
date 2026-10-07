@@ -606,13 +606,13 @@ fn logical_scalar_axis(value: bool) -> AxisData {
 }
 
 fn axis_from_tensor(tensor: Tensor, index: usize) -> BuiltinResult<AxisData> {
-    if !is_vector_shape(&tensor.shape) {
+    if !is_vector_shape(tensor.shape()) {
         return Err(ndgrid_error_with_detail(
             &NDGRID_ERROR_INVALID_AXIS,
             format!(
                 "argument {} must be a vector, got shape {:?}",
                 index + 1,
-                tensor.shape
+                tensor.shape()
             ),
         ));
     }
@@ -645,13 +645,13 @@ fn axis_from_logical(logical: LogicalArray, index: usize) -> BuiltinResult<AxisD
 }
 
 fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> BuiltinResult<AxisData> {
-    if !is_vector_shape(&tensor.shape) {
+    if !is_vector_shape(tensor.shape()) {
         return Err(ndgrid_error_with_detail(
             &NDGRID_ERROR_INVALID_AXIS,
             format!(
                 "argument {} must be a vector, got shape {:?}",
                 index + 1,
-                tensor.shape
+                tensor.shape()
             ),
         ));
     }
@@ -1076,7 +1076,7 @@ mod tests {
         let eval = eval(&[Value::Tensor(x)], None).expect("ndgrid");
         assert_eq!(eval.outputs.len(), 1);
         let x_out = test_support::gather(output(&eval, 0).expect("X")).expect("host");
-        assert_eq!(x_out.shape, vec![3, 1]);
+        assert_eq!(x_out.shape(), &[3, 1]);
         assert_eq!(x_out.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
@@ -1091,7 +1091,7 @@ mod tests {
         assert_eq!(outputs.len(), 3);
 
         let x1 = test_support::gather(outputs[0].clone()).expect("x1");
-        assert_eq!(x1.shape, vec![2, 2, 2]);
+        assert_eq!(x1.shape(), &[2, 2, 2]);
         assert_eq!(
             x1.materialize_f64(),
             vec![10.0, 20.0, 10.0, 20.0, 10.0, 20.0, 10.0, 20.0]
@@ -1117,10 +1117,10 @@ mod tests {
         assert_eq!(eval.outputs.len(), 2);
 
         let x_out = test_support::gather(output(&eval, 0).expect("X")).expect("host");
-        assert_eq!(x_out.shape, vec![3, 2]);
+        assert_eq!(x_out.shape(), &[3, 2]);
         assert_eq!(x_out.materialize_f64(), vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
         let y_out = test_support::gather(output(&eval, 1).expect("Y")).expect("host");
-        assert_eq!(y_out.shape, vec![3, 2]);
+        assert_eq!(y_out.shape(), &[3, 2]);
         assert_eq!(
             y_out.materialize_f64(),
             vec![10.0, 10.0, 10.0, 20.0, 20.0, 20.0]
@@ -1141,7 +1141,7 @@ mod tests {
         assert_eq!(eval.outputs.len(), 3);
 
         let x_out = test_support::gather(output(&eval, 0).expect("X")).expect("host");
-        assert_eq!(x_out.shape, vec![2, 3, 2]);
+        assert_eq!(x_out.shape(), &[2, 3, 2]);
         assert_eq!(
             x_out.materialize_f64(),
             vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0]
@@ -1162,7 +1162,7 @@ mod tests {
         let Value::ComplexTensor(out) = output(&eval, 0).expect("X") else {
             panic!("expected complex tensor");
         };
-        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.shape(), &[2, 1]);
         assert_eq!(out.materialize_f64(), vec![(1.0, 2.0), (3.0, -4.0)]);
     }
 
@@ -1175,7 +1175,7 @@ mod tests {
             panic!("expected complex single output");
         };
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), &[2, 2]);
         assert_eq!(
             output.as_f32_slice().map(|values| values
                 .iter()
@@ -1196,11 +1196,11 @@ mod tests {
         let Value::ComplexTensor(x_out) = output(&eval, 0).expect("X") else {
             panic!("expected complex X");
         };
-        assert_eq!(x_out.shape, vec![2, 2]);
+        assert_eq!(x_out.shape(), &[2, 2]);
         let Value::Tensor(y_out) = output(&eval, 1).expect("Y") else {
             panic!("expected real Y");
         };
-        assert_eq!(y_out.shape, vec![2, 2]);
+        assert_eq!(y_out.shape(), &[2, 2]);
         assert_eq!(y_out.numeric_dtype(), NumericDType::F64);
         assert_eq!(y_out.materialize_f64(), vec![10.0, 10.0, 20.0, 20.0]);
     }
@@ -1268,7 +1268,7 @@ mod tests {
             let Value::Tensor(first_output) = output(&eval, 0).expect("grid output") else {
                 panic!("expected exact integer tensor");
             };
-            assert_eq!(first_output.shape, vec![2, 2]);
+            assert_eq!(first_output.shape(), &[2, 2]);
             assert_eq!(first_output.integer_storage(), Some(&expected));
             let Value::Tensor(second_output) = output(&eval, 1).expect("second grid output") else {
                 panic!("expected second exact integer tensor");
@@ -1366,7 +1366,7 @@ mod tests {
         let Value::Tensor(second) = output(&eval, 1).expect("second grid") else {
             panic!("expected typed integer second grid");
         };
-        assert_eq!(first.shape, vec![2, 2]);
+        assert_eq!(first.shape(), &[2, 2]);
         assert_eq!(
             first.integer_storage(),
             Some(&IntegerStorage::U64(vec![
@@ -1401,7 +1401,7 @@ mod tests {
         let Value::ComplexTensor(first) = output(&eval, 0).expect("first grid") else {
             panic!("expected typed complex integer first grid");
         };
-        assert_eq!(first.shape, vec![2, 2]);
+        assert_eq!(first.shape(), &[2, 2]);
         assert_eq!(
             first.integer_storage().cloned(),
             Some(
@@ -1458,7 +1458,7 @@ mod tests {
         assert_eq!(eval.outputs.len(), 1);
 
         let x_out = test_support::gather(output(&eval, 0).expect("X")).expect("host");
-        assert_eq!(x_out.shape, vec![2, 3, 2]);
+        assert_eq!(x_out.shape(), &[2, 3, 2]);
         assert_eq!(
             x_out.materialize_f64(),
             vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0]
@@ -1474,7 +1474,7 @@ mod tests {
         let Value::ComplexTensor(out) = output(&eval, 0).expect("X") else {
             panic!("expected complex tensor");
         };
-        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.shape(), &[2, 1]);
         assert_eq!(out.materialize_f64(), vec![(1.0, 0.0), (2.0, 0.0)]);
     }
 
@@ -1545,7 +1545,7 @@ mod tests {
             assert_eq!(telemetry.download_bytes, 0);
             assert_eq!(telemetry.upload_bytes, 0);
             let gathered = test_support::gather(y_out).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 3]);
+            assert_eq!(gathered.shape(), &[2, 3]);
             assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
             assert_eq!(
                 gathered.as_f32_slice(),
@@ -1563,13 +1563,13 @@ mod tests {
             let x_handle = provider
                 .upload(&HostTensorView {
                     data: &x.materialize_f64(),
-                    shape: &x.shape,
+                    shape: x.shape(),
                 })
                 .expect("upload x");
             let y_handle = provider
                 .upload(&HostTensorView {
                     data: &y.materialize_f64(),
-                    shape: &y.shape,
+                    shape: y.shape(),
                 })
                 .expect("upload y");
 
@@ -1587,9 +1587,9 @@ mod tests {
                 test_support::gather(Value::GpuTensor(x_handle)).expect("gather original x");
             let y_after =
                 test_support::gather(Value::GpuTensor(y_handle)).expect("gather original y");
-            assert_eq!(x_after.shape, vec![1, 2]);
+            assert_eq!(x_after.shape(), &[1, 2]);
             assert_eq!(x_after.materialize_f64(), vec![1.0, 2.0]);
-            assert_eq!(y_after.shape, vec![3, 1]);
+            assert_eq!(y_after.shape(), &[3, 1]);
             assert_eq!(y_after.materialize_f64(), vec![10.0, 20.0, 30.0]);
         });
     }

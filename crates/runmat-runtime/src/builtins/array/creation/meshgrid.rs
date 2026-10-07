@@ -871,13 +871,13 @@ async fn axis_from_value(
             let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
             match gathered {
                 Value::Tensor(tensor) => {
-                    if is_vector_shape(&tensor.shape) {
+                    if is_vector_shape(tensor.shape()) {
                         *prefer_gpu = true;
                     }
                     axis_from_tensor(tensor, index)
                 }
                 Value::ComplexTensor(tensor) => {
-                    if is_vector_shape(&tensor.shape) {
+                    if is_vector_shape(tensor.shape()) {
                         *prefer_gpu = true;
                     }
                     axis_from_complex_tensor(tensor, index)
@@ -896,7 +896,7 @@ async fn axis_from_value(
 }
 
 fn axis_from_tensor(tensor: Tensor, index: usize) -> crate::BuiltinResult<AxisData> {
-    if is_vector_shape(&tensor.shape) {
+    if is_vector_shape(tensor.shape()) {
         let storage = tensor
             .into_numeric_storage()
             .map_err(|error| builtin_error(format!("meshgrid: {error}")))?;
@@ -913,7 +913,7 @@ fn axis_from_tensor(tensor: Tensor, index: usize) -> crate::BuiltinResult<AxisDa
     //
     // This is a pragmatic compatibility shim for cases where callers already have
     // coordinate matrices (X/Y) and pass them through `meshgrid` again.
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     if let Some(axis) = axis_from_meshgrid_matrix_real(tensor, index)? {
         return Ok(axis);
     }
@@ -926,7 +926,7 @@ fn axis_from_tensor(tensor: Tensor, index: usize) -> crate::BuiltinResult<AxisDa
 }
 
 fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> crate::BuiltinResult<AxisData> {
-    if is_vector_shape(&tensor.shape) {
+    if is_vector_shape(tensor.shape()) {
         let len = tensor::complex_tensor_element_len(&tensor);
         let is_complex = match tensor.integer_storage() {
             Some(storage) => storage
@@ -950,7 +950,7 @@ fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> crate::Built
         return Err(builtin_error(format!(
             "meshgrid: input argument {} must be a vector (1xN or Nx1), got shape {:?}",
             index + 1,
-            tensor.shape
+            tensor.shape()
         )));
     }
 
@@ -961,7 +961,7 @@ fn axis_from_complex_tensor(tensor: ComplexTensor, index: usize) -> crate::Built
     Err(builtin_error(format!(
         "meshgrid: input argument {} must be a vector (1xN or Nx1), got shape {:?}",
         index + 1,
-        tensor.shape
+        tensor.shape()
     )))
 }
 
@@ -969,7 +969,7 @@ fn axis_from_meshgrid_matrix_real(
     tensor: Tensor,
     index: usize,
 ) -> crate::BuiltinResult<Option<AxisData>> {
-    let (rows, cols) = match tensor.shape.as_slice() {
+    let (rows, cols) = match tensor.shape() {
         [r, c] => (*r, *c),
         _ => return Ok(None),
     };
@@ -1026,7 +1026,7 @@ fn axis_from_meshgrid_matrix_complex(
     tensor: &ComplexTensor,
     index: usize,
 ) -> crate::BuiltinResult<Option<AxisData>> {
-    let (rows, cols) = match tensor.shape.as_slice() {
+    let (rows, cols) = match tensor.shape() {
         [r, c] => (*r, *c),
         _ => return Ok(None),
     };
@@ -1477,7 +1477,7 @@ fn to_complex_gpu_tensor_value(
 }
 
 fn tensor_to_complex_tensor(tensor: Tensor) -> crate::BuiltinResult<ComplexTensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = match tensor
         .into_numeric_storage()
         .map_err(|error| builtin_error(format!("meshgrid: {error}")))?
@@ -1648,7 +1648,7 @@ pub(crate) mod tests {
             let Value::Tensor(y) = eval_second(&eval).expect("Y") else {
                 panic!("expected real integer Y output");
             };
-            assert_eq!(x.shape, vec![3, 3]);
+            assert_eq!(x.shape(), &[3, 3]);
             assert_eq!(
                 x.integer_storage(),
                 Some(
@@ -1712,7 +1712,7 @@ pub(crate) mod tests {
         let Value::Tensor(y) = eval_second(&eval).expect("Y") else {
             panic!("expected real integer Y output");
         };
-        assert_eq!(x.shape, vec![2, 2]);
+        assert_eq!(x.shape(), &[2, 2]);
         assert_eq!(
             x.integer_storage(),
             Some(&IntegerStorage::U64(vec![
@@ -1785,7 +1785,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(x) = eval_first(&eval).expect("X") else {
             panic!("expected typed complex integer X output");
         };
-        assert_eq!(x.shape, vec![2, 2]);
+        assert_eq!(x.shape(), &[2, 2]);
         assert_eq!(
             x.integer_storage().cloned(),
             Some(
@@ -1859,7 +1859,7 @@ pub(crate) mod tests {
             Tensor::new_integer(IntegerStorage::I64(vec![-3, 5]), vec![1, 2]).expect("tensor");
 
         let out = tensor_to_complex_tensor(tensor).expect("complex tensor");
-        assert_eq!(out.shape, vec![1, 2]);
+        assert_eq!(out.shape(), &[1, 2]);
         assert_eq!(out.materialize_f64(), vec![(-3.0, 0.0), (5.0, 0.0)]);
         assert_eq!(
             out.integer_storage().cloned(),
@@ -1884,13 +1884,13 @@ pub(crate) mod tests {
         let eval = evaluate(&[Value::Tensor(x)]).expect("meshgrid");
         assert_eq!(eval.output_count(), 2);
         let x_out = test_support::gather(eval_first(&eval).expect("X")).expect("host");
-        assert_eq!(x_out.shape, vec![3, 3]);
+        assert_eq!(x_out.shape(), &[3, 3]);
         assert_eq!(
             x_out.materialize_f64(),
             vec![-1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
         );
         let y_out = test_support::gather(eval_second(&eval).expect("Y")).expect("host");
-        assert_eq!(y_out.shape, vec![3, 3]);
+        assert_eq!(y_out.shape(), &[3, 3]);
         assert_eq!(
             y_out.materialize_f64(),
             vec![-1.0, 0.0, 1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 1.0]
@@ -2006,10 +2006,10 @@ pub(crate) mod tests {
         let eval = evaluate(&[Value::Tensor(x), Value::Tensor(y)]).expect("meshgrid");
         assert_eq!(eval.output_count(), 2);
         let x_out = test_support::gather(eval_first(&eval).expect("X")).expect("host");
-        assert_eq!(x_out.shape, vec![2, 3]);
+        assert_eq!(x_out.shape(), &[2, 3]);
         assert_eq!(x_out.materialize_f64(), vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0]);
         let y_out = test_support::gather(eval_second(&eval).expect("Y")).expect("host");
-        assert_eq!(y_out.shape, vec![2, 3]);
+        assert_eq!(y_out.shape(), &[2, 3]);
         assert_eq!(
             y_out.materialize_f64(),
             vec![10.0, 20.0, 10.0, 20.0, 10.0, 20.0]
@@ -2026,13 +2026,13 @@ pub(crate) mod tests {
             evaluate(&[Value::Tensor(x), Value::Tensor(y), Value::Tensor(z)]).expect("meshgrid");
         assert_eq!(eval.output_count(), 3);
         let x_out = test_support::gather(eval_first(&eval).expect("X")).expect("host");
-        assert_eq!(x_out.shape, vec![3, 2, 2]);
+        assert_eq!(x_out.shape(), &[3, 2, 2]);
         assert_eq!(
             x_out.materialize_f64(),
             vec![1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0]
         );
         let z_out = test_support::gather(eval_third(&eval).expect("Z")).expect("host");
-        assert_eq!(z_out.shape, vec![3, 2, 2]);
+        assert_eq!(z_out.shape(), &[3, 2, 2]);
         assert_eq!(
             z_out.materialize_f64(),
             vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
@@ -2049,7 +2049,7 @@ pub(crate) mod tests {
             let proto = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let proto_view = HostTensorView {
                 data: &proto.materialize_f64(),
-                shape: &proto.shape,
+                shape: proto.shape(),
             };
             let proto_handle = provider.upload(&proto_view).expect("upload");
             let eval = evaluate(&[
@@ -2062,7 +2062,7 @@ pub(crate) mod tests {
             let x_value = eval_first(&eval).expect("X");
             assert!(matches!(x_value, Value::GpuTensor(_)));
             let gathered = test_support::gather(x_value).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 3]);
+            assert_eq!(gathered.shape(), &[2, 3]);
         });
     }
 
@@ -2074,11 +2074,11 @@ pub(crate) mod tests {
             let y = tensor_from_vec(vec![1.0, 2.0], 2, 1);
             let x_view = HostTensorView {
                 data: &x.materialize_f64(),
-                shape: &x.shape,
+                shape: x.shape(),
             };
             let y_view = HostTensorView {
                 data: &y.materialize_f64(),
-                shape: &y.shape,
+                shape: y.shape(),
             };
             let x_handle = provider.upload(&x_view).expect("upload");
             let y_handle = provider.upload(&y_view).expect("upload");
@@ -2115,11 +2115,11 @@ pub(crate) mod tests {
 
         let x_view = HostTensorView {
             data: &x.materialize_f64(),
-            shape: &x.shape,
+            shape: x.shape(),
         };
         let y_view = HostTensorView {
             data: &y.materialize_f64(),
-            shape: &y.shape,
+            shape: y.shape(),
         };
         let x_gpu = provider.upload(&x_view).expect("upload x");
         let y_gpu = provider.upload(&y_view).expect("upload y");
@@ -2135,9 +2135,9 @@ pub(crate) mod tests {
         let gathered_x = test_support::gather(gpu_x_value).expect("gather X gpu");
         let gathered_y = test_support::gather(gpu_y_value).expect("gather Y gpu");
 
-        assert_eq!(gathered_x.shape, cpu_x.shape);
+        assert_eq!(gathered_x.shape(), cpu_x.shape());
         assert_eq!(gathered_x.materialize_f64(), cpu_x.materialize_f64());
-        assert_eq!(gathered_y.shape, cpu_y.shape);
+        assert_eq!(gathered_y.shape(), cpu_y.shape());
         assert_eq!(gathered_y.materialize_f64(), cpu_y.materialize_f64());
     }
 
@@ -2194,7 +2194,7 @@ pub(crate) mod tests {
         let x_value = eval_first(&eval).expect("X");
         match x_value {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![2, 2]);
+                assert_eq!(ct.shape(), &[2, 2]);
             }
             Value::Complex(_, _) => {}
             other => panic!("expected complex output, got {other:?}"),
@@ -2210,7 +2210,7 @@ pub(crate) mod tests {
             panic!("expected complex single output");
         };
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), &[2, 2]);
         assert_eq!(
             output.as_f32_slice().map(|values| values
                 .iter()
@@ -2249,7 +2249,7 @@ pub(crate) mod tests {
             let Value::ComplexTensor(tensor) = gathered else {
                 panic!("expected complex tensor");
             };
-            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.shape(), &[2, 2]);
             assert_eq!(
                 tensor.materialize_f64(),
                 vec![(1.0, 0.0), (1.0, 0.0), (2.0, 0.0), (2.0, 0.0)]
@@ -2278,7 +2278,7 @@ pub(crate) mod tests {
             let Value::ComplexTensor(tensor) = gathered else {
                 panic!("expected complex tensor");
             };
-            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.shape(), &[2, 2]);
             assert_eq!(
                 tensor.materialize_f64(),
                 vec![(1.0, 1.0), (1.0, 1.0), (2.0, -1.0), (2.0, -1.0)]
@@ -2374,7 +2374,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(gpu_tensor) = gathered else {
             panic!("expected complex tensor");
         };
-        assert_eq!(gpu_tensor.shape, cpu_x.shape);
+        assert_eq!(gpu_tensor.shape(), cpu_x.shape());
         assert_eq!(gpu_tensor.materialize_f64(), cpu_x.materialize_f64());
     }
 

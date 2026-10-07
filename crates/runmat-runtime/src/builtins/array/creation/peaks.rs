@@ -596,27 +596,27 @@ fn peaks_from_host_tensors(
     let _ = matrix_shape(&y_tensor)?;
     let output_shape = crate::builtins::common::broadcast::broadcast_shapes(
         "peaks",
-        &x_tensor.shape,
-        &y_tensor.shape,
+        x_tensor.shape(),
+        y_tensor.shape(),
     )
     .map_err(|_| builtin_error("peaks: X and Y must have compatible sizes"))?;
     let x_data = tensor::tensor_values_f64_cow(&x_tensor);
     let y_data = tensor::tensor_values_f64_cow(&y_tensor);
-    let x_strides = crate::builtins::common::broadcast::compute_strides(&x_tensor.shape);
-    let y_strides = crate::builtins::common::broadcast::compute_strides(&y_tensor.shape);
+    let x_strides = crate::builtins::common::broadcast::compute_strides(x_tensor.shape());
+    let y_strides = crate::builtins::common::broadcast::compute_strides(y_tensor.shape());
     let output_len = output_shape.iter().product();
     let mut z_mat = Vec::with_capacity(output_len);
     for index in 0..output_len {
         let x_index = crate::builtins::common::broadcast::broadcast_index(
             index,
             &output_shape,
-            &x_tensor.shape,
+            x_tensor.shape(),
             &x_strides,
         );
         let y_index = crate::builtins::common::broadcast::broadcast_index(
             index,
             &output_shape,
-            &y_tensor.shape,
+            y_tensor.shape(),
             &y_strides,
         );
         z_mat.push(peaks_at(x_data[x_index], y_data[y_index]));
@@ -847,7 +847,7 @@ async fn gather_tensor_or_gpu(value: &Value) -> crate::BuiltinResult<Tensor> {
 }
 
 fn matrix_shape(tensor: &Tensor) -> crate::BuiltinResult<(usize, usize)> {
-    match tensor.shape.as_slice() {
+    match tensor.shape() {
         [rows, cols] => Ok((*rows, *cols)),
         [n] => Ok((1, *n)),
         _ => Err(builtin_error("peaks: X and Y must be 2-D matrices")),
@@ -876,13 +876,13 @@ mod tests {
     #[test]
     fn peaks_default_shape() {
         let gathered = gather_result(peaks_builtin(vec![]).expect("peaks"));
-        assert_eq!(gathered.shape, vec![49, 49]);
+        assert_eq!(gathered.shape(), &[49, 49]);
     }
 
     #[test]
     fn peaks_n_shape() {
         let gathered = gather_result(peaks_builtin(vec![Value::Num(20.0)]).expect("peaks"));
-        assert_eq!(gathered.shape, vec![20, 20]);
+        assert_eq!(gathered.shape(), &[20, 20]);
     }
 
     #[test]
@@ -946,7 +946,7 @@ mod tests {
             peaks_builtin(vec![Value::Tensor(x.clone()), Value::Tensor(y.clone())]).expect("peaks");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 for i in 0..4 {
                     let expected = peaks_at(x.materialize_f64()[i], y.materialize_f64()[i]);
                     assert!((t.materialize_f64()[i] - expected).abs() < 1e-12);
@@ -1002,7 +1002,7 @@ mod tests {
         let Value::Tensor(z) = &values[2] else {
             panic!("expected Z tensor");
         };
-        assert_eq!(z.shape, vec![1, 2]);
+        assert_eq!(z.shape(), &[1, 2]);
         assert!(z.integer_storage().is_none());
     }
 
@@ -1028,7 +1028,7 @@ mod tests {
         let Value::Tensor(z) = &values[2] else {
             panic!("expected Z tensor");
         };
-        assert_eq!(z.shape, vec![2, 2]);
+        assert_eq!(z.shape(), &[2, 2]);
     }
 
     #[test]
@@ -1199,7 +1199,7 @@ mod tests {
                     .unwrap_or_else(|e| panic!("provider.peaks({n}) failed: {e}"));
                 let t = gather_handle(handle);
 
-                assert_eq!(t.shape, vec![n, n], "shape mismatch for n={n}");
+                assert_eq!(t.shape(), &[n, n], "shape mismatch for n={n}");
                 for (i, (&gv, &cv)) in t.materialize_f64().iter().zip(z_ref.iter()).enumerate() {
                     let err = (gv - cv).abs();
                     assert!(
@@ -1218,7 +1218,7 @@ mod tests {
             let provider = wgpu_provider();
             let handle = provider.peaks(0).expect("peaks(0)");
             let t = gather_handle(handle);
-            assert_eq!(t.shape, vec![0, 0]);
+            assert_eq!(t.shape(), &[0, 0]);
             assert!(t.materialize_f64().is_empty());
         }
 
@@ -1263,7 +1263,7 @@ mod tests {
                 .expect("provider.peaks_xy");
             let t = gather_handle(z_handle);
 
-            assert_eq!(t.shape, shape.to_vec());
+            assert_eq!(t.shape(), shape);
             for (i, (&gv, &cv)) in t.materialize_f64().iter().zip(z_ref.iter()).enumerate() {
                 let err = (gv - cv).abs();
                 assert!(

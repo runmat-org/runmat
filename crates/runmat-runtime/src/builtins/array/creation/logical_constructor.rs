@@ -324,15 +324,15 @@ async fn extract_logical_dims(value: &Value, name: &str) -> BuiltinResult<Option
                 }));
             }
             let scalar = len == 1;
-            let row = value.shape.len() >= 2 && value.shape[0] == 1;
-            let column = value.shape.len() >= 2 && value.shape[1] == 1;
+            let row = value.shape().len() >= 2 && value.shape()[0] == 1;
+            let column = value.shape().len() >= 2 && value.shape()[1] == 1;
             if column && !row && !scalar {
                 return Err(builtin_error(
                     name,
                     format!("{name}: size vector must be a row vector"),
                 ));
             }
-            if !(scalar || row || value.shape.len() == 1) {
+            if !(scalar || row || value.shape().len() == 1) {
                 return Ok(None);
             }
             let values = (0..len)
@@ -437,8 +437,8 @@ fn keyword_of(value: &Value) -> Option<String> {
 
 fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
     match value {
-        Value::Tensor(t) => Ok(t.shape.clone()),
-        Value::ComplexTensor(t) => Ok(t.shape.clone()),
+        Value::Tensor(t) => Ok(t.shape().to_vec()),
+        Value::ComplexTensor(t) => Ok(t.shape().to_vec()),
         Value::LogicalArray(l) => Ok(l.shape.clone()),
         Value::GpuTensor(h) => Ok(normalize_scalar_shape(h.shape())),
         Value::CharArray(ca) => Ok(ca.shape.clone()),

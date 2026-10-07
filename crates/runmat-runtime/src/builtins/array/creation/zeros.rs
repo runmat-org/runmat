@@ -597,9 +597,9 @@ fn keyword_of(value: &Value) -> Option<String> {
 
 fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
     match value {
-        Value::Tensor(t) => Ok(t.shape.clone()),
+        Value::Tensor(t) => Ok(t.shape().to_vec()),
         Value::SparseTensor(t) => Ok(t.shape()),
-        Value::ComplexTensor(t) => Ok(t.shape.clone()),
+        Value::ComplexTensor(t) => Ok(t.shape().to_vec()),
         Value::LogicalArray(l) => Ok(l.shape.clone()),
         Value::GpuTensor(h) => Ok(normalize_scalar_shape(h.shape())),
         Value::CharArray(ca) => Ok(ca.shape.clone()),
@@ -728,7 +728,7 @@ pub(crate) mod tests {
         let args = vec![Value::Num(3.0)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
-        assert_eq!(tensor.shape, vec![3, 3]);
+        assert_eq!(tensor.shape(), &[3, 3]);
         assert!(tensor.materialize_f64().iter().all(|&x| x == 0.0));
     }
 
@@ -739,7 +739,7 @@ pub(crate) mod tests {
         let args = vec![Value::Num(2.0), Value::Num(4.0)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
-        assert_eq!(tensor.shape, vec![2, 4]);
+        assert_eq!(tensor.shape(), &[2, 4]);
         assert_eq!(tensor.len(), 8);
     }
 
@@ -751,7 +751,7 @@ pub(crate) mod tests {
         let args = vec![Value::Tensor(size_vec)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
-        assert_eq!(tensor.shape, vec![2, 3]);
+        assert_eq!(tensor.shape(), &[2, 3]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -778,7 +778,7 @@ pub(crate) mod tests {
         let args = vec![Value::Tensor(tensor)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert!(tensor.materialize_f64().iter().all(|&x| x == 0.0));
     }
 
@@ -794,7 +794,7 @@ pub(crate) mod tests {
         let result = block_on(zeros_builtin(args)).expect("zeros");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
+                assert_eq!(t.shape(), &[3, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -850,7 +850,7 @@ pub(crate) mod tests {
         ];
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
-        assert_eq!(tensor.shape, vec![2, 3]);
+        assert_eq!(tensor.shape(), &[2, 3]);
         assert!(tensor.materialize_f64().iter().all(|&x| x == 0.0));
     }
 
@@ -862,7 +862,7 @@ pub(crate) mod tests {
         let args = vec![Value::from("like"), Value::Tensor(proto)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert!(tensor.materialize_f64().iter().all(|&x| x == 0.0));
     }
 
@@ -890,7 +890,7 @@ pub(crate) mod tests {
             let Value::Tensor(output) = result else {
                 panic!("expected integer tensor");
             };
-            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(output.shape(), &[1, 2]);
             assert_eq!(output.integer_storage(), Some(&storage.zeros_like(2)));
         }
 
@@ -933,7 +933,7 @@ pub(crate) mod tests {
             let Value::Tensor(output) = result else {
                 panic!("expected integer tensor for {class_name}");
             };
-            assert_eq!(output.shape, vec![2, 3]);
+            assert_eq!(output.shape(), &[2, 3]);
             assert_eq!(output.integer_storage(), Some(&expected));
         }
     }
@@ -1037,7 +1037,7 @@ pub(crate) mod tests {
         let result = block_on(zeros_builtin(vec![Value::Tensor(empty)])).expect("zeros");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 0]);
+                assert_eq!(t.shape(), &[0, 0]);
                 assert!(t.is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
@@ -1261,7 +1261,7 @@ pub(crate) mod tests {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let output = test_support::gather(block_on(zeros_builtin(vec![size])).expect("extension"))
             .expect("gather output");
-        assert_eq!(output.shape, vec![2, 3]);
+        assert_eq!(output.shape(), &[2, 3]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1282,7 +1282,7 @@ pub(crate) mod tests {
             Value::GpuTensor(handle) => {
                 let gathered =
                     test_support::gather(Value::GpuTensor(handle)).expect("gather to host");
-                assert_eq!(gathered.shape, vec![2, 2]);
+                assert_eq!(gathered.shape(), &[2, 2]);
                 assert!(gathered.materialize_f64().iter().all(|&x| x == 0.0));
             }
             other => panic!("expected gpu tensor, got {other:?}"),

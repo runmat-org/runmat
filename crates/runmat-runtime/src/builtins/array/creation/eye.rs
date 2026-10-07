@@ -335,9 +335,9 @@ fn ensure_eye_extensions(args: &[Value]) -> crate::BuiltinResult<()> {
             Value::Num(_) | Value::Int(_) => dimension_count += 1,
             Value::Tensor(value) => {
                 let len = value.len();
-                let row = value.shape.len() >= 2 && value.shape[0] == 1;
-                let column = value.shape.len() >= 2 && value.shape[1] == 1;
-                if len <= 1 || row || column || value.shape.len() == 1 {
+                let row = value.shape().len() >= 2 && value.shape()[0] == 1;
+                let column = value.shape().len() >= 2 && value.shape()[1] == 1;
+                if len <= 1 || row || column || value.shape().len() == 1 {
                     if column && !row && len > 1 {
                         crate::compatibility::ensure_builtin_extension_enabled(
                             &EYE_COLUMN_SIZE_VECTOR_EXTENSION,
@@ -884,9 +884,9 @@ async fn extract_dims(value: &Value) -> Result<Option<Vec<usize>>, String> {
                 return Ok(Some(Vec::new()));
             }
             let scalar = len == 1;
-            let row = value.shape.len() >= 2 && value.shape[0] == 1;
-            let column = value.shape.len() >= 2 && value.shape[1] == 1;
-            if !(scalar || row || column || value.shape.len() == 1) {
+            let row = value.shape().len() >= 2 && value.shape()[0] == 1;
+            let column = value.shape().len() >= 2 && value.shape()[1] == 1;
+            if !(scalar || row || column || value.shape().len() == 1) {
                 return Ok(None);
             }
             (0..len)
@@ -950,8 +950,8 @@ fn parse_eye_integer_dimension(value: &IntValue) -> Result<usize, String> {
 
 fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
     match value {
-        Value::Tensor(t) => Ok(t.shape.clone()),
-        Value::ComplexTensor(t) => Ok(t.shape.clone()),
+        Value::Tensor(t) => Ok(t.shape().to_vec()),
+        Value::ComplexTensor(t) => Ok(t.shape().to_vec()),
         Value::LogicalArray(l) => Ok(l.shape.clone()),
         Value::GpuTensor(h) => Ok(h.shape().to_vec()),
         Value::CharArray(ca) => Ok(ca.shape.clone()),
@@ -1068,7 +1068,7 @@ pub(crate) mod tests {
         let result = block_on(eye_builtin(args)).expect("eye");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
+                assert_eq!(t.shape(), &[3, 3]);
                 for r in 0..3 {
                     for c in 0..3 {
                         let idx = r + c * 3;
@@ -1091,7 +1091,7 @@ pub(crate) mod tests {
         let result = block_on(eye_builtin(args)).expect("eye");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 4]);
+                assert_eq!(t.shape(), &[2, 4]);
                 assert_eq!(t.materialize_f64().len(), 8);
                 for r in 0..2 {
                     for c in 0..4 {
@@ -1115,7 +1115,7 @@ pub(crate) mod tests {
         let result = block_on(eye_builtin(vec![Value::Tensor(size_vec)])).expect("eye");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 4]);
+                assert_eq!(t.shape(), &[2, 4]);
                 assert_eq!(t.materialize_f64().len(), 8);
                 assert_eq!(t.materialize_f64()[0], 1.0);
                 assert_eq!(t.materialize_f64()[1], 0.0);
@@ -1132,7 +1132,7 @@ pub(crate) mod tests {
         let result = block_on(eye_builtin(vec![Value::Num(0.0)])).expect("eye");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 0]);
+                assert_eq!(t.shape(), &[0, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1148,7 +1148,7 @@ pub(crate) mod tests {
         let result = block_on(eye_builtin(args)).expect("eye");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, tensor.shape);
+                assert_eq!(t.shape(), tensor.shape());
                 assert_eq!(t.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1304,7 +1304,7 @@ pub(crate) mod tests {
             let one = storage.ones_like(1).value_at(0).expect("one");
             expected.set_value(0, one.clone()).expect("first diagonal");
             expected.set_value(3, one).expect("second diagonal");
-            assert_eq!(output.shape, vec![2, 3]);
+            assert_eq!(output.shape(), &[2, 3]);
             assert_eq!(output.integer_storage(), Some(&expected));
         }
 
@@ -1346,7 +1346,7 @@ pub(crate) mod tests {
             let Value::Tensor(output) = result else {
                 panic!("expected integer tensor for {class_name}");
             };
-            assert_eq!(output.shape, vec![2, 3]);
+            assert_eq!(output.shape(), &[2, 3]);
             assert_eq!(output.integer_storage(), Some(&expected));
         }
     }
@@ -1379,7 +1379,7 @@ pub(crate) mod tests {
         let result = block_on(eye_builtin(args)).expect("eye");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert_eq!(t.materialize_f64()[0], (1.0, 0.0));
                 assert_eq!(t.materialize_f64()[1], (0.0, 0.0));
                 assert_eq!(t.materialize_f64()[2], (0.0, 0.0));
@@ -1429,7 +1429,7 @@ pub(crate) mod tests {
         let result = block_on(eye_builtin(args)).expect("eye");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3, 2]);
+                assert_eq!(t.shape(), &[2, 3, 2]);
                 // slice 0
                 assert_eq!(t.materialize_f64()[0], 1.0);
                 assert_eq!(t.materialize_f64()[1], 0.0);
@@ -1458,7 +1458,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let args = vec![
@@ -1472,7 +1472,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(gpu) => {
                     assert_eq!(gpu.shape(), &[2, 3]);
                     let gathered = test_support::gather(Value::GpuTensor(gpu)).expect("gather");
-                    assert_eq!(gathered.shape, vec![2, 3]);
+                    assert_eq!(gathered.shape(), &[2, 3]);
                     assert_eq!(gathered.materialize_f64()[0], 1.0);
                     assert_eq!(gathered.materialize_f64()[1], 0.0);
                     assert_eq!(gathered.materialize_f64()[2], 0.0);
@@ -1491,12 +1491,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let prototype = provider.upload(&view).expect("upload proto");
             let result = block_on(eye_builtin(vec![Value::GpuTensor(prototype)])).expect("eye");
             let gathered = test_support::gather(result).expect("gather gpu identity");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), &[2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
         });
     }
@@ -1529,7 +1529,7 @@ pub(crate) mod tests {
         let Value::Tensor(result) = block_on(eye_builtin(args)).expect("eye") else {
             panic!("expected empty tensor");
         };
-        assert_eq!(result.shape, vec![0, 0]);
+        assert_eq!(result.shape(), &[0, 0]);
         assert!(result.is_empty());
     }
 
@@ -1594,7 +1594,7 @@ pub(crate) mod tests {
         let host_proto = Tensor::zeros(vec![3, 3]);
         let view = HostTensorView {
             data: &host_proto.materialize_f64(),
-            shape: &host_proto.shape,
+            shape: host_proto.shape(),
         };
         let gpu_proto = provider.upload(&view).expect("upload proto");
 
@@ -1611,7 +1611,7 @@ pub(crate) mod tests {
             other => panic!("expected tensor for cpu eye, got {other:?}"),
         };
 
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         assert_eq!(gathered.materialize_f64(), cpu_tensor.materialize_f64());
     }
 }

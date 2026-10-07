@@ -556,7 +556,7 @@ fn parse_dim_tensor(tensor: &Tensor) -> crate::BuiltinResult<DimSelection> {
         if dims.is_empty() {
             return Ok(DimSelection::Auto);
         }
-        if !is_vector_shape(&tensor.shape) {
+        if !is_vector_shape(tensor.shape()) {
             return Err(builtin_error(
                 "range: dimension vector must be a row or column vector",
             ));
@@ -567,7 +567,7 @@ fn parse_dim_tensor(tensor: &Tensor) -> crate::BuiltinResult<DimSelection> {
     if values.is_empty() {
         return Ok(DimSelection::Auto);
     }
-    if !is_vector_shape(&tensor.shape) {
+    if !is_vector_shape(tensor.shape()) {
         return Err(builtin_error(
             "range: dimension vector must be a row or column vector",
         ));
@@ -605,7 +605,7 @@ fn range_host(
 ) -> crate::BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for("range", value)
         .map_err(|e| builtin_error(format!("range: {e}")))?;
-    let resolved = resolve_dims(&tensor.shape, &selection)?;
+    let resolved = resolve_dims(tensor.shape(), &selection)?;
     let result = compute_range_tensor(&tensor, &resolved, nan_mode)?;
     Ok(tensor::tensor_into_value(result))
 }
@@ -795,9 +795,9 @@ fn compute_range_tensor(
     if let Some(storage) = tensor.integer_storage() {
         return compute_integer_range_tensor(tensor, storage.exact_values(), dims);
     }
-    let mut shape = tensor.shape.clone();
+    let mut shape = tensor.shape().to_vec();
     if shape.is_empty() {
-        shape = vec![tensor.rows, tensor.cols];
+        shape = vec![0, 0];
     }
     let values = tensor::tensor_values_f64_cow(tensor);
 
@@ -886,9 +886,9 @@ fn compute_integer_range_tensor(
     values: Vec<IntValue>,
     dims: &ResolvedDims,
 ) -> crate::BuiltinResult<Tensor> {
-    let mut shape = tensor.shape.clone();
+    let mut shape = tensor.shape().to_vec();
     if shape.is_empty() {
-        shape = vec![tensor.rows, tensor.cols];
+        shape = vec![0, 0];
     }
     if dims.dims_in_bounds.is_empty() {
         return Tensor::new(vec![0.0; values.len()], shape)
@@ -1056,6 +1056,17 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn range_rank_zero_and_rank_one_keep_existing_geometry() {
+        let rank_zero = Tensor::new(vec![7.0], vec![]).expect("rank-zero input");
+        assert!(range_builtin(Value::Tensor(rank_zero), Vec::new()).is_err());
+
+        let rank_one = Tensor::new(vec![2.0, 5.0], vec![2]).expect("rank-one input");
+        let result = range_builtin(Value::Tensor(rank_one), Vec::new()).expect("rank-one range");
+        assert!(matches!(result, Value::Num(value) if value == 3.0));
+    }
+
     #[test]
     fn range_defaults_to_omitting_nan() {
         let tensor = Tensor::new(vec![1.0, f64::NAN, 4.0], vec![3, 1]).unwrap();
@@ -1165,7 +1176,7 @@ pub(crate) mod tests {
         let result = range_builtin(Value::Tensor(tensor), Vec::new()).expect("range");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 assert_eq!(t.materialize_f64(), vec![2.0, 3.0, 3.0]);
             }
             other => panic!("expected row vector, got {other:?}"),
@@ -1180,7 +1191,7 @@ pub(crate) mod tests {
         let result = range_builtin(Value::Tensor(tensor), args).expect("range");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.shape(), &[2, 1]);
                 assert_eq!(t.materialize_f64(), vec![3.0, 4.0]);
             }
             other => panic!("expected column vector, got {other:?}"),
@@ -1208,7 +1219,7 @@ pub(crate) mod tests {
         let result = range_builtin(Value::Tensor(tensor), args).expect("range");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 assert_eq!(t.materialize_f64(), vec![2.0, 0.0, 0.0]);
             }
             other => panic!("expected row vector, got {other:?}"),
@@ -1247,7 +1258,7 @@ pub(crate) mod tests {
         let result = range_builtin(Value::Tensor(tensor), args).expect("range");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert_eq!(t.materialize_f64()[0], 0.0);
                 assert_eq!(t.materialize_f64()[1], 0.0);
                 assert!(t.materialize_f64()[2].is_nan());
@@ -1270,7 +1281,7 @@ pub(crate) mod tests {
             range_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("range");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 1, 2]);
+                assert_eq!(t.shape(), &[1, 1, 2]);
                 assert_eq!(t.materialize_f64(), vec![11.0, 11.0]);
             }
             other => panic!("expected 1x1x2 tensor, got {other:?}"),
@@ -1285,7 +1296,7 @@ pub(crate) mod tests {
         let result = range_builtin(Value::Tensor(tensor), Vec::new()).expect("range");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), &[1, 2]);
                 assert_eq!(out.materialize_f64(), vec![5.0, 13.0]);
                 assert!(out.integer_storage().is_none());
             }
@@ -1306,7 +1317,7 @@ pub(crate) mod tests {
             .expect("range over typed dims");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 1, 2]);
+                assert_eq!(out.shape(), &[1, 1, 2]);
                 assert_eq!(out.materialize_f64(), vec![11.0, 11.0]);
             }
             other => panic!("expected tensor output, got {other:?}"),
@@ -1333,7 +1344,7 @@ pub(crate) mod tests {
             .expect("range");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), &[1, 3]);
                 assert_eq!(out.materialize_f64(), vec![0.0, 0.0, 0.0]);
             }
             other => panic!("expected tensor output, got {other:?}"),
@@ -1353,7 +1364,7 @@ pub(crate) mod tests {
             range_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("range");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 1, 1]);
+                assert_eq!(t.shape(), &[1, 1, 1]);
                 assert_eq!(t.materialize_f64(), vec![11.0]);
             }
             Value::Num(n) => assert_eq!(n, 11.0),
@@ -1395,12 +1406,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 3.0, 4.0, 7.0, 2.0, 5.0], vec![2, 3]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = range_builtin(Value::GpuTensor(handle), Vec::new()).expect("range");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), &[1, 3]);
             assert_eq!(gathered.materialize_f64(), vec![2.0, 3.0, 3.0]);
         });
     }
@@ -1412,13 +1423,13 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 4.0, 7.0], vec![1, 3]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
                 range_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("range");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.shape(), &[1, 1]);
             assert_eq!(gathered.materialize_f64(), vec![6.0]);
             drop(handle);
         });
@@ -1431,13 +1442,13 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 6.0, 3.0, 10.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = range_builtin(Value::GpuTensor(handle.clone()), vec![Value::from("all")])
                 .expect("range");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.shape(), &[1, 1]);
             assert_eq!(gathered.materialize_f64(), vec![9.0]);
             drop(handle);
         });
@@ -1450,14 +1461,14 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![2.0, 4.0, f64::NAN, 6.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let args = vec![Value::from("omitnan")];
             let result = range_builtin(Value::GpuTensor(handle), args).expect("range");
             match result {
                 Value::Tensor(t) => {
-                    assert_eq!(t.shape, vec![1, 2]);
+                    assert_eq!(t.shape(), &[1, 2]);
                     assert_eq!(t.materialize_f64(), vec![2.0, 0.0]);
                 }
                 other => panic!("expected host tensor fallback, got {other:?}"),
@@ -1481,7 +1492,7 @@ pub(crate) mod tests {
         .expect("cpu range");
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu = range_builtin(
@@ -1491,7 +1502,7 @@ pub(crate) mod tests {
         .expect("gpu range");
         let cpu_tensor = test_support::gather(cpu).expect("gather cpu");
         let gpu_tensor = test_support::gather(gpu).expect("gather gpu");
-        assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
+        assert_eq!(gpu_tensor.shape(), cpu_tensor.shape());
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

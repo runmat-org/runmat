@@ -729,7 +729,7 @@ async fn rand_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Buil
             data: tensor
                 .as_f64_slice()
                 .expect("rand fallback constructs double storage"),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         if let Ok(gpu) = provider.upload(&view) {
             if let Ok(gpu) = validate_constructor_gpu_output(
@@ -901,7 +901,7 @@ pub(crate) mod tests {
         let result = block_on(rand_builtin(args)).expect("rand");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
+                assert_eq!(t.shape(), &[3, 3]);
                 let expected = random::expected_uniform_sequence(9);
                 assert_eq!(t.materialize_f64().len(), expected.len());
                 for (observed, exp) in t.materialize_f64().iter().zip(expected.iter()) {
@@ -924,7 +924,7 @@ pub(crate) mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected empty host tensor");
         };
-        assert_eq!(tensor.shape, vec![0, 3]);
+        assert_eq!(tensor.shape(), &[0, 3]);
     }
 
     #[test]
@@ -947,7 +947,7 @@ pub(crate) mod tests {
         let _guard = reset_rng_clean();
         let seed_result = block_on(rand_builtin(vec![Value::from("seed"), Value::Num(2026.0)]))
             .expect("rand seed");
-        assert!(matches!(seed_result, Value::Tensor(t) if t.shape == vec![0, 0]));
+        assert!(matches!(seed_result, Value::Tensor(t) if t.shape() == [0, 0]));
         let query = block_on(rand_builtin(vec![Value::from("seed")])).expect("rand seed query");
         assert!(matches!(query, Value::Num(seed) if (seed - 2026.0).abs() < f64::EPSILON));
 
@@ -959,9 +959,9 @@ pub(crate) mod tests {
         let second = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(3.0)])).expect("rand");
         match (prefix, first, second) {
             (Value::Tensor(prefix), Value::Tensor(a), Value::Tensor(b)) => {
-                assert_eq!(prefix.shape, vec![1, 4]);
-                assert_eq!(a.shape, vec![1, 3]);
-                assert_eq!(b.shape, vec![1, 3]);
+                assert_eq!(prefix.shape(), &[1, 4]);
+                assert_eq!(a.shape(), &[1, 3]);
+                assert_eq!(b.shape(), &[1, 3]);
                 assert_eq!(a.materialize_f64(), b.materialize_f64());
             }
             other => panic!("expected tensor outputs, got {other:?}"),
@@ -996,8 +996,8 @@ pub(crate) mod tests {
         let second = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(4.0)])).expect("rand");
         match (first, second) {
             (Value::Tensor(a), Value::Tensor(b)) => {
-                assert_eq!(a.shape, vec![1, 4]);
-                assert_eq!(b.shape, vec![1, 4]);
+                assert_eq!(a.shape(), &[1, 4]);
+                assert_eq!(b.shape(), &[1, 4]);
                 assert_eq!(a.materialize_f64(), b.materialize_f64());
             }
             other => panic!("expected tensor outputs, got {other:?}"),
@@ -1017,7 +1017,7 @@ pub(crate) mod tests {
         let second = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(3.0)])).expect("rand");
         match (first, second) {
             (Value::Tensor(a), Value::Tensor(b)) => {
-                assert_eq!(a.shape, vec![1, 3]);
+                assert_eq!(a.shape(), &[1, 3]);
                 assert_eq!(a.materialize_f64(), b.materialize_f64());
             }
             other => panic!("expected tensor outputs, got {other:?}"),
@@ -1151,7 +1151,7 @@ pub(crate) mod tests {
         let result = block_on(rand_builtin(args)).expect("rand single");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert_eq!(t.numeric_dtype(), NumericDType::F32);
                 let expected = random::expected_uniform_sequence(4)
                     .into_iter()
@@ -1182,7 +1182,7 @@ pub(crate) mod tests {
         let result = block_on(rand_builtin(args)).expect("rand");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 let expected = random::expected_complex_sequence(4);
                 for ((re, im), (eref, eim)) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((*re - *eref).abs() < 1e-12);
@@ -1207,7 +1207,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(output) = result else {
             panic!("expected complex tensor");
         };
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), &[2, 2]);
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
     }
 
@@ -1234,7 +1234,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let args = vec![
@@ -1249,7 +1249,7 @@ pub(crate) mod tests {
                     assert_eq!(gpu.shape(), vec![2, 2]);
                     let gathered =
                         test_support::gather(Value::GpuTensor(gpu)).expect("gather to host");
-                    assert_eq!(gathered.shape, vec![2, 2]);
+                    assert_eq!(gathered.shape(), &[2, 2]);
                     for value in gathered.materialize_f64() {
                         assert!((0.0..1.0).contains(&value));
                     }
@@ -1295,7 +1295,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().unwrap();
         let handle = provider.upload(&view).expect("upload");
@@ -1304,7 +1304,7 @@ pub(crate) mod tests {
         match result {
             Value::GpuTensor(h) => {
                 let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather to host");
-                assert_eq!(gathered.shape, vec![2, 2]);
+                assert_eq!(gathered.shape(), &[2, 2]);
                 for v in gathered.materialize_f64() {
                     assert!((0.0..1.0).contains(&v));
                 }
@@ -1325,7 +1325,7 @@ pub(crate) mod tests {
         let summed =
             block_on(crate::call_builtin_async("sum", &[s, Value::Num(1.0)])).expect("sum");
         let gathered = test_support::gather(summed).expect("gather");
-        assert_eq!(gathered.shape, vec![1, 2]);
+        assert_eq!(gathered.shape(), &[1, 2]);
     }
 
     #[test]
@@ -1362,7 +1362,7 @@ pub(crate) mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected host single tensor");
         };
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
     }
 }
