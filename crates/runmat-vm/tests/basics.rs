@@ -2,6 +2,10 @@
 mod test_helpers;
 #[path = "support/document_host.rs"]
 mod document_host;
+#[path = "support/captured_arguments.rs"]
+mod captured_arguments;
+
+use captured_arguments::is_expand_all_cell_contents;
 
 use runmat_accelerate::ShapeInfo;
 use runmat_value::{IntegerStorage, Value};
@@ -38,27 +42,6 @@ fn character_array_slices_preserve_rows_columns_and_linear_order() {
     assert!(has_char(&[1, 4], &['w', 'x', 'y', 'z']));
     assert!(has_char(&[2, 1], &['c', 'y']));
     assert!(has_char(&[1, 2], &['a', 'x']));
-}
-
-fn is_expand_all_cell_contents(
-    spec: &runmat_runtime::call::arguments::ArgumentSpec,
-    expected_num_indices: usize,
-) -> bool {
-    use runmat_runtime::call::arguments::{ArgumentExpansionSpec, ArgumentSpec};
-
-    match spec {
-        ArgumentSpec::Expansion(ArgumentExpansionSpec::CellContents {
-            num_indices,
-            expand_all,
-        }) => *expand_all && *num_indices == expected_num_indices,
-        ArgumentSpec::Single
-        | ArgumentSpec::CapturedSequence { .. }
-        | ArgumentSpec::Expansion(
-            ArgumentExpansionSpec::ReturnedOutputs
-            | ArgumentExpansionSpec::Member(_)
-            | ArgumentExpansionSpec::DynamicMember,
-        ) => false,
-    }
 }
 
 fn matlab_single_quoted_path(path: &Path) -> String {
@@ -970,13 +953,18 @@ fn atan2_explicit_comma_list_argument_path_unpacks_before_call() {
     assert!((x - 1.0f64.atan2(2.0)).abs() < 1e-12);
 
     let bytecode = compile_source(input).expect("compile atan2 comma-list script");
-    let has_output_list_expansion = bytecode.instructions.iter().any(|instr| {
-        matches!(instr, Instr::CallBuiltinExpandMultiOutput(name, specs, out_count)
+    let has_output_list_expansion =
+        bytecode
+            .instructions
+            .iter()
+            .enumerate()
+            .any(|(position, instr)| {
+                matches!(instr, Instr::CallBuiltinExpandMultiOutput(name, specs, out_count)
             if name == "atan2"
                 && *out_count == 1
                 && specs.len() == 1
-                && is_expand_all_cell_contents(&specs[0], 0))
-    });
+                && is_expand_all_cell_contents(&bytecode.instructions[..position], &specs[0], 0))
+            });
     assert!(
         has_output_list_expansion,
         "expected explicit CallBuiltinExpandMultiOutput(atan2) expansion in bytecode"
@@ -994,11 +982,10 @@ fn atan2_compiled_dispatch_gates_integer_extension() {
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
     let error = execute_source_result("y = atan2(uint64(18446744073709551615), 1);")
         .expect_err("integer atan2 must be gated");
-    assert!(
-        error
-            .to_string()
-            .contains("atan2 with typed-integer input is a RunMat extension"),
-        "unexpected error: {error}"
+    assert_eq!(
+        error.identifier.as_deref(),
+        runmat_builtins::ATAN2_INTEGER_INPUT_EXTENSION.error_identifier,
+        "integer input must report the canonical compatibility gate: {error}"
     );
 }
 

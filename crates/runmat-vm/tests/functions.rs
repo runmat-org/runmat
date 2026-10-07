@@ -3,11 +3,14 @@ mod test_helpers;
 
 #[path = "support/captured_arguments.rs"]
 mod captured_arguments;
+#[path = "support/captured_arguments/dotted.rs"]
+mod captured_dotted_arguments;
 
 #[path = "support/dotted_calls.rs"]
 mod dotted_calls;
 
-use captured_arguments::{has_captured_cell_dotted_call, is_expand_all_cell_contents};
+use captured_arguments::is_expand_all_cell_contents;
+use captured_dotted_arguments::has_captured_cell_dotted_call;
 use dotted_calls::has_single_value_dotted_call;
 
 use std::convert::TryFrom;
