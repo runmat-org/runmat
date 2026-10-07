@@ -19,13 +19,13 @@ fn hypot_wgpu_matches_cpu_elementwise() {
     let h_lhs = provider
         .upload(&runmat_accelerate_api::HostTensorView {
             data: &lhs.materialize_f64(),
-            shape: &lhs.shape,
+            shape: lhs.shape(),
         })
         .expect("upload lhs");
     let h_rhs = provider
         .upload(&runmat_accelerate_api::HostTensorView {
             data: &rhs.materialize_f64(),
-            shape: &rhs.shape,
+            shape: rhs.shape(),
         })
         .expect("upload rhs");
 
@@ -33,7 +33,7 @@ fn hypot_wgpu_matches_cpu_elementwise() {
         hypot_builtin(Value::GpuTensor(h_lhs), Value::GpuTensor(h_rhs)).expect("gpu hypot");
     let gathered = test_support::gather(gpu_value).expect("gather gpu result");
 
-    assert_eq!(gathered.shape, expected.shape);
+    assert_eq!(gathered.shape(), expected.shape());
     let tol = match provider.precision() {
         runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
         runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

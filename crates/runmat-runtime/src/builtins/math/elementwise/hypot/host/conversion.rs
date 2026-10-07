@@ -71,8 +71,8 @@ pub(in super::super) fn scalar(value: &Value) -> Option<f64> {
 }
 
 fn complex_tensor_into_magnitudes(tensor: runmat_value::ComplexTensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
-    let storage = match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(values) => NumericStorage::F64(
             values
                 .into_iter()

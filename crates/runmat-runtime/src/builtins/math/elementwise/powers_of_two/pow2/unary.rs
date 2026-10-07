@@ -35,7 +35,7 @@ pub(super) fn evaluate_host(value: Value) -> BuiltinResult<Value> {
 }
 
 pub(super) fn transform_real(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor.into_numeric_storage().map_err(errors::internal)?;
     let output = match storage {
         NumericStorage::F64(values) => {
@@ -55,8 +55,8 @@ pub(super) fn transform_real(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn transform_complex(tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
-    let storage = match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(values) => ComplexStorage::F64(
             values
                 .into_iter()

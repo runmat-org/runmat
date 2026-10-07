@@ -28,7 +28,7 @@ fn hypot_typed_integer_tensor_broadcast_reads_integer_storage() {
     let result = hypot_builtin(Value::Tensor(matrix), Value::Tensor(row)).expect("integer hypot");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             let expected = [
                 3.0_f64.hypot(4.0),
                 4.0_f64.hypot(4.0),
@@ -106,7 +106,7 @@ fn hypot_preserves_native_single_real_complex_mixed_and_empty_storage() {
     else {
         panic!("expected empty mixed tensor");
     };
-    assert_eq!(output.shape, vec![0, 3]);
+    assert_eq!(output.shape(), &[0, 3]);
     assert_eq!(
         output.into_numeric_storage().unwrap(),
         NumericStorage::F64(Vec::new())
@@ -138,7 +138,7 @@ fn hypot_complex_tensor_with_real() {
     let result = hypot_builtin(Value::ComplexTensor(complex), Value::Tensor(real)).expect("mixed");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 1]);
+            assert_eq!(t.shape(), &[2, 1]);
             let expected = [
                 complex_magnitude(3.0, 4.0).hypot(0.0),
                 complex_magnitude(5.0, 12.0).hypot(1.0),
@@ -160,7 +160,7 @@ fn hypot_char_array_inputs() {
         hypot_builtin(Value::CharArray(chars), Value::Int(IntValue::I32(1))).expect("char hypot");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), &[1, 2]);
             let expected = [
                 (65.0f64.powi(2) + 1.0).sqrt(),
                 (66.0f64.powi(2) + 1.0).sqrt(),
@@ -183,7 +183,7 @@ fn hypot_logical_inputs() {
         hypot_builtin(Value::LogicalArray(logical), Value::Tensor(tensor)).expect("logical");
     match result {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![2, 2]);
+            assert_eq!(out.shape(), &[2, 2]);
             let expected = [
                 1.0_f64.hypot(0.0),
                 0.0_f64.hypot(1.0),
@@ -195,5 +195,26 @@ fn hypot_logical_inputs() {
             }
         }
         other => panic!("expected tensor, got {other:?}"),
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn hypot_broadcasts_rank_zero_single_over_rank_one_complex_single() {
+    let real = Tensor::from_f32(vec![12.0], vec![]).expect("rank-zero single");
+    let complex =
+        ComplexTensor::from_f32(vec![(3.0, 4.0), (5.0, 12.0)], vec![2]).expect("rank-one");
+
+    let Value::Tensor(output) =
+        hypot_builtin(Value::Tensor(real), Value::ComplexTensor(complex)).expect("low-rank hypot")
+    else {
+        panic!("expected native single tensor");
+    };
+    assert_eq!(output.shape(), &[2]);
+    assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
+    let actual = output.as_f32_slice().expect("single storage");
+    let expected = [12.0_f32.hypot(5.0), 12.0_f32.hypot(13.0)];
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert!((*actual - expected).abs() < 1e-5);
     }
 }

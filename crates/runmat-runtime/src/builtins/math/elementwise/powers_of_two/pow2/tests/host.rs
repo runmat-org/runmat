@@ -16,12 +16,46 @@ fn unary_scalar_tensor_and_special_values_follow_the_contract() {
     let Value::Tensor(output) = call(Value::Tensor(tensor), vec![]).expect("tensor pow2") else {
         panic!("expected tensor");
     };
-    assert_eq!(output.shape, vec![2, 2]);
+    assert_eq!(output.shape(), &[2, 2]);
     assert_eq!(output.materialize_f64(), vec![0.5, 1.0, 2.0, 4.0]);
     assert!(
         matches!(call(Value::Num(f64::INFINITY), vec![]), Ok(Value::Num(value)) if value.is_infinite())
     );
     assert!(matches!(call(Value::Num(f64::NAN), vec![]), Ok(Value::Num(value)) if value.is_nan()));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn unary_pow2_preserves_low_rank_scalarization_shape_and_native_class() {
+    let scalar = Tensor::new(vec![3.0], vec![]).expect("rank-zero double");
+    assert_eq!(
+        call(Value::Tensor(scalar), vec![]).expect("scalar pow2"),
+        Value::Num(8.0)
+    );
+
+    let vector = Tensor::from_f32(vec![-1.0, 2.0], vec![2]).expect("rank-one single");
+    let Value::Tensor(vector) = call(Value::Tensor(vector), vec![]).expect("vector pow2") else {
+        panic!("expected native single tensor");
+    };
+    assert_eq!(vector.shape(), &[2]);
+    assert_eq!(vector.numeric_dtype(), runmat_value::NumericDType::F32);
+    assert_eq!(vector.as_f32_slice().expect("single storage"), &[0.5, 4.0]);
+
+    let complex = ComplexTensor::from_f32(vec![(1.0, 0.5)], vec![]).expect("complex rank zero");
+    let Value::ComplexTensor(complex) =
+        call(Value::ComplexTensor(complex), vec![]).expect("complex pow2")
+    else {
+        panic!("expected native complex single tensor");
+    };
+    assert_eq!(complex.shape(), &[]);
+    assert_eq!(complex.numeric_dtype(), runmat_value::NumericDType::F32);
+    let values = complex.materialize_f64();
+    let [(real, imaginary)] = values.as_slice() else {
+        panic!("expected one complex result");
+    };
+    let angle = 0.5_f64 * std::f64::consts::LN_2;
+    assert!((*real - 2.0 * angle.cos()).abs() < 1e-6);
+    assert!((*imaginary - 2.0 * angle.sin()).abs() < 1e-6);
 }
 
 #[test]
@@ -58,7 +92,7 @@ fn empty_arrays_preserve_shape_and_precision() {
     let Value::Tensor(output) = call(Value::Tensor(unary), vec![]).expect("unary empty") else {
         panic!("expected tensor");
     };
-    assert_eq!(output.shape, vec![0, 3]);
+    assert_eq!(output.shape(), &[0, 3]);
     assert_eq!(
         output.into_numeric_storage().expect("storage"),
         NumericStorage::F32(Vec::new())
@@ -74,7 +108,7 @@ fn empty_arrays_preserve_shape_and_precision() {
     .expect("binary empty") else {
         panic!("expected complex tensor");
     };
-    assert_eq!(output.shape, vec![0, 2]);
+    assert_eq!(output.shape(), &[0, 2]);
     assert!(matches!(output.complex_storage(), &ComplexStorage::F32(_)));
 }
 
@@ -87,7 +121,7 @@ fn binary_scaling_broadcasts_and_preserves_complex_single() {
     else {
         panic!("expected tensor");
     };
-    assert_eq!(output.shape, vec![3, 2]);
+    assert_eq!(output.shape(), &[3, 2]);
     assert_eq!(
         output.materialize_f64(),
         vec![4.0, 8.0, 12.0, 8.0, 16.0, 24.0]

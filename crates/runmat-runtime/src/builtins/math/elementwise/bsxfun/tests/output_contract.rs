@@ -85,7 +85,7 @@ fn bsxfun_handles_complex_callback_results() {
     let Value::ComplexTensor(tensor) = result else {
         panic!("expected complex tensor");
     };
-    assert_eq!(tensor.shape, vec![2, 1]);
+    assert_eq!(tensor.shape(), &[2, 1]);
     assert_eq!(tensor.materialize_f64(), vec![(11.0, 2.0), (13.0, -1.0)]);
 }
 

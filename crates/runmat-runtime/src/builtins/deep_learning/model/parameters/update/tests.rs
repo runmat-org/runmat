@@ -26,6 +26,31 @@ fn network() -> ObjectInstance {
     network
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn empty_native_update_rejects_before_parameter_publication() {
+    let input = network();
+    let key = view(&input, "test").unwrap()[0].key.clone();
+    let error = apply_updates(
+        input.clone(),
+        vec![ParameterUpdate {
+            key,
+            value: Tensor::from_f32(vec![], vec![0, 2]).unwrap(),
+        }],
+        "test",
+    )
+    .unwrap_err();
+    assert!(error
+        .message()
+        .contains("native training update must not be empty"));
+    let rows = view(&input, "test").unwrap();
+    let Value::Tensor(weights) = parameter_data(rows[0].value.unwrap(), "test").unwrap() else {
+        panic!("unchanged native learnable storage")
+    };
+    assert_eq!(weights.shape(), &[2, 2]);
+    assert_eq!(weights.as_f32_slice(), Some(&[1., 2., 3., 4.][..]));
+}
+
 #[test]
 fn selected_native_updates_preserve_canonical_store_metadata_and_input_alias() {
     let mut input = network();

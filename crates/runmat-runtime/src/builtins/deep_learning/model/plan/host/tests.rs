@@ -26,6 +26,28 @@ fn network() -> Value {
     .unwrap()
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn feature_input_preparation_keeps_admitted_rank_one_shape_exact() {
+    let Value::Object(network) = network() else {
+        panic!("network object expected")
+    };
+    let rank_one = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![2]).unwrap());
+    let plan = HostNetworkPlan::admit(&network, &rank_one, "forward").expect("feature input");
+    assert_eq!(plan.input_axes().shape(), &[2]);
+    let HostValue::Real(prepared) = block_on(plan.prepare_input(&rank_one)).unwrap() else {
+        panic!("real input expected")
+    };
+    assert_eq!(prepared.shape(), &[2]);
+    assert_eq!(prepared.numeric_dtype(), NumericDType::F32);
+    assert_eq!(prepared.as_f32_slice(), Some(&[1.0, 2.0][..]));
+
+    let row_shorthand = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap());
+    assert!(block_on(plan.prepare_input(&row_shorthand)).is_err());
+    let rank_zero = Value::Tensor(Tensor::from_f32(vec![1.0], Vec::new()).unwrap());
+    assert!(HostNetworkPlan::admit(&network, &rank_zero, "forward").is_err());
+}
+
 #[test]
 fn training_geometry_uses_initialization_shapes_before_any_parameter_is_filled() {
     let input_layer = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
@@ -36,7 +58,7 @@ fn training_geometry_uses_initialization_shapes_before_any_parameter_is_filled()
         panic!("dense layer")
     };
     assert!(dense.properties.get("Weights").is_none_or(|value| {
-        matches!(value, Value::Tensor(tensor) if tensor.shape.contains(&0))
+        matches!(value, Value::Tensor(tensor) if tensor.shape().contains(&0))
     }));
     let layers = Value::Cell(CellArray::new(layers, 2, 1).unwrap());
     let admitted = admit_training_geometry(&layers, &input, "test").unwrap();
@@ -226,7 +248,7 @@ fn public_raw_complex_sequence_gap_retains_double_and_input_storage() {
         panic!("complex tensor result expected")
     };
     assert_eq!(result.numeric_dtype(), NumericDType::F64);
-    assert_eq!(result.shape, vec![2, 1]);
+    assert_eq!(result.shape(), &[2, 1]);
     assert_eq!(
         result.as_f64_slice().unwrap(),
         &[ComplexElement(3., 30.), ComplexElement(4., 40.)]
@@ -261,7 +283,7 @@ fn public_formatted_complex_gap_supports_cbt_and_no_channel_sb() {
         panic!("complex dlarray data expected")
     };
     assert_eq!(cbt_data.numeric_dtype(), NumericDType::F32);
-    assert_eq!(cbt_data.shape, vec![2, 2]);
+    assert_eq!(cbt_data.shape(), &[2, 2]);
     assert_eq!(
         cbt_data.as_f32_slice().unwrap(),
         &[
@@ -309,7 +331,7 @@ fn public_formatted_complex_gap_supports_cbt_and_no_channel_sb() {
     let Some(Value::ComplexTensor(sb_data)) = sb_output.properties.get("Data") else {
         panic!("complex dlarray data expected")
     };
-    assert_eq!(sb_data.shape, vec![1, 2]);
+    assert_eq!(sb_data.shape(), &[1, 2]);
     assert_eq!(
         sb_data.as_f64_slice().unwrap(),
         &[ComplexElement(2., 20.), ComplexElement(5., 50.)]
@@ -385,7 +407,7 @@ fn public_real_gap_admits_documented_channel_less_bt_sb_and_sbt_formats() {
         let Some(Value::Tensor(result)) = output.properties.get("Data") else {
             panic!("real GAP tensor expected")
         };
-        assert_eq!(result.shape, output_shape, "{format}");
+        assert_eq!(result.shape(), output_shape.as_slice(), "{format}");
         assert_eq!(result.as_f64_slice().unwrap(), expected, "{format}");
     }
 }
@@ -489,7 +511,7 @@ fn nonsquare_bc_and_cb_use_distinct_physical_channel_axes() {
     let Value::Tensor(raw) = block_on(forward_builtin(net.clone(), raw_bc, vec![])).unwrap() else {
         panic!("raw tensor result expected")
     };
-    assert_eq!(raw.shape, vec![3, 1]);
+    assert_eq!(raw.shape(), &[3, 1]);
     assert_eq!(raw.materialize_f64(), vec![0.5, 2.5, 4.5]);
 
     let cb = object(
@@ -509,7 +531,7 @@ fn nonsquare_bc_and_cb_use_distinct_physical_channel_axes() {
     let Some(Value::Tensor(result)) = wrapped.properties.get("Data") else {
         panic!("tensor data expected")
     };
-    assert_eq!(result.shape, vec![1, 3]);
+    assert_eq!(result.shape(), &[1, 3]);
     assert_eq!(result.materialize_f64(), vec![0.5, 2.5, 4.5]);
     assert_eq!(
         wrapped.properties.get("Format"),
@@ -526,7 +548,7 @@ fn single_input_projects_double_parameters_only_at_execution_boundary() {
         panic!("tensor result expected")
     };
     assert_eq!(output.numeric_dtype(), NumericDType::F32);
-    assert_eq!(output.shape, vec![2, 1]);
+    assert_eq!(output.shape(), &[2, 1]);
     assert_eq!(
         output.into_numeric_storage().unwrap(),
         NumericStorage::F32(vec![-0.5, 0.5])

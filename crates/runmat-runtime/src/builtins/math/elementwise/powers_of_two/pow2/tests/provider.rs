@@ -12,7 +12,7 @@ fn unary_and_binary_floating_results_remain_resident() {
         let result = call(Value::GpuTensor(handle), vec![]).expect("unary");
         assert!(matches!(result, Value::GpuTensor(_)));
         let output = test_support::gather(result).expect("gather");
-        assert_eq!(output.shape, vec![3, 1]);
+        assert_eq!(output.shape(), &[3, 1]);
         assert_eq!(output.materialize_f64(), vec![0.5, 1.0, 8.0]);
 
         let left = Tensor::new(vec![0.5, 1.5], vec![2, 1]).expect("left");

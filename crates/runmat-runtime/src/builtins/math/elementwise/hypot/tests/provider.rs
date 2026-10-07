@@ -40,20 +40,20 @@ fn hypot_gpu_provider_roundtrip() {
         let h_lhs = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &lhs.materialize_f64(),
-                shape: &lhs.shape,
+                shape: lhs.shape(),
             })
             .expect("upload lhs");
         let h_rhs = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &rhs.materialize_f64(),
-                shape: &rhs.shape,
+                shape: rhs.shape(),
             })
             .expect("upload rhs");
         let result =
             hypot_builtin(Value::GpuTensor(h_lhs), Value::GpuTensor(h_rhs)).expect("gpu hypot");
         let gathered = test_support::gather(result).expect("gathered result");
         let expected = [5.0, 13.0, 17.0, 25.0];
-        assert_eq!(gathered.shape, vec![2, 2]);
+        assert_eq!(gathered.shape(), &[2, 2]);
         for (actual, expect) in gathered.materialize_f64().iter().zip(expected.iter()) {
             assert!((actual - expect).abs() < 1e-12);
         }
@@ -68,13 +68,13 @@ fn hypot_gpu_and_host_mix_falls_back() {
         let handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &lhs.materialize_f64(),
-                shape: &lhs.shape,
+                shape: lhs.shape(),
             })
             .expect("upload");
         let result =
             hypot_builtin(Value::GpuTensor(handle), Value::Num(4.0)).expect("gpu + host hypot");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), &[2, 1]);
         let expected: Vec<f64> = lhs
             .materialize_f64()
             .iter()
@@ -95,7 +95,7 @@ fn hypot_gpu_left_host_integer_right_fallback_reads_integer_storage() {
         let handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &lhs.materialize_f64(),
-                shape: &lhs.shape,
+                shape: lhs.shape(),
             })
             .expect("upload");
         let rhs = Tensor::new_integer(IntegerStorage::I16(vec![4, 3]), vec![2, 1]).unwrap();
@@ -106,7 +106,7 @@ fn hypot_gpu_left_host_integer_right_fallback_reads_integer_storage() {
         assert!(runmat_accelerate_api::provider_for_handle(&handle).is_some());
         assert_eq!(runmat_accelerate_api::handle_precision(&handle), precision);
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), &[2, 1]);
         let expected = [5.0, 5.0];
         for (actual, expect) in gathered.materialize_f64().iter().zip(expected.iter()) {
             assert!((actual - expect).abs() < 1e-12, "{actual} vs {expect}");
@@ -123,7 +123,7 @@ fn hypot_host_integer_left_gpu_right_fallback_reads_integer_storage() {
         let handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &rhs.materialize_f64(),
-                shape: &rhs.shape,
+                shape: rhs.shape(),
             })
             .expect("upload");
         let lhs = Tensor::new_integer(IntegerStorage::I16(vec![3, 4]), vec![2, 1]).unwrap();
@@ -131,7 +131,7 @@ fn hypot_host_integer_left_gpu_right_fallback_reads_integer_storage() {
         let result = hypot_builtin(Value::Tensor(lhs), Value::GpuTensor(handle))
             .expect("integer host + gpu hypot");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), &[2, 1]);
         let expected = [5.0, 5.0];
         for (actual, expect) in gathered.materialize_f64().iter().zip(expected.iter()) {
             assert!((actual - expect).abs() < 1e-12, "{actual} vs {expect}");

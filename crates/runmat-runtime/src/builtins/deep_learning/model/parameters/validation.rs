@@ -20,7 +20,7 @@ pub(super) fn parameter_data<'a>(
 
 pub(super) fn empty_parameter(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.shape.contains(&0),
+        Value::Tensor(tensor) => tensor.shape().contains(&0),
         Value::GpuTensor(handle) => handle.shape().contains(&0),
         _ => false,
     }
@@ -87,7 +87,7 @@ pub(in crate::builtins::deep_learning) fn numeric_payload_shape<'a>(
 ) -> BuiltinResult<&'a [usize]> {
     let data = parameter_data(value, function)?;
     let shape: &[usize] = match data {
-        Value::Tensor(tensor) => &tensor.shape,
+        Value::Tensor(tensor) => tensor.shape(),
         Value::GpuTensor(handle)
             if runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real
                 && !runmat_accelerate_api::handle_is_logical(handle) =>
@@ -173,6 +173,60 @@ mod tests {
     fn tensor(shape: Vec<usize>) -> Value {
         let count = shape.iter().product();
         Value::Tensor(Tensor::new(vec![1.0; count], shape).unwrap())
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn parameter_admission_retains_low_rank_geometry_and_checks_empty_storage_class() {
+        let scalar = Value::Tensor(Tensor::from_f32(vec![1.0], vec![]).unwrap());
+        assert_eq!(numeric_payload_shape(&scalar, "Bias", "test").unwrap(), &[]);
+        assert_eq!(floating_precision(&scalar), Some(NumericDType::F32));
+        validate_parameter(
+            &scalar,
+            &ParameterShape::Elements(1),
+            ParameterRole::Bias,
+            "test",
+        )
+        .unwrap();
+
+        let row = tensor(vec![2]);
+        validate_parameter(
+            &row,
+            &ParameterShape::Matrix {
+                rows: 1,
+                columns: Some(2),
+            },
+            ParameterRole::Weights,
+            "test",
+        )
+        .unwrap();
+        assert!(validate_parameter(
+            &row,
+            &ParameterShape::Dimensions(vec![Some(1), Some(2)]),
+            ParameterRole::Weights,
+            "test",
+        )
+        .is_err());
+
+        let empty = Value::Tensor(Tensor::from_f32(vec![], vec![0, 2]).unwrap());
+        assert!(empty_parameter(&empty));
+        assert_eq!(floating_precision(&empty), None);
+        validate_parameter(
+            &empty,
+            &ParameterShape::Elements(1),
+            ParameterRole::Bias,
+            "test",
+        )
+        .unwrap();
+        let logical =
+            Value::LogicalArray(runmat_value::LogicalArray::new(vec![], vec![0, 2]).unwrap());
+        assert!(validate_parameter(
+            &logical,
+            &ParameterShape::Elements(1),
+            ParameterRole::Bias,
+            "test",
+        )
+        .is_err());
     }
 
     #[test]

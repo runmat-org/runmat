@@ -48,7 +48,7 @@ fn bsxfun_does_not_logicalize_shadowed_callback_names() {
     let Value::Tensor(tensor) = result else {
         panic!("expected numeric result, got {result:?}");
     };
-    assert_eq!(tensor.shape, vec![1, 1]);
+    assert_eq!(tensor.shape(), &[1, 1]);
     assert_eq!(tensor.materialize_f64(), vec![2.0]);
 }
 
@@ -87,7 +87,7 @@ fn bsxfun_invokes_bound_function_for_each_broadcasted_pair() {
     let Value::Tensor(tensor) = result else {
         panic!("expected tensor");
     };
-    assert_eq!(tensor.shape, vec![2, 3]);
+    assert_eq!(tensor.shape(), &[2, 3]);
     assert_eq!(
         tensor.materialize_f64(),
         vec![21.0, 22.0, 41.0, 42.0, 61.0, 62.0]

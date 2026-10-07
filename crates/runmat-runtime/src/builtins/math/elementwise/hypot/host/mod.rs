@@ -20,7 +20,7 @@ pub(super) fn evaluate(left: Value, right: Value) -> BuiltinResult<Value> {
 }
 
 pub(super) fn compute(left: Tensor, right: Tensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&left.shape, &right.shape)
+    let plan = BroadcastPlan::new(left.shape(), right.shape())
         .map_err(|error| errors::with_detail(&HYPOT_ERROR_SIZE_MISMATCH, error))?;
     let output_shape = plan.output_shape().to_vec();
     let left_storage = left

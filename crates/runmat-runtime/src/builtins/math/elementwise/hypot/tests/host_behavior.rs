@@ -18,7 +18,7 @@ fn hypot_matrix_elements() {
     let result = hypot_builtin(Value::Tensor(lhs), Value::Tensor(rhs)).expect("element-wise hypot");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             let expected = [1.0, 3.0, (5.0f64).sqrt(), (17.0f64).sqrt()];
             for (actual, expect) in t.materialize_f64().iter().zip(expected.iter()) {
                 assert!((actual - expect).abs() < 1e-12, "{actual} vs {expect}");
@@ -35,7 +35,7 @@ fn hypot_scalar_broadcast() {
     let result = hypot_builtin(Value::Tensor(matrix), Value::Num(4.0)).expect("broadcast");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             let expected = [4.123105625617661, 4.47213595499958, 5.0, 5.656854249492381];
             for (actual, expect) in t.materialize_f64().iter().zip(expected.iter()) {
                 assert!((actual - expect).abs() < 1e-12);
@@ -53,7 +53,7 @@ fn hypot_row_vector_broadcasts_over_matrix() {
     let result = hypot_builtin(Value::Tensor(matrix), Value::Tensor(row)).expect("row broadcast");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 3]);
+            assert_eq!(t.shape(), &[2, 3]);
             let expected = [
                 (1.0f64).hypot(3.0),
                 (4.0f64).hypot(3.0),
@@ -125,7 +125,7 @@ fn hypot_empty_tensor_result() {
     let result = hypot_builtin(Value::Tensor(lhs), Value::Tensor(rhs)).expect("empty hypot result");
     match result {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![0, 3]);
+            assert_eq!(out.shape(), &[0, 3]);
             assert!(out.materialize_f64().is_empty());
         }
         other => panic!("expected empty tensor, got {other:?}"),

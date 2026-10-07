@@ -241,7 +241,7 @@ async fn prepare_input(plan: &HostNetworkPlan<'_>, input: &Value) -> BuiltinResu
                 "prepared input differs from admitted complex payload",
             ));
         };
-        if tensor.shape != plan.input_axes.shape()
+        if tensor.shape() != plan.input_axes.shape()
             || tensor.numeric_dtype() != plan.precision
             || tensor.len() != plan.input_axes.element_count()
         {
@@ -259,7 +259,7 @@ async fn prepare_input(plan: &HostNetworkPlan<'_>, input: &Value) -> BuiltinResu
         plan.precision,
         plan.function,
     )?;
-    if tensor.shape != plan.input_axes.shape() {
+    if tensor.shape() != plan.input_axes.shape() {
         return Err(fail(
             plan.function,
             "prepared input shape differs from admitted input",

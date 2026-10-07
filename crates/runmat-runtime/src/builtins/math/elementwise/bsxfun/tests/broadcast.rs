@@ -15,11 +15,28 @@ fn bsxfun_plus_expands_row_and_column_vectors() {
     let Value::Tensor(tensor) = result else {
         panic!("expected tensor result");
     };
-    assert_eq!(tensor.shape, vec![3, 2]);
+    assert_eq!(tensor.shape(), &[3, 2]);
     assert_eq!(
         tensor.materialize_f64(),
         vec![11.0, 12.0, 13.0, 21.0, 22.0, 23.0]
     );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn bsxfun_normalizes_rank_zero_and_rank_one_tensor_inputs_for_broadcasting() {
+    let scalar = Tensor::new(vec![2.0], vec![]).expect("rank-zero tensor");
+    let vector = Tensor::new(vec![10.0, 20.0], vec![2]).expect("rank-one tensor");
+    let Value::Tensor(output) = call(
+        Value::FunctionHandle("plus".to_string()),
+        Value::Tensor(scalar),
+        Value::Tensor(vector),
+    )
+    .expect("low-rank bsxfun") else {
+        panic!("expected tensor output");
+    };
+    assert_eq!(output.shape(), &[1, 2]);
+    assert_eq!(output.materialize_f64(), vec![12.0, 22.0]);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -37,7 +54,7 @@ fn bsxfun_nd_expansion_uses_matlab_trailing_dimensions() {
     let Value::Tensor(tensor) = result else {
         panic!("expected tensor result");
     };
-    assert_eq!(tensor.shape, vec![2, 3, 4]);
+    assert_eq!(tensor.shape(), &[2, 3, 4]);
     assert_eq!(tensor.materialize_f64()[0], 101.0);
     assert_eq!(tensor.materialize_f64()[1], 102.0);
     assert_eq!(tensor.materialize_f64()[2], 203.0);
@@ -75,7 +92,7 @@ fn bsxfun_singleton_dimension_can_expand_to_zero() {
     let Value::Tensor(tensor) = result else {
         panic!("expected tensor");
     };
-    assert_eq!(tensor.shape, vec![0, 3]);
+    assert_eq!(tensor.shape(), &[0, 3]);
     assert!(tensor.materialize_f64().is_empty());
 }
 

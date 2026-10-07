@@ -15,7 +15,7 @@ pub(in crate::builtins::deep_learning) fn project_owned(
     if tensor.numeric_dtype() == dtype {
         return Ok(tensor);
     }
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = match dtype {
         NumericDType::F32 => NumericStorage::F32(
             tensor

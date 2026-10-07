@@ -67,7 +67,7 @@ pub(in crate::builtins::deep_learning) fn apply_updates(
                 row.key.role,
                 function,
             )?;
-            if value.shape.contains(&0) {
+            if value.shape().contains(&0) {
                 return Err(deep_learning_error(
                     function,
                     format!("{function}: native training update must not be empty"),

@@ -53,9 +53,9 @@ impl ArrayData {
 
     fn shape(&self) -> Vec<usize> {
         match self {
-            Self::Tensor(value) => normalize_shape(&value.shape),
+            Self::Tensor(value) => normalize_shape(value.shape()),
             Self::Logical(value) => normalize_shape(&value.shape),
-            Self::Complex(value) => normalize_shape(&value.shape),
+            Self::Complex(value) => normalize_shape(value.shape()),
             Self::Character(value) => vec![value.rows, value.cols],
             Self::Scalar(_) => vec![1, 1],
         }

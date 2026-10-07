@@ -5,7 +5,7 @@ pub(in crate::builtins::deep_learning) fn floating_precision(
     value: &Value,
 ) -> Option<NumericDType> {
     match value {
-        Value::Tensor(tensor) if !tensor.shape.contains(&0) => Some(tensor.numeric_dtype()),
+        Value::Tensor(tensor) if !tensor.shape().contains(&0) => Some(tensor.numeric_dtype()),
         Value::GpuTensor(handle) if !handle.shape().contains(&0) => {
             runmat_accelerate_api::handle_precision(handle).map(|precision| match precision {
                 ProviderPrecision::F32 => NumericDType::F32,

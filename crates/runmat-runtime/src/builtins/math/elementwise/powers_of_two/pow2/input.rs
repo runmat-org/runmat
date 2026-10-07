@@ -12,8 +12,8 @@ pub(super) enum NumericArray {
 impl NumericArray {
     pub(super) fn shape(&self) -> &[usize] {
         match self {
-            Self::Real(tensor) => &tensor.shape,
-            Self::Complex(tensor) => &tensor.shape,
+            Self::Real(tensor) => tensor.shape(),
+            Self::Complex(tensor) => tensor.shape(),
         }
     }
 

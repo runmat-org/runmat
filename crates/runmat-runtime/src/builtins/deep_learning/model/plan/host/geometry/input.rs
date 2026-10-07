@@ -65,7 +65,7 @@ pub(super) fn metadata<'a>(
     let data = forward_data(input);
     let (shape, dtype, payload_kind) = match data {
         Value::Tensor(tensor) => (
-            tensor.shape.as_slice(),
+            tensor.shape(),
             if tensor.numeric_dtype().integer_class().is_some() {
                 // Preserve the stored integer input and convert only at the
                 // declared floating execution boundary.
@@ -76,7 +76,7 @@ pub(super) fn metadata<'a>(
             InputPayloadKind::Real,
         ),
         Value::ComplexTensor(tensor) => (
-            tensor.shape.as_slice(),
+            tensor.shape(),
             tensor.numeric_dtype(),
             InputPayloadKind::Complex,
         ),
@@ -180,6 +180,32 @@ mod tests {
     use runmat_value::{
         ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericStorage, Tensor,
     };
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn feature_input_metadata_preserves_low_rank_axis_admission() {
+        for (dimensions, admitted) in [(Vec::new(), false), (vec![2], true)] {
+            let count = dimensions.iter().product();
+            let input =
+                Value::Tensor(Tensor::from_f32(vec![1.0; count], dimensions.clone()).unwrap());
+            let (shape, precision, format, payload_kind) = metadata(&input, "forward").unwrap();
+            assert_eq!(shape, dimensions.as_slice());
+            assert_eq!(precision, NumericDType::F32);
+            assert_eq!(payload_kind, InputPayloadKind::Real);
+            let axis_plan = axes(
+                &format,
+                DeepLearningInputKind::Feature,
+                shape,
+                ChannelPolicy::Required,
+                "forward",
+            );
+            assert_eq!(axis_plan.is_ok(), admitted);
+            if let Ok(axis_plan) = axis_plan {
+                assert_eq!(axis_plan.shape(), dimensions.as_slice());
+                assert_eq!(axis_plan.layout().axes(), &[A::Channel]);
+            }
+        }
+    }
 
     #[test]
     fn all_integer_predictor_classes_enter_the_double_boundary_without_storage_mutation() {
