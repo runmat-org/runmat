@@ -241,16 +241,16 @@ async fn symrcm_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 /// Compute the symmetric reverse Cuthill-McKee ordering for a real tensor.
 pub fn symrcm_host_real_tensor(tensor: &Tensor) -> StructureKernelResult<Vec<usize>> {
     if let Some(storage) = tensor.integer_storage() {
-        return adjacency_from_integer_storage(&tensor.shape, storage)
+        return adjacency_from_integer_storage(tensor.shape(), storage)
             .map(|adjacency| symmetric_reverse_cuthill_mckee(&adjacency));
     }
     let values = tensor::tensor_values_f64_cow(tensor);
-    symrcm_host_real_data(&tensor.shape, &values)
+    symrcm_host_real_data(tensor.shape(), &values)
 }
 
 /// Compute the symmetric reverse Cuthill-McKee ordering for a complex tensor.
 pub fn symrcm_host_complex_tensor(tensor: &ComplexTensor) -> StructureKernelResult<Vec<usize>> {
-    symrcm_host_complex_data(&tensor.shape, &tensor.materialize_f64())
+    symrcm_host_complex_data(tensor.shape(), &tensor.materialize_f64())
 }
 
 /// Host implementation for dense real data.
@@ -501,7 +501,7 @@ pub(crate) mod tests {
         let result = symrcm_builtin(Value::Tensor(tensor)).expect("symrcm");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), [1, 3]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -551,7 +551,7 @@ pub(crate) mod tests {
         let result = symrcm_builtin(Value::Num(42.0)).expect("symrcm");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 1]);
+                assert_eq!(t.shape(), [1, 1]);
                 assert_eq!(t.materialize_f64(), vec![1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -575,7 +575,7 @@ pub(crate) mod tests {
         let result = symrcm_builtin(Value::Tensor(tensor)).expect("symrcm");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), [1, 5]);
                 assert_eq!(t.materialize_f64(), vec![5.0, 4.0, 3.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -600,7 +600,7 @@ pub(crate) mod tests {
         let result = symrcm_builtin(Value::Tensor(tensor)).expect("symrcm");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), [1, 5]);
                 assert_eq!(t.materialize_f64(), vec![5.0, 4.0, 3.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -645,7 +645,7 @@ pub(crate) mod tests {
         let result = symrcm_builtin(Value::LogicalArray(logical)).expect("symrcm");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), [1, 4]);
                 assert_eq!(t.materialize_f64(), vec![4.0, 3.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -660,7 +660,7 @@ pub(crate) mod tests {
         let result = symrcm_builtin(Value::Tensor(tensor)).expect("symrcm");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), [1, 4]);
                 assert_eq!(t.materialize_f64(), vec![2.0, 1.0, 4.0, 3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -675,7 +675,7 @@ pub(crate) mod tests {
         let result = symrcm_builtin(Value::Tensor(tensor)).expect("symrcm");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), [1, 5]);
                 assert_eq!(t.materialize_f64(), vec![5.0, 4.0, 3.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -690,7 +690,7 @@ pub(crate) mod tests {
         let result = symrcm_builtin(Value::ComplexTensor(tensor)).expect("symrcm");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), [1, 2]);
                 assert!(
                     t.materialize_f64() == vec![2.0, 1.0] || t.materialize_f64() == vec![1.0, 2.0]
                 );
@@ -706,13 +706,13 @@ pub(crate) mod tests {
             let tensor = tensor_from_entries(4, 4, &[(0, 1, 1.0), (1, 2, 1.0), (2, 3, 1.0)]);
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = symrcm_builtin(Value::GpuTensor(handle)).expect("symrcm");
             match result {
                 Value::Tensor(t) => {
-                    assert_eq!(t.shape, vec![1, 4]);
+                    assert_eq!(t.shape(), [1, 4]);
                     assert_eq!(t.materialize_f64(), vec![4.0, 3.0, 2.0, 1.0]);
                 }
                 other => panic!("expected tensor result, got {other:?}"),
@@ -727,7 +727,7 @@ pub(crate) mod tests {
         let result = symrcm_builtin(Value::Tensor(tensor)).expect("symrcm");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 0]);
+                assert_eq!(t.shape(), [1, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -811,7 +811,7 @@ pub(crate) mod tests {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = symrcm_builtin(Value::GpuTensor(handle)).expect("symrcm");
@@ -819,7 +819,7 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 let expected_f: Vec<f64> =
                     expected.into_iter().map(|idx| (idx + 1) as f64).collect();
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), [1, 5]);
                 assert_eq!(t.materialize_f64(), expected_f);
             }
             other => panic!("expected tensor result, got {other:?}"),

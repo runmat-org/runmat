@@ -327,9 +327,9 @@ async fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
 
 fn triu_value_is_paged(value: &Value) -> bool {
     match value {
-        Value::Tensor(value) => value.shape.len() > 2,
+        Value::Tensor(value) => value.shape().len() > 2,
         Value::LogicalArray(value) => value.shape.len() > 2,
-        Value::ComplexTensor(value) => value.shape.len() > 2,
+        Value::ComplexTensor(value) => value.shape().len() > 2,
         Value::GpuTensor(value) => value.shape().len() > 2,
         _ => false,
     }
@@ -400,7 +400,7 @@ fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
 }
 
 fn triu_tensor(tensor: Tensor, offset: isize) -> crate::BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|e| triu_error_with_message(format!("triu: {e}"), &TRIU_ERROR_INTERNAL))?;
@@ -465,8 +465,8 @@ fn triu_complex_tensor(
     tensor: ComplexTensor,
     offset: isize,
 ) -> crate::BuiltinResult<ComplexTensor> {
-    let shape = tensor.shape.clone();
-    let storage = match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(mut values) => {
             apply_triu_inplace(&mut values, &shape, offset, (0.0, 0.0).into())?;
             ComplexStorage::F64(values)
@@ -634,7 +634,7 @@ pub(crate) mod tests {
                 Some(IntegerElementType::U64)
             );
             let gathered = block_on(gpu_helpers::gather_tensor_async(&result)).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), [2, 2]);
             assert_eq!(
                 gathered.integer_storage(),
                 Some(&IntegerStorage::U64(vec![u64::MAX, 0, 7, 0]))
@@ -683,7 +683,7 @@ pub(crate) mod tests {
         let value = triu_builtin(Value::Tensor(tensor), Vec::new()).expect("triu");
         match value {
             Value::Tensor(result) => {
-                assert_eq!(result.shape, vec![2, 3]);
+                assert_eq!(result.shape(), [2, 3]);
                 assert_eq!(result.materialize_f64(), vec![1.0, 0.0, 2.0, 5.0, 3.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -750,7 +750,7 @@ pub(crate) mod tests {
         else {
             panic!("expected tensor output");
         };
-        assert_eq!(output.shape, vec![2, 2, 2]);
+        assert_eq!(output.shape(), [2, 2, 2]);
         assert_eq!(
             output.materialize_f64(),
             vec![1.0, 0.0, 3.0, 4.0, 5.0, 0.0, 7.0, 8.0]
@@ -811,7 +811,7 @@ pub(crate) mod tests {
         let value = triu_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("triu complex");
         match value {
             Value::ComplexTensor(result) => {
-                assert_eq!(result.shape, vec![2, 2]);
+                assert_eq!(result.shape(), [2, 2]);
                 assert_eq!(result.materialize_f64()[0], (1.0, 2.0));
                 assert_eq!(result.materialize_f64()[1], (0.0, 0.0));
                 assert_eq!(result.materialize_f64()[2], (5.0, 6.0));
@@ -839,12 +839,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let value = triu_builtin(Value::GpuTensor(handle), Vec::new()).expect("triu gpu");
             let gathered = test_support::gather(value).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), [2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 3.0, 4.0]);
         });
     }
@@ -890,7 +890,7 @@ pub(crate) mod tests {
         let cpu = triu_tensor(tensor.clone(), 1).expect("cpu triu");
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = runmat_accelerate_api::provider()
             .unwrap()
@@ -898,7 +898,7 @@ pub(crate) mod tests {
             .expect("upload");
         let gpu = block_on(super::triu_gpu(handle, 1)).expect("gpu triu");
         let gathered = test_support::gather(gpu).expect("gather");
-        assert_eq!(gathered.shape, cpu.shape);
+        assert_eq!(gathered.shape(), cpu.shape());
         assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
     }
 }

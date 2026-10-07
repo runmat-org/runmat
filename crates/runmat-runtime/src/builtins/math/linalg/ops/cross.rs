@@ -714,18 +714,20 @@ fn ensure_same_size_complex(a: &ComplexTensor, b: &ComplexTensor) -> BuiltinResu
 }
 
 fn canonical_shape_tensor(t: &Tensor) -> Vec<usize> {
-    if t.shape.is_empty() {
-        vec![t.rows, t.cols]
+    if t.shape().is_empty() {
+        // `cross` treats a rank-zero dense value as having no vector axis;
+        // keep that domain projection distinct from the public 1-by-1 matrix view.
+        vec![0, 0]
     } else {
-        t.shape.clone()
+        t.shape().to_vec()
     }
 }
 
 fn canonical_shape_complex(t: &ComplexTensor) -> Vec<usize> {
-    if t.shape.is_empty() {
-        vec![t.rows, t.cols]
+    if t.shape().is_empty() {
+        vec![t.rows(), t.cols()]
     } else {
-        t.shape.clone()
+        t.shape().to_vec()
     }
 }
 
@@ -871,6 +873,23 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn cross_dense_scalar_retains_zero_by_zero_domain_projection() {
+        let scalar = Tensor::new(vec![1.0], Vec::new()).expect("scalar");
+        assert_eq!(scalar.rows(), 1);
+        assert_eq!(scalar.cols(), 1);
+        assert_eq!(canonical_shape_tensor(&scalar), [0, 0]);
+
+        let error = cross_builtin(
+            Value::Tensor(scalar.clone()),
+            Value::Tensor(scalar),
+            Vec::new(),
+        )
+        .expect_err("a scalar has no dimension of length three");
+        assert_eq!(error.identifier(), CROSS_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cross_row_vectors() {
         let lhs = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap();
@@ -879,7 +898,7 @@ pub(crate) mod tests {
             cross_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).expect("cross");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), [1, 3]);
                 assert_eq!(t.materialize_f64(), vec![0.0, 0.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -895,7 +914,7 @@ pub(crate) mod tests {
             cross_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).expect("cross");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), [3, 1]);
                 assert_eq!(t.materialize_f64(), vec![0.0, 0.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -915,7 +934,7 @@ pub(crate) mod tests {
         .expect("cross");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), [2, 3]);
                 assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -939,7 +958,7 @@ pub(crate) mod tests {
         .expect("cross");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), [2, 3]);
                 assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -956,7 +975,7 @@ pub(crate) mod tests {
             cross_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).expect("cross");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), [1, 3]);
                 assert_eq!(t.materialize_f64(), vec![0.0, 0.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1158,7 +1177,7 @@ pub(crate) mod tests {
             cross_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).expect("cross");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2, 3]);
+                assert_eq!(t.shape(), [1, 2, 3]);
                 assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1179,7 +1198,7 @@ pub(crate) mod tests {
         .expect("cross");
         match value {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), [1, 3]);
                 assert_eq!(t.materialize_f64()[0], (0.0, 0.0));
                 assert_eq!(t.materialize_f64()[1], (0.0, 0.0));
                 assert_eq!(t.materialize_f64()[2], (3.0, -1.0));
@@ -1447,11 +1466,11 @@ pub(crate) mod tests {
             let rhs = Tensor::new(vec![0.0, 1.0, 0.0], vec![1, 3]).unwrap();
             let view_lhs = HostTensorView {
                 data: &lhs.materialize_f64(),
-                shape: &lhs.shape,
+                shape: lhs.shape(),
             };
             let view_rhs = HostTensorView {
                 data: &rhs.materialize_f64(),
-                shape: &rhs.shape,
+                shape: rhs.shape(),
             };
             let gpu_lhs = provider.upload(&view_lhs).expect("upload lhs");
             let gpu_rhs = provider.upload(&view_rhs).expect("upload rhs");
@@ -1464,7 +1483,7 @@ pub(crate) mod tests {
             match value {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    assert_eq!(gathered.shape, vec![1, 3]);
+                    assert_eq!(gathered.shape(), [1, 3]);
                     assert_eq!(gathered.materialize_f64(), vec![0.0, 0.0, 1.0]);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
@@ -1516,11 +1535,11 @@ pub(crate) mod tests {
         let cpu = cross_real_tensor(&lhs, &rhs, Some(2), false).expect("cpu cross");
         let view_lhs = HostTensorView {
             data: &lhs.materialize_f64(),
-            shape: &lhs.shape,
+            shape: lhs.shape(),
         };
         let view_rhs = HostTensorView {
             data: &rhs.materialize_f64(),
-            shape: &rhs.shape,
+            shape: rhs.shape(),
         };
         let gpu_lhs = provider.upload(&view_lhs).expect("upload lhs");
         let gpu_rhs = provider.upload(&view_rhs).expect("upload rhs");
@@ -1531,7 +1550,7 @@ pub(crate) mod tests {
         )
         .expect("gpu cross");
         let gathered = test_support::gather(gpu_value).expect("gather");
-        assert_eq!(gathered.shape, cpu.shape);
+        assert_eq!(gathered.shape(), cpu.shape());
         assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
     }
 

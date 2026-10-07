@@ -354,8 +354,8 @@ enum MatrixData {
 impl MatrixData {
     fn shape(&self) -> &[usize] {
         match self {
-            MatrixData::Real(t) => &t.shape,
-            MatrixData::Complex(t) => &t.shape,
+            MatrixData::Real(t) => t.shape(),
+            MatrixData::Complex(t) => t.shape(),
         }
     }
 }
@@ -646,8 +646,8 @@ fn is_symmetric_integer(
 }
 
 fn is_symmetric_complex(tensor: &ComplexTensor, mode: SymmetryMode, tol: f64) -> bool {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
+    let rows = tensor.rows();
+    let cols = tensor.cols();
     debug_assert_eq!(rows, cols, "is_symmetric_complex requires a square matrix");
     let data = &tensor.materialize_f64();
 
@@ -705,7 +705,7 @@ pub fn issymmetric_host_real_tensor(
     skew: bool,
     tol: f64,
 ) -> StructureKernelResult<bool> {
-    let (rows, cols) = matrix_dimensions_for(&tensor.shape)?;
+    let (rows, cols) = matrix_dimensions_for(tensor.shape())?;
     if rows != cols {
         return Ok(false);
     }
@@ -722,7 +722,7 @@ pub fn issymmetric_host_complex_tensor(
     skew: bool,
     tol: f64,
 ) -> StructureKernelResult<bool> {
-    let (rows, cols) = matrix_dimensions_for(&tensor.shape)?;
+    let (rows, cols) = matrix_dimensions_for(tensor.shape())?;
     if rows != cols {
         return Ok(false);
     }
@@ -1130,7 +1130,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![2.0, 1.0, 1.0, 3.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
@@ -1151,7 +1151,7 @@ pub(crate) mod tests {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().unwrap();
         let handle = provider.upload(&view).unwrap();
@@ -1166,7 +1166,7 @@ pub(crate) mod tests {
         .unwrap();
         let view_skew = runmat_accelerate_api::HostTensorView {
             data: &skew.materialize_f64(),
-            shape: &skew.shape,
+            shape: skew.shape(),
         };
         let handle_skew = provider.upload(&view_skew).unwrap();
         let gpu_skew = issymmetric_builtin(

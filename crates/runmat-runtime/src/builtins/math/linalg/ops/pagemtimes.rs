@@ -453,7 +453,7 @@ impl PageInput {
         } else {
             NumericDType::F64
         };
-        let shape = canonical_matrix_shape(&tensor.shape);
+        let shape = canonical_matrix_shape(tensor.shape());
         let expected = checked_product(&shape)?;
         let data = tensor::tensor_into_values_f64(tensor);
         if data.len() != expected {
@@ -471,7 +471,7 @@ impl PageInput {
     }
 
     fn from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Self> {
-        let shape = canonical_matrix_shape(&tensor.shape);
+        let shape = canonical_matrix_shape(tensor.shape());
         let expected = checked_product(&shape)?;
         if tensor.materialize_f64().len() != expected {
             return Err(pagemtimes_internal(
@@ -967,7 +967,7 @@ mod tests {
             vec![2, 2, 2],
         );
         let out = expect_tensor(call(lhs, vec![rhs]).unwrap());
-        assert_eq!(out.shape, vec![2, 2, 2]);
+        assert_eq!(out.shape(), [2, 2, 2]);
         assert_eq!(
             out.materialize_f64(),
             vec![70.0, 100.0, 150.0, 220.0, 670.0, 780.0, 910.0, 1060.0]
@@ -994,7 +994,7 @@ mod tests {
         )
         .unwrap();
         let out = expect_tensor(call(Value::Tensor(lhs), vec![Value::Tensor(rhs)]).unwrap());
-        assert_eq!(out.shape, vec![2, 2, 2]);
+        assert_eq!(out.shape(), [2, 2, 2]);
         assert_eq!(out.numeric_dtype(), NumericDType::F64);
         assert!(out.integer_storage().is_none());
         assert_eq!(
@@ -1011,7 +1011,7 @@ mod tests {
         let rhs = Tensor::new_integer(IntegerStorage::U16(vec![5, 7, 6, 8]), vec![2, 2]).unwrap();
 
         let out = expect_tensor(call(Value::Tensor(lhs), vec![Value::Tensor(rhs)]).unwrap());
-        assert_eq!(out.shape, vec![2, 2]);
+        assert_eq!(out.shape(), [2, 2]);
         assert_eq!(out.numeric_dtype(), NumericDType::F64);
         assert_eq!(out.materialize_f64(), vec![26.0, 38.0, 30.0, 44.0]);
     }
@@ -1056,7 +1056,7 @@ mod tests {
             vec![2, 2, 2],
         );
         let out = expect_tensor(call(lhs, vec![rhs]).unwrap());
-        assert_eq!(out.shape, vec![2, 2, 2]);
+        assert_eq!(out.shape(), [2, 2, 2]);
         assert_eq!(
             out.materialize_f64(),
             vec![70.0, 100.0, 150.0, 220.0, 230.0, 340.0, 310.0, 460.0]
@@ -1072,7 +1072,7 @@ mod tests {
             Tensor::new((1..=16).map(|v| v as f64).collect(), vec![2, 2, 4, 1]).unwrap(),
         );
         let out = expect_tensor(call(lhs, vec![rhs]).unwrap());
-        assert_eq!(out.shape, vec![2, 2, 4, 3]);
+        assert_eq!(out.shape(), [2, 2, 4, 3]);
         let values = out.materialize_f64();
         assert_eq!(values.len(), 2 * 2 * 4 * 3);
         assert_eq!(&values[0..4], &[7.0, 10.0, 15.0, 22.0]);
@@ -1083,7 +1083,7 @@ mod tests {
     fn scalar_left_scales_each_page() {
         let rhs = tensor(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], vec![2, 2, 2]);
         let out = expect_tensor(call(Value::Num(2.5), vec![rhs]).unwrap());
-        assert_eq!(out.shape, vec![2, 2, 2]);
+        assert_eq!(out.shape(), [2, 2, 2]);
         assert_eq!(
             out.materialize_f64(),
             vec![2.5, 5.0, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0]
@@ -1094,7 +1094,7 @@ mod tests {
     fn scalar_right_scales_each_page() {
         let lhs = tensor(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], vec![2, 2, 2]);
         let out = expect_tensor(call(lhs, vec![Value::Num(-2.0)]).unwrap());
-        assert_eq!(out.shape, vec![2, 2, 2]);
+        assert_eq!(out.shape(), [2, 2, 2]);
         assert_eq!(
             out.materialize_f64(),
             vec![-2.0, -4.0, -6.0, -8.0, -10.0, -12.0, -14.0, -16.0]
@@ -1116,7 +1116,7 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(out.shape, vec![3, 3]);
+        assert_eq!(out.shape(), [3, 3]);
         assert_eq!(
             out.materialize_f64(),
             vec![23.0, 53.0, 83.0, 29.0, 67.0, 105.0, 35.0, 81.0, 127.0]
@@ -1187,7 +1187,7 @@ mod tests {
         let empty_pages = tensor(Vec::new(), vec![2, 2, 0]);
         let singleton_pages = tensor(vec![1.0; 4], vec![2, 2, 1]);
         let out = expect_tensor(call(empty_pages.clone(), vec![singleton_pages]).unwrap());
-        assert_eq!(out.shape, vec![2, 2, 0]);
+        assert_eq!(out.shape(), [2, 2, 0]);
         assert!(out.is_empty());
 
         let three_pages = tensor(vec![1.0; 12], vec![2, 2, 3]);
@@ -1238,13 +1238,13 @@ mod tests {
             let data = tensor.as_f64_slice().expect("double tensor");
             let view = HostTensorView {
                 data,
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).unwrap();
             let out = call(Value::GpuTensor(handle), vec![Value::Num(2.0)]).unwrap();
             assert!(matches!(out, Value::GpuTensor(_)));
             let gathered = test_support::gather(out).unwrap();
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), [2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![2.0, 4.0, 6.0, 8.0]);
         });
     }
@@ -1296,7 +1296,7 @@ mod tests {
                     assert!((im - 5.0).abs() < 1e-12);
                 }
                 Value::ComplexTensor(tensor) => {
-                    assert_eq!(tensor.shape, vec![1, 1]);
+                    assert_eq!(tensor.shape(), [1, 1]);
                     let (re, im) = tensor.materialize_f64()[0];
                     assert!((re - 5.0).abs() < 1e-12);
                     assert!((im - 5.0).abs() < 1e-12);

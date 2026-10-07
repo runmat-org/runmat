@@ -2,6 +2,23 @@ use super::*;
 use crate::builtins::common::{gpu_helpers, test_support};
 use runmat_value::{IntValue, IntegerStorage};
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn color_geometry_preserves_full_rank_and_rejects_non_image_ranks() {
+    let stacked = Tensor::new(vec![0.0; 12], vec![2, 1, 3, 2]).unwrap();
+    let layout = stacked_color_layout(&stacked, "color-test").unwrap();
+    assert_eq!(layout.pixels(), 4);
+    assert_eq!(layout.output_shape(), vec![2, 1, 3, 2]);
+
+    let rank_zero = Tensor::new(vec![0.0], Vec::new()).unwrap();
+    assert!(color_layout(&rank_zero, "color-test").is_err());
+    assert!(grayscale_shape(&rank_zero, "color-test").is_err());
+
+    let rank_one = Tensor::new(vec![0.0; 3], vec![3]).unwrap();
+    assert!(color_layout(&rank_one, "color-test").is_err());
+    assert!(grayscale_shape(&rank_one, "color-test").is_err());
+}
+
 struct PublicationOwner(runmat_accelerate_api::test_support::TestAllocationOwner);
 
 impl runmat_accelerate_api::AccelProvider for PublicationOwner {

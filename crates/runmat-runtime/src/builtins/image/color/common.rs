@@ -275,7 +275,7 @@ pub(crate) fn tensor_with_dtype(
 }
 
 pub(crate) fn color_layout(tensor: &Tensor, name: &'static str) -> BuiltinResult<ColorLayout> {
-    let shape = &tensor.shape;
+    let shape = tensor.shape();
     if shape.len() == 3 && shape[2] == 3 {
         let rows = shape[0];
         let cols = shape[1];
@@ -307,26 +307,26 @@ pub(crate) fn stacked_color_layout(
     tensor: &Tensor,
     name: &'static str,
 ) -> BuiltinResult<StackedColorLayout> {
-    if tensor.shape.len() == 2 && tensor.shape[1] == 3 && tensor.shape[0] > 0 {
+    let shape = tensor.shape();
+    if shape.len() == 2 && shape[1] == 3 && shape[0] > 0 {
         return Ok(StackedColorLayout {
-            plane_pixels: tensor.shape[0],
+            plane_pixels: shape[0],
             stacks: 1,
-            shape: tensor.shape.clone(),
+            shape: shape.to_vec(),
         });
     }
-    if tensor.shape.len() >= 3 && tensor.shape[0] > 0 && tensor.shape[1] > 0 && tensor.shape[2] == 3
-    {
-        let plane_pixels = tensor.shape[0]
-            .checked_mul(tensor.shape[1])
+    if shape.len() >= 3 && shape[0] > 0 && shape[1] > 0 && shape[2] == 3 {
+        let plane_pixels = shape[0]
+            .checked_mul(shape[1])
             .ok_or_else(|| builtin_error(name, format!("{name}: RGB image dimensions overflow")))?;
-        let stacks = tensor.shape[3..]
+        let stacks = shape[3..]
             .iter()
             .try_fold(1usize, |product, &dimension| product.checked_mul(dimension))
             .ok_or_else(|| builtin_error(name, format!("{name}: RGB image dimensions overflow")))?;
         return Ok(StackedColorLayout {
             plane_pixels,
             stacks,
-            shape: tensor.shape.clone(),
+            shape: shape.to_vec(),
         });
     }
     Err(builtin_error(
@@ -339,7 +339,7 @@ pub(crate) fn grayscale_shape(
     tensor: &Tensor,
     name: &'static str,
 ) -> BuiltinResult<(usize, usize)> {
-    let shape = &tensor.shape;
+    let shape = tensor.shape();
     if shape.len() == 2 {
         return Ok((shape[0], shape[1]));
     }

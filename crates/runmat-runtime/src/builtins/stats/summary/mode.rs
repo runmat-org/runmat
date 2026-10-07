@@ -391,13 +391,13 @@ fn mode_evaluate(
     output_class: OutputClass,
 ) -> BuiltinResult<ModeEvaluation> {
     let tensor = materialize_tensor(value)?;
-    if matches!(&args.axes, ModeAxes::Default) && tensor.shape == [0, 0] {
+    if matches!(&args.axes, ModeAxes::Default) && tensor.shape() == [0, 0] {
         return ModeEvaluation::empty(vec![1, 1], output_class);
     }
     if let Some(storage) = tensor.integer_storage().cloned() {
         return match args.axes {
             ModeAxes::Default => {
-                let dim = default_dimension_from_shape(&tensor.shape);
+                let dim = default_dimension_from_shape(tensor.shape());
                 reduce_integer_along_dim(tensor, storage, dim)
             }
             ModeAxes::Dim(dim) => reduce_integer_along_dim(tensor, storage, dim),
@@ -407,7 +407,7 @@ fn mode_evaluate(
     }
     match args.axes {
         ModeAxes::Default => {
-            let dim = default_dimension_from_shape(&tensor.shape);
+            let dim = default_dimension_from_shape(tensor.shape());
             reduce_along_dim(tensor, dim, output_class)
         }
         ModeAxes::Dim(dim) => reduce_along_dim(tensor, dim, output_class),
@@ -474,7 +474,7 @@ fn reduce_along_dim(
     if dim == 0 {
         return Err(mode_error(&MODE_ERROR_INVALID_DIMENSION));
     }
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let data = tensor::tensor_into_values_f64(tensor);
 
     if shape.is_empty() {
@@ -576,7 +576,7 @@ fn reduce_along_dims(
     dims: Vec<usize>,
     output_class: OutputClass,
 ) -> BuiltinResult<ModeEvaluation> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let (output_shape, reduce_mask) = vecdim_plan(&shape, dims)?;
     if !reduce_mask.iter().any(|reduced| *reduced) {
         return reduce_along_dim(tensor, shape.len() + 1, output_class);
@@ -630,20 +630,20 @@ fn reduce_integer_along_dim(
     if dim == 0 {
         return Err(mode_error(&MODE_ERROR_INVALID_DIMENSION));
     }
-    if tensor.shape.is_empty() || dim > tensor.shape.len() {
+    if tensor.shape().is_empty() || dim > tensor.shape().len() {
         return integer_identity_mode(tensor, storage);
     }
 
     let dim_index = dim - 1;
-    let reduce_len = tensor.shape[dim_index];
-    let mut output_shape = tensor.shape.clone();
+    let reduce_len = tensor.shape()[dim_index];
+    let mut output_shape = tensor.shape().to_vec();
     output_shape[dim_index] = 1;
     if reduce_len == 0 || storage.is_empty() {
         return ModeEvaluation::empty(output_shape, OutputClass::Double);
     }
 
-    let stride_before = dim_product(&tensor.shape[..dim_index])?;
-    let stride_after = dim_product(&tensor.shape[dim_index + 1..])?;
+    let stride_before = dim_product(&tensor.shape()[..dim_index])?;
+    let stride_after = dim_product(&tensor.shape()[dim_index + 1..])?;
     let output_len = stride_before
         .checked_mul(stride_after)
         .ok_or_else(|| mode_internal_error("mode: output size overflow"))?;
@@ -693,7 +693,7 @@ fn reduce_integer_along_dims(
     storage: IntegerStorage,
     dims: Vec<usize>,
 ) -> BuiltinResult<ModeEvaluation> {
-    let (output_shape, reduce_mask) = vecdim_plan(&tensor.shape, dims)?;
+    let (output_shape, reduce_mask) = vecdim_plan(tensor.shape(), dims)?;
     if !reduce_mask.iter().any(|reduced| *reduced) {
         return integer_identity_mode(tensor, storage);
     }
@@ -703,7 +703,7 @@ fn reduce_integer_along_dims(
     let output_len = tensor::element_count(&output_shape);
     let mut slices = vec![Vec::new(); output_len];
     for (linear, value) in storage.exact_values().into_iter().enumerate() {
-        let output_index = vecdim_output_index(linear, &tensor.shape, &reduce_mask);
+        let output_index = vecdim_output_index(linear, tensor.shape(), &reduce_mask);
         slices[output_index].push(value);
     }
     let mut values = Vec::with_capacity(output_len);
@@ -773,7 +773,7 @@ fn vecdim_output_index(linear: usize, shape: &[usize], reduce_mask: &[bool]) -> 
 }
 
 fn integer_identity_mode(tensor: Tensor, storage: IntegerStorage) -> BuiltinResult<ModeEvaluation> {
-    let output_shape = tensor.shape.clone();
+    let output_shape = tensor.shape().to_vec();
     let values = Tensor::new_integer(storage.clone(), output_shape.clone())
         .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
     let freq = Tensor::new(vec![1.0; storage.len()], output_shape.clone())
@@ -1104,7 +1104,7 @@ fn tensor_into_class_value(tensor: Tensor, class: OutputClass) -> BuiltinResult<
     match class {
         OutputClass::Double => unreachable!("double handled above"),
         OutputClass::Single => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let values = tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(|value| value as f32)
@@ -1135,7 +1135,7 @@ fn tensor_into_class_value(tensor: Tensor, class: OutputClass) -> BuiltinResult<
             if contains_nan {
                 return Ok(tensor::tensor_into_value(tensor));
             }
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let data: Vec<u8> = tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(|value| if value != 0.0 { 1 } else { 0 })
@@ -1167,7 +1167,7 @@ fn tensor_into_class_array_value(tensor: Tensor, class: OutputClass) -> BuiltinR
     match class {
         OutputClass::Double => unreachable!("double handled above"),
         OutputClass::Single => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let values = tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(|value| value as f32)
@@ -1198,7 +1198,7 @@ fn tensor_into_class_array_value(tensor: Tensor, class: OutputClass) -> BuiltinR
             if contains_nan {
                 return Ok(Value::Tensor(tensor));
             }
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let data: Vec<u8> = tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(|value| if value != 0.0 { 1 } else { 0 })
@@ -1234,7 +1234,7 @@ fn tensor_into_integer_class_value(tensor: Tensor, kind: IntKind) -> BuiltinResu
 }
 
 fn tensor_into_integer_class_array_value(tensor: Tensor, kind: IntKind) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = if let Some(storage) = tensor.integer_storage() {
         kind.storage_from_int_values(storage.exact_values())
     } else {
@@ -1383,6 +1383,28 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Num(7.0));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn mode_concrete_rank_zero_and_rank_one_shapes_follow_existing_axes() {
+        let scalar = Tensor::new(vec![7.0], vec![]).expect("rank-zero tensor");
+        let scalar_outputs = mode_outputs(Value::Tensor(scalar), Vec::new(), 2).expect("mode");
+        assert_eq!(scalar_outputs, vec![Value::Num(7.0), Value::Num(1.0)]);
+
+        let vector = Tensor::new(vec![1.0, 2.0, 2.0], vec![3]).expect("rank-one tensor");
+        let reduced = mode_outputs(Value::Tensor(vector.clone()), Vec::new(), 2).expect("mode");
+        assert_eq!(reduced, vec![Value::Num(2.0), Value::Num(2.0)]);
+
+        let identity = mode_outputs(Value::Tensor(vector), vec![Value::Int(IntValue::I32(2))], 2)
+            .expect("mode on trailing singleton axis");
+        assert_eq!(expect_tensor(&identity[0]).shape(), &[3]);
+        assert_eq!(
+            expect_tensor(&identity[0]).materialize_f64(),
+            vec![1.0, 2.0, 2.0]
+        );
+        assert_eq!(expect_tensor(&identity[1]).shape(), &[3]);
+        assert_eq!(expect_tensor(&identity[1]).materialize_f64(), vec![1.0; 3]);
+    }
+
     #[test]
     fn mode_vector_simple_majority() {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0], vec![7, 1]).unwrap();
@@ -1423,7 +1445,7 @@ pub(crate) mod tests {
                 let entry = &cell.data[0];
                 match entry {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![2, 1]);
+                        assert_eq!(t.shape(), [2, 1]);
                         assert_eq!(t.materialize_f64(), vec![1.0, 2.0]);
                     }
                     other => panic!("expected tensor inside cell, got {other:?}"),
@@ -1443,7 +1465,7 @@ pub(crate) mod tests {
         let result = mode_call(Value::Tensor(tensor), Vec::new()).expect("mode");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), [1, 3]);
                 assert_eq!(t.materialize_f64(), vec![2.0, 3.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1461,7 +1483,7 @@ pub(crate) mod tests {
             mode_call(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(2))]).expect("mode");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), [3, 1]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1480,7 +1502,7 @@ pub(crate) mod tests {
         let result = mode_call(Value::Tensor(tensor), vec![Value::Tensor(dim)]).expect("mode");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), [3, 1]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1500,7 +1522,7 @@ pub(crate) mod tests {
                 let entry = &cell.data[0];
                 match entry {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![1, 1]);
+                        assert_eq!(t.shape(), [1, 1]);
                         assert_eq!(t.materialize_f64(), vec![2.0]);
                     }
                     other => panic!("expected tensor in cell, got {other:?}"),
@@ -1519,10 +1541,10 @@ pub(crate) mod tests {
         let outputs =
             mode_outputs(Value::Tensor(input), vec![Value::Tensor(dims)], 3).expect("mode");
         let values = expect_tensor(&outputs[0]);
-        assert_eq!(values.shape, vec![1, 1, 2]);
+        assert_eq!(values.shape(), [1, 1, 2]);
         assert_eq!(values.materialize_f64(), vec![1.0, 3.0]);
         let frequency = expect_tensor(&outputs[1]);
-        assert_eq!(frequency.shape, vec![1, 1, 2]);
+        assert_eq!(frequency.shape(), [1, 1, 2]);
         assert_eq!(frequency.materialize_f64(), vec![2.0, 3.0]);
         let Value::Cell(ties) = &outputs[2] else {
             panic!("expected tied-value cell");
@@ -1597,7 +1619,7 @@ pub(crate) mod tests {
                 let entry = &cell.data[0];
                 match entry {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![0, 1]);
+                        assert_eq!(t.shape(), [0, 1]);
                         assert!(t.materialize_f64().is_empty());
                     }
                     other => panic!("expected empty tensor in cell, got {other:?}"),
@@ -1634,7 +1656,7 @@ pub(crate) mod tests {
                 match entry {
                     Value::Tensor(t) => {
                         assert_eq!(t.numeric_dtype(), NumericDType::U16);
-                        assert_eq!(t.shape, vec![1, 1]);
+                        assert_eq!(t.shape(), [1, 1]);
                         assert_eq!(t.integer_storage(), Some(&IntegerStorage::U16(vec![10])));
                     }
                     other => panic!("expected uint16 tensor inside cell, got {other:?}"),
@@ -1651,7 +1673,7 @@ pub(crate) mod tests {
         let outputs = mode_outputs(Value::Tensor(unsigned), Vec::new(), 3).expect("mode");
         match &outputs[0] {
             Value::Tensor(values) => {
-                assert_eq!(values.shape, vec![1, 2]);
+                assert_eq!(values.shape(), [1, 2]);
                 assert_eq!(
                     values.integer_storage(),
                     Some(&IntegerStorage::U16(vec![2, 3]))
@@ -1758,7 +1780,7 @@ pub(crate) mod tests {
             .expect("mode");
         match &outputs[0] {
             Value::Tensor(values) => {
-                assert_eq!(values.shape, vec![2, 1]);
+                assert_eq!(values.shape(), [2, 1]);
                 assert_eq!(
                     values.integer_storage(),
                     Some(&IntegerStorage::U64(vec![wide, wide - 1]))
@@ -1905,7 +1927,7 @@ pub(crate) mod tests {
             let source = Tensor::new(vec![1.0, 2.0, 2.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &source.materialize_f64(),
-                shape: &source.shape,
+                shape: source.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let outputs = mode_outputs(Value::GpuTensor(handle), Vec::new(), 2).expect("mode");
@@ -2009,14 +2031,14 @@ pub(crate) mod tests {
             .expect("mode");
         match &outputs[0] {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), [3, 1]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
         match &outputs[1] {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), [3, 1]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 1.0]);
             }
             other => panic!("expected tensor of frequencies, got {other:?}"),

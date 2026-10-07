@@ -458,21 +458,21 @@ pub fn bandwidth_host_complex_data(
 
 pub fn bandwidth_host_real_tensor(tensor: &Tensor) -> StructureKernelResult<(usize, usize)> {
     if let Some(storage) = tensor.integer_storage() {
-        let (rows, cols) = ensure_matrix_shape(&tensor.shape)?;
+        let (rows, cols) = ensure_matrix_shape(tensor.shape())?;
         return Ok(compute_integer_bandwidth(rows, cols, storage));
     }
     let values = tensor::tensor_values_f64_cow(tensor);
-    bandwidth_host_real_data(&tensor.shape, &values)
+    bandwidth_host_real_data(tensor.shape(), &values)
 }
 
 pub fn bandwidth_host_complex_tensor(
     tensor: &ComplexTensor,
 ) -> StructureKernelResult<(usize, usize)> {
     if tensor.integer_storage().is_some() {
-        let (rows, cols) = ensure_matrix_shape(&tensor.shape)?;
+        let (rows, cols) = ensure_matrix_shape(tensor.shape())?;
         return Ok(compute_complex_integer_bandwidth(rows, cols, tensor));
     }
-    bandwidth_host_complex_data(&tensor.shape, &tensor.materialize_f64())
+    bandwidth_host_complex_data(tensor.shape(), &tensor.materialize_f64())
 }
 
 fn compute_real_bandwidth(rows: usize, cols: usize, data: &[f64]) -> (usize, usize) {
@@ -887,7 +887,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 2.0, 0.0, 0.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
@@ -948,7 +948,7 @@ pub(crate) mod tests {
         let cpu = super::bandwidth_host_real_tensor(&tensor).expect("cpu bandwidth");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_meta = provider.bandwidth(&handle).expect("provider bandwidth");

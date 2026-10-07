@@ -378,7 +378,7 @@ fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
 }
 
 fn tril_tensor(tensor: Tensor, offset: isize) -> crate::BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|e| tril_error_with_message(format!("tril: {e}"), &TRIL_ERROR_INTERNAL))?;
@@ -443,8 +443,8 @@ fn tril_complex_tensor(
     tensor: ComplexTensor,
     offset: isize,
 ) -> crate::BuiltinResult<ComplexTensor> {
-    let shape = tensor.shape.clone();
-    let storage = match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(mut values) => {
             apply_tril_inplace(&mut values, &shape, offset, (0.0, 0.0).into())?;
             ComplexStorage::F64(values)
@@ -610,7 +610,7 @@ pub(crate) mod tests {
                 Some(IntegerElementType::U64)
             );
             let gathered = block_on(gpu_helpers::gather_tensor_async(&result)).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), [2, 2]);
             assert_eq!(
                 gathered.integer_storage(),
                 Some(&IntegerStorage::U64(vec![
@@ -664,7 +664,7 @@ pub(crate) mod tests {
         let value = tril_builtin(Value::Tensor(tensor), Vec::new()).expect("tril");
         match value {
             Value::Tensor(result) => {
-                assert_eq!(result.shape, vec![2, 3]);
+                assert_eq!(result.shape(), [2, 3]);
                 assert_eq!(result.materialize_f64(), vec![1.0, 4.0, 0.0, 5.0, 0.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -772,7 +772,7 @@ pub(crate) mod tests {
         let value = tril_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("tril complex");
         match value {
             Value::ComplexTensor(result) => {
-                assert_eq!(result.shape, vec![2, 2]);
+                assert_eq!(result.shape(), [2, 2]);
                 assert_eq!(result.materialize_f64()[0], (1.0, 2.0));
                 assert_eq!(result.materialize_f64()[1], (3.0, 4.0));
                 assert_eq!(result.materialize_f64()[2], (0.0, 0.0));
@@ -820,12 +820,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let value = tril_builtin(Value::GpuTensor(handle), Vec::new()).expect("tril gpu");
             let gathered = test_support::gather(value).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), [2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 2.0, 0.0, 4.0]);
         });
     }
@@ -842,7 +842,7 @@ pub(crate) mod tests {
         let cpu = tril_tensor(tensor.clone(), -1).expect("cpu tril");
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = runmat_accelerate_api::provider()
             .unwrap()
@@ -850,7 +850,7 @@ pub(crate) mod tests {
             .expect("upload");
         let gpu = block_on(super::tril_gpu(handle, -1)).expect("gpu tril");
         let gathered = test_support::gather(gpu).expect("gather");
-        assert_eq!(gathered.shape, cpu.shape);
+        assert_eq!(gathered.shape(), cpu.shape());
         assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
     }
 }
