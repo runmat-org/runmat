@@ -370,3 +370,29 @@ row-construction storage and addressability, not whole-compilation policy admiss
 Prepared-target overlap, geometry, group/evidence retention, plan accumulation and component
 rank still need complete phase admission before adaptive output and scheduled publication.
 Resource revision stays81; original scientific failures and acceptance limits remain open.
+
+
+## Group evidence and retained accumulation workspace
+
+Group construction now derives additional target ordering, ID-copy, optional reference-ID
+and authored source-digest workspace before its buffers. Whole authored preparation and
+individual group source digests share one source profile, including borrowed equation-term
+references, stable ordering and original source materialization. Their numerical identities
+and canonical source encoding remain unchanged.
+
+The compiler profiles original completed group evidence and incoming rows incrementally
+before row-buffer reserve/append. A single collection envelope is retained; per-increment
+structural bytes come from the shared codec's envelope-aware counter. Existing accumulated
+rows/groups are neither cloned nor rescanned for each increment. The inventory includes
+planned group records and possible overlap of old/new/incoming row-record allocations;
+term payload ownership moves without cloning. Arithmetic, capacities and addressability
+are checked before reserve. Group construction precedes append, preserving successful
+plan identities and original physical fields.
+
+Tests retain borrowed equation slots, source/group composition, incremental bounds against
+a combined original Tet10 plan, immutable canonical bytes, overflow, inconsistent capacities
+and cancellation. These are requested storage inventories and shared materialization
+estimates, not RSS. Group construction excludes already owned lowered evidence; accumulation
+starts after lowering. Prepared-target/geometry work and finalization/rank phase overlap
+still need full policy admission before the adaptive task/root/publication envelope can be
+qualified. Resource revision remains81 and original scientific acceptance remains open.

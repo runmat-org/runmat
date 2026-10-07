@@ -9,6 +9,9 @@ mod algebra;
 mod translation_selection;
 pub(crate) use translation_selection::HomogeneousTranslationSelection;
 mod compilation;
+pub use compilation::{
+    constraint_group_construction_workspace_profile, ConstraintGroupConstructionWorkspaceProfile,
+};
 mod compile;
 mod contract;
 mod coupling;
@@ -78,6 +81,7 @@ pub(crate) use reaction::solve_constraint_multipliers;
 
 pub use plan::{
     constraint_authored_workspace_profile, constraint_plan_finalization_workspace_profile,
-    ConstraintAuthoredWorkspaceProfile, ConstraintPlanFinalizationWorkspaceProfile,
+    constraint_source_workspace_profile, ConstraintAuthoredWorkspaceProfile,
+    ConstraintPlanFinalizationWorkspaceProfile, ConstraintSourceWorkspaceProfile,
 };
 pub use row::{constraint_row_workspace_profile, ConstraintRowWorkspaceProfile};

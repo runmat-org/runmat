@@ -24,7 +24,8 @@ mod authored_profile;
 mod profile;
 mod validation;
 pub use authored_profile::{
-    constraint_authored_workspace_profile, ConstraintAuthoredWorkspaceProfile,
+    constraint_authored_workspace_profile, constraint_source_workspace_profile,
+    ConstraintAuthoredWorkspaceProfile, ConstraintSourceWorkspaceProfile,
 };
 pub use profile::{
     constraint_plan_finalization_workspace_profile, ConstraintPlanFinalizationWorkspaceProfile,
@@ -235,12 +236,14 @@ pub(super) fn reference_point_identity(
 pub(super) fn canonical_value_workspace_bytes<T: Serialize + ?Sized>(
     value: &T,
 ) -> Result<u64, ConstraintPlanError> {
+    Ok(canonical_value_workspace_profile(value)?.materialization_resident_bytes_estimate)
+}
+
+pub(super) fn canonical_value_workspace_profile<T: Serialize + ?Sized>(
+    value: &T,
+) -> Result<runmat_canonical_codec::SerializedCanonicalProfile, ConstraintPlanError> {
     super::workspace::check_cancelled()?;
-    runmat_canonical_codec::serialized_materialization_resident_bytes_estimate(
-        value,
-        PROFILE_LIMITS,
-    )
-    .map_err(|e| {
+    runmat_canonical_codec::profile_serialized(value, PROFILE_LIMITS).map_err(|e| {
         if crate::is_fea_cancelled() {
             ConstraintPlanError::Cancelled
         } else {

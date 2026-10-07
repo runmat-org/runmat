@@ -13,7 +13,12 @@ use super::{
 };
 
 mod topology;
+mod workspace;
 use topology::CompilationTopology;
+use workspace::AccumulationWorkspace;
+pub use workspace::{
+    constraint_group_construction_workspace_profile, ConstraintGroupConstructionWorkspaceProfile,
+};
 
 pub(super) struct CompiledConstraint {
     pub(super) targets: Vec<ResolvedConstraintTarget>,
@@ -60,10 +65,8 @@ pub(super) fn compile(
     let topology = CompilationTopology::derive(model, mesh)?;
     let reference_points = canonical_reference_points(&authored)?;
     let authored_constraints_digest = authored_constraints_digest(&authored)?;
-    let mut groups = Vec::new();
-    groups
-        .try_reserve_exact(authored.len())
-        .map_err(allocation)?;
+    let mut accumulation = AccumulationWorkspace::new(authored.len())?;
+    let mut groups = super::workspace::reserve(authored.len())?;
     let mut rows = Vec::new();
     let mut enforcement_mode = ConstraintEnforcement::DirectElimination;
 
@@ -80,6 +83,13 @@ pub(super) fn compile(
             pairings,
             coupling,
         } = compiled;
+        let group_workspace = constraint_group_construction_workspace_profile(
+            constraint,
+            targets.len(),
+            coupling.is_some(),
+        )?;
+        usize::try_from(group_workspace.total_requested_bytes)
+            .map_err(|_| super::workspace::overflow())?;
         super::workspace::sort_stable_by(&mut targets, |a, b| {
             a.selection_digest.cmp(&b.selection_digest)
         })?;
@@ -89,18 +99,24 @@ pub(super) fn compile(
             enforcement::select(&constraint.kind, &compiled_rows),
         );
         let row_count = compiled_rows.len();
-        // This fallible accumulation is not a pre-expansion workspace admission claim.
-        // Per-constraint target/row construction still needs its owner-side profile.
-        rows.try_reserve_exact(row_count).map_err(allocation)?;
-        rows.extend(compiled_rows);
-        groups.push(group(
+        let group = group(
             constraint,
             implementation,
             targets,
             pairings,
             coupling,
             row_count,
-        )?);
+        )?;
+        accumulation.advance(
+            &group,
+            &compiled_rows,
+            compiled_rows.capacity(),
+            rows.len(),
+            rows.capacity(),
+        )?;
+        rows.try_reserve_exact(row_count).map_err(allocation)?;
+        rows.extend(compiled_rows);
+        groups.push(group);
     }
 
     super::workspace::sort_stable_by(&mut groups, |a, b| a.constraint_id.cmp(&b.constraint_id))?;
