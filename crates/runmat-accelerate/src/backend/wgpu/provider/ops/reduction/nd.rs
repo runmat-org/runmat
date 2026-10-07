@@ -12,57 +12,37 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         // Cache hits must not bypass the original input's owner/live/precision admission.
         self.get_entry(a)?;
-        // If input is a known square of a base tensor, reuse or compute ex2 via moments
-        let base = self
-            .pow2_of
-            .lock()
-            .ok()
-            .and_then(|map| map.get(&a.view_identity()).cloned());
-        if let Some(base) = base {
-            if let Ok(base_handle) = base.acquire() {
-                let base_id = base_handle.view_identity();
-                // Try cache
-                let cached = self.moments_cache.lock().ok().and_then(|cache| {
-                    cache
-                        .get(&(base_id, dims_zero_based.to_vec()))
-                        .map(|(_, ex2)| ex2.clone())
-                });
-                if let Some(ex2) = cached {
-                    self.get_entry_raw(&ex2)?;
-                    return Ok(ex2);
-                }
-                {
+        if self.reduction_reuse.is_poisoned() {
+            // The original uncached ND kernel remains authoritative when only
+            // optional reuse bookkeeping is unavailable; make the loss visible.
+            log::error!("WGPU reduction reuse cache poisoned; executing uncached ND mean");
+        } else {
+            // If input is a known square of a base tensor, reuse or compute ex2 via moments.
+            let base = self.cached_square_source(a)?;
+            if let Some(base) = base {
+                if let Ok(base_handle) = base.acquire() {
+                    self.get_entry(&base_handle)?;
+                    if let Some((_, ex2)) =
+                        self.cached_moment_pair(&base_handle, dims_zero_based)?
+                    {
+                        return Ok(ex2);
+                    }
                     let moments = self.reduce_moments_nd_exec(&base_handle, dims_zero_based)?;
-                    let replaced = self.moments_cache.lock().ok().and_then(|mut cache2| {
-                        cache2.insert(
-                            (base_id, dims_zero_based.to_vec()),
-                            (moments.mean.clone(), moments.ex2.clone()),
-                        )
-                    });
-                    drop(replaced);
+                    self.remember_moments(
+                        &base_handle,
+                        dims_zero_based,
+                        &moments.mean,
+                        &moments.ex2,
+                    )?;
                     return Ok(moments.ex2);
                 }
             }
-        }
-        // Prefer computing moments once and caching ex2 for future reuse
-        if let Ok(cache) = self.moments_cache.lock() {
-            let key = (a.view_identity(), dims_zero_based.to_vec());
-            if let Some((mean_h, _ex2_h)) = cache.get(&key) {
-                let mean = mean_h.clone();
-                drop(cache);
-                self.get_entry_raw(&mean)?;
+            // Prefer computing moments once and caching ex2 for future reuse.
+            if let Some((mean, _)) = self.cached_moment_pair(a, dims_zero_based)? {
                 return Ok(mean);
             }
-            // Compute moments and store
-            drop(cache);
             let moments = self.reduce_moments_nd_exec(a, dims_zero_based)?;
-            let replaced = self.moments_cache.lock().ok().and_then(|mut cache2| {
-                cache2.insert(
-                    (a.view_identity(), dims_zero_based.to_vec()),
-                    (moments.mean.clone(), moments.ex2.clone()),
-                )
-            });
-            drop(replaced);
+            self.remember_moments(a, dims_zero_based, &moments.mean, &moments.ex2)?;
             return Ok(moments.mean);
         }
         let entry = self.get_entry(a)?;

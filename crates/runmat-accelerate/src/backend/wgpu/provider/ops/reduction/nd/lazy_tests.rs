@@ -83,10 +83,11 @@ fn exercise_lazy_mean_and_moments(precision: NumericPrecision) {
         assert_eq!(provider.telemetry_snapshot().download_bytes, before);
         assert!(repeated.shares_allocation_with(&mean));
         assert!(provider
-            .moments_cache
+            .reduction_reuse
             .lock()
             .unwrap()
-            .contains_key(&(identity, vec![axis])));
+            .moment_pair(&(identity, vec![axis]))
+            .is_some());
         assert_values(&provider, &repeated, &means);
 
         // Direct moments is also used independently of mean's cache. Both
@@ -123,4 +124,106 @@ fn actual_lazy_mean_and_moments_f32() {
 #[ignore = "requires SHADER_F64 adapter; run with RUNMAT_WGPU_FORCE_PRECISION=f64"]
 fn actual_lazy_mean_and_moments_f64() {
     exercise_lazy_mean_and_moments(NumericPrecision::F64);
+}
+
+fn exercise_source_retirement_with_cached_pair(poison_cache: bool) {
+    let provider = WgpuProvider::new(WgpuProviderOptions::default())
+        .expect("qualification requires an actual WGPU adapter");
+    assert_eq!(provider.precision, NumericPrecision::F32);
+    let baseline_records = provider.allocations.record_count().unwrap();
+    let input = provider
+        .upload_numeric_exec(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1.0, 2.0, 3.0, 4.0]),
+            shape: &[2, 2],
+            storage: runmat_accelerate_api::GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let input_weak = input.downgrade();
+    let mean = block_on(provider.reduce_mean_nd(&input, &[0])).unwrap();
+    let (cached_mean, cached_ex2) = provider
+        .reduction_reuse
+        .lock()
+        .unwrap()
+        .moment_pair(&(input.view_identity(), vec![0]))
+        .expect("native moments pair retained for exact source view");
+    let mean_weak = cached_mean.downgrade();
+    let ex2_weak = cached_ex2.downgrade();
+    drop(mean);
+    drop(cached_mean);
+    drop(cached_ex2);
+    if poison_cache {
+        let cache = provider.reduction_reuse.clone();
+        assert!(std::thread::spawn(move || {
+            let _guard = cache.lock().unwrap();
+            panic!("injected optional cache bookkeeping poison");
+        })
+        .join()
+        .is_err());
+        assert!(provider.reduction_reuse.is_poisoned());
+    }
+    drop(input);
+    assert!(input_weak.acquire().is_err());
+    assert!(mean_weak.acquire().is_err());
+    assert!(ex2_weak.acquire().is_err());
+    assert_eq!(
+        provider.allocations.record_count().unwrap(),
+        baseline_records
+    );
+}
+
+#[test]
+#[ignore = "requires actual F32 WGPU adapter; verifies source-driven cache output retirement"]
+fn actual_source_retirement_releases_cached_moment_output_owners() {
+    exercise_source_retirement_with_cached_pair(false);
+}
+
+#[test]
+#[ignore = "requires actual F32 WGPU adapter; verifies optional cache poison cannot block retirement"]
+fn poisoned_cache_does_not_quarantine_actual_source_or_cached_output_owners() {
+    exercise_source_retirement_with_cached_pair(true);
+}
+
+#[test]
+#[ignore = "requires actual F32 WGPU adapter; verifies exact-view lazy pruning"]
+fn dropped_source_view_is_pruned_while_physical_sibling_remains_live() {
+    let provider = WgpuProvider::new(WgpuProviderOptions::default())
+        .expect("qualification requires an actual WGPU adapter");
+    assert_eq!(provider.precision, NumericPrecision::F32);
+    let original = provider
+        .upload_numeric_exec(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            shape: &[2, 3],
+            storage: runmat_accelerate_api::GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let view = provider.transpose_exec(&original).unwrap();
+    assert_ne!(view.view_identity(), original.view_identity());
+    let view_identity = view.view_identity();
+    let mean = block_on(provider.reduce_mean_nd(&view, &[0])).unwrap();
+    let weak_mean = mean.downgrade();
+    drop(mean);
+    drop(view);
+    assert!(original.allocation_lease().validate_live().is_ok());
+    assert!(
+        provider
+            .reduction_reuse
+            .lock()
+            .unwrap()
+            .moment_pair(&(view_identity, vec![0]))
+            .is_some(),
+        "bounded cache retains pair until next insertion or eviction"
+    );
+    let replacement = block_on(provider.reduce_mean_nd(&original, &[0])).unwrap();
+    assert!(
+        provider
+            .reduction_reuse
+            .lock()
+            .unwrap()
+            .moment_pair(&(view_identity, vec![0]))
+            .is_none(),
+        "dead exact view was lazily pruned"
+    );
+    assert!(weak_mean.acquire().is_err());
+    assert!(original.allocation_lease().validate_live().is_ok());
+    drop(replacement);
 }

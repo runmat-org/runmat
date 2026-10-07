@@ -9,6 +9,7 @@ use runmat_accelerate_api::allocation::catch_allocation_cleanup_unwind;
 use runmat_accelerate_api::GpuTensorHandle;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 #[path = "allocation_state/lifecycle.rs"]
@@ -32,6 +33,7 @@ pub(super) struct AllocationState {
     // Provenance contains tensor handles. It must not form a strong path from
     // allocation state back through future handle leases to this same state.
     kernel_resources: Weak<KernelResourceRegistry>,
+    reduction_reuse: OnceLock<Weak<Mutex<super::moments_cache::ReductionReuseCache>>>,
 }
 
 impl AllocationState {
@@ -51,7 +53,17 @@ impl AllocationState {
             max_poolable_bytes,
             bind_groups,
             kernel_resources,
+            reduction_reuse: OnceLock::new(),
         }
+    }
+
+    pub(super) fn set_reduction_reuse(
+        &self,
+        cache: Weak<Mutex<super::moments_cache::ReductionReuseCache>>,
+    ) -> Result<()> {
+        self.reduction_reuse
+            .set(cache)
+            .map_err(|_| anyhow!("WGPU reduction cache owner already installed"))
     }
 
     fn lock_records(&self) -> Result<MutexGuard<'_, HashMap<u64, Record>>> {

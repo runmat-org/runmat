@@ -21,6 +21,27 @@ impl AllocationState {
         // accidentally destroy the payload before its failed phase is recorded.
         let result = catch_allocation_cleanup_unwind(|| -> Result<()> {
             let payload = entry.as_ref().ok_or(AllocationStateError::NotLive)?;
+            if let Some(cache) = self.reduction_reuse.get().and_then(Weak::upgrade) {
+                let identity = runmat_accelerate_api::allocation::AllocationIdentity::new(
+                    self.device_id,
+                    id,
+                    1,
+                );
+                let detached = match cache.lock() {
+                    Ok(mut reuse) => reuse.retire_allocation(identity),
+                    Err(poisoned) => {
+                        log::error!(
+                            "WGPU reduction reuse cache poisoned during allocation retirement; discarding optional reuse"
+                        );
+                        poisoned.into_inner().detach_all()
+                    }
+                };
+                if let Err(error) = super::super::moments_cache::drain_detached(detached) {
+                    // The released handle's captured owner records its own
+                    // disposition. Optional reuse cannot strand this source.
+                    log::error!("WGPU cached output release failed: {error}");
+                }
+            }
             self.bind_groups
                 .invalidate_buffer(Arc::as_ptr(&payload.buffer) as usize)?;
             failure.set(Failure::MapPoisoned);

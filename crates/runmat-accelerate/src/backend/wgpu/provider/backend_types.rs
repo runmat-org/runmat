@@ -15,13 +15,6 @@ impl Default for WgpuProviderOptions {
     }
 }
 
-pub(super) type MomentsKey = (
-    runmat_accelerate_api::allocation::TensorViewIdentity,
-    Vec<usize>,
-);
-pub(super) type MomentsValue = (GpuTensorHandle, GpuTensorHandle);
-pub(super) type MomentsCache = HashMap<MomentsKey, MomentsValue>;
-
 // Core WGPU provider state (device, caches, pipelines)
 pub struct WgpuProvider {
     pub(super) instance: Arc<wgpu::Instance>,
@@ -63,13 +56,7 @@ pub struct WgpuProvider {
     #[allow(dead_code)]
     pub(super) autotune_device_tag: String,
     // Optimization caches
-    pub(super) pow2_of: Mutex<
-        HashMap<
-            runmat_accelerate_api::allocation::TensorViewIdentity,
-            runmat_accelerate_api::allocation::WeakGpuTensorHandle,
-        >,
-    >,
-    pub(super) moments_cache: Mutex<MomentsCache>, // (base view, dims) -> (mean, ex2)
+    pub(super) reduction_reuse: Arc<Mutex<super::moments_cache::ReductionReuseCache>>,
     pub(super) fft_twiddle_cache: Mutex<HashMap<(usize, u8), Arc<wgpu::Buffer>>>, // (len, mode) -> twiddle buffer
 }
 

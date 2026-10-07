@@ -1,6 +1,8 @@
 use anyhow::{anyhow, ensure, Result};
 #[path = "allocation_state.rs"]
 mod allocation_state;
+#[path = "moments_cache.rs"]
+mod moments_cache;
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
 use log::{debug, error};
 use once_cell::sync::OnceCell;

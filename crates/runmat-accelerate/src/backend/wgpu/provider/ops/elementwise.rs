@@ -508,9 +508,7 @@ impl WgpuProvider {
     pub(crate) fn unary_pow2_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let out = self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Pow2, a)?;
         // Record squared->base mapping for later reduction fusion (moments reuse).
-        if let Ok(mut map) = self.pow2_of.lock() {
-            map.insert(out.view_identity(), a.downgrade());
-        }
+        self.remember_square(&out, a)?;
         Ok(out)
     }
 

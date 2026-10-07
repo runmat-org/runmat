@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use super::moments_cache::{CacheBudget, ReductionReuseCache};
 use super::{
     canonical_vendor_name, install_device_error_handlers, parse_two_pass_mode,
     ImageNormalizeTuning, NumericPrecision, ReductionTwoPassMode, WgpuProvider,
@@ -21,6 +22,34 @@ use crate::backend::wgpu::resources::KernelResourceRegistry;
 use crate::telemetry::AccelTelemetry;
 
 impl WgpuProvider {
+    /// Provider-local reuse ceiling, independent of the adapter residency
+    /// pool and aggregate placement hardware capacity. Zero disables reuse.
+    pub(super) fn reduction_reuse_budget() -> CacheBudget {
+        fn parse(var: &str, default: u64) -> u64 {
+            match std::env::var(var) {
+                Ok(raw) => match raw.parse::<u64>() {
+                    Ok(value) => value,
+                    Err(_) => {
+                        log::warn!(
+                            "invalid {var}='{raw}'; using reduction-cache default {default}"
+                        );
+                        default
+                    }
+                },
+                Err(_) => default,
+            }
+        }
+        let entries = parse("RUNMAT_WGPU_MOMENTS_CACHE_MAX_ENTRIES", 128);
+        let max_entries = usize::try_from(entries).unwrap_or_else(|_| {
+            warn!("WGPU reduction-cache entry limit {entries} exceeds usize; using default 128");
+            128
+        });
+        CacheBudget {
+            max_entries,
+            max_bytes: parse("RUNMAT_WGPU_MOMENTS_CACHE_MAX_BYTES", 64 << 20),
+        }
+    }
+
     pub(super) fn buffer_residency_pool_limit() -> usize {
         const VAR: &str = "RUNMAT_WGPU_POOL_MAX_PER_KEY";
         match std::env::var(VAR) {
@@ -377,6 +406,9 @@ impl WgpuProvider {
             Self::buffer_residency_max_poolable_bytes(satisfied_limits.max_buffer_size);
 
         let bind_group_cache = Arc::new(BindGroupCache::default());
+        let reduction_reuse = Arc::new(Mutex::new(ReductionReuseCache::new(
+            Self::reduction_reuse_budget(),
+        )));
         let kernel_resources = Arc::new(KernelResourceRegistry::default());
         let allocations = Arc::new(super::allocation_state::AllocationState::new(
             runtime_device_id,
@@ -385,6 +417,7 @@ impl WgpuProvider {
             bind_group_cache.clone(),
             Arc::downgrade(&kernel_resources),
         ));
+        allocations.set_reduction_reuse(Arc::downgrade(&reduction_reuse))?;
         #[cfg(not(target_arch = "wasm32"))]
         let observation_stopped = access.with_shared(|emission| {
             install_device_error_handlers(emission.device(), &allocations)
@@ -435,8 +468,7 @@ impl WgpuProvider {
             image_norm_pipeline_cache: Mutex::new(HashMap::new()),
             autotune_base_dir,
             autotune_device_tag,
-            pow2_of: Mutex::new(HashMap::new()),
-            moments_cache: Mutex::new(HashMap::new()),
+            reduction_reuse,
             fft_twiddle_cache: Mutex::new(HashMap::new()),
         })
     }
