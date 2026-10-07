@@ -462,8 +462,8 @@ enum InputArray {
 impl InputArray {
     fn shape(&self) -> Vec<usize> {
         match self {
-            InputArray::Real(t) => t.shape.clone(),
-            InputArray::Complex(t) => t.shape.clone(),
+            InputArray::Real(t) => t.shape().to_vec(),
+            InputArray::Complex(t) => t.shape().to_vec(),
             InputArray::String(sa) => sa.shape.clone(),
         }
     }
@@ -675,15 +675,15 @@ fn gpu_shape_is_vector(shape: &[usize]) -> bool {
 
 fn issorted_real(tensor: &Tensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
     if let Some(storage) = tensor.integer_storage() {
-        return issorted_integer(&storage.exact_values(), &tensor.shape, args);
+        return issorted_integer(&storage.exact_values(), tensor.shape(), args);
     }
     if let Some(values) = tensor.as_f32_slice() {
-        return issorted_floating(values, &tensor.shape, args);
+        return issorted_floating(values, tensor.shape(), args);
     }
     let values = tensor
         .as_f64_slice()
         .expect("non-integer real tensor stores native single or double");
-    issorted_floating(values, &tensor.shape, args)
+    issorted_floating(values, tensor.shape(), args)
 }
 
 fn issorted_floating<T: SetFloat>(
@@ -819,15 +819,15 @@ fn check_integer_slice(
 
 fn issorted_complex(tensor: &ComplexTensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
     if let Some(values) = tensor.as_f32_slice() {
-        return issorted_floating_complex(values, &tensor.shape, args);
+        return issorted_floating_complex(values, tensor.shape(), args);
     }
     if let Some(values) = tensor.as_f64_slice() {
-        return issorted_floating_complex(values, &tensor.shape, args);
+        return issorted_floating_complex(values, tensor.shape(), args);
     }
     let storage = tensor
         .integer_storage()
         .expect("complex tensor storage is floating or integer");
-    issorted_complex_integer(storage, &tensor.shape, args)
+    issorted_complex_integer(storage, tensor.shape(), args)
 }
 
 fn issorted_complex_integer(
@@ -2178,7 +2178,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = issorted_builtin(Value::GpuTensor(handle), vec![]).expect("issorted gpu");
@@ -2268,7 +2268,7 @@ pub(crate) mod tests {
         let cpu = issorted_builtin(Value::Tensor(tensor.clone()), vec![]).expect("cpu issorted");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = runmat_accelerate_api::provider()
             .expect("wgpu provider")

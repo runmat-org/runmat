@@ -508,7 +508,7 @@ fn parse_columns(value: &Value, num_cols: usize) -> crate::BuiltinResult<Option<
             .ok_or_else(|| invalid_argument("issortedrows: column index is out of range"))?],
         Value::Num(value) => vec![floating_column(*value)?],
         Value::Tensor(tensor) => {
-            if !is_vector(&tensor.shape) {
+            if !is_vector(tensor.shape()) {
                 return Err(invalid_argument(
                     "issortedrows: column specification must be a vector",
                 ));
@@ -857,9 +857,9 @@ fn complex_phase<T: SetFloat>((real, imaginary): (T, T)) -> T {
 
 fn value_shape(value: &Value) -> Vec<usize> {
     match value {
-        Value::Tensor(tensor) => tensor.shape.clone(),
+        Value::Tensor(tensor) => tensor.shape().to_vec(),
         Value::LogicalArray(array) => array.shape.clone(),
-        Value::ComplexTensor(tensor) => tensor.shape.clone(),
+        Value::ComplexTensor(tensor) => tensor.shape().to_vec(),
         Value::CharArray(array) => array.shape.clone(),
         _ => vec![1, 1],
     }

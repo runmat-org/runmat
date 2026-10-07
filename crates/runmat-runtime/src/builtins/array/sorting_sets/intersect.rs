@@ -577,7 +577,13 @@ fn intersect_numeric(
     if let (Some(a_storage), Some(b_storage)) = (a.integer_storage(), b.integer_storage()) {
         if a_storage.numeric_dtype() == b_storage.numeric_dtype() {
             return if opts.rows {
-                intersect_integer_rows(a_storage, a.shape.clone(), b_storage, b.shape.clone(), opts)
+                intersect_integer_rows(
+                    a_storage,
+                    a.shape().to_vec(),
+                    b_storage,
+                    b.shape().to_vec(),
+                    opts,
+                )
             } else {
                 intersect_integer_elements(a_storage, b_storage, opts)
             };
@@ -600,8 +606,8 @@ fn intersect_numeric(
     if a_dtype != b_dtype && a_dtype != NumericDType::F64 && b_dtype != NumericDType::F64 {
         return Err(intersect_error(&INTERSECT_ERROR_NUMERIC_CLASS_MISMATCH));
     }
-    let a_shape = a.shape.clone();
-    let b_shape = b.shape.clone();
+    let a_shape = a.shape().to_vec();
+    let b_shape = b.shape().to_vec();
     let a_storage = a
         .into_numeric_storage()
         .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
@@ -843,9 +849,9 @@ fn intersect_complex(
     b: ComplexTensor,
     opts: &IntersectOptions,
 ) -> crate::BuiltinResult<IntersectEvaluation> {
-    let a_shape = a.shape.clone();
-    let b_shape = b.shape.clone();
-    match (a.into_complex_storage(), b.into_complex_storage()) {
+    let (a_storage, a_shape) = a.into_complex_storage_and_shape();
+    let (b_storage, b_shape) = b.into_complex_storage_and_shape();
+    match (a_storage, b_storage) {
         (ComplexStorage::F64(a), ComplexStorage::F64(b)) => {
             intersect_floating_complex(a, a_shape, b, b_shape, opts)
         }
@@ -1793,7 +1799,7 @@ fn scalar_complex_tensor(re: f64, im: f64) -> crate::BuiltinResult<ComplexTensor
 }
 
 fn tensor_to_complex_owned(name: &str, tensor: Tensor) -> crate::BuiltinResult<ComplexTensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let complex = tensor
         .into_numeric_storage()
         .map_err(|e| intersect_internal_error(format!("{name}: {e}")))?
@@ -1900,6 +1906,22 @@ pub(crate) mod tests {
         futures::executor::block_on(intersect_builtin(a, b, rest))
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn intersect_rows_rejects_rank_zero_and_rank_one_tensors() {
+        for (shape, data) in [(vec![], vec![1.0]), (vec![2], vec![1.0, 2.0])] {
+            let left = Tensor::new(data, shape).expect("left tensor");
+            let right = Tensor::new(vec![1.0], vec![1, 1]).expect("right matrix");
+            let error = builtin_sync(
+                Value::Tensor(left),
+                Value::Tensor(right),
+                vec![Value::from("rows")],
+            )
+            .expect_err("rows requires two-dimensional numeric matrices");
+            assert!(error.message().contains("requires 2-D numeric matrices"));
+        }
+    }
+
     #[test]
     fn registered_builtin_restores_resident_outputs_and_rejects_excess_arity() {
         test_support::with_test_provider(|provider| {
@@ -1985,7 +2007,7 @@ pub(crate) mod tests {
         let Value::Tensor(values) = values else {
             panic!("expected native single rows");
         };
-        assert_eq!(values.shape, vec![1, 2]);
+        assert_eq!(values.shape(), &[1, 2]);
         assert_eq!(
             values.into_numeric_storage().unwrap(),
             NumericStorage::F32(vec![1.0, 2.0])
@@ -2038,7 +2060,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(values) = values else {
             panic!("expected native complex single rows");
         };
-        assert_eq!(values.shape, vec![1, 2]);
+        assert_eq!(values.shape(), &[1, 2]);
         assert_eq!(
             values.as_f32_slice().map(|values| values
                 .iter()
@@ -2220,7 +2242,7 @@ pub(crate) mod tests {
         )
         .expect("intersect rows");
         let values = tensor::value_into_tensor_for("intersect", eval.values_value()).unwrap();
-        assert_eq!(values.shape, vec![1, 2]);
+        assert_eq!(values.shape(), &[1, 2]);
         assert_eq!(values.materialize_f64(), vec![1.0, 2.0]);
         let ia = tensor::value_into_tensor_for("intersect", eval.ia_value()).unwrap();
         let ib = tensor::value_into_tensor_for("intersect", eval.ib_value()).unwrap();
@@ -2387,11 +2409,11 @@ pub(crate) mod tests {
             let b = Tensor::new(vec![2.0, 5.0, 1.0], vec![3, 1]).unwrap();
             let view_a = HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             };
             let view_b = HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             };
             let handle_a = provider.upload(&view_a).expect("upload A");
             let handle_b = provider.upload(&view_b).expect("upload B");
@@ -2457,11 +2479,11 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view_a = HostTensorView {
             data: &a.materialize_f64(),
-            shape: &a.shape,
+            shape: a.shape(),
         };
         let view_b = HostTensorView {
             data: &b.materialize_f64(),
-            shape: &b.shape,
+            shape: b.shape(),
         };
         let handle_a = provider.upload(&view_a).expect("upload A");
         let handle_b = provider.upload(&view_b).expect("upload B");

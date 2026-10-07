@@ -514,7 +514,13 @@ fn setdiff_numeric(
     if let (Some(a_storage), Some(b_storage)) = (a.integer_storage(), b.integer_storage()) {
         if a_storage.numeric_dtype() == b_storage.numeric_dtype() {
             return if opts.rows {
-                setdiff_integer_rows(a_storage, a.shape.clone(), b_storage, b.shape.clone(), opts)
+                setdiff_integer_rows(
+                    a_storage,
+                    a.shape().to_vec(),
+                    b_storage,
+                    b.shape().to_vec(),
+                    opts,
+                )
             } else {
                 setdiff_integer_elements(a_storage, b_storage, opts)
             };
@@ -532,8 +538,8 @@ fn setdiff_numeric(
     if a_dtype != b_dtype && a_dtype != NumericDType::F64 && b_dtype != NumericDType::F64 {
         return Err(setdiff_error(&SETDIFF_ERROR_NUMERIC_CLASS_MISMATCH));
     }
-    let a_shape = a.shape.clone();
-    let b_shape = b.shape.clone();
+    let a_shape = a.shape().to_vec();
+    let b_shape = b.shape().to_vec();
     let a_storage = a
         .into_numeric_storage()
         .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
@@ -754,9 +760,9 @@ fn setdiff_complex(
     b: ComplexTensor,
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
-    let a_shape = a.shape.clone();
-    let b_shape = b.shape.clone();
-    match (a.into_complex_storage(), b.into_complex_storage()) {
+    let (a_storage, a_shape) = a.into_complex_storage_and_shape();
+    let (b_storage, b_shape) = b.into_complex_storage_and_shape();
+    match (a_storage, b_storage) {
         (ComplexStorage::F64(a), ComplexStorage::F64(b)) => {
             setdiff_floating_complex(a, a_shape, b, b_shape, opts)
         }
@@ -1758,7 +1764,7 @@ pub(crate) mod tests {
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("setdiff");
         match eval.values_value() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 1]);
+                assert_eq!(t.shape(), &[1, 1]);
                 assert_eq!(t.materialize_f64(), vec![5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1790,7 +1796,7 @@ pub(crate) mod tests {
         let Value::Tensor(values) = values else {
             panic!("expected native single rows");
         };
-        assert_eq!(values.shape, vec![1, 2]);
+        assert_eq!(values.shape(), &[1, 2]);
         assert_eq!(
             values.into_numeric_storage().unwrap(),
             NumericStorage::F32(vec![1.0, 2.0])
@@ -1838,7 +1844,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(values) = values else {
             panic!("expected native complex single rows");
         };
-        assert_eq!(values.shape, vec![1, 2]);
+        assert_eq!(values.shape(), &[1, 2]);
         assert_eq!(
             values.as_f32_slice().map(|values| values
                 .iter()
@@ -1944,7 +1950,7 @@ pub(crate) mod tests {
             .expect("setdiff");
         match eval.values_value() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 1]);
+                assert_eq!(t.shape(), &[1, 1]);
                 assert_eq!(t.materialize_f64(), vec![2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1962,7 +1968,7 @@ pub(crate) mod tests {
             .expect("setdiff");
         match eval.values_value() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -2106,11 +2112,11 @@ pub(crate) mod tests {
             let tensor_b = Tensor::new(vec![6.0, 4.0, 2.0], vec![3, 1]).unwrap();
             let view_a = HostTensorView {
                 data: &tensor_a.materialize_f64(),
-                shape: &tensor_a.shape,
+                shape: tensor_a.shape(),
             };
             let view_b = HostTensorView {
                 data: &tensor_b.materialize_f64(),
-                shape: &tensor_b.shape,
+                shape: tensor_b.shape(),
             };
             let handle_a = provider.upload(&view_a).expect("upload a");
             let handle_b = provider.upload(&view_b).expect("upload b");
@@ -2145,11 +2151,11 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view_a = HostTensorView {
             data: &a.materialize_f64(),
-            shape: &a.shape,
+            shape: a.shape(),
         };
         let view_b = HostTensorView {
             data: &b.materialize_f64(),
-            shape: &b.shape,
+            shape: b.shape(),
         };
         let handle_a = provider.upload(&view_a).expect("upload A");
         let handle_b = provider.upload(&view_b).expect("upload B");
@@ -2159,8 +2165,8 @@ pub(crate) mod tests {
         let gpu_ia = tensor::value_into_tensor_for("setdiff", gpu_eval.ia_value()).unwrap();
 
         assert_eq!(gpu_values.materialize_f64(), cpu_values.materialize_f64());
-        assert_eq!(gpu_values.shape, cpu_values.shape);
+        assert_eq!(gpu_values.shape(), cpu_values.shape());
         assert_eq!(gpu_ia.materialize_f64(), cpu_ia.materialize_f64());
-        assert_eq!(gpu_ia.shape, cpu_ia.shape);
+        assert_eq!(gpu_ia.shape(), cpu_ia.shape());
     }
 }

@@ -549,7 +549,13 @@ fn union_numeric(
     if let (Some(a_storage), Some(b_storage)) = (a.integer_storage(), b.integer_storage()) {
         if a_storage.numeric_dtype() == b_storage.numeric_dtype() {
             return if opts.rows {
-                union_integer_rows(a_storage, a.shape.clone(), b_storage, b.shape.clone(), opts)
+                union_integer_rows(
+                    a_storage,
+                    a.shape().to_vec(),
+                    b_storage,
+                    b.shape().to_vec(),
+                    opts,
+                )
             } else {
                 union_integer_elements(a_storage, b_storage, opts)
             };
@@ -572,8 +578,8 @@ fn union_numeric(
     if a_dtype != b_dtype && a_dtype != NumericDType::F64 && b_dtype != NumericDType::F64 {
         return Err(union_error(&UNION_ERROR_NUMERIC_CLASS_MISMATCH));
     }
-    let a_shape = a.shape.clone();
-    let b_shape = b.shape.clone();
+    let a_shape = a.shape().to_vec();
+    let b_shape = b.shape().to_vec();
     let a_storage = a
         .into_numeric_storage()
         .map_err(|e| union_internal_error(format!("union: {e}")))?;
@@ -861,9 +867,9 @@ fn union_complex(
     b: ComplexTensor,
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
-    let a_shape = a.shape.clone();
-    let b_shape = b.shape.clone();
-    match (a.into_complex_storage(), b.into_complex_storage()) {
+    let (a_storage, a_shape) = a.into_complex_storage_and_shape();
+    let (b_storage, b_shape) = b.into_complex_storage_and_shape();
+    match (a_storage, b_storage) {
         (ComplexStorage::F64(a), ComplexStorage::F64(b)) => {
             union_floating_complex(a, a_shape, b, b_shape, opts)
         }
@@ -2071,6 +2077,22 @@ pub(crate) mod tests {
         futures::executor::block_on(union_builtin(a, b, rest))
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn union_rows_rejects_rank_zero_and_rank_one_tensors() {
+        for (shape, data) in [(vec![], vec![1.0]), (vec![2], vec![1.0, 2.0])] {
+            let left = Tensor::new(data, shape).expect("left tensor");
+            let right = Tensor::new(vec![1.0], vec![1, 1]).expect("right matrix");
+            let error = builtin_sync(
+                Value::Tensor(left),
+                Value::Tensor(right),
+                vec![Value::from("rows")],
+            )
+            .expect_err("rows requires two-dimensional numeric matrices");
+            assert!(error.message().contains("requires 2-D numeric matrices"));
+        }
+    }
+
     #[test]
     fn registered_builtin_restores_resident_outputs_and_rejects_excess_arity() {
         test_support::with_test_provider(|provider| {
@@ -2117,16 +2139,16 @@ pub(crate) mod tests {
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 5.0, 7.0]);
-                assert_eq!(t.shape, vec![4, 1]);
+                assert_eq!(t.shape(), &[4, 1]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
         let ia = tensor::value_into_tensor_for("union", eval.ia_value()).expect("ia tensor");
         assert_eq!(ia.materialize_f64(), vec![3.0, 1.0, 2.0]);
-        assert_eq!(ia.shape, vec![3, 1]);
+        assert_eq!(ia.shape(), &[3, 1]);
         let ib = tensor::value_into_tensor_for("union", eval.ib_value()).expect("ib tensor");
         assert_eq!(ib.materialize_f64(), vec![1.0]);
-        assert_eq!(ib.shape, vec![1, 1]);
+        assert_eq!(ib.shape(), &[1, 1]);
     }
 
     #[test]
@@ -2152,7 +2174,7 @@ pub(crate) mod tests {
         let Value::Tensor(values) = values else {
             panic!("expected native single rows");
         };
-        assert_eq!(values.shape, vec![3, 2]);
+        assert_eq!(values.shape(), &[3, 2]);
         assert_eq!(
             values.into_numeric_storage().unwrap(),
             NumericStorage::F32(vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0])
@@ -2204,7 +2226,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(values) = values else {
             panic!("expected native complex single rows");
         };
-        assert_eq!(values.shape, vec![3, 2]);
+        assert_eq!(values.shape(), &[3, 2]);
         assert_eq!(
             values.as_f32_slice().map(|values| values
                 .iter()
@@ -2358,7 +2380,7 @@ pub(crate) mod tests {
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![5.0, 7.0, 1.0, 3.0, 2.0, 4.0]);
-                assert_eq!(t.shape, vec![6, 1]);
+                assert_eq!(t.shape(), &[6, 1]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -2375,7 +2397,7 @@ pub(crate) mod tests {
         let b = Tensor::new(vec![2.0, f64::NAN], vec![2, 1]).unwrap();
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("union");
         let values = tensor::value_into_tensor_for("union", eval.values_value()).expect("values");
-        assert_eq!(values.shape, vec![3, 1]);
+        assert_eq!(values.shape(), &[3, 1]);
         assert_eq!(values.materialize_f64()[0], 1.0);
         assert_eq!(values.materialize_f64()[1], 2.0);
         assert!(values.materialize_f64()[2].is_nan());
@@ -2394,7 +2416,7 @@ pub(crate) mod tests {
             .expect("union");
         match eval.values_value() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 2]);
+                assert_eq!(t.shape(), &[3, 2]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -2419,7 +2441,7 @@ pub(crate) mod tests {
         let (values, ia, ib) = eval.into_triple();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 2]);
+                assert_eq!(t.shape(), &[3, 2]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -2510,11 +2532,11 @@ pub(crate) mod tests {
             let b = Tensor::new(vec![2.0, 5.0], vec![2, 1]).unwrap();
             let view_a = HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             };
             let view_b = HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             };
             let handle_a = provider.upload(&view_a).expect("upload A");
             let handle_b = provider.upload(&view_b).expect("upload B");
@@ -2620,7 +2642,7 @@ pub(crate) mod tests {
         match eval.values_value() {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![1.0, 3.0]);
-                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.shape(), &[2, 1]);
             }
             other => panic!("expected numeric tensor, got {other:?}"),
         }
@@ -2649,11 +2671,11 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view_a = HostTensorView {
             data: &a.materialize_f64(),
-            shape: &a.shape,
+            shape: a.shape(),
         };
         let view_b = HostTensorView {
             data: &b.materialize_f64(),
-            shape: &b.shape,
+            shape: b.shape(),
         };
         let handle_a = provider.upload(&view_a).expect("upload A");
         let handle_b = provider.upload(&view_b).expect("upload B");
@@ -2664,7 +2686,7 @@ pub(crate) mod tests {
         let gpu_ib = tensor::value_into_tensor_for("union", gpu_eval.ib_value()).unwrap();
 
         assert_eq!(gpu_values.materialize_f64(), cpu_values.materialize_f64());
-        assert_eq!(gpu_values.shape, cpu_values.shape);
+        assert_eq!(gpu_values.shape(), cpu_values.shape());
         assert_eq!(gpu_ia.materialize_f64(), cpu_ia.materialize_f64());
         assert_eq!(gpu_ib.materialize_f64(), cpu_ib.materialize_f64());
     }
