@@ -149,7 +149,7 @@ async fn imfilter_builtin(
 
 fn imfilter_value_shape(value: &Value) -> Option<Vec<usize>> {
     match value {
-        Value::Tensor(value) => Some(value.shape.clone()),
+        Value::Tensor(value) => Some(value.shape().to_vec()),
         Value::LogicalArray(value) => Some(value.shape.clone()),
         Value::GpuTensor(value) => Some(value.shape().to_vec()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Some(vec![1, 1]),
@@ -311,7 +311,7 @@ fn host_kernel_tensor(value: Value) -> BuiltinResult<Tensor> {
 }
 
 fn validate_public_kernel_tensor(tensor: &Tensor) -> BuiltinResult<()> {
-    validate_public_kernel_shape(&tensor.shape)
+    validate_public_kernel_shape(tensor.shape())
 }
 
 fn validate_public_kernel_shape(shape: &[usize]) -> BuiltinResult<()> {

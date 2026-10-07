@@ -77,9 +77,9 @@ fn same_size_or_scalar(x: &Tensor, nu: &Tensor) -> BuiltinResult<(Vec<f64>, Vec<
     let x_scalar = x.len() == 1;
     let nu_scalar = nu.len() == 1;
     let shape = if x_scalar && !nu_scalar {
-        nu.shape.clone()
-    } else if nu_scalar || x.shape == nu.shape {
-        x.shape.clone()
+        nu.shape().to_vec()
+    } else if nu_scalar || x.shape() == nu.shape() {
+        x.shape().to_vec()
     } else {
         return Err(super::normal_error(
             "chi2cdf",

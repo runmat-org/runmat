@@ -164,7 +164,7 @@ fn chi2cdf_preserves_single_and_uses_only_scalar_expansion() {
         panic!("expected single tensor");
     };
     assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
-    assert_eq!(tensor.shape, vec![1, 2]);
+    assert_eq!(tensor.shape(), &[1, 2]);
 
     let err = block_on(chi2cdf::chi2cdf_builtin(
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
@@ -174,4 +174,28 @@ fn chi2cdf_preserves_single_and_uses_only_scalar_expansion() {
     ))
     .unwrap_err();
     assert!(err.message().contains("same size"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn chi2cdf_scalar_expansion_preserves_rank_one_output_shape() {
+    let rank_one_nu = Tensor::new(vec![2.0, 4.0], vec![2]).unwrap();
+    let Value::Tensor(output) = block_on(chi2cdf::chi2cdf_builtin(
+        Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap()),
+        vec![Value::Tensor(rank_one_nu)],
+    ))
+    .expect("rank-zero x expands across rank-one nu") else {
+        panic!("expected tensor output");
+    };
+    assert_eq!(output.shape(), &[2]);
+
+    let rank_one_x = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
+    let Value::Tensor(output) = block_on(chi2cdf::chi2cdf_builtin(
+        Value::Tensor(rank_one_x),
+        vec![Value::Tensor(Tensor::new(vec![2.0], Vec::new()).unwrap())],
+    ))
+    .expect("rank-zero nu expands across rank-one x") else {
+        panic!("expected tensor output");
+    };
+    assert_eq!(output.shape(), &[2]);
 }

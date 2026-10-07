@@ -142,7 +142,7 @@ async fn filter2_builtin(
 
 fn value_rank(value: &Value) -> Option<usize> {
     match value {
-        Value::Tensor(tensor) => Some(tensor.shape.len()),
+        Value::Tensor(tensor) => Some(tensor.shape().len()),
         Value::LogicalArray(array) => Some(array.shape.len()),
         Value::GpuTensor(handle) => Some(handle.shape().len()),
         _ => None,
@@ -151,7 +151,7 @@ fn value_rank(value: &Value) -> Option<usize> {
 
 fn filter2_value_shape(value: &Value) -> Option<Vec<usize>> {
     match value {
-        Value::Tensor(value) => Some(value.shape.clone()),
+        Value::Tensor(value) => Some(value.shape().to_vec()),
         Value::LogicalArray(value) => Some(value.shape.clone()),
         Value::GpuTensor(value) => Some(value.shape().to_vec()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Some(vec![1, 1]),
@@ -320,7 +320,7 @@ fn filter2_host(
     let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, options, FILTER2_BUILTIN)
         .map_err(|err| filter2_map_error(err.into(), &FILTER2_ERROR_INVALID_INPUT))?;
     if output_single {
-        let shape = result.shape.clone();
+        let shape = result.shape().to_vec();
         let result = Tensor::from_f32(
             result
                 .materialize_f64()

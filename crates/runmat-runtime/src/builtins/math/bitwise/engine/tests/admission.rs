@@ -208,7 +208,44 @@ fn dense_single_and_logical_result_classes_match_catalog_facts() {
                 panic!("{name}: dense double result")
             };
             assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F64);
-            assert_eq!(output.shape, shape);
+            assert_eq!(output.shape(), shape);
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rank_zero_and_rank_one_controls_preserve_exact_bitwise_array_outputs() {
+    use super::super::{bitand_builtin, bitset_builtin, bitshift_builtin};
+    use runmat_value::{IntegerStorage, Tensor};
+
+    for shape in [Vec::new(), vec![1]] {
+        let input =
+            || Value::Tensor(Tensor::new_integer(IntegerStorage::U8(vec![1, 3]), vec![2]).unwrap());
+        let control = |value| Value::Tensor(Tensor::new(vec![value], shape.clone()).unwrap());
+        let results = [
+            (
+                block_on(bitand_builtin(vec![input(), control(3.0)])).unwrap(),
+                vec![1, 3],
+            ),
+            (
+                block_on(bitshift_builtin(vec![input(), control(1.0)])).unwrap(),
+                vec![2, 6],
+            ),
+            (
+                block_on(bitset_builtin(vec![input(), control(1.0), control(0.0)])).unwrap(),
+                vec![0, 2],
+            ),
+        ];
+        for (result, expected) in results {
+            let Value::Tensor(output) = result else {
+                panic!("expected typed array");
+            };
+            assert_eq!(output.shape(), &[2]);
+            assert_eq!(
+                output.integer_storage(),
+                Some(&IntegerStorage::U8(expected))
+            );
         }
     }
 }

@@ -94,6 +94,23 @@ fn kstest_accepts_two_column_cdf_table() {
     assert!(err.message.contains("CDF table range"));
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn kstest_rejects_rank_zero_and_rank_one_cdf_tables() {
+    let sample = || Value::Tensor(Tensor::new(vec![0.25, 0.75], vec![2, 1]).unwrap());
+    for cdf in [
+        Tensor::new(vec![0.0], Vec::new()).unwrap(),
+        Tensor::new(vec![0.0, 1.0], vec![2]).unwrap(),
+    ] {
+        let error = block_on(kstest_builtin(
+            sample(),
+            vec![Value::from("CDF"), Value::Tensor(cdf)],
+        ))
+        .expect_err("CDF tables must be rank-two");
+        assert!(error.message.contains("n-by-2"));
+    }
+}
+
 #[test]
 fn kstest_reads_typed_integer_sample_and_cdf_table_exactly() {
     let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);

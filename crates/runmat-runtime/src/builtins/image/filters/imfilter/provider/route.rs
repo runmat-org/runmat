@@ -32,7 +32,7 @@ fn projected_public_kernel(
     let shape = match value {
         Value::Num(_) => vec![1, 1],
         Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F64 => {
-            tensor.shape.clone()
+            tensor.shape().to_vec()
         }
         Value::GpuTensor(handle)
             if runmat_accelerate_api::handle_precision(handle) == Some(ProviderPrecision::F64) =>
@@ -146,7 +146,7 @@ pub(super) fn select_provider_route(
     };
     let kernel_shape = match kernel {
         Value::Num(_) => vec![1, 1],
-        Value::Tensor(tensor) => tensor.shape.clone(),
+        Value::Tensor(tensor) => tensor.shape().to_vec(),
         Value::GpuTensor(handle) => handle.shape().to_vec(),
         _ => return Ok(ProviderRouteSelection::default()),
     };

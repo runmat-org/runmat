@@ -61,6 +61,24 @@ fn error_message(err: &crate::RuntimeError) -> String {
     err.message().to_string()
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn filter2_preserves_rank_zero_and_rank_one_single_tap_kernels() {
+    for shape in [Vec::new(), vec![1]] {
+        let kernel = Tensor::new(vec![2.0], shape).unwrap();
+        let image = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
+        let value = block_on(filter2_builtin(
+            Value::Tensor(kernel),
+            Value::Tensor(image),
+            Vec::new(),
+        ))
+        .expect("filter2 single-tap kernel");
+        let output = test_support::gather(value).expect("host output");
+        assert_eq!(output.shape(), &[1, 2]);
+        assert_eq!(output.materialize_f64(), vec![4.0, 6.0]);
+    }
+}
+
 #[cfg(feature = "wgpu")]
 struct WgpuFilterEnvGuard {
     skip_warmup: Option<std::ffi::OsString>,
@@ -113,7 +131,7 @@ fn default_same_matches_imfilter_reference() {
     };
     let expected =
         apply_imfilter_tensor(&image, &kernel, &options, FILTER2_BUILTIN).expect("reference");
-    assert_eq!(gathered.shape, expected.shape);
+    assert_eq!(gathered.shape(), expected.shape());
     assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
 }
 
@@ -135,7 +153,7 @@ fn full_shape_option_expands_output() {
     };
     let expected =
         apply_imfilter_tensor(&image, &kernel, &options, FILTER2_BUILTIN).expect("reference");
-    assert_eq!(gathered.shape, expected.shape);
+    assert_eq!(gathered.shape(), expected.shape());
     assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
 }
 
@@ -157,7 +175,7 @@ fn valid_shape_option_matches_reference() {
     };
     let expected =
         apply_imfilter_tensor(&image, &kernel, &options, FILTER2_BUILTIN).expect("reference");
-    assert_eq!(gathered.shape, expected.shape);
+    assert_eq!(gathered.shape(), expected.shape());
     assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
 }
 
@@ -180,7 +198,7 @@ fn convolution_mode_rotates_kernel() {
     };
     let expected =
         apply_imfilter_tensor(&image, &kernel, &options, FILTER2_BUILTIN).expect("reference");
-    assert_eq!(gathered.shape, expected.shape);
+    assert_eq!(gathered.shape(), expected.shape());
     assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
 }
 
@@ -206,7 +224,7 @@ fn explicit_corr_option_matches_default() {
 
     let default_tensor = test_support::gather(default_value).expect("gather default");
     let corr_tensor = test_support::gather(corr_value).expect("gather corr");
-    assert_eq!(default_tensor.shape, corr_tensor.shape);
+    assert_eq!(default_tensor.shape(), corr_tensor.shape());
     assert_eq!(
         default_tensor.materialize_f64(),
         corr_tensor.materialize_f64()
@@ -235,7 +253,7 @@ fn conv_and_shape_order_independent() {
 
     let conv_first_tensor = test_support::gather(conv_first).expect("gather conv first");
     let shape_first_tensor = test_support::gather(shape_first).expect("gather shape first");
-    assert_eq!(conv_first_tensor.shape, shape_first_tensor.shape);
+    assert_eq!(conv_first_tensor.shape(), shape_first_tensor.shape());
     assert_eq!(
         conv_first_tensor.materialize_f64(),
         shape_first_tensor.materialize_f64()
@@ -309,7 +327,7 @@ fn logical_input_promoted_to_double() {
     )
     .expect("expected logical reference");
 
-    assert_eq!(gathered.shape, expected.shape);
+    assert_eq!(gathered.shape(), expected.shape());
     assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
 }
 
@@ -448,7 +466,7 @@ fn filter2_gpu_matches_cpu() {
         let image = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
         let image_view = HostTensorView {
             data: &image.materialize_f64(),
-            shape: &image.shape,
+            shape: image.shape(),
         };
         let image_handle = provider.upload(&image_view).expect("upload image");
         let result = block_on(filter2_builtin(
@@ -465,7 +483,7 @@ fn filter2_gpu_matches_cpu() {
             FILTER2_BUILTIN,
         )
         .expect("ref");
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     });
 }
@@ -511,11 +529,11 @@ fn filter2_gpu_kernel_and_image() {
         let image = tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2);
         let kernel_view = HostTensorView {
             data: &kernel.materialize_f64(),
-            shape: &kernel.shape,
+            shape: kernel.shape(),
         };
         let image_view = HostTensorView {
             data: &image.materialize_f64(),
-            shape: &image.shape,
+            shape: image.shape(),
         };
         let kernel_handle = provider.upload(&kernel_view).expect("upload kernel");
         let image_handle = provider.upload(&image_view).expect("upload image");
@@ -533,7 +551,7 @@ fn filter2_gpu_kernel_and_image() {
             FILTER2_BUILTIN,
         )
         .expect("reference");
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     });
 }
@@ -545,7 +563,7 @@ fn resident_double_image_with_single_kernel_returns_single() {
         let image_handle = provider
             .upload(&HostTensorView {
                 data: &image.materialize_f64(),
-                shape: &image.shape,
+                shape: image.shape(),
             })
             .expect("upload double image");
         let kernel = Tensor::from_f32(vec![1.0], vec![1, 1]).expect("single kernel");
@@ -586,11 +604,11 @@ fn filter2_wgpu_same_matches_cpu() {
 
     let kernel_view = HostTensorView {
         data: &kernel.materialize_f64(),
-        shape: &kernel.shape,
+        shape: kernel.shape(),
     };
     let image_view = HostTensorView {
         data: &image.materialize_f64(),
-        shape: &image.shape,
+        shape: image.shape(),
     };
 
     let kernel_handle = provider.upload(&kernel_view).expect("upload kernel");
@@ -612,7 +630,7 @@ fn filter2_wgpu_same_matches_cpu() {
     )
     .expect("expected");
 
-    assert_eq!(gpu_tensor.shape, expected.shape);
+    assert_eq!(gpu_tensor.shape(), expected.shape());
     assert_eq!(
         gpu_tensor.materialize_f64().len(),
         expected.materialize_f64().len()
@@ -658,11 +676,11 @@ fn filter2_wgpu_full_conv_matches_cpu() {
 
     let kernel_view = HostTensorView {
         data: &kernel.materialize_f64(),
-        shape: &kernel.shape,
+        shape: kernel.shape(),
     };
     let image_view = HostTensorView {
         data: &image.materialize_f64(),
-        shape: &image.shape,
+        shape: image.shape(),
     };
     let kernel_handle = provider.upload(&kernel_view).expect("upload kernel");
     let image_handle = provider.upload(&image_view).expect("upload image");
@@ -683,7 +701,7 @@ fn filter2_wgpu_full_conv_matches_cpu() {
     let expected = apply_imfilter_tensor(&image, &kernel, &options, FILTER2_BUILTIN)
         .expect("expected host result");
 
-    assert_eq!(gpu_tensor.shape, expected.shape);
+    assert_eq!(gpu_tensor.shape(), expected.shape());
     assert_eq!(
         gpu_tensor.materialize_f64().len(),
         expected.materialize_f64().len()

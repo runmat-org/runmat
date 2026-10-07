@@ -189,7 +189,7 @@ pub(super) fn admit_bit_value_buffer(
 }
 
 pub(super) fn tensor_to_bit_value_buffer(tensor: Tensor) -> BuiltinResult<BitValueBuffer> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let data = match tensor.integer_storage() {
         Some(storage) => storage
             .exact_values()
@@ -217,7 +217,7 @@ pub(super) fn finite_nonzero_bit_value(value: f64) -> BuiltinResult<bool> {
 }
 
 pub(super) fn tensor_to_shift_buffer(tensor: Tensor) -> BuiltinResult<ShiftBuffer> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let data = match tensor.integer_storage() {
         Some(storage) => storage
             .exact_values()
@@ -237,8 +237,8 @@ pub(super) fn tensor_to_bit_buffer(
     tensor: Tensor,
     assumed: Option<IntegerClass>,
 ) -> BuiltinResult<BitBuffer> {
-    let is_scalar = tensor::element_count(&tensor.shape) == 1;
-    let shape = tensor.shape.clone();
+    let is_scalar = tensor::element_count(tensor.shape()) == 1;
+    let shape = tensor.shape().to_vec();
     let (data, native_class, output_class) = match tensor.integer_storage() {
         Some(storage) => (
             storage.exact_values().iter().map(int_to_bits).collect(),

@@ -57,7 +57,7 @@ pub(super) fn upload_kernel(
         provider,
         &HostNumericTensorView {
             data,
-            shape: &tensor.shape,
+            shape: tensor.shape(),
             storage: GpuTensorStorage::Real,
         },
         &protected,

@@ -48,8 +48,8 @@ pub(super) fn admitted_shape<'a>(
     match value {
         Value::Bool(_) | Value::Num(_) | Value::Int(_) | Value::Complex(_, _) => Ok(&[1, 1]),
         Value::LogicalArray(array) => Ok(&array.shape),
-        Value::Tensor(array) => Ok(&array.shape),
-        Value::ComplexTensor(array) => Ok(&array.shape),
+        Value::Tensor(array) => Ok(array.shape()),
+        Value::ComplexTensor(array) => Ok(array.shape()),
         Value::CharArray(array) => Ok(&array.shape),
         Value::GpuTensor(handle) => Ok(handle.shape()),
         other => Err(error_with_detail(
@@ -113,7 +113,7 @@ fn from_logical(array: LogicalArray) -> BuiltinResult<LogicalBuffer> {
 }
 
 fn from_tensor(tensor: Tensor) -> LogicalBuffer {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let data = (0..tensor.len())
         .map(|index| {
             u8::from(
@@ -128,7 +128,7 @@ fn from_tensor(tensor: Tensor) -> LogicalBuffer {
 }
 
 fn from_complex_tensor(tensor: ComplexTensor) -> LogicalBuffer {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let data = (0..tensor.len())
         .map(|index| {
             let (real, imaginary) = tensor

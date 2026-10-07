@@ -61,6 +61,24 @@ fn simple_tensor(data: &[f64], rows: usize, cols: usize) -> Tensor {
     Tensor::new(data.to_vec(), vec![rows, cols]).unwrap()
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn imfilter_preserves_rank_zero_and_rank_one_single_tap_kernels() {
+    for shape in [Vec::new(), vec![1]] {
+        let image = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
+        let kernel = Tensor::new(vec![2.0], shape).unwrap();
+        let value = block_on(imfilter_builtin(
+            Value::Tensor(image),
+            Value::Tensor(kernel),
+            Vec::new(),
+        ))
+        .expect("imfilter single-tap kernel");
+        let output = test_support::gather(value).expect("host output");
+        assert_eq!(output.shape(), &[1, 2]);
+        assert_eq!(output.materialize_f64(), vec![4.0, 6.0]);
+    }
+}
+
 #[test]
 fn logical_image_keeps_logical_output_class() {
     let image =
@@ -128,7 +146,7 @@ fn same_padding_default_zero() {
     let options = ImfilterOptions::default();
     let result =
         apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
-    assert_eq!(result.shape, vec![2, 2]);
+    assert_eq!(result.shape(), &[2, 2]);
     assert!(result
         .materialize_f64()
         .iter()
@@ -146,7 +164,7 @@ fn replicate_padding() {
     };
     let result =
         apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
-    assert_eq!(result.shape, vec![2, 2]);
+    assert_eq!(result.shape(), &[2, 2]);
     let expected = [18.0, 24.0, 21.0, 27.0];
     for (got, exp) in result.materialize_f64().iter().zip(expected.iter()) {
         assert!((got - exp).abs() < 1e-12);
@@ -164,7 +182,7 @@ fn full_output_matches_expected_size() {
     };
     let result =
         apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
-    assert_eq!(result.shape, vec![3, 3]);
+    assert_eq!(result.shape(), &[3, 3]);
     let expected = [4.0, 14.0, 6.0, 11.0, 30.0, 11.0, 6.0, 14.0, 4.0];
     for (got, exp) in result.materialize_f64().iter().zip(expected.iter()) {
         assert!((got - exp).abs() < 1e-12);
@@ -182,7 +200,7 @@ fn valid_output_respects_kernel_size() {
     };
     let result =
         apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
-    assert_eq!(result.shape, vec![1, 1]);
+    assert_eq!(result.shape(), &[1, 1]);
     assert!((result.materialize_f64()[0] - 10.0).abs() < 1e-12);
 }
 
@@ -201,7 +219,7 @@ fn convolution_matches_correlation_with_flipped_kernel() {
         ..Default::default()
     };
     let conv = apply_imfilter_tensor(&image, &kernel, &conv_opts, IMFILTER_BUILTIN).expect("conv");
-    assert_eq!(conv.shape, corr_flipped.shape);
+    assert_eq!(conv.shape(), corr_flipped.shape());
     for ((a, b), c) in conv
         .materialize_f64()
         .iter()
@@ -225,7 +243,7 @@ fn raw_filter_plan_reads_typed_integer_image_storage_exactly() {
     )
     .expect("imfilter");
 
-    assert_eq!(result.shape, vec![2, 2]);
+    assert_eq!(result.shape(), &[2, 2]);
     assert_eq!(result.materialize_f64(), vec![2.0, 6.0, 4.0, 8.0]);
 }
 
@@ -237,7 +255,7 @@ fn resident_integer_fallback_uses_documented_binary32_accumulation() {
         shape: ImfilterShape::Valid,
         ..Default::default()
     };
-    let plan = build_imfilter_plan(&image.shape, &kernel, &options, IMFILTER_BUILTIN)
+    let plan = build_imfilter_plan(image.shape(), &kernel, &options, IMFILTER_BUILTIN)
         .expect("filter plan");
     let values = image.materialize_f64();
     assert_eq!(
@@ -285,11 +303,11 @@ fn gpu_fallback_uses_provider_upload() {
         let kernel = simple_tensor(&[1.0, 1.0, 1.0, 1.0], 2, 2);
         let image_view = HostTensorView {
             data: &image.materialize_f64(),
-            shape: &image.shape,
+            shape: image.shape(),
         };
         let kernel_view = HostTensorView {
             data: &kernel.materialize_f64(),
-            shape: &kernel.shape,
+            shape: kernel.shape(),
         };
         let image_handle = provider.upload(&image_view).expect("upload image");
         let kernel_handle = provider.upload(&kernel_view).expect("upload kernel");
@@ -300,7 +318,7 @@ fn gpu_fallback_uses_provider_upload() {
         ))
         .expect("imfilter");
         let gathered = test_support::gather(value).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 2]);
+        assert_eq!(gathered.shape(), &[2, 2]);
         // A 2-by-2 kernel has its documented origin at the first element,
         // so same-size correlation samples forward from each output site.
         let expected = [12.0, 9.0, 7.0, 5.0];
@@ -317,7 +335,7 @@ fn public_gpu_form_rejects_non_double_kernel_before_upload() {
         let image = simple_tensor(&[1.0, 4.0, 2.0, 5.0], 2, 2);
         let image_view = HostTensorView {
             data: &image.materialize_f64(),
-            shape: &image.shape,
+            shape: image.shape(),
         };
         let image_handle = provider.upload(&image_view).expect("upload image");
         let kernel = typed_tensor(IntegerStorage::I16(vec![2]), vec![1, 1]);
@@ -486,7 +504,7 @@ fn doc_example_average_filter_matches_expected() {
         IMFILTER_BUILTIN,
     )
     .expect("imfilter");
-    assert_eq!(result.shape, vec![2, 2]);
+    assert_eq!(result.shape(), &[2, 2]);
     for value in result.materialize_f64() {
         assert!((value - (10.0 / 9.0)).abs() < 1e-12);
     }
@@ -503,7 +521,7 @@ fn doc_example_convolution_same_matches_expected() {
     };
     let result =
         apply_imfilter_tensor(&image, &kernel, &options, IMFILTER_BUILTIN).expect("imfilter");
-    assert_eq!(result.shape, vec![3, 2]);
+    assert_eq!(result.shape(), &[3, 2]);
     // The documented even-kernel origin is the first element for a 2-by-2
     // kernel. Convolution rotates H while retaining that origin.
     let expected = [25.0, 35.0, 30.0, 26.0, 32.0, 24.0];
@@ -533,7 +551,7 @@ fn specifying_numeric_pad_value_matches_manual_options() {
     ))
     .expect("imfilter builtin");
     let via_tensor = tensor::value_into_tensor_for("imfilter", via_builtin).expect("tensor");
-    assert_eq!(manual_res.shape, via_tensor.shape);
+    assert_eq!(manual_res.shape(), via_tensor.shape());
     for (a, b) in manual_res
         .materialize_f64()
         .iter()
@@ -602,7 +620,7 @@ fn valid_with_larger_kernel_returns_empty_tensor() {
     match result {
         Value::Tensor(t) => {
             assert!(t.materialize_f64().is_empty());
-            assert_eq!(t.shape, vec![0, 0]);
+            assert_eq!(t.shape(), &[0, 0]);
         }
         other => panic!("expected tensor, got {other:?}"),
     }
@@ -651,7 +669,7 @@ fn imfilter_wgpu_matches_cpu_same_padding() {
 
     let image_view = HostTensorView {
         data: &image.materialize_f64(),
-        shape: &image.shape,
+        shape: image.shape(),
     };
     let image_handle = provider.upload(&image_view).expect("upload image");
 
@@ -663,7 +681,7 @@ fn imfilter_wgpu_matches_cpu_same_padding() {
     .expect("imfilter");
     let gathered = test_support::gather(gpu_value).expect("gather");
 
-    assert_eq!(cpu.shape, gathered.shape);
+    assert_eq!(cpu.shape(), gathered.shape());
     let tol = match provider.precision() {
         runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
         runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
@@ -701,7 +719,7 @@ fn imfilter_wgpu_preserves_higher_rank_inputs_through_host_fallback() {
     .expect("higher-rank imfilter");
     let gathered = test_support::gather(filtered).expect("gather higher-rank output");
 
-    assert_eq!(gathered.shape, shape);
+    assert_eq!(gathered.shape(), shape);
     assert_eq!(gathered.materialize_f64(), vec![6.0, 12.0]);
 }
 

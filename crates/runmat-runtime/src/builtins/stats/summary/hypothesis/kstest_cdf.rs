@@ -28,12 +28,13 @@ pub(super) fn parse_kstest_cdf(value: &Value) -> BuiltinResult<CdfSpec> {
 
 pub(super) fn parse_kstest_cdf_table(tensor: &Tensor) -> BuiltinResult<CdfSpec> {
     ensure_exact_kstest_integer_tensor(tensor, "CDF table")?;
-    if tensor.shape.len() != 2 || tensor.shape[1] != 2 || tensor.shape[0] < 2 {
+    let shape = tensor.shape();
+    if shape.len() != 2 || shape[1] != 2 || shape[0] < 2 {
         return Err(kstest_invalid_argument(
             "kstest: CDF table must be an n-by-2 numeric matrix",
         ));
     }
-    let rows = tensor.shape[0];
+    let rows = shape[0];
     let mut points = Vec::with_capacity(rows);
     for row in 0..rows {
         let x = tensor::tensor_value_f64(tensor, row);

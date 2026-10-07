@@ -61,3 +61,33 @@ fn invalid_types_and_shapes_are_rejected_before_preparation() {
     }
     assert_eq!(calls.get(), 3);
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rank_zero_and_rank_one_complex_controls_preserve_logical_shapes() {
+    use runmat_value::ComplexTensor;
+
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    for shape in [Vec::new(), vec![1]] {
+        let control =
+            || Value::ComplexTensor(ComplexTensor::new(vec![(0.0, 1.0)], shape.clone()).unwrap());
+        let result = block_on(super::super::binary::execute(
+            Value::Tensor(Tensor::new(vec![0.0, 2.0], vec![2]).unwrap()),
+            control(),
+            LogicalBinaryOperator::And,
+        ))
+        .unwrap();
+        let Value::LogicalArray(output) = result else {
+            panic!("expected logical array");
+        };
+        assert_eq!(output.shape, vec![2]);
+        assert_eq!(output.data, vec![0, 1]);
+        let scalar = block_on(super::super::binary::execute(
+            Value::Tensor(Tensor::new(vec![2.0], shape.clone()).unwrap()),
+            control(),
+            LogicalBinaryOperator::And,
+        ))
+        .unwrap();
+        assert_eq!(scalar, Value::Bool(true));
+    }
+}

@@ -33,7 +33,7 @@ pub(super) fn apply_imfilter_host(
     accumulation: FilterAccumulation,
     builtin: &str,
 ) -> BuiltinResult<Value> {
-    let plan = build_imfilter_plan(&image.shape, kernel, options, builtin)?;
+    let plan = build_imfilter_plan(image.shape(), kernel, options, builtin)?;
     let image_values = tensor::tensor_values_f64_cow(image);
     let data = plan.evaluate_with_accumulation(&image_values, options, accumulation);
     let shape = plan.final_shape;

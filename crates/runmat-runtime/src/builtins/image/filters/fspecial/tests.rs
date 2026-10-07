@@ -141,7 +141,7 @@ fn all_integer_scalar_tensors(value: u8) -> Vec<Tensor> {
 #[test]
 fn fspecial_average_default() {
     let tensor = fspecial_host_tensor("average", Vec::new());
-    assert_eq!(tensor.shape, vec![3, 3]);
+    assert_eq!(tensor.shape(), &[3, 3]);
     for value in tensor.materialize_f64() {
         assert_close(value, 1.0 / 9.0, 1e-12);
     }
@@ -152,7 +152,7 @@ fn fspecial_average_default() {
 fn fspecial_average_scalar_size() {
     let args = vec![Value::from(5.0)];
     let tensor = fspecial_host_tensor("average", args);
-    assert_eq!(tensor.shape, vec![5, 5]);
+    assert_eq!(tensor.shape(), &[5, 5]);
     let sum: f64 = tensor.materialize_f64().iter().sum();
     assert_close(sum, 1.0, 1e-12);
 }
@@ -164,7 +164,7 @@ fn fspecial_average_rectangular_size() {
         Tensor::new(vec![4.0, 6.0], vec![1, 2]).unwrap(),
     )];
     let tensor = fspecial_host_tensor("average", args);
-    assert_eq!(tensor.shape, vec![4, 6]);
+    assert_eq!(tensor.shape(), &[4, 6]);
     let expected = 1.0 / (4.0 * 6.0);
     for value in tensor.materialize_f64() {
         assert_close(value, expected, 1e-12);
@@ -374,7 +374,7 @@ fn fspecial_average_rejects_zero_size() {
 #[test]
 fn fspecial_gaussian_default_matches_reference() {
     let tensor = fspecial_host_tensor("gaussian", Vec::new());
-    assert_eq!(tensor.shape, vec![3, 3]);
+    assert_eq!(tensor.shape(), &[3, 3]);
     const EXPECTED: [f64; 9] = [
         0.011_343_736_558_495,
         0.083_819_505_802_211,
@@ -396,10 +396,10 @@ fn fspecial_gaussian_default_matches_reference() {
 fn fspecial_gaussian_size_sigma() {
     let args = vec![Value::from(7.0), Value::from(2.0)];
     let tensor = fspecial_host_tensor("gaussian", args);
-    assert_eq!(tensor.shape, vec![7, 7]);
-    let center = tensor.rows / 2;
+    assert_eq!(tensor.shape(), &[7, 7]);
+    let center = tensor.rows() / 2;
     let col = center;
-    let idx = col * tensor.rows + center;
+    let idx = col * tensor.rows() + center;
     assert!(tensor.materialize_f64()[idx] > 0.0);
     let sum: f64 = tensor.materialize_f64().iter().sum();
     assert_close(sum, 1.0, 1e-5);
@@ -410,7 +410,7 @@ fn fspecial_gaussian_size_sigma() {
 fn fspecial_laplacian_alpha() {
     let args = vec![Value::from(0.2)];
     let t = fspecial_host_tensor("laplacian", args);
-    assert_eq!(t.shape, vec![3, 3]);
+    assert_eq!(t.shape(), &[3, 3]);
     let expected = [
         0.16666666666666669,
         0.6666666666666667,
@@ -432,7 +432,7 @@ fn fspecial_laplacian_alpha() {
 fn fspecial_unsharp_default() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let t = fspecial_host_tensor("unsharp", Vec::new());
-    assert_eq!(t.shape, vec![3, 3]);
+    assert_eq!(t.shape(), &[3, 3]);
     let sum: f64 = t.materialize_f64().iter().sum();
     assert_close(sum, 1.0, 1e-6);
 }
@@ -441,11 +441,11 @@ fn fspecial_unsharp_default() {
 #[test]
 fn fspecial_log_basic_properties() {
     let t = fspecial_host_tensor("log", vec![Value::from(5.0), Value::from(0.5)]);
-    assert_eq!(t.shape, vec![5, 5]);
+    assert_eq!(t.shape(), &[5, 5]);
     let sum: f64 = t.materialize_f64().iter().sum();
     assert_close(sum, 0.0, 1e-12);
-    let center = t.rows / 2;
-    let idx = center * t.rows + center;
+    let center = t.rows() / 2;
+    let idx = center * t.rows() + center;
     assert!(t.materialize_f64()[idx] < 0.0);
 }
 
@@ -453,10 +453,10 @@ fn fspecial_log_basic_properties() {
 #[test]
 fn fspecial_disk_sum_is_one() {
     let t = fspecial_host_tensor("disk", vec![Value::from(5.0)]);
-    assert_eq!(t.shape, vec![11, 11]);
+    assert_eq!(t.shape(), &[11, 11]);
     let sum: f64 = t.materialize_f64().iter().sum();
     assert_close(sum, 1.0, 1e-10);
-    let idx = t.rows * (t.cols / 2) + t.rows / 2;
+    let idx = t.rows() * (t.cols() / 2) + t.rows() / 2;
     assert!(t.materialize_f64()[idx] > 0.0);
 }
 
@@ -477,7 +477,7 @@ fn fspecial_disk_negative_radius_errors() {
 #[test]
 fn fspecial_motion_sum_is_one() {
     let t = fspecial_host_tensor("motion", vec![Value::from(15.0), Value::from(45.0)]);
-    assert_eq!(t.shape, vec![15, 15]);
+    assert_eq!(t.shape(), &[15, 15]);
     let sum: f64 = t.materialize_f64().iter().sum();
     assert_close(sum, 1.0, 1e-10);
 }
@@ -554,7 +554,7 @@ fn fspecial_gaussian_gpu_matches_cpu() {
         }
         other => panic!("unexpected result {other:?}"),
     };
-    assert_eq!(gpu_tensor.shape, host_tensor.shape);
+    assert_eq!(gpu_tensor.shape(), host_tensor.shape());
     for (a, b) in gpu_tensor
         .materialize_f64()
         .iter()

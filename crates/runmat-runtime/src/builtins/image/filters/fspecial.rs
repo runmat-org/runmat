@@ -439,7 +439,7 @@ fn finalize_output_with_observation(
             ) {
                 Ok(handle) => {
                     let expected_precision = provider.precision();
-                    let valid = handle.shape() == tensor.shape
+                    let valid = handle.shape() == tensor.shape()
                         && handle.device_id() == provider.device_id()
                         && handle.allocation_lease().validate_live().is_ok()
                         && runmat_accelerate_api::provider_for_handle(&handle).is_some_and(
