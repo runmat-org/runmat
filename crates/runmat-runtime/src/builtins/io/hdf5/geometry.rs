@@ -100,7 +100,7 @@ pub(super) fn numeric_vector_usize(
                     .map(|value| int_usize_entry(value, builtin, label))
                     .collect()
             } else {
-                (0..checked_shape_len(&t.shape, builtin)?)
+                (0..checked_shape_len(t.shape(), builtin)?)
                     .map(|index| {
                         let value = match t
                             .numeric_value_at(index)

@@ -10,7 +10,7 @@ pub(super) fn preflight_numeric_shapes<'a>(
     for value in values {
         let shape = match value {
             Value::Num(_) | Value::Int(_) | Value::Bool(_) => vec![1, 1],
-            Value::Tensor(tensor) => tensor_shape(&tensor.shape, tensor.rows, tensor.cols),
+            Value::Tensor(tensor) => canonical_shape(tensor.shape()),
             Value::LogicalArray(logical) => logical_shape(&logical.shape),
             Value::GpuTensor(handle)
                 if runmat_accelerate_api::handle_storage(handle)

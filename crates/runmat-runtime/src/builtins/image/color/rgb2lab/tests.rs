@@ -53,7 +53,7 @@ fn converts_rgb_colormap_to_lab_references() {
     )
     .unwrap();
     let out = call(rgb).unwrap();
-    assert_eq!(out.shape, vec![4, 3]);
+    assert_eq!(out.shape(), &[4, 3]);
     let expected = vec![
         0.0, 53.2408, 87.7347, 32.2970, 0.0, 80.0925, -86.1827, 79.1875, 0.0, 67.2032, 83.1793,
         -107.8602,
@@ -133,11 +133,35 @@ fn custom_white_point_and_repeated_option_use_final_value() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn white_point_requires_exact_row_geometry_before_numeric_conversion() {
+    let rgb = || Tensor::new(vec![1.0, 1.0, 1.0], vec![1, 3]).unwrap();
+    let coordinates = [0.9642, 1.0, 0.8251];
+    let row = Tensor::new(coordinates.to_vec(), vec![1, 3]).unwrap();
+    assert!(block_on(rgb2lab_builtin(
+        None,
+        Value::Tensor(rgb()),
+        vec![Value::from("WhitePoint"), Value::Tensor(row)],
+    ))
+    .is_ok());
+    for shape in [vec![3], vec![3, 1]] {
+        let wrong = Tensor::new(coordinates.to_vec(), shape).unwrap();
+        let error = block_on(rgb2lab_builtin(
+            None,
+            Value::Tensor(rgb()),
+            vec![Value::from("WhitePoint"), Value::Tensor(wrong)],
+        ))
+        .unwrap_err();
+        assert_eq!(error.identifier(), RGB2LAB_ERROR_INVALID_OPTION.identifier);
+    }
+}
+
 #[test]
 fn converts_m_by_n_by_three_by_p_image_stacks_without_crossing_planes() {
     let rgb = Tensor::new(vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0], vec![1, 1, 3, 2]).unwrap();
     let out = call(rgb).expect("stacked RGB");
-    assert_eq!(out.shape, vec![1, 1, 3, 2]);
+    assert_eq!(out.shape(), &[1, 1, 3, 2]);
     let values = values(&out);
     assert_close(values[0], 100.0, 1e-4);
     assert_close(values[1], 0.0, 1e-3);

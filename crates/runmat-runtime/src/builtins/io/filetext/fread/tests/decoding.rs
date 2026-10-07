@@ -137,7 +137,7 @@ fn fread_uint8_vector_with_count() {
     match eval.data() {
         Value::Tensor(t) => {
             assert_eq!(double_values(t), &[1.0, 2.0, 3.0, 4.0]);
-            assert_eq!(t.shape, vec![4, 1]);
+            assert_eq!(t.shape(), &[4, 1]);
         }
         other => panic!("unexpected result {other:?}"),
     }
@@ -169,7 +169,7 @@ fn fread_uint8_matrix_with_padding() {
     assert_eq!(eval.count(), 5);
     match eval.data() {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 3]);
+            assert_eq!(t.shape(), &[2, 3]);
             assert_eq!(double_values(t), &[1.0, 2.0, 3.0, 4.0, 5.0, 0.0]);
         }
         other => panic!("unexpected result {other:?}"),

@@ -256,7 +256,7 @@ fn numeric_input(builtin: &'static str, value: Value) -> BuiltinResult<NumericIn
         Value::Int(i) => (vec![i.to_f64()], vec![1, 1]),
         Value::Bool(flag) => (vec![if flag { 1.0 } else { 0.0 }], vec![1, 1]),
         Value::Tensor(tensor) => {
-            let shape = tensor_shape(&tensor.shape, tensor.rows, tensor.cols);
+            let shape = canonical_shape(tensor.shape());
             (tensor_utils::tensor_into_values_f64(tensor), shape)
         }
         Value::LogicalArray(logical) => {

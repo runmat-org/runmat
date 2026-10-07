@@ -29,7 +29,7 @@ fn h5write_and_h5read_round_trip_column_major_numeric() {
 
     match out {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 3]);
+            assert_eq!(t.shape(), &[2, 3]);
             assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -60,11 +60,49 @@ fn hdf5_round_trips_native_single_storage() {
     let Value::Tensor(tensor) = out else {
         panic!("expected tensor");
     };
-    assert_eq!(tensor.shape, vec![2, 2]);
+    assert_eq!(tensor.shape(), &[2, 2]);
     assert_eq!(
         tensor.into_numeric_storage().expect("single storage"),
         NumericStorage::F32(vec![1.25, 2.5, 3.75, 5.0])
     );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn hdf5_round_trips_low_rank_exact_uint64_geometry() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("low_rank_uint64.h5");
+
+    for (dataset, shape, values) in [
+        ("/rank_zero", Vec::new(), vec![u64::MAX]),
+        ("/rank_one", vec![2], vec![9_007_199_254_740_993, u64::MAX]),
+    ] {
+        let tensor = Tensor::new_integer(IntegerStorage::U64(values.clone()), shape.clone())
+            .expect("exact uint64 input");
+        block_on(h5write_builtin(
+            Value::String(path.display().to_string()),
+            Value::String(dataset.to_string()),
+            Value::Tensor(tensor),
+            Vec::new(),
+        ))
+        .expect("write low-rank integer");
+        let output = block_on(h5read_builtin(
+            Value::String(path.display().to_string()),
+            Value::String(dataset.to_string()),
+            Vec::new(),
+        ))
+        .expect("read low-rank integer");
+        if shape.is_empty() {
+            assert_eq!(output, Value::Int(IntValue::U64(u64::MAX)));
+        } else {
+            let Value::Tensor(output) = output else {
+                panic!("rank-one HDF5 integer must remain a tensor");
+            };
+            assert_eq!(output.shape(), shape.as_slice());
+            assert_eq!(output.integer_storage(), Some(&IntegerStorage::U64(values)));
+        }
+    }
 }
 
 #[test]
@@ -272,7 +310,7 @@ fn h5read_supports_start_count_stride_selection() {
 
     match out {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![4.0, 6.0, 7.0, 9.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -315,7 +353,7 @@ fn h5write_supports_start_count_stride_selection() {
 
     match out {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![3, 4]);
+            assert_eq!(t.shape(), &[3, 4]);
             assert_eq!(
                 t.materialize_f64(),
                 vec![0.0, 0.0, 0.0, 40.0, 0.0, 60.0, 70.0, 0.0, 90.0, 0.0, 0.0, 0.0]

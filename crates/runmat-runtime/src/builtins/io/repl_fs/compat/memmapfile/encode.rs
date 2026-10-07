@@ -121,7 +121,7 @@ fn encode_field(
         (MemmapDataType::Numeric(expected), Value::Tensor(tensor))
             if tensor.numeric_dtype() == expected =>
         {
-            if tensor.shape != expected_shape {
+            if tensor.shape() != expected_shape {
                 return Err(format_error(
                     "memmapfile: assigned Data shape does not match Format",
                 ));

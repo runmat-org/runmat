@@ -311,10 +311,10 @@ fn tensor_from_numeric_value(value: Value) -> BuiltinResult<Tensor> {
 }
 
 fn tensor_shape_for(tensor: &Tensor) -> Vec<usize> {
-    if tensor.shape.is_empty() {
-        tensor::default_shape_for(&tensor.shape, tensor::tensor_element_len(tensor))
+    if tensor.shape().is_empty() {
+        tensor::default_shape_for(tensor.shape(), tensor::tensor_element_len(tensor))
     } else {
-        tensor.shape.clone()
+        tensor.shape().to_vec()
     }
 }
 

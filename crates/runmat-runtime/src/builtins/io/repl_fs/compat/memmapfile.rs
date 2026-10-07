@@ -416,7 +416,7 @@ pub(super) fn shape_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {
         Value::Int(v) => Ok(vec![positive_integer_shape_dim(v)?, 1]),
         Value::Tensor(tensor) => {
             let len = tensor
-                .shape
+                .shape()
                 .iter()
                 .try_fold(1usize, |product, dim| product.checked_mul(*dim))
                 .ok_or_else(|| format_error("memmapfile: Format shape is too large"))?;

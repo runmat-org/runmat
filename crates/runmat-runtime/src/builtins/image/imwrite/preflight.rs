@@ -142,7 +142,7 @@ fn preflight_known_option_value(
                 }
                 Value::Tensor(alpha) => {
                     ensure_documented_alpha_class(alpha)?;
-                    alpha.shape.clone()
+                    alpha.shape().to_vec()
                 }
                 Value::LogicalArray(alpha) => alpha.shape.clone(),
                 Value::Num(_) | Value::Bool(_) | Value::Int(IntValue::U8(_) | IntValue::U16(_)) => {
@@ -234,7 +234,7 @@ pub(super) fn preflight_resident_argument_roles(args: &[Value]) -> BuiltinResult
             }
             Value::Tensor(tensor) => {
                 ensure_double_colormap(map)?;
-                tensor.shape.as_slice()
+                tensor.shape()
             }
             _ => {
                 return Err(imwrite_error_with_detail(
@@ -280,7 +280,7 @@ pub(super) async fn preflight_known_host_pixels(
                     }
                     cooperation.completed(chunk.len()).await?;
                 }
-                tensor.shape.as_slice()
+                tensor.shape()
             }
             _ => unreachable!("metadata admission validated map class"),
         };

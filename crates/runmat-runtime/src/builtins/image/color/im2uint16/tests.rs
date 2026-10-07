@@ -14,6 +14,25 @@ fn values(tensor: &Tensor) -> Vec<f64> {
     tensor.materialize_f64()
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn low_rank_uint8_images_preserve_uint16_class_and_scalarization() {
+    let scalar = Tensor::new_integer(IntegerStorage::U8(vec![255]), Vec::new()).unwrap();
+    assert_eq!(
+        call(Value::Tensor(scalar)),
+        Value::Int(IntValue::U16(u16::MAX))
+    );
+    let vector = Tensor::new_integer(IntegerStorage::U8(vec![0, 255]), vec![2]).unwrap();
+    let Value::Tensor(output) = call(Value::Tensor(vector)) else {
+        panic!("two-element image must remain a tensor")
+    };
+    assert_eq!(output.shape(), &[2]);
+    assert_eq!(
+        output.integer_storage(),
+        Some(&IntegerStorage::U16(vec![0, u16::MAX]))
+    );
+}
+
 #[test]
 fn scales_double_to_uint16_image_range() {
     assert_eq!(call(Value::Num(1.0)), Value::Int(IntValue::U16(65535)));
@@ -65,7 +84,7 @@ fn clamps_and_rounds_float_tensor_to_uint16() {
         panic!("expected tensor");
     };
     assert_eq!(out.numeric_dtype(), NumericDType::U16);
-    assert_eq!(out.shape, vec![2, 3]);
+    assert_eq!(out.shape(), &[2, 3]);
     assert_eq!(values(&out), vec![0.0, 0.0, 32768.0, 65535.0, 65535.0, 0.0]);
 }
 
@@ -234,7 +253,7 @@ fn empty_nd_image_preserves_geometry_and_output_class() {
     let Value::Tensor(output) = call(Value::Tensor(image)) else {
         panic!("empty image must remain a tensor");
     };
-    assert_eq!(output.shape, vec![0, 2, 3]);
+    assert_eq!(output.shape(), &[0, 2, 3]);
     assert_eq!(output.numeric_dtype(), NumericDType::U16);
     assert!(values(&output).is_empty());
 }

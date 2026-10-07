@@ -89,7 +89,7 @@ pub(super) fn tensor_to_gpu_value(
             provider,
             &runmat_accelerate_api::HostLogicalTensorView {
                 data: &bits,
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             },
             &[prototype],
         )
@@ -128,7 +128,7 @@ pub(super) fn tensor_to_gpu_value(
         };
         tensor::coerce_tensor_dtype(tensor, dtype)
     };
-    let expected_shape = tensor.shape.clone();
+    let expected_shape = tensor.shape().to_vec();
     let output = gpu_helpers::upload_tensor_protecting(provider, &tensor, &[prototype]).map_err(
         |error| {
             crate::runtime_error::with_provider_execution_source(
@@ -198,7 +198,7 @@ pub(super) fn convert_to_logical_value(data: Value) -> Result<Value, String> {
                     }
                 })
                 .collect();
-            LogicalArray::new(bits, tensor.shape.clone())
+            LogicalArray::new(bits, tensor.shape().to_vec())
                 .map(Value::LogicalArray)
                 .map_err(|e| format!("fread: {e}"))
         }

@@ -123,12 +123,12 @@ fn impulse_multi_output_returns_y_and_t_columns() {
     };
     assert_eq!(outputs.len(), 2);
     match &outputs[0] {
-        Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![2, 1]),
+        Value::Tensor(tensor) => assert_eq!(tensor.shape(), vec![2, 1]),
         other => panic!("expected y tensor, got {other:?}"),
     }
     match &outputs[1] {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 1]);
+            assert_eq!(tensor.shape(), vec![2, 1]);
             assert_eq!(tensor.materialize_f64(), vec![0.0, 0.1]);
         }
         other => panic!("expected t tensor, got {other:?}"),

@@ -59,7 +59,7 @@ pub(in crate::builtins::io::mat) fn convert_value_with_cooperation<'a, 'b>(
                 },
             }),
             Value::Tensor(t) => {
-                let dims = canonical_dims(&t.shape);
+                let dims = canonical_dims(t.shape());
                 let storage = t
                     .into_numeric_storage()
                     .map_err(|error| owner.error(MatEncodingFailure::Io, &error))?;
@@ -79,7 +79,7 @@ pub(in crate::builtins::io::mat) fn convert_value_with_cooperation<'a, 'b>(
                 },
             }),
             Value::ComplexTensor(t) => {
-                let dims = canonical_dims(&t.shape);
+                let dims = canonical_dims(t.shape());
                 let (class, real, imag) = match t.into_complex_storage() {
                     ComplexStorage::F64(values) => {
                         let (real, imag): (Vec<_>, Vec<_>) = values.into_iter().unzip();

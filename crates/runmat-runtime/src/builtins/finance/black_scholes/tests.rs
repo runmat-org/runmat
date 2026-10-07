@@ -17,6 +17,22 @@ fn empty_numeric() -> Value {
     Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap())
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn low_rank_pricing_admission_and_numeric_input_use_the_same_geometry() {
+    for (shape, values, expected) in [
+        (Vec::new(), vec![12.0], vec![1, 1]),
+        (vec![2], vec![12.0, 15.0], vec![2, 1]),
+        (vec![1, 2, 1], vec![12.0, 15.0], vec![1, 2, 1]),
+    ] {
+        let value = Value::Tensor(Tensor::new(values.clone(), shape).unwrap());
+        admission::preflight_numeric_shapes("blsprice", [&value]).unwrap();
+        let input = numeric_input("blsprice", value).unwrap();
+        assert_eq!(input.shape, expected);
+        assert_eq!(input.values, values);
+    }
+}
+
 fn output_list(value: Value) -> Vec<Value> {
     match value {
         Value::OutputList(values) => values,
@@ -107,8 +123,8 @@ fn blsprice_vectorizes_scalar_inputs() {
     drop(guard);
     let call = as_tensor(&out[0]);
     let put = as_tensor(&out[1]);
-    assert_eq!(call.shape, vec![2, 1]);
-    assert_eq!(put.shape, vec![2, 1]);
+    assert_eq!(call.shape(), vec![2, 1]);
+    assert_eq!(put.shape(), vec![2, 1]);
     assert!(call.materialize_f64()[0] > call.materialize_f64()[1]);
     assert!(put.materialize_f64()[0] < put.materialize_f64()[1]);
 }
@@ -134,8 +150,8 @@ fn blsprice_broadcast_inputs_read_typed_integer_storage_exactly() {
     drop(guard);
     let call = as_tensor(&out[0]);
     let put = as_tensor(&out[1]);
-    assert_eq!(call.shape, vec![2, 1]);
-    assert_eq!(put.shape, vec![2, 1]);
+    assert_eq!(call.shape(), vec![2, 1]);
+    assert_eq!(put.shape(), vec![2, 1]);
     assert!(call.integer_storage().is_none());
     assert!(put.integer_storage().is_none());
     assert!(call.materialize_f64()[0] > call.materialize_f64()[1]);
@@ -249,8 +265,8 @@ fn blsprice_implicitly_expands_nonscalar_inputs() {
 
     let call = as_tensor(&out[0]);
     let put = as_tensor(&out[1]);
-    assert_eq!(call.shape, vec![2, 3]);
-    assert_eq!(put.shape, vec![2, 3]);
+    assert_eq!(call.shape(), vec![2, 3]);
+    assert_eq!(put.shape(), vec![2, 3]);
     for idx in 0..call.materialize_f64().len() {
         let price = [100.0, 110.0][idx % 2];
         let strike = [90.0, 100.0, 110.0][idx / 2];
@@ -280,7 +296,7 @@ fn blsprice_gpu_resident_inputs_preserve_residency() {
             provider
                 .upload(&HostTensorView {
                     data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 })
                 .expect("upload")
         };
@@ -314,8 +330,8 @@ fn blsprice_gpu_resident_inputs_preserve_residency() {
 
         let call = test_support::gather(out[0].clone()).expect("gather call");
         let put = test_support::gather(out[1].clone()).expect("gather put");
-        assert_eq!(call.shape, vec![2, 3]);
-        assert_eq!(put.shape, vec![2, 3]);
+        assert_eq!(call.shape(), vec![2, 3]);
+        assert_eq!(put.shape(), vec![2, 3]);
         for idx in 0..call.materialize_f64().len() {
             let expected = price_pair(PriceParams {
                 price: price.materialize_f64()[idx % 2],
@@ -346,7 +362,7 @@ fn blsprice_host_single_class_ignores_double_scalar_representation() {
         ))
         .expect("single price with double scalar controls");
         assert_eq!(as_tensor(&result).numeric_dtype(), NumericDType::F32);
-        assert_eq!(as_tensor(&result).shape, vec![2, 1]);
+        assert_eq!(as_tensor(&result).shape(), vec![2, 1]);
     }
 
     let all_scalar = block_on(blsprice_builtin(
@@ -359,7 +375,7 @@ fn blsprice_host_single_class_ignores_double_scalar_representation() {
     ))
     .expect("single scalar result");
     assert_eq!(as_tensor(&all_scalar).numeric_dtype(), NumericDType::F32);
-    assert_eq!(as_tensor(&all_scalar).shape, vec![1, 1]);
+    assert_eq!(as_tensor(&all_scalar).shape(), vec![1, 1]);
 }
 
 #[test]
@@ -480,7 +496,7 @@ fn blsprice_single_with_empty_yield_keeps_single_for_numeric_cell_and_string_arr
         .expect("empty yield uses default");
         let result = as_tensor(&result);
         assert_eq!(result.numeric_dtype(), NumericDType::F32);
-        assert_eq!(result.shape, vec![2, 1]);
+        assert_eq!(result.shape(), vec![2, 1]);
         assert_eq!(
             result.materialize_f64(),
             as_tensor(&no_yield).materialize_f64()
@@ -559,7 +575,7 @@ fn blsimpv_vectorizes_class_strings() {
     ))
     .unwrap();
     let vols = as_tensor(&out);
-    assert_eq!(vols.shape, vec![2, 1]);
+    assert_eq!(vols.shape(), vec![2, 1]);
     assert!((vols.materialize_f64()[0] - 0.5).abs() < 1e-3);
     assert!((vols.materialize_f64()[1] - 0.5).abs() < 1e-3);
 }

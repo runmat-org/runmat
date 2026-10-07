@@ -2,6 +2,17 @@ use super::*;
 use futures::executor::block_on;
 use runmat_value::{CharArray, ComplexTensor, IntegerStorage, ObjectInstance};
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn frequency_admission_accepts_low_rank_vectors_but_rejects_matrices() {
+    for (shape, values) in [(Vec::new(), vec![1.0]), (vec![2], vec![1.0, 2.0])] {
+        let value = Value::Tensor(Tensor::new(values, shape).unwrap());
+        frequency::validate_host(&value).unwrap();
+    }
+    let matrix = Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2]).unwrap());
+    assert!(frequency::validate_host(&matrix).is_err());
+}
+
 fn raw_tf(numerator: Value, denominator: Value, sample_time: f64) -> Value {
     let mut object = ObjectInstance::new("tf".to_string());
     object.properties.insert("Numerator".into(), numerator);
@@ -69,7 +80,7 @@ fn continuous_and_discrete_responses_preserve_exact_output_shape() {
         let Value::Tensor(tensor) = output else {
             panic!("expected tensor")
         };
-        assert_eq!(tensor.shape, vec![3, 1]);
+        assert_eq!(tensor.shape(), vec![3, 1]);
     }
     assert_eq!(values(&outputs[2]), vec![0.0, 1.0, 2.0]);
     assert!((values(&outputs[0])[1] - 0.5).abs() < 1e-12);

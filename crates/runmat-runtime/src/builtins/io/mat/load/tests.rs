@@ -340,7 +340,7 @@ fn load_roundtrip_numeric() {
             assert!(sv.fields.contains_key("A"));
             match sv.fields.get("A").unwrap() {
                 Value::Tensor(t) => {
-                    assert_eq!(t.shape, vec![2, 2]);
+                    assert_eq!(t.shape(), &[2, 2]);
                     assert_eq!(t.materialize_f64(), vec![1.0, 4.0, 2.0, 5.0]);
                 }
                 other => panic!("expected tensor, got {other:?}"),
@@ -668,7 +668,7 @@ fn load_save_roundtrip_preserves_every_integer_tensor_class_exactly() {
     }
     match values.get("empty_u64").expect("loaded empty tensor") {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![0, 2]);
+            assert_eq!(tensor.shape(), &[0, 2]);
             assert_eq!(
                 tensor.integer_storage(),
                 Some(&IntegerStorage::U64(Vec::new()))
@@ -1165,7 +1165,7 @@ fn load_wgpu_tensor_roundtrip() {
     let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
     let view = HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let handle = provider.upload(&view).expect("upload tensor");
     set_workspace(&[("gpu_var", Value::GpuTensor(handle))]);
@@ -1184,7 +1184,7 @@ fn load_wgpu_tensor_roundtrip() {
     match struct_value {
         Value::Struct(sv) => match sv.fields.get("gpu_var") {
             Some(Value::Tensor(t)) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert_eq!(t.materialize_f64(), tensor.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),

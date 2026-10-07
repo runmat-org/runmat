@@ -220,7 +220,7 @@ fn fread_like_gpu_provider_roundtrip() {
         let proto = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
         let view = HostTensorView {
             data: double_values(&proto),
-            shape: &proto.shape,
+            shape: proto.shape(),
         };
         let handle = provider.upload(&view).expect("upload prototype");
 
@@ -373,7 +373,7 @@ fn fread_big_endian_machine_format() {
     match eval.data() {
         Value::Tensor(t) => {
             assert_eq!(double_values(t), &[258.0, 772.0]);
-            assert_eq!(t.shape, vec![2, 1]);
+            assert_eq!(t.shape(), &[2, 1]);
         }
         other => panic!("unexpected result {other:?}"),
     }

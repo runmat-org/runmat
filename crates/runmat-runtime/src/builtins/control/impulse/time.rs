@@ -194,7 +194,7 @@ pub(super) fn time_vector_from_value(value: Value) -> BuiltinResult<Vec<f64>> {
             format!("time vector must be numeric: {err}"),
         )
     })?;
-    ensure_vector("time", &tensor.shape)?;
+    ensure_vector("time", tensor.shape())?;
     ensure_exact_integer_tensor(&tensor, "time")?;
     let values = tensor::tensor_into_values_f64(tensor);
     if values.is_empty() {

@@ -35,7 +35,7 @@ impl WritableData {
                 shape: vec![1, 1],
             }),
             Value::Tensor(t) => {
-                let shape = t.shape.clone();
+                let shape = t.shape().to_vec();
                 let storage = t.into_numeric_storage().map_err(|error| {
                     hdf5_error(builtin, &ERR_UNSUPPORTED, format!("{builtin}: {error}"))
                 })?;

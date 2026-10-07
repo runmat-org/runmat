@@ -392,7 +392,7 @@ fn fread_default_reads_uint8_and_returns_double() {
     assert_eq!(eval.count(), 1);
     match eval.data() {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 1]);
+            assert_eq!(t.shape(), &[1, 1]);
             assert_eq!(double_values(t), &[7.0]);
         }
         other => panic!("unexpected result {other:?}"),

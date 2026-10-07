@@ -58,6 +58,36 @@ fn character_format_returns_character_class_and_column_major_shape() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn numeric_format_encodes_rank_one_exact_storage_and_rejects_other_low_rank_geometry() {
+    let format = MemmapFormat {
+        dtype: MemmapDataType::Numeric(NumericDType::U16),
+        shape: vec![2],
+        field: None,
+        additional_fields: Vec::new(),
+        presentation: MemmapFormatPresentation::TypeName,
+    };
+    let rank_one = Tensor::new_integer(IntegerStorage::U16(vec![0x0102, 0xff00]), vec![2])
+        .expect("rank-one uint16");
+    assert_eq!(
+        format
+            .encode(&Value::Tensor(rank_one), 1, None)
+            .expect("encode exact little-endian bytes"),
+        [0x02, 0x01, 0x00, 0xff]
+    );
+
+    for shape in [Vec::new(), vec![2, 1]] {
+        let values = vec![7_u16; shape.iter().product::<usize>().max(1)];
+        let mismatched =
+            Tensor::new_integer(IntegerStorage::U16(values), shape).expect("low-rank tensor");
+        let error = format
+            .encode(&Value::Tensor(mismatched), 1, None)
+            .expect_err("Format geometry must be exact");
+        assert_eq!(error.identifier(), Some("RunMat:memmapfile:InvalidFormat"));
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn named_multirecord_format_retains_declared_field_order() {
     let format = MemmapFormat {
@@ -220,5 +250,5 @@ fn wide_repeat_property_is_exact_without_a_large_file() {
     let Value::Tensor(data) = property("Data") else {
         panic!("numeric payload");
     };
-    assert_eq!(data.shape, vec![1, 1]);
+    assert_eq!(data.shape(), &[1, 1]);
 }

@@ -926,7 +926,7 @@ fn save_gpu_tensor_roundtrip() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload tensor");
         set_workspace(&[("gpu_data", Value::GpuTensor(handle.clone()))]);
@@ -972,7 +972,7 @@ fn save_wgpu_tensor_roundtrip() {
     let tensor = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
     let view = HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let handle = provider.upload(&view).expect("upload tensor");
     set_workspace(&[("wgpu_tensor", Value::GpuTensor(handle.clone()))]);

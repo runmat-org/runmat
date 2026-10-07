@@ -128,6 +128,38 @@ mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn numeric_low_rank_shapes_use_mat_canonical_dimensions_without_losing_storage_class() {
+        let rank_zero =
+            runmat_value::Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), Vec::new())
+                .expect("rank-zero uint64");
+        let encoded = block_on(convert_value(Value::Tensor(rank_zero))).expect("encode uint64");
+        assert_eq!(encoded.class, MatClass::UInt64);
+        assert_eq!(encoded.dims, vec![1, 1]);
+        let MatData::Numeric { real, imag: None } = encoded.data else {
+            panic!("expected real numeric MAT payload");
+        };
+        assert_eq!(real, NumericStorage::U64(vec![u64::MAX]));
+
+        let rank_one =
+            runmat_value::ComplexTensor::from_f32(vec![(1.25, -2.5), (3.5, 4.75)], vec![2])
+                .expect("rank-one complex single");
+        let encoded =
+            block_on(convert_value(Value::ComplexTensor(rank_one))).expect("encode complex single");
+        assert_eq!(encoded.class, MatClass::Single);
+        assert_eq!(encoded.dims, vec![1, 2]);
+        let MatData::Numeric {
+            real,
+            imag: Some(imag),
+        } = encoded.data
+        else {
+            panic!("expected complex numeric MAT payload");
+        };
+        assert_eq!(real, NumericStorage::F32(vec![1.25, 3.5]));
+        assert_eq!(imag, NumericStorage::F32(vec![-2.5, 4.75]));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn nested_string_cells_cancel_between_elements_without_result() {
         let cancellation = CancellationSource::new();

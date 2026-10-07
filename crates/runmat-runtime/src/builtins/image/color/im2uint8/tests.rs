@@ -12,6 +12,25 @@ fn values(tensor: &Tensor) -> Vec<f64> {
     tensor.materialize_f64()
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn low_rank_uint16_images_preserve_uint8_class_and_scalarization() {
+    let scalar = Tensor::new_integer(IntegerStorage::U16(vec![u16::MAX]), Vec::new()).unwrap();
+    assert_eq!(
+        call(Value::Tensor(scalar)),
+        Value::Int(IntValue::U8(u8::MAX))
+    );
+    let vector = Tensor::new_integer(IntegerStorage::U16(vec![0, u16::MAX]), vec![2]).unwrap();
+    let Value::Tensor(output) = call(Value::Tensor(vector)) else {
+        panic!("two-element image must remain a tensor")
+    };
+    assert_eq!(output.shape(), &[2]);
+    assert_eq!(
+        output.integer_storage(),
+        Some(&IntegerStorage::U8(vec![0, u8::MAX]))
+    );
+}
+
 #[test]
 fn scales_double_to_uint8_image_range() {
     assert_eq!(call(Value::Num(0.5)), Value::Int(IntValue::U8(128)));
@@ -79,7 +98,7 @@ fn clamps_and_rounds_float_tensor_to_uint8() {
         panic!("expected tensor");
     };
     assert_eq!(out.numeric_dtype(), NumericDType::U8);
-    assert_eq!(out.shape, vec![2, 3]);
+    assert_eq!(out.shape(), &[2, 3]);
     assert_eq!(values(&out), vec![0.0, 0.0, 128.0, 255.0, 255.0, 0.0]);
 }
 
@@ -256,7 +275,7 @@ fn nd_image_preserves_geometry_and_exact_uint8_storage() {
     let Value::Tensor(output) = call(Value::Tensor(image)) else {
         panic!("N-D image must remain a tensor");
     };
-    assert_eq!(output.shape, vec![1, 1, 2, 2]);
+    assert_eq!(output.shape(), &[1, 1, 2, 2]);
     assert_eq!(
         output.integer_storage(),
         // 32896 is the exact half-byte boundary above 128 and rounds upward.

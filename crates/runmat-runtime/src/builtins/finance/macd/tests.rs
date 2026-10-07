@@ -64,7 +64,7 @@ fn matrix_input_returns_macd_line_by_default() {
         ))
         .unwrap(),
     );
-    assert_eq!(out.shape, vec![5, 1]);
+    assert_eq!(out.shape(), vec![5, 1]);
     assert_close(out.materialize_f64()[0], 0.0);
     assert_close(out.materialize_f64()[1], 0.075);
     assert_close(out.materialize_f64()[2], 0.283125);
@@ -88,7 +88,7 @@ fn matrix_input_reads_typed_integer_storage_exactly_as_double() {
         ))
         .unwrap(),
     );
-    assert_eq!(out.shape, vec![5, 1]);
+    assert_eq!(out.shape(), vec![5, 1]);
     assert!(out.integer_storage().is_none());
     assert_close(out.materialize_f64()[0], 0.0);
     assert_close(out.materialize_f64()[1], 0.075);
@@ -194,7 +194,7 @@ fn resident_integer_matrix_is_downloaded_once_and_checked_after_gather() {
             .expect("integer upload");
         provider.reset_telemetry();
         let output = call_with_mode(Value::GpuTensor(handle), true).expect("exact integer MACD");
-        assert_eq!(expect_tensor(output).shape, vec![1, 1]);
+        assert_eq!(expect_tensor(output).shape(), vec![1, 1]);
         assert_eq!(provider.telemetry_snapshot().download_bytes, 4 * 8);
 
         let lossy =
@@ -217,6 +217,13 @@ fn tensor_shape_for_reads_scalar_typed_integer_storage_without_mirror() {
     assert_eq!(tensor_shape_for(&input), vec![1, 1]);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rank_one_macd_input_keeps_its_full_shape() {
+    let input = Tensor::from_f32(vec![7.0, 8.0], vec![2]).unwrap();
+    assert_eq!(tensor_shape_for(&input), vec![2]);
+}
+
 #[test]
 fn two_outputs_return_macd_and_signal() {
     let _guard = crate::output_count::push_output_count(Some(2));
@@ -237,8 +244,8 @@ fn two_outputs_return_macd_and_signal() {
     assert_eq!(values.len(), 2);
     let macd = expect_tensor(values[0].clone());
     let signal = expect_tensor(values[1].clone());
-    assert_eq!(macd.shape, vec![5, 1]);
-    assert_eq!(signal.shape, vec![5, 1]);
+    assert_eq!(macd.shape(), vec![5, 1]);
+    assert_eq!(signal.shape(), vec![5, 1]);
     assert_close(signal.materialize_f64()[0], 0.0);
     assert_close(signal.materialize_f64()[1], 0.015);
     assert_close(signal.materialize_f64()[2], 0.068625);
@@ -273,8 +280,8 @@ fn empty_matrix_returns_empty_series() {
     };
     let macd = expect_tensor(values[0].clone());
     let signal = expect_tensor(values[1].clone());
-    assert_eq!(macd.shape, vec![0, 1]);
-    assert_eq!(signal.shape, vec![0, 1]);
+    assert_eq!(macd.shape(), vec![0, 1]);
+    assert_eq!(signal.shape(), vec![0, 1]);
     assert!(macd.materialize_f64().is_empty());
     assert!(signal.materialize_f64().is_empty());
 }
@@ -294,7 +301,7 @@ fn nan_prices_propagate_through_ema_recurrence() {
         ))
         .unwrap(),
     );
-    assert_eq!(out.shape, vec![4, 1]);
+    assert_eq!(out.shape(), vec![4, 1]);
     assert_eq!(out.materialize_f64()[0], 0.0);
     assert!(out.materialize_f64()[1].is_nan());
     assert!(out.materialize_f64()[2].is_nan());
@@ -326,7 +333,7 @@ fn table_input_is_case_insensitive_and_returns_table_with_close() {
     let variables = table_variables(&object).unwrap();
     assert_eq!(variables.fields.len(), 1);
     let close = expect_tensor(variables.fields.get("Close").cloned().unwrap());
-    assert_eq!(close.shape, vec![3, 1]);
+    assert_eq!(close.shape(), vec![3, 1]);
     assert_close(close.materialize_f64()[1], 0.075);
     assert_close(close.materialize_f64()[2], 0.283125);
 }

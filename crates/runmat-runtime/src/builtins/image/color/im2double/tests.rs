@@ -12,6 +12,20 @@ fn values(tensor: &Tensor) -> Vec<f64> {
     tensor.materialize_f64()
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn low_rank_uint8_images_keep_conversion_values_and_scalarization() {
+    let scalar = Tensor::new_integer(IntegerStorage::U8(vec![255]), Vec::new()).unwrap();
+    assert_eq!(call(Value::Tensor(scalar)), Value::Num(1.0));
+    let vector = Tensor::new_integer(IntegerStorage::U8(vec![0, 255]), vec![2]).unwrap();
+    let Value::Tensor(output) = call(Value::Tensor(vector)) else {
+        panic!("two-element image must remain a tensor")
+    };
+    assert_eq!(output.shape(), &[2]);
+    assert_eq!(output.numeric_dtype(), NumericDType::F64);
+    assert_eq!(output.materialize_f64(), vec![0.0, 1.0]);
+}
+
 #[test]
 fn scales_uint8_tensor_to_unit_double() {
     let input =
@@ -69,7 +83,7 @@ fn preserves_float_values_and_shape() {
         panic!("expected tensor");
     };
     assert_eq!(out.numeric_dtype(), NumericDType::F64);
-    assert_eq!(out.shape, vec![2, 2]);
+    assert_eq!(out.shape(), &[2, 2]);
     assert_eq!(values(&out), vec![-0.25, 0.0, 0.5, 1.25]);
 }
 
@@ -80,7 +94,7 @@ fn converts_logical_array_to_double_zeros_and_ones() {
         panic!("expected tensor");
     };
     assert_eq!(out.numeric_dtype(), NumericDType::F64);
-    assert_eq!(out.shape, vec![2, 2]);
+    assert_eq!(out.shape(), &[2, 2]);
     assert_eq!(values(&out), vec![1.0, 0.0, 1.0, 0.0]);
 }
 
@@ -133,7 +147,7 @@ fn indexed_mode_adds_one_to_zero_based_integer_indices() {
         panic!("expected tensor");
     };
     assert_eq!(out.numeric_dtype(), NumericDType::F64);
-    assert_eq!(out.shape, vec![1, 3]);
+    assert_eq!(out.shape(), &[1, 3]);
     assert_eq!(values(&out), vec![1.0, 8.0, 65536.0]);
 }
 
@@ -229,7 +243,7 @@ fn empty_nd_image_preserves_geometry_and_output_class() {
     let Value::Tensor(output) = call(Value::Tensor(image)) else {
         panic!("empty image must remain a tensor");
     };
-    assert_eq!(output.shape, vec![0, 2, 3]);
+    assert_eq!(output.shape(), &[0, 2, 3]);
     assert_eq!(output.numeric_dtype(), NumericDType::F64);
     assert!(values(&output).is_empty());
 }

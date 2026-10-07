@@ -176,7 +176,7 @@ fn numeric_vector(value: Value, role: &str) -> BuiltinResult<Vec<f64>> {
         Value::Int(value) => vec![value.to_f64()],
         Value::Bool(value) => vec![if value { 1.0 } else { 0.0 }],
         Value::Tensor(value) => {
-            vector_shape(&value.shape, role)?;
+            vector_shape(value.shape(), role)?;
             tensor::tensor_values_f64(&value)
         }
         Value::LogicalArray(value) => {

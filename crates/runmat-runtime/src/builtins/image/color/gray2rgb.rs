@@ -171,7 +171,7 @@ async fn gray2rgb_builtin(
 fn admit_gray(value: &Value) -> BuiltinResult<bool> {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Ok(true),
-        Value::Tensor(tensor) if tensor.shape.len() == 2 => Ok(true),
+        Value::Tensor(tensor) if tensor.shape().len() == 2 => Ok(true),
         Value::LogicalArray(array) if array.shape.len() == 2 => Ok(true),
         Value::GpuTensor(handle) if handle.shape().len() == 2 => {
             if runmat_accelerate_api::handle_is_logical(handle) {
@@ -216,7 +216,7 @@ async fn gray2rgb_execute(
             && match (&result, selected.output_dtype) {
                 (Ok(Value::LogicalArray(output)), None) => output.shape == selected.output_shape,
                 (Ok(Value::Tensor(output)), Some(dtype)) => {
-                    output.shape == selected.output_shape && output.numeric_dtype() == dtype
+                    output.shape() == selected.output_shape && output.numeric_dtype() == dtype
                 }
                 _ => false,
             };
@@ -298,6 +298,22 @@ mod tests {
         assert_eq!(GRAY2RGB_INTEGER_CAPABILITIES.len(), 1);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn grayscale_admission_requires_rank_two_even_for_one_element() {
+        for shape in [Vec::new(), vec![1]] {
+            let image = Tensor::from_f32(vec![0.25], shape).unwrap();
+            assert!(call(Value::Tensor(image)).is_err());
+        }
+        let image = Tensor::from_f32(vec![0.25], vec![1, 1]).unwrap();
+        let Value::Tensor(output) = call(Value::Tensor(image)).unwrap() else {
+            panic!("rank-two grayscale image must retain native single storage")
+        };
+        assert_eq!(output.shape(), &[1, 1, 3]);
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(output.as_f32_slice(), Some(&[0.25; 3][..]));
+    }
+
     #[test]
     fn gray2rgb_preserves_logical_storage() {
         let logical = LogicalArray::new(vec![0, 1], vec![1, 2]).expect("logical image");
@@ -316,7 +332,7 @@ mod tests {
         let Value::Tensor(out) = call(Value::Tensor(gray)).expect("gray2rgb") else {
             panic!("expected tensor");
         };
-        assert_eq!(out.shape, vec![2, 2, 3]);
+        assert_eq!(out.shape(), &[2, 2, 3]);
         assert_eq!(out.numeric_dtype(), NumericDType::U8);
         assert_eq!(
             out.materialize_f64(),
@@ -332,7 +348,7 @@ mod tests {
         let Value::Tensor(out) = call(Value::Tensor(gray)).expect("gray2rgb") else {
             panic!("expected tensor");
         };
-        assert_eq!(out.shape, vec![1, 2, 3]);
+        assert_eq!(out.shape(), &[1, 2, 3]);
         assert_eq!(out.numeric_dtype(), NumericDType::U64);
         assert_eq!(
             out.integer_storage(),

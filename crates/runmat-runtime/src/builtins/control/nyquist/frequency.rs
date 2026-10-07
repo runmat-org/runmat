@@ -26,7 +26,7 @@ fn values(value: &Value) -> BuiltinResult<Vec<f64>> {
         Value::Int(value) => vec![value.to_f64()],
         Value::Bool(value) => vec![if *value { 1.0 } else { 0.0 }],
         Value::Tensor(value) => {
-            vector_shape(&value.shape)?;
+            vector_shape(value.shape())?;
             tensor::tensor_values_f64(value)
         }
         Value::LogicalArray(value) => {

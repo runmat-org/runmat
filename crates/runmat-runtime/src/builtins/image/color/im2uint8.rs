@@ -227,7 +227,7 @@ fn quantize_u16_to_u8(value: u16) -> u8 {
 }
 
 fn im2uint8_tensor(tensor: Tensor, mode: ImageIndexMode) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|err| im2uint8_error_with_detail(&IM2UINT8_ERROR_INTERNAL, err))?;

@@ -101,6 +101,39 @@ fn indexed_with_large_host_map(path: &std::path::Path) -> Vec<Value> {
     ]
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn host_preflight_keeps_exact_colormap_and_alpha_geometry_without_file_effects() {
+    let image = Value::Tensor(tensor(vec![1.0], Vec::new(), NumericDType::F64));
+    let row_map = Value::Tensor(tensor(vec![0.0, 0.5, 1.0], vec![1, 3], NumericDType::F64));
+    preflight::preflight_resident_argument_roles(&[image.clone(), row_map]).unwrap();
+    let vector_map = Value::Tensor(tensor(vec![0.0, 0.5, 1.0], vec![3], NumericDType::F64));
+    assert_eq!(
+        preflight::preflight_resident_argument_roles(&[image.clone(), vector_map])
+            .unwrap_err()
+            .identifier(),
+        IMWRITE_ERROR_INVALID_COLORMAP.identifier
+    );
+
+    let options = |alpha| {
+        vec![
+            image.clone(),
+            Value::String("unused.png".into()),
+            Value::String("Alpha".into()),
+            alpha,
+        ]
+    };
+    let scalar_alpha = Value::Tensor(tensor(vec![0.5], vec![1, 1], NumericDType::F64));
+    preflight::preflight_option_text(&options(scalar_alpha), 2, "unused.png", false).unwrap();
+    let rank_zero_alpha = Value::Tensor(tensor(vec![0.5], Vec::new(), NumericDType::F64));
+    assert_eq!(
+        preflight::preflight_option_text(&options(rank_zero_alpha), 2, "unused.png", false)
+            .unwrap_err()
+            .identifier(),
+        IMWRITE_ERROR_INVALID_OPTION.identifier
+    );
+}
+
 #[test]
 fn known_invalid_option_precedes_host_map_scan_and_cancellation() {
     let directory = tempdir().unwrap();

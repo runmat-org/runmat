@@ -317,7 +317,7 @@ fn parse_white_point(value: &Value) -> BuiltinResult<[f64; 3]> {
     let Value::Tensor(tensor) = value else {
         return Err(rgb2lab_error(&RGB2LAB_ERROR_INVALID_OPTION));
     };
-    if tensor.shape != [1, 3]
+    if tensor.shape() != [1, 3]
         || !matches!(
             tensor.numeric_dtype(),
             NumericDType::F32 | NumericDType::F64

@@ -24,7 +24,7 @@ impl TimeSpec {
             Value::Num(n) => Self::final_time(*n),
             Value::Int(i) => Self::final_time(i.to_f64()),
             Value::Tensor(tensor) => {
-                ensure_time_vector_shape(&tensor.shape)?;
+                ensure_time_vector_shape(tensor.shape())?;
                 let data = tensor::tensor_values_f64(tensor);
                 if tensor::is_scalar_tensor(tensor) {
                     return Self::final_time(tensor::tensor_value_f64(tensor, 0));
