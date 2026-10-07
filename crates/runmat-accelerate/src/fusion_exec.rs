@@ -16,7 +16,7 @@ use log;
 use runmat_accelerate_api::{
     provider, AccelProvider, CovRows, CovarianceOptions, GpuTensorHandle, HostTensorView,
     ImageNormalizeDescriptor, PowerStepEpilogue, ProviderOperationFamily, ProviderPrecision,
-    ProviderWorkload, ReductionFlavor,
+    ProviderRejectionCode, ProviderWorkload, ReductionFlavor,
 };
 use runmat_execution::{
     CandidateExecutionLocation, CandidateOutputResidency, CandidatePreparationState,
@@ -71,6 +71,35 @@ pub struct FusionExecutionRequest<'a> {
     pub inputs: Vec<Value>,
     pub placement: Option<PlacementCorrelationId>,
     pub runtime: Option<runmat_runtime::context::RuntimeContext>,
+}
+
+/// The placement-aware executor may choose its shared-runtime continuation on
+/// provider absence only for a wholly host-owned request. Direct execution
+/// wrappers reject that outcome instead. A resident leaf (including a captured
+/// or constant leaf) still requires its exact owner and must never be replayed
+/// as an ordinary host input. This does not classify failures after provider
+/// discovery as retryable.
+fn admit_provider_availability<'p>(
+    request: &FusionExecutionRequest<'_>,
+    available: Option<&'p dyn AccelProvider>,
+) -> ExecutionResult<FusionExecutionOutcome<&'p dyn AccelProvider>> {
+    if let Some(provider) = available {
+        return Ok(FusionExecutionOutcome::Executed(provider));
+    }
+    if request
+        .inputs
+        .iter()
+        .chain(request.plan.const_values.values())
+        .chain(request.plan.constants.values())
+        .any(runmat_runtime::dispatcher::value_contains_gpu)
+    {
+        return Err(anyhow!("no acceleration provider registered").into());
+    }
+    FusionPlacementObserver::new(request.placement)
+        .provider_rejected(ProviderRejectionCode::ProviderUnavailable);
+    Ok(FusionExecutionOutcome::SharedRuntime(
+        FusionCpuObservation::new(None),
+    ))
 }
 
 pub struct ElementwiseExecutionResult {
@@ -640,7 +669,6 @@ pub fn execute_reduction_with_shape_placed(
     if !request.plan.group.kind.is_reduction() {
         return Err(anyhow!("unsupported fusion kind").into());
     }
-    let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
     if !request.plan.kernel.supported {
         return Err(anyhow!("fusion kernel not supported for this plan").into());
     }
@@ -660,6 +688,12 @@ pub fn execute_reduction_with_shape_placed(
     let scalar_shape = {
         let constant_shape = request.plan.constant_shape(len);
         normalize_scalar_shape(&vec![1; constant_shape.len()])
+    };
+    let provider = match admit_provider_availability(&request, provider())? {
+        FusionExecutionOutcome::Executed(provider) => provider,
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            return Ok(FusionExecutionOutcome::SharedRuntime(observation));
+        }
     };
     let selection =
         select_fusion_provider(&request, &bindings, provider, &[output_shape.to_vec()])?;
@@ -821,7 +855,12 @@ pub async fn execute_centered_gram_placed(
     if request.plan.group.kind != FusionKind::CenteredGram {
         return Err((anyhow!("unsupported fusion kind")).into());
     }
-    let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
+    let provider = match admit_provider_availability(&request, provider())? {
+        FusionExecutionOutcome::Executed(provider) => provider,
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            return Ok(FusionExecutionOutcome::SharedRuntime(observation));
+        }
+    };
     let selection = select_fusion_provider(&request, &bindings, provider, &[])?;
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,
@@ -896,7 +935,12 @@ pub async fn execute_power_step_normalize_placed(
     if request.plan.group.kind != FusionKind::PowerStepNormalize {
         return Err(anyhow!("unsupported fusion kind").into());
     }
-    let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
+    let provider = match admit_provider_availability(&request, provider())? {
+        FusionExecutionOutcome::Executed(provider) => provider,
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            return Ok(FusionExecutionOutcome::SharedRuntime(observation));
+        }
+    };
     let selection = select_fusion_provider(&request, &bindings, provider, &[])?;
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,
@@ -975,7 +1019,12 @@ pub async fn execute_explained_variance_placed(
     if request.plan.group.kind != FusionKind::ExplainedVariance {
         return Err(anyhow!("unsupported fusion kind").into());
     }
-    let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
+    let provider = match admit_provider_availability(&request, provider())? {
+        FusionExecutionOutcome::Executed(provider) => provider,
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            return Ok(FusionExecutionOutcome::SharedRuntime(observation));
+        }
+    };
     let selection = select_fusion_provider(&request, &bindings, provider, &[])?;
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,
@@ -1184,7 +1233,12 @@ pub async fn execute_image_normalize_placed(
     if request.plan.group.kind != FusionKind::ImageNormalize {
         return Err(anyhow!("unsupported fusion kind").into());
     }
-    let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
+    let provider = match admit_provider_availability(&request, provider())? {
+        FusionExecutionOutcome::Executed(provider) => provider,
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            return Ok(FusionExecutionOutcome::SharedRuntime(observation));
+        }
+    };
     let selection = select_fusion_provider(&request, &bindings, provider, &[])?;
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,

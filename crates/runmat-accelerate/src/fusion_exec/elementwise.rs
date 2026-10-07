@@ -15,7 +15,6 @@ async fn execute_elementwise_outputs(
     if !request.plan.group.kind.is_elementwise() {
         return Err(anyhow!("unsupported fusion kind").into());
     }
-    let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
     if !request.plan.kernel.supported {
         return Err(anyhow!("fusion kernel not supported for this plan").into());
     }
@@ -28,6 +27,12 @@ async fn execute_elementwise_outputs(
         .into());
     }
     reject_native_integer_fusion_inputs(request)?;
+    let provider = match admit_provider_availability(request, provider())? {
+        FusionExecutionOutcome::Executed(provider) => provider,
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            return Ok(FusionExecutionOutcome::SharedRuntime(observation));
+        }
+    };
     for value in &request.inputs {
         match value {
             Value::GpuTensor(handle) => {

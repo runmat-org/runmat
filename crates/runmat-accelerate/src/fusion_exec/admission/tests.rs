@@ -214,6 +214,57 @@ fn request<'a>(plan: &'a FusionGroupPlan, runtime: &RuntimeContext) -> FusionExe
 }
 
 #[test]
+fn missing_provider_is_pre_effect_shared_runtime_only_for_host_requests() {
+    runmat_gc::gc_test_context(|| {
+        let runtime = context(runmat_runtime::builtin::runtime_builtin_bindings_by_name(
+            "sin",
+        ));
+        let mut plan = make_plan(vec![named("sin", FusionCallOrigin::named("sin"))]);
+        let mut invocation = request(&plan, &runtime);
+        assert!(matches!(
+            admit_provider_availability(&invocation, None).unwrap(),
+            FusionExecutionOutcome::SharedRuntime(_)
+        ));
+        assert!(matches!(
+            admit_provider_availability(&invocation, Some(&RejectingProvider)).unwrap(),
+            FusionExecutionOutcome::Executed(_)
+        ));
+
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let explicit = allocation
+            .handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
+        let resident = Value::GpuTensor(explicit);
+        invocation.inputs[0] =
+            Value::Cell(runmat_value::CellArray::new(vec![resident.clone()], 1, 1).unwrap());
+        assert!(admit_provider_availability(&invocation, None).is_err());
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(invocation);
+
+        plan.const_values.insert(9, resident.clone());
+        let invocation = request(&plan, &runtime);
+        assert!(admit_provider_availability(&invocation, None).is_err());
+        assert_eq!(allocation.probe.retirements(), 0);
+
+        let mut indexed_plan = make_plan(vec![named("sin", FusionCallOrigin::named("sin"))]);
+        indexed_plan.constants.insert(
+            0,
+            Value::Cell(runmat_value::CellArray::new(vec![resident], 1, 1).unwrap()),
+        );
+        let indexed = request(&indexed_plan, &runtime);
+        assert!(admit_provider_availability(&indexed, None).is_err());
+        assert_eq!(allocation.probe.retirements(), 0);
+    });
+}
+
+#[test]
 fn selected_named_bindings_reject_replacements_absence_and_ambiguity() {
     runmat_gc::gc_test_context(|| {
         for (name, args) in [

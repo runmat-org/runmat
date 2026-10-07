@@ -26,7 +26,12 @@ pub async fn execute_matmul_epilogue_placed(
         ));
     };
     crate::ensure_residency_hooks();
-    let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
+    let provider = match admit_provider_availability(&request, provider())? {
+        FusionExecutionOutcome::Executed(provider) => provider,
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            return Ok(FusionExecutionOutcome::SharedRuntime(observation));
+        }
+    };
     // Admission reads typed operations and represented operands only. No
     // upload, metadata mutation, allocation or placement selection precedes it.
     // Provider precision/ownership metadata is read to validate representation.
