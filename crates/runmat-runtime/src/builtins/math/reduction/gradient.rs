@@ -256,6 +256,10 @@ pub mod kernel_error;
 pub use kernel_error::GradientKernelError;
 use kernel_error::GradientKernelResult;
 
+#[cfg(test)]
+#[path = "gradient/kernel_fault_tests.rs"]
+mod kernel_fault_tests;
+
 #[derive(Clone, Debug, PartialEq)]
 enum GradientSpacing {
     Scalar(f64),
