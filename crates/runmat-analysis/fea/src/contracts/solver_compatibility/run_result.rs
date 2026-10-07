@@ -24,6 +24,8 @@ pub(in crate::contracts) struct FeaRunResultWire {
     #[serde(default)]
     spatial_projection_evidence: Vec<crate::excitation::SpatialProjectionEvidence>,
     #[serde(default)]
+    structural_static_convergence: Option<crate::contracts::StructuralStaticConvergence>,
+    #[serde(default)]
     structural_static_balance: Option<Box<crate::solve::StructuralStaticBalanceEvidence>>,
     #[serde(default)]
     structural_constraint_result:
@@ -53,6 +55,7 @@ impl TryFrom<FeaRunResultWire> for FeaRunResult {
             accelerator_evidence: wire.accelerator_evidence,
             diagnostics: wire.diagnostics,
             spatial_projection_evidence: wire.spatial_projection_evidence,
+            structural_static_convergence: wire.structural_static_convergence,
             structural_static_balance: wire.structural_static_balance,
             structural_constraint_result: wire.structural_constraint_result,
             structural_connector_result: wire.structural_connector_result,
@@ -78,6 +81,18 @@ impl FeaRunResult {
             .realization()
             .temporals
             .contains(&TemporalImplementation::StructuralStaticLinearSolve);
+        match (is_structural_static, &self.structural_static_convergence) {
+            (true, Some(evidence)) => evidence.validate()?,
+            (true, None) => {
+                return Err(SolverFormulationCompatibilityError::MissingStructuralStaticConvergence)
+            }
+            (false, Some(_)) => {
+                return Err(
+                    SolverFormulationCompatibilityError::UnexpectedStructuralStaticConvergence,
+                )
+            }
+            (false, None) => {}
+        }
         let has_structural_connector_state = is_structural_static
             || self
                 .identity

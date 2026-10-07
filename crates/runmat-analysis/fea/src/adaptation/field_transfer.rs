@@ -60,6 +60,7 @@ pub struct SolverFieldTransferResult {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SolverFieldTransferError {
+    Cancelled,
     InvalidSourceArtifact(String),
     InvalidTargetArtifact(String),
     InvalidTransferMap(String),
@@ -68,6 +69,7 @@ pub enum SolverFieldTransferError {
     MissingTargetTopology,
     TopologyLocationMismatch,
     InvalidFieldShape,
+    InvalidFieldValues,
     DeviceFieldRequiresHostTransfer,
     UnsupportedTopologyChange,
     InconsistentQuadraticConnectivity,
@@ -81,6 +83,9 @@ pub fn transfer_solver_field(
     topology_id: &str,
     field: &AnalysisField,
 ) -> Result<SolverFieldTransferResult, SolverFieldTransferError> {
+    if crate::is_fea_cancelled() {
+        return Err(SolverFieldTransferError::Cancelled);
+    }
     source
         .validate()
         .map_err(|failure| SolverFieldTransferError::InvalidSourceArtifact(failure.to_string()))?;
@@ -118,6 +123,9 @@ pub fn transfer_solver_field(
     };
     let component_count =
         component_count(field, source_map.ordered_entity_ids.len(), values.len())?;
+    if values.iter().any(|v| !v.is_finite()) {
+        return Err(SolverFieldTransferError::InvalidFieldValues);
+    }
     let source_identities = stable_identities(source, source_map.location);
     let target_identities = stable_identities(target, target_map.location);
     let source_values = source_map
@@ -146,11 +154,13 @@ pub fn transfer_solver_field(
     let mut copied_entity_count = 0;
     let mut projected_entity_count = 0;
     let mut applied_projection_methods = Vec::new();
-    let mut resolved_values = source_values
-        .iter()
-        .map(|(identity, values)| (*identity, values.to_vec()))
-        .collect::<BTreeMap<_, _>>();
-    for entity_id in &target_map.ordered_entity_ids {
+    // Original values are already borrowed above. Retain only newly projected values
+    // needed by later linear midsides; do not duplicate every original component array.
+    let mut resolved_values: BTreeMap<_, Vec<f64>> = BTreeMap::new();
+    for (ordinal, entity_id) in target_map.ordered_entity_ids.iter().enumerate() {
+        if ordinal % 1024 == 0 && crate::is_fea_cancelled() {
+            return Err(SolverFieldTransferError::Cancelled);
+        }
         let stable_identity = target_identities[entity_id];
         if let Some(values) = source_values.get(&stable_identity) {
             output.extend_from_slice(values);
@@ -167,16 +177,20 @@ pub fn transfer_solver_field(
             if quadratic_nodal_source {
                 return Err(SolverFieldTransferError::UnsupportedTopologyChange);
             }
-            let left = resolved_values
+            let left = source_values
                 .get(&left)
+                .copied()
+                .or_else(|| resolved_values.get(&left).map(Vec::as_slice))
                 .ok_or(SolverFieldTransferError::UnsupportedTopologyChange)?;
-            let right = resolved_values
+            let right = source_values
                 .get(&right)
+                .copied()
+                .or_else(|| resolved_values.get(&right).map(Vec::as_slice))
                 .ok_or(SolverFieldTransferError::UnsupportedTopologyChange)?;
             (
                 left.iter()
                     .zip(right)
-                    .map(|(left, right)| 0.5 * (left + right))
+                    .map(|(left, right)| projection::linear_midpoint(*left, *right))
                     .collect(),
                 SolverFieldTransferMethod::LinearEdgeInterpolation,
             )

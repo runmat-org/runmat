@@ -349,6 +349,7 @@ fn persisted_run_rejects_solver_or_preconditioner_substitution() {
             accelerator_evidence: Vec::new(),
             diagnostics: Vec::new(),
             spatial_projection_evidence: Vec::new(),
+            structural_static_convergence: Some(crate::contracts::StructuralStaticConvergence { converged: true, iterations: 0, residual_norm: 0.0, relative_residual: Some(0.0) }),
             structural_static_balance: Some(Box::new(crate::solve::StructuralStaticBalanceEvidence {
                 internal_work_joules: 0.0,
                 applied_load_work_joules: 0.0,
@@ -419,12 +420,25 @@ fn persisted_run_rejects_solver_or_preconditioner_substitution() {
     unexpected_static_evidence.preconditioner = SolverPreconditioner::Ilu0;
     assert_eq!(
         unexpected_static_evidence.validate_solver_formulation(),
-        Err(SolverFormulationCompatibilityError::UnexpectedStructuralStaticBalance)
+        Err(SolverFormulationCompatibilityError::UnexpectedStructuralStaticConvergence)
     );
 
     unexpected_static_evidence.structural_static_balance = None;
+    unexpected_static_evidence.structural_static_convergence = None;
     assert_eq!(
         unexpected_static_evidence.validate_solver_formulation(),
         Err(SolverFormulationCompatibilityError::UnexpectedStructuralConstraintResult)
     );
+    // An absent static-only carrier must not change immutable nonstatic wire records.
+    let mut thermal = run;
+    thermal.identity = nonstructural_identity(PhysicsFamily::Thermal, AnalysisProcedure::Static);
+    thermal.structural_static_convergence = None;
+    thermal.structural_static_balance = None;
+    thermal.structural_constraint_result = None;
+    thermal.structural_connector_result = None;
+    thermal.validate_solver_formulation().unwrap();
+    let original_wire = serde_json::to_value(&thermal).unwrap();
+    assert!(original_wire.get("structural_static_convergence").is_none());
+    let cold: FeaRunResult = serde_json::from_value(original_wire.clone()).unwrap();
+    assert_eq!(serde_json::to_value(cold).unwrap(), original_wire);
 }

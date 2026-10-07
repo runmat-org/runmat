@@ -105,6 +105,7 @@ impl ThermalSolverResultManifest {
                 accelerator_evidence: run.accelerator_evidence.clone(),
                 diagnostics: run.diagnostics.clone(),
                 spatial_projection_evidence: run.spatial_projection_evidence.clone(),
+                structural_static_convergence: None,
                 structural_static_balance: None,
                 structural_constraint_result: None,
                 structural_connector_result: None,

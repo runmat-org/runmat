@@ -11,6 +11,12 @@ pub(super) use run_result::FeaRunResultWire;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum SolverFormulationCompatibilityError {
+    #[error("structural static algebraic convergence is invalid")]
+    InvalidStructuralStaticConvergence,
+    #[error("structural static result lacks original typed convergence")]
+    MissingStructuralStaticConvergence,
+    #[error("structural static convergence is attached to another procedure")]
+    UnexpectedStructuralStaticConvergence,
     #[error("structural static balance evidence is invalid")]
     InvalidStructuralStaticBalance,
     #[error("a structural static result is missing mandatory physical balance evidence")]

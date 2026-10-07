@@ -127,6 +127,7 @@ pub(super) fn recover(
         accelerator_evidence: nonlinear.accelerator_evidence.clone(),
         diagnostics,
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
+        structural_static_convergence: None,
         structural_static_balance: None,
         structural_constraint_result: Some(Box::new(constraint_result)),
         structural_connector_result: None,

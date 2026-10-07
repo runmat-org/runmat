@@ -1,3 +1,5 @@
+mod static_convergence;
+pub use static_convergence::StructuralStaticConvergence;
 mod field_ids;
 mod run_error;
 mod solver_compatibility;
@@ -100,6 +102,8 @@ pub struct FeaRunResult {
     pub diagnostics: Vec<crate::diagnostics::FeaDiagnostic>,
     #[serde(default)]
     pub spatial_projection_evidence: Vec<crate::excitation::SpatialProjectionEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structural_static_convergence: Option<StructuralStaticConvergence>,
     #[serde(default)]
     pub structural_static_balance: Option<Box<crate::solve::StructuralStaticBalanceEvidence>>,
     #[serde(default)]

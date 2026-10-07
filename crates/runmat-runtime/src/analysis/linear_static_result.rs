@@ -60,10 +60,11 @@ pub(super) fn admit_linear_static_result(
         fallback_events.push(FallbackEvent::solver_backend());
     }
 
-    let solver_convergence = if run.diagnostics.iter().any(|item| {
-        item.code == "FEA_CONVERGENCE"
-            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
-    }) {
+    let solver_convergence = if run
+        .structural_static_convergence
+        .as_ref()
+        .is_some_and(|e| e.converged)
+    {
         QualityGate::Pass
     } else {
         QualityGate::Warn
@@ -139,7 +140,7 @@ pub(super) fn admit_linear_static_result(
             solver_convergence == QualityGate::Pass && result_quality == QualityGate::Pass
         }
         QualityPolicy::Exploratory => {
-            solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
+            solver_convergence == QualityGate::Pass && result_quality != QualityGate::Fail
         }
     };
     let (production_publishable, production_publication_reasons) =
@@ -184,6 +185,8 @@ pub(super) fn admit_linear_static_result(
 }
 
 fn validate_result(input: &LinearStaticResultInput<'_>, run: &FeaRunResult) -> Result<(), String> {
+    run.validate_solver_formulation()
+        .map_err(|e| e.to_string())?;
     if run.requested_backend != input.requested_backend {
         return Err(
             "structural result requested backend differs from its execution request".into(),
@@ -461,5 +464,94 @@ mod lineage_tests {
             .bind_resolved_entities(vec![other_occurrence])
             .expect("resolve another occurrence");
         assert!(!mesh_has_boundary_target(&mesh, &target));
+    }
+}
+
+#[cfg(test)]
+mod convergence_tests {
+    use super::*;
+    #[test]
+    fn static_admission_uses_original_typed_convergence_without_diagnostic_text() {
+        let mut model = runmat_analysis_fea::fixtures::fixture_model(
+            runmat_analysis_fea::fixtures::FixtureId::CantileverLinearStatic,
+        );
+        let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(
+            runmat_meshing_core::ElementOrder::Tet4,
+        );
+        model.signals.clear();
+        model.excitations.clear();
+        model.excitation_cases.clear();
+        model.constraints = mesh
+            .topology
+            .nodes
+            .iter()
+            .map(|node| {
+                runmat_analysis_core::AnalysisConstraint::Structural(
+                    runmat_analysis_core::StructuralConstraint {
+                        constraint_id: format!("fixed_{}", node.node_id),
+                        frame: runmat_analysis_core::CoordinateFrame::Global,
+                        kind: runmat_analysis_core::StructuralConstraintKind::Fixed {
+                            target: runmat_analysis_core::RegionTarget::point(format!(
+                                "node:{}",
+                                node.node_id
+                            )),
+                        },
+                    },
+                )
+            })
+            .collect();
+        let mut run = runmat_analysis_fea::run_linear_static_with_options(
+            &model,
+            ComputeBackend::Cpu,
+            runmat_analysis_fea::LinearStaticSolveOptions {
+                formulation_requirement: FormulationRequirement::Experimental,
+                solver_mesh: Some(mesh.clone()),
+                require_solver_mesh_for_solid: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let options = AnalysisRunOptions {
+            quality_policy: QualityPolicy::Exploratory,
+            ..Default::default()
+        };
+        let input = || LinearStaticResultInput {
+            model: &model,
+            solver_mesh: Some(&mesh),
+            requested_backend: ComputeBackend::Cpu,
+            formulation_requirement: FormulationRequirement::Experimental,
+            options: &options,
+            assigned_run_id: Some("typed-convergence"),
+        };
+        run.diagnostics.clear();
+        assert_eq!(
+            admit_linear_static_result(input(), run.clone())
+                .unwrap()
+                .solver_convergence,
+            QualityGate::Pass
+        );
+        run.structural_static_convergence
+            .as_mut()
+            .unwrap()
+            .converged = false;
+        run.diagnostics
+            .push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
+                code: "FEA_CONVERGENCE".into(),
+                severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
+                message: "converged=true".into(),
+            });
+        assert_eq!(
+            admit_linear_static_result(input(), run.clone())
+                .unwrap()
+                .solver_convergence,
+            QualityGate::Warn
+        );
+        assert!(
+            !admit_linear_static_result(input(), run.clone())
+                .unwrap()
+                .numerically_acceptable
+        );
+        run.structural_static_convergence = None;
+        assert!(admit_linear_static_result(input(), run).is_err());
     }
 }

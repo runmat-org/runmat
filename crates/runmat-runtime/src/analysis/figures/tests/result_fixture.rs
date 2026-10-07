@@ -21,6 +21,7 @@ pub(super) fn simple_run_result(
             solver_host_sync_count: 0,
             diagnostics: Vec::new(),
             spatial_projection_evidence: Vec::new(),
+            structural_static_convergence: None,
             structural_static_balance: None,
             structural_constraint_result: None,
             structural_connector_result: None,

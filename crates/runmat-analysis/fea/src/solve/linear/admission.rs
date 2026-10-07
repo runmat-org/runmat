@@ -52,6 +52,7 @@ pub(super) fn rejected_system_result(
             .map(|value| value * value)
             .sum::<f64>()
             .sqrt(),
+        relative_residual: None,
         converged: false,
         host_sync_count: 0,
         solver_backend: backend,

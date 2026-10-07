@@ -27,7 +27,7 @@ fn solver(
         normalized_residual: 1.0e-10,
     }
 }
-fn plan() -> AccuracyPlan {
+pub(in crate::adaptation) fn plan() -> AccuracyPlan {
     let mut plan = AccuracyPlan::experimental_baseline("adaptive");
     plan.exceeded_limit = AccuracyLimitAction::Refine;
     plan.resources.maximum_refinement_cycles = 4;

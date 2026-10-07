@@ -135,6 +135,16 @@ impl AcceleratorSolveEvidence {
         }
     }
 
+    pub fn independent_relative_residual(&self) -> Option<f64> {
+        match self {
+            Self::Completed {
+                independently_computed_relative_residual,
+                ..
+            } => Some(*independently_computed_relative_residual),
+            Self::Cancelled { .. } | Self::ProviderLost { .. } => None,
+        }
+    }
+
     pub fn terminal_solution_readbacks(&self) -> u32 {
         match self {
             Self::Completed {

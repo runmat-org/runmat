@@ -275,6 +275,7 @@ pub fn recover_completed_structural_buckling_run(
             ),
         }],
         spatial_projection_evidence: summary.spatial_projection_evidence,
+        structural_static_convergence: None,
         structural_static_balance: None,
         structural_constraint_result: None,
         structural_connector_result: None,

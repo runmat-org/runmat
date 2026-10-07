@@ -194,6 +194,12 @@ pub fn check_cancelled(operation: impl Into<String>) -> Result<(), crate::contra
     Ok(())
 }
 
+impl runmat_canonical_codec::CanonicalCodecControl for FeaCancellationToken {
+    fn is_cancelled(&self) -> bool {
+        FeaCancellationToken::is_cancelled(self)
+    }
+}
+
 #[cfg(test)]
 mod control_tests {
     use super::*;

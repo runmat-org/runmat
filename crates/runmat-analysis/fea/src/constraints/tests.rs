@@ -827,6 +827,7 @@ fn canonical_solid_solve_enforces_affine_equation_and_recovers_reactions() {
         None,
     );
     assert!(solve.converged, "{:?}", solve.diagnostics);
+    assert!(solve.relative_residual.is_some_and(|value| value <= 1e-8));
     assert!((solve.solution[3] - solve.solution[6] - 0.001).abs() <= 1.0e-10);
 
     let fields = recover_result_fields(
@@ -1047,6 +1048,7 @@ fn canonical_solid_solve_enforces_exact_multiplier_equations() {
     );
 
     assert!(solve.converged, "{:?}", solve.diagnostics);
+    assert!(solve.relative_residual.is_some_and(|value| value <= 1e-8));
     assert_eq!(
         solve.solver_method,
         crate::contracts::SolverMethod::MatrixFreeSaddlePointGmres
@@ -1611,6 +1613,7 @@ fn reference_point_wrench_solves_through_distributing_coupling() {
         None,
     );
     assert!(solve.converged, "{:?}", solve.diagnostics);
+    assert!(solve.relative_residual.is_some_and(|value| value <= 1e-8));
     let matrix = summary.constraint_matrix.as_ref().unwrap();
     for row in 0..matrix.row_count() {
         let start = matrix.row_offsets[row];

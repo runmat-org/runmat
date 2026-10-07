@@ -32,6 +32,8 @@ use crate::{
 pub struct LinearSolveResult {
     pub iterations: u32,
     pub residual_norm: f64,
+    /// Relative residual in the actual solved equation space; absent after admission failure.
+    pub relative_residual: Option<f64>,
     pub converged: bool,
     pub host_sync_count: u32,
     pub solver_backend: LinearAlgebraBackendKind,
@@ -193,6 +195,7 @@ fn solve_operator_system_with_apply(
         return Ok(LinearSolveResult {
             iterations: 0,
             residual_norm: 0.0,
+            relative_residual: None,
             converged: false,
             host_sync_count: 0,
             solver_backend: effective_backend_kind,
@@ -355,6 +358,10 @@ fn solve_operator_system_with_apply(
         return Ok(LinearSolveResult {
             iterations: 0,
             residual_norm: initial_residual_norm,
+            relative_residual: crate::solve::convergence::relative_residual(
+                initial_residual_norm,
+                reference_norm,
+            ),
             converged: true,
             host_sync_count: 0,
             solver_backend: effective_backend_kind,
@@ -442,6 +449,10 @@ fn solve_operator_system_with_apply(
     Ok(LinearSolveResult {
         iterations,
         residual_norm,
+        relative_residual: crate::solve::convergence::relative_residual(
+            residual_norm,
+            reference_norm,
+        ),
         converged,
         host_sync_count: 0,
         solver_backend: effective_backend_kind,
@@ -478,6 +489,7 @@ pub(crate) fn linear_result_from_accelerator_output(
             .evidence
             .independent_residual_norm()
             .expect("completed accelerator evidence has a residual"),
+        relative_residual: output.evidence.independent_relative_residual(),
         converged: output.converged,
         host_sync_count,
         solver_backend: LinearAlgebraBackendKind::Accelerator,
@@ -505,6 +517,7 @@ pub(crate) fn linear_result_from_accelerator_error(
             .map(|value| value * value)
             .sum::<f64>()
             .sqrt(),
+        relative_residual: None,
         converged: false,
         host_sync_count: error
             .evidence

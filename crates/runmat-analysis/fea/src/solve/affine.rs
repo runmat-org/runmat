@@ -133,6 +133,7 @@ fn solve_affine_constraint_system_with_apply(
         return Ok(LinearSolveResult {
             iterations: 0,
             residual_norm: 0.0,
+            relative_residual: Some(0.0),
             converged: true,
             host_sync_count: 0,
             solver_backend: LinearAlgebraBackendKind::CpuReference,
@@ -298,6 +299,10 @@ fn solve_affine_constraint_system_with_apply(
     Ok(LinearSolveResult {
         iterations,
         residual_norm,
+        relative_residual: crate::solve::convergence::relative_residual(
+            residual_norm,
+            reference_norm,
+        ),
         converged,
         host_sync_count: 0,
         solver_backend: LinearAlgebraBackendKind::CpuReference,
@@ -324,6 +329,7 @@ fn rejected_affine_system(
             .map(|value| value * value)
             .sum::<f64>()
             .sqrt(),
+        relative_residual: None,
         converged: false,
         host_sync_count: 0,
         solver_backend: LinearAlgebraBackendKind::CpuReference,

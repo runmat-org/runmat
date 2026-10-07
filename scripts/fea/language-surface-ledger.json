@@ -65,7 +65,9 @@
         "positive_coverage": "core.model_realization.domains.root_and_included_models_preserve_both_explicit_domains",
         "negative_coverage": "core.model_realization.domains.declarations_coalesce_without_defaults_and_conflicts_are_order_independent"
       },
-      "members": { "reference_temperature": {} }
+      "members": {
+        "reference_temperature": {}
+      }
     },
     {
       "source": "crates/runmat-analysis/core/src/problem/domains.rs",
@@ -81,7 +83,9 @@
         "positive_coverage": "core.model_realization.domains.root_and_included_models_preserve_both_explicit_domains",
         "negative_coverage": "core.model_realization.domains.declarations_coalesce_without_defaults_and_conflicts_are_order_independent"
       },
-      "members": { "reference_temperature": {} }
+      "members": {
+        "reference_temperature": {}
+      }
     },
     {
       "source": "crates/runmat-runtime/src/analysis/contracts.rs",
@@ -439,6 +443,15 @@
         },
         "fields": {
           "identity": "numerical-result identity"
+        },
+        "structural_static_convergence": {
+          "cardinality": "required_once_for_structural_static_solve_only",
+          "default": "absent_for_every_other_procedure",
+          "target": "original algebraic convergence in the actual full, affine-reduced or saddle-point equation space",
+          "identity": "numerical-result evidence",
+          "validation": "finite nonnegative norms; successful solves require original relative residual; missing or foreign procedure rejects",
+          "positive_coverage": "adaptation.solved_source.original_both_order_static_results_retain_typed_convergence_and_scalar_observations",
+          "negative_coverage": "analysis.linear_static_result.static_admission_uses_original_typed_convergence_without_diagnostic_text"
         }
       }
     },

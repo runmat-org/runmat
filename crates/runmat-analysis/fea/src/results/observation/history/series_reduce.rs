@@ -1,3 +1,4 @@
+use crate::algebra::CompensatedSum;
 use crate::results::field::RecoveredFieldSample;
 use runmat_analysis_core::{
     AnalysisField, ComplexRepresentation, ExtremaTiePolicy, SeriesReduction, SeriesWeighting,
@@ -5,8 +6,7 @@ use runmat_analysis_core::{
 };
 
 use super::super::{
-    distributed_numeric::CompensatedSum, ObservationEntity, ObservationError,
-    ObservationExecutionPolicy, ResolvedObservationPlan,
+    ObservationEntity, ObservationError, ObservationExecutionPolicy, ResolvedObservationPlan,
 };
 use super::series_contract::{
     SeriesExtremumLocation, SeriesReductionContribution, SeriesReductionEvidence,

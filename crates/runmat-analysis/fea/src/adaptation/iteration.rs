@@ -272,4 +272,4 @@ fn codec_error(error: CanonicalCodecError) -> StructuralAdaptationIterationError
     StructuralAdaptationIterationError::Codec(error.to_string())
 }
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

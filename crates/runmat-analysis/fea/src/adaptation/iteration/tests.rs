@@ -14,7 +14,7 @@ use crate::adaptation::{
 };
 use crate::assembly::solver_solid::tests::artifact;
 
-fn adaptation_fixture() -> (
+pub(in crate::adaptation) fn adaptation_fixture() -> (
     SolverMeshArtifact,
     SolverMeshArtifact,
     SolverMeshTransferMap,
@@ -263,4 +263,4 @@ fn transfer_error(
 }
 
 mod constraint_lineage;
-mod governed;
+pub(in crate::adaptation) mod governed;

@@ -524,6 +524,8 @@ fn run_linear_static_with_constraint_plan(
     );
     diagnostics.extend(thermo_mechanical_diagnostics);
     diagnostics.extend(electro_thermal_diagnostics);
+    let structural_static_convergence =
+        crate::contracts::StructuralStaticConvergence::from_solve(&solve_result);
     diagnostics.extend(solve_result.diagnostics);
 
     emit_phase(
@@ -549,6 +551,7 @@ fn run_linear_static_with_constraint_plan(
         accelerator_evidence: solve_result.accelerator_evidence.into_iter().collect(),
         diagnostics,
         spatial_projection_evidence: summary.spatial_projection_evidence.clone(),
+        structural_static_convergence: Some(structural_static_convergence),
         structural_static_balance: Some(Box::new(static_balance.evidence)),
         structural_constraint_result: Some(Box::new(structural_constraint_result)),
         structural_connector_result: Some(Box::new(structural_connector_result)),

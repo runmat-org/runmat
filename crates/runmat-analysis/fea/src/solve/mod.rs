@@ -2,6 +2,7 @@ pub mod accelerator;
 mod affine;
 pub mod backend;
 pub mod buckling;
+pub(crate) mod convergence;
 pub mod dynamics;
 pub mod fixed_point;
 pub(crate) mod krylov;

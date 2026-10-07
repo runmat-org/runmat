@@ -98,6 +98,7 @@ fn solve_multiplier_constraint_system_with_apply(
         return Ok(LinearSolveResult {
             iterations: 0,
             residual_norm: f64::INFINITY,
+            relative_residual: None,
             converged: false,
             host_sync_count: 0,
             solver_backend: LinearAlgebraBackendKind::CpuReference,
@@ -245,6 +246,7 @@ fn solve_multiplier_constraint_system_with_apply(
     Ok(LinearSolveResult {
         iterations: result.iterations,
         residual_norm: result.residual_norm,
+        relative_residual: result.relative_residual,
         converged: result.converged,
         host_sync_count: 0,
         solver_backend: LinearAlgebraBackendKind::CpuReference,
@@ -271,6 +273,7 @@ fn rejected_multiplier_system(
             .map(|value| value * value)
             .sum::<f64>()
             .sqrt(),
+        relative_residual: None,
         converged: false,
         host_sync_count: 0,
         solver_backend: LinearAlgebraBackendKind::CpuReference,

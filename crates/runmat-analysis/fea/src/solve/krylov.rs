@@ -19,6 +19,7 @@ pub(crate) struct GmresResult {
     pub solution: Vec<f64>,
     pub iterations: u32,
     pub residual_norm: f64,
+    pub relative_residual: Option<f64>,
     pub converged: bool,
     pub cancelled: bool,
     pub breakdown: bool,
@@ -248,6 +249,10 @@ fn restarted_gmres_with_updates<E>(
         solution,
         iterations,
         residual_norm,
+        relative_residual: crate::solve::convergence::relative_residual(
+            residual_norm,
+            reference_norm,
+        ),
         converged,
         cancelled: observed_cancellation,
         breakdown,

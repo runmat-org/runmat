@@ -1,3 +1,10 @@
+mod solved_source;
+pub use solved_source::{
+    build_structural_adaptation_iteration_from_solved_results, StructuralAdaptationSolvedIteration,
+    StructuralAdaptationSolvedIterationInput, StructuralAdaptationSolvedSource,
+    StructuralAdaptationSolvedSourceInput, StructuralAdaptationSourceError,
+    StructuralAdaptationSourceLimits,
+};
 mod field_transfer;
 mod iteration;
 mod structural_recovery;

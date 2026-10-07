@@ -285,6 +285,7 @@ fn solid_tetrahedron4_recovery_uses_solver_mesh_field_shapes() {
     let solve = LinearSolveResult {
         iterations: 1,
         residual_norm: 0.0,
+        relative_residual: None,
         converged: true,
         host_sync_count: 0,
         solver_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
@@ -348,6 +349,7 @@ fn solid_tetrahedron10_recovery_uses_midside_displacements() {
     let solve = LinearSolveResult {
         iterations: 1,
         residual_norm: 0.0,
+        relative_residual: None,
         converged: true,
         host_sync_count: 0,
         solver_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
@@ -486,6 +488,7 @@ fn finite_nonconverged_solve_still_recovers_solver_mesh_fields() {
     let solve = LinearSolveResult {
         iterations: 10,
         residual_norm: 1.0e-4,
+        relative_residual: None,
         converged: false,
         host_sync_count: 0,
         solver_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,

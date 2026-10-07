@@ -13,11 +13,7 @@ use super::{
     ObservationPartitionTarget, ResolvedComponentProjection, ResolvedObservation,
 };
 
-#[derive(Clone, Copy, Debug, Default)]
-pub(super) struct CompensatedSum {
-    sum: f64,
-    correction: f64,
-}
+use crate::algebra::CompensatedSum;
 
 pub(super) fn required_source_indices(
     observation: &ResolvedObservation,
@@ -164,22 +160,6 @@ pub(super) fn interpolate_values(
         });
     }
     Ok((entities, values))
-}
-
-impl CompensatedSum {
-    pub(super) fn add(&mut self, value: f64) {
-        let next = self.sum + value;
-        self.correction += if self.sum.abs() >= value.abs() {
-            (self.sum - next) + value
-        } else {
-            (value - next) + self.sum
-        };
-        self.sum = next;
-    }
-
-    pub(super) fn total(self) -> f64 {
-        self.sum + self.correction
-    }
 }
 
 pub(super) fn select_values(

@@ -54,6 +54,7 @@ use policy::{
 
 mod artifact_root;
 pub mod assessment;
+mod fsi_result;
 mod nonlinear_result;
 pub use artifact_root::{
     AdmittedFrequencySamplePublication, AnalysisArtifactRoot, FrequencySampleArtifactRootInventory,
@@ -3347,26 +3348,7 @@ fn execute_fsi_with_options(
     let max_cfd_momentum_residual = coupling.max_cfd_momentum_residual;
     let max_cfd_continuity_residual = coupling.max_cfd_continuity_residual;
     let max_interface_residual = coupling.max_interface_residual;
-    let mut run = FeaRunResult {
-        identity,
-        requested_backend: backend,
-        execution_backend: ExecutionBackend::Cpu,
-        solver_backend: LinearAlgebraBackendKind::CpuReference,
-        solver_device_apply_k_ratio: 0.0,
-        solver_method: SolverMethod::FsiPartitionedProjection,
-        preconditioner: SolverPreconditioner::InterfaceRelaxation,
-        solver_host_sync_count: 0,
-        accelerator_evidence: Vec::new(),
-        diagnostics: coupling.diagnostics,
-        spatial_projection_evidence: Vec::new(),
-        structural_static_balance: None,
-        structural_constraint_result: None,
-        structural_connector_result: None,
-        observations: Vec::new(),
-        observation_histories: Vec::new(),
-        series_reductions: Vec::new(),
-        fields: coupling.fields,
-    };
+    let mut run = fsi_result::materialize(identity, backend, coupling);
     let solve_ms = solve_start.elapsed().as_secs_f64() * 1000.0;
     run.diagnostics
         .push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
