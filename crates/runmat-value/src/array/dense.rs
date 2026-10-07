@@ -223,10 +223,10 @@ impl Tensor {
     }
 
     pub fn rows(&self) -> usize {
-        shape_dimensions(&self.shape).0
+        self.shape.first().copied().unwrap_or(1)
     }
     pub fn cols(&self) -> usize {
-        shape_dimensions(&self.shape).1
+        self.shape.get(1).copied().unwrap_or(1)
     }
 
     /// Borrows the authoritative column-major dimensions.

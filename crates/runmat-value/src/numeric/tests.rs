@@ -747,11 +747,24 @@ mod integer_storage_tests {
     fn dense_tensor_dimensions_are_derived_from_the_authoritative_shape() {
         let scalar = Tensor::new(vec![1.0], vec![]).expect("scalar tensor");
         assert!(scalar.shape().is_empty());
-        assert_eq!((scalar.rows(), scalar.cols()), (0, 0));
+        assert_eq!((scalar.rows(), scalar.cols()), (1, 1));
+        assert_eq!(scalar.get2(0, 0).expect("scalar indexing"), 1.0);
 
         let vector = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).expect("vector tensor");
         assert_eq!(vector.shape(), [3]);
-        assert_eq!((vector.rows(), vector.cols()), (1, 3));
+        assert_eq!((vector.rows(), vector.cols()), (3, 1));
+        assert_eq!(vector.get2(2, 0).expect("column-vector indexing"), 3.0);
+        assert!(vector.get2(0, 1).is_err());
+
+        let empty_vector = Tensor::new(Vec::new(), vec![0]).expect("empty column vector");
+        assert_eq!((empty_vector.rows(), empty_vector.cols()), (0, 1));
+
+        let complex_scalar =
+            ComplexTensor::new(vec![(1.0, -1.0)], vec![]).expect("rank-zero complex shape");
+        assert_eq!((complex_scalar.rows(), complex_scalar.cols()), (0, 0));
+        let complex_vector =
+            ComplexTensor::new(vec![(1.0, -1.0); 3], vec![3]).expect("rank-one complex shape");
+        assert_eq!((complex_vector.rows(), complex_vector.cols()), (1, 3));
 
         let complex = ComplexTensor::new(vec![(1.0, -1.0); 6], vec![2, 3]).expect("complex matrix");
         assert_eq!(complex.shape(), [2, 3]);
