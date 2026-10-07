@@ -43,7 +43,7 @@ fn numeric_combinations_have_compatible_order_shape_and_empty_forms() {
     let Value::Tensor(output) = call(Value::Tensor(vector), Value::Num(4.0)).unwrap() else {
         panic!("expected tensor")
     };
-    assert_eq!(output.shape, vec![5, 4]);
+    assert_eq!(output.shape(), [5, 4]);
     assert_eq!(
         output.materialize_f64(),
         vec![
@@ -56,11 +56,11 @@ fn numeric_combinations_have_compatible_order_shape_and_empty_forms() {
     let Value::Tensor(empty) = call(Value::Tensor(vector.clone()), Value::Num(0.0)).unwrap() else {
         panic!("expected tensor")
     };
-    assert_eq!(empty.shape, vec![1, 0]);
+    assert_eq!(empty.shape(), [1, 0]);
     let Value::Tensor(empty) = call(Value::Tensor(vector), Value::Num(4.0)).unwrap() else {
         panic!("expected tensor")
     };
-    assert_eq!(empty.shape, vec![0, 4]);
+    assert_eq!(empty.shape(), [0, 4]);
 
     let single = Tensor::from_f32(vec![2.0, 4.0, 6.0], vec![1, 3]).unwrap();
     let Value::Tensor(single) = call(Value::Tensor(single), Value::Num(2.0)).unwrap() else {
@@ -116,7 +116,7 @@ fn invalid_shapes_values_and_provider_inputs_return_stable_errors() {
         let handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &vector.materialize_f64(),
-                shape: &vector.shape,
+                shape: vector.shape(),
             })
             .unwrap();
         let invalid = call(Value::GpuTensor(handle), Value::Num(2.0)).expect_err("gpu input");

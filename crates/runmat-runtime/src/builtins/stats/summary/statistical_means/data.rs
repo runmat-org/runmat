@@ -208,7 +208,7 @@ pub(super) async fn materialize(kind: ReductionKind, value: Value) -> BuiltinRes
         }),
         Value::ComplexTensor(tensor) => {
             let dtype = tensor.numeric_dtype();
-            let shape = preserved_shape(&tensor.shape, tensor.len());
+            let shape = preserved_shape(tensor.shape(), tensor.len());
             let points = (0..tensor.len())
                 .map(|index| {
                     let (real, imaginary) = tensor
@@ -251,7 +251,7 @@ pub(super) async fn materialize(kind: ReductionKind, value: Value) -> BuiltinRes
 
 fn from_tensor(input: Tensor) -> BuiltinResult<HostData> {
     let dtype = input.numeric_dtype();
-    let shape = preserved_shape(&input.shape, input.len());
+    let shape = preserved_shape(input.shape(), input.len());
     let points = (0..input.len())
         .map(|index| {
             Point::real(Component::from(

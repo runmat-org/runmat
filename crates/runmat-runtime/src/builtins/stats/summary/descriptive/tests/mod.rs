@@ -27,7 +27,7 @@ fn assert_extension_error(result: BuiltinResult<Value>, identifier: &'static str
 fn tensor_values(value: Value) -> (Vec<f64>, Vec<usize>) {
     match value {
         Value::Num(num) => (vec![num], vec![1, 1]),
-        Value::Tensor(tensor) => (tensor.materialize_f64(), tensor.shape),
+        Value::Tensor(tensor) => (tensor.materialize_f64(), tensor.shape().to_vec()),
         other => panic!("expected numeric output, got {other:?}"),
     }
 }

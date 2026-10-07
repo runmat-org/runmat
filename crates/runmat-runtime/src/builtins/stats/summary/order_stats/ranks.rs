@@ -49,7 +49,7 @@ fn is_vector_shape(shape: &[usize]) -> bool {
 
 pub(super) fn tiedrank_tensor(input: Tensor, mode: TiedRankMode) -> BuiltinResult<(Value, Value)> {
     let input_values = ordered_input_values(&input);
-    let shape = tensor::default_shape_for(&input.shape, input_values.len());
+    let shape = tensor::default_shape_for(input.shape(), input_values.len());
     if is_vector_shape(&shape) {
         let (ranks, tieadj) = tiedrank_slice(&input_values, mode);
         let ranks = Tensor::new(ranks, shape)

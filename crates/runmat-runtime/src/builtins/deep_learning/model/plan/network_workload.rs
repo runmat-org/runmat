@@ -82,12 +82,12 @@ impl PayloadFacts {
         let (kind, shape, origin) = match data {
             Value::Tensor(tensor) => (
                 PayloadKind::Real(tensor.numeric_dtype()),
-                tensor.shape.clone(),
+                tensor.shape().to_vec(),
                 PayloadOrigin::Host,
             ),
             Value::ComplexTensor(tensor) => (
                 PayloadKind::Complex(tensor.numeric_dtype()),
-                tensor.shape.clone(),
+                tensor.shape().to_vec(),
                 PayloadOrigin::Host,
             ),
             Value::LogicalArray(array) => (

@@ -128,7 +128,7 @@ pub(crate) async fn parse_ode_input(
             if values.is_empty() {
                 return Err(ode_error(name, format!("{name}: y0 cannot be empty")));
             }
-            (values, tensor.shape, false)
+            (values, tensor.shape().to_vec(), false)
         }
         Value::LogicalArray(logical) => {
             if logical.data.is_empty() {

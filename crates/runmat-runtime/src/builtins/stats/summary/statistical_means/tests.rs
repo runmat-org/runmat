@@ -103,7 +103,7 @@ fn geometric_and_harmonic_singleton_or_trailing_axis_are_identity() {
             let Value::Tensor(result) = result else {
                 panic!("expected unchanged vector")
             };
-            assert_eq!(result.shape, vec![2, 1]);
+            assert_eq!(result.shape(), [2, 1]);
             let values = result.materialize_f64();
             if geometric {
                 assert!(values[0].is_nan());
@@ -192,7 +192,7 @@ fn weighted_rmse_broadcasts_weights_from_unexpanded_forecast() {
     let Value::Tensor(output) = result else {
         panic!("expected per-column values")
     };
-    assert_eq!(output.shape, vec![1, 2]);
+    assert_eq!(output.shape(), [1, 2]);
     for value in output.materialize_f64() {
         assert!((value - (13.0_f64 / 4.0).sqrt()).abs() < 1e-12);
     }
@@ -222,13 +222,13 @@ fn nd_default_vector_and_all_preserve_full_rank() {
     let Value::Tensor(default) = default else {
         panic!("expected N-D result")
     };
-    assert_eq!(default.shape, vec![1, 2, 3]);
+    assert_eq!(default.shape(), [1, 2, 3]);
     let vecdim = Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap());
     let across_axes = block_on(rms::rms_builtin(input.clone(), vec![vecdim])).unwrap();
     let Value::Tensor(across_axes) = across_axes else {
         panic!("expected N-D result")
     };
-    assert_eq!(across_axes.shape, vec![1, 2, 1]);
+    assert_eq!(across_axes.shape(), [1, 2, 1]);
     let all = block_on(rms::rms_builtin(input, vec![Value::from("all")])).unwrap();
     let expected = ((1..=12).map(|value| f64::from(value * value)).sum::<f64>() / 12.0).sqrt();
     assert!((scalar(all) - expected).abs() < 1e-12);
@@ -242,7 +242,7 @@ fn empty_nd_shapes_and_far_trailing_axis_do_not_allocate_by_axis_value() {
     let Value::Tensor(result) = result else {
         panic!("expected empty N-D result")
     };
-    assert_eq!(result.shape, vec![1, 2, 3]);
+    assert_eq!(result.shape(), [1, 2, 3]);
     assert_eq!(result.len(), 6);
     assert!(result.materialize_f64().iter().all(|value| value.is_nan()));
     assert!(scalar(block_on(rms::rms_builtin(empty, vec![Value::from("all")])).unwrap()).is_nan());
@@ -252,5 +252,5 @@ fn empty_nd_shapes_and_far_trailing_axis_do_not_allocate_by_axis_value() {
     let Value::Tensor(result) = result else {
         panic!("expected unchanged shape")
     };
-    assert_eq!(result.shape, vec![2, 2]);
+    assert_eq!(result.shape(), [2, 2]);
 }

@@ -32,7 +32,7 @@ pub(super) fn value(value: Value, selection: usize) -> BuiltinResult<Value> {
 }
 
 fn numeric(tensor: Tensor, selection: usize) -> BuiltinResult<Value> {
-    let population = arguments::vector_len(&tensor.shape)?;
+    let population = arguments::vector_len(tensor.shape())?;
     let rows = output_rows(population, selection)?;
     let storage = tensor.into_numeric_storage().map_err(internal)?;
     let storage = numeric_storage(storage, rows, selection)?;
@@ -66,7 +66,7 @@ fn numeric_storage(
 }
 
 fn complex(tensor: ComplexTensor, selection: usize) -> BuiltinResult<Value> {
-    let population = arguments::vector_len(&tensor.shape)?;
+    let population = arguments::vector_len(tensor.shape())?;
     let rows = output_rows(population, selection)?;
     let storage = match tensor.into_complex_storage() {
         ComplexStorage::F64(values) => {

@@ -55,7 +55,7 @@ fn logical_and_complex_provider_values_restore_their_storage() {
         assert!(runmat_accelerate_api::handle_is_logical(logical_output));
         let output_lease = logical_output.allocation_lease().downgrade();
         let gathered = test_support::gather(output).expect("logical payload");
-        assert_eq!(gathered.shape, vec![6, 3]);
+        assert_eq!(gathered.shape(), [6, 3]);
         assert_eq!(tensor_rows(&gathered)[0], vec![1.0, 1.0, 0.0]);
         assert!(input_lease.acquire().is_some());
         drop(handle);

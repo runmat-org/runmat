@@ -75,7 +75,7 @@ fn quantile_scalar_count_and_vecdim_have_distinct_shapes() {
     let Value::Tensor(count) = count else {
         panic!("expected quantile array")
     };
-    assert_eq!(count.shape, vec![4, 2, 2]);
+    assert_eq!(count.shape(), [4, 2, 2]);
     assert_eq!(&count.materialize_f64()[..4], &[1.0, 1.3, 1.7, 2.0]);
 
     let dims = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
@@ -87,7 +87,7 @@ fn quantile_scalar_count_and_vecdim_have_distinct_shapes() {
     let Value::Tensor(reduced) = reduced else {
         panic!("expected reduced array")
     };
-    assert_eq!(reduced.shape, vec![1, 1, 2]);
+    assert_eq!(reduced.shape(), [1, 1, 2]);
     assert_eq!(reduced.materialize_f64(), vec![2.5, 6.5]);
 }
 
@@ -108,7 +108,7 @@ fn tiedrank_kendall_and_ansari_modes_match_documented_vectors() {
             panic!("expected correction array")
         };
         assert_eq!(ranks.materialize_f64(), vec![1.0, 2.5, 4.0, 2.5, 5.0]);
-        assert_eq!(adjustment.shape, vec![3, 1]);
+        assert_eq!(adjustment.shape(), [3, 1]);
         assert_eq!(adjustment.materialize_f64(), vec![3.0, 0.0, 18.0]);
     }
     let ansari = block_on(tiedrank::tiedrank_builtin(
@@ -156,7 +156,7 @@ fn quantile_vector_uses_midpoint_interpolation() {
     .unwrap();
     match out {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![3, 1]);
+            assert_eq!(tensor.shape(), [3, 1]);
             assert_eq!(tensor.materialize_f64(), vec![1.5, 3.0, 6.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -255,7 +255,7 @@ fn prctile_reduces_columns_by_default() {
     let out = block_on(prctile::prctile_builtin(x, vec![Value::Num(50.0)])).unwrap();
     match out {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), [1, 2]);
             assert_eq!(tensor.materialize_f64(), vec![2.0, 15.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -268,7 +268,7 @@ fn tiedrank_averages_ties_and_preserves_nan() {
     let out = block_on(tiedrank::tiedrank_builtin(x, vec![])).unwrap();
     match out {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![4, 1]);
+            assert_eq!(tensor.shape(), [4, 1]);
             assert_eq!(tensor.materialize_f64()[0], 1.0);
             assert_eq!(tensor.materialize_f64()[1], 2.5);
             assert_eq!(tensor.materialize_f64()[2], 2.5);
@@ -318,14 +318,14 @@ fn tiedrank_ranks_matrix_columns_and_returns_tieadj() {
             assert_eq!(values.len(), 2);
             match &values[0] {
                 Value::Tensor(tensor) => {
-                    assert_eq!(tensor.shape, vec![3, 2]);
+                    assert_eq!(tensor.shape(), [3, 2]);
                     assert_eq!(tensor.materialize_f64(), vec![3.0, 1.5, 1.5, 1.5, 1.5, 3.0]);
                 }
                 other => panic!("expected rank tensor, got {other:?}"),
             }
             match &values[1] {
                 Value::Tensor(tensor) => {
-                    assert_eq!(tensor.shape, vec![1, 2]);
+                    assert_eq!(tensor.shape(), [1, 2]);
                     assert_eq!(tensor.materialize_f64(), vec![3.0, 3.0]);
                 }
                 other => panic!("expected tieadj tensor, got {other:?}"),
@@ -348,7 +348,7 @@ fn quantile_typed_integer_input_and_probability_read_exact_storage() {
     .unwrap();
     match out {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 1]);
+            assert_eq!(tensor.shape(), [2, 1]);
             assert_eq!(tensor.materialize_f64(), vec![1.0, 27.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -372,7 +372,7 @@ fn prctile_typed_integer_input_and_percentiles_read_exact_storage() {
     .unwrap();
     match out {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![3, 2]);
+            assert_eq!(tensor.shape(), [3, 2]);
             let expected = [20.0, 40.0, 60.0, 30.0, 50.0, 70.0];
             for (actual, expect) in tensor.materialize_f64().iter().zip(expected.iter()) {
                 assert!((actual - expect).abs() < 1.0e-12, "{actual} vs {expect}");
@@ -394,14 +394,14 @@ fn tiedrank_typed_integer_matrix_reads_exact_storage() {
             assert_eq!(values.len(), 2);
             match &values[0] {
                 Value::Tensor(tensor) => {
-                    assert_eq!(tensor.shape, vec![3, 2]);
+                    assert_eq!(tensor.shape(), [3, 2]);
                     assert_eq!(tensor.materialize_f64(), vec![3.0, 1.5, 1.5, 1.5, 1.5, 3.0]);
                 }
                 other => panic!("expected rank tensor, got {other:?}"),
             }
             match &values[1] {
                 Value::Tensor(tensor) => {
-                    assert_eq!(tensor.shape, vec![1, 2]);
+                    assert_eq!(tensor.shape(), [1, 2]);
                     assert_eq!(tensor.materialize_f64(), vec![3.0, 3.0]);
                 }
                 other => panic!("expected tieadj tensor, got {other:?}"),

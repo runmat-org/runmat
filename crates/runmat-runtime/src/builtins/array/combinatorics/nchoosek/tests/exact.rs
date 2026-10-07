@@ -60,7 +60,7 @@ fn every_integer_class_preserves_exact_scalar_and_vector_storage() {
             else {
                 panic!("expected empty tensor")
             };
-            assert_eq!(output.shape, shape);
+            assert_eq!(output.shape(), shape.as_slice());
             assert_eq!(output.integer_storage(), Some(&empty));
         }
     }
@@ -110,7 +110,7 @@ fn every_complex_integer_class_preserves_both_components_exactly() {
         else {
             panic!("expected complex tensor")
         };
-        assert_eq!(output.shape, vec![3, 2]);
+        assert_eq!(output.shape(), [3, 2]);
         assert_eq!(output.integer_storage(), Some(&expected));
     }
 }

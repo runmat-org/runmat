@@ -9,7 +9,7 @@ use super::super::enumeration::{self, EnumerationError};
 use super::{cardinality, error, shape};
 
 pub(super) fn numeric(tensor: Tensor) -> BuiltinResult<Value> {
-    let elements = shape::vector_len(&tensor.shape)?;
+    let elements = shape::vector_len(tensor.shape())?;
     let rows = cardinality::output_rows(elements)?;
     let storage = tensor
         .into_numeric_storage()
@@ -41,7 +41,7 @@ fn permute_numeric_storage(storage: NumericStorage, rows: usize) -> BuiltinResul
 }
 
 pub(super) fn complex(tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let elements = shape::vector_len(&tensor.shape)?;
+    let elements = shape::vector_len(tensor.shape())?;
     let rows = cardinality::output_rows(elements)?;
     if let Some(storage) = tensor.integer_storage() {
         let storage = storage

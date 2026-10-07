@@ -142,7 +142,7 @@ async fn parse_flagged_options(
 }
 
 fn normalize_shape(input: &Tensor) -> Vec<usize> {
-    tensor::default_shape_for(&input.shape, tensor::tensor_element_len(input))
+    tensor::default_shape_for(input.shape(), tensor::tensor_element_len(input))
 }
 
 fn resolved_axes(shape: &[usize], axes: Axes) -> Vec<usize> {

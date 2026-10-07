@@ -129,7 +129,7 @@ fn flagged_statistics_keep_single_output_class_and_bound_far_dimensions() {
             panic!("a single result must retain its tensor carrier")
         };
         assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
-        assert_eq!(tensor.shape, vec![1, 1]);
+        assert_eq!(tensor.shape(), [1, 1]);
     }
 
     let data = || Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());

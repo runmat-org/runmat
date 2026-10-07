@@ -29,7 +29,7 @@ fn parse_axes(name: &str, value: &Value) -> BuiltinResult<ReductionAxes> {
     if tensor::tensor_element_len(array) <= 1 {
         return Ok(ReductionAxes::Dimensions(vec![parse_dim(name, value)? - 1]));
     }
-    if array.shape.iter().filter(|size| **size > 1).count() > 1 {
+    if array.shape().iter().filter(|size| **size > 1).count() > 1 {
         return Err(order_error(
             name,
             format!("{name}: vecdim must be a vector"),
@@ -60,7 +60,7 @@ fn parse_axes(name: &str, value: &Value) -> BuiltinResult<ReductionAxes> {
 
 fn input_shape_before_gather(name: &str, input: &Value) -> BuiltinResult<Vec<usize>> {
     let (shape, count) = match input {
-        Value::Tensor(tensor) => (&tensor.shape[..], tensor.len()),
+        Value::Tensor(tensor) => (tensor.shape(), tensor.len()),
         Value::LogicalArray(array) => (&array.shape[..], array.data.len()),
         Value::GpuTensor(handle) => {
             let shape = handle.shape();
@@ -453,7 +453,7 @@ fn quantile_from_sorted(values: &[OrderedValue], p: f64, method: QuantileMethod)
 
 pub(super) fn quantile_tensor(mut args: QuantileArgs, name: &str) -> BuiltinResult<Value> {
     let input_values = ordered_input_values(&args.input);
-    let shape = tensor::default_shape_for(&args.input.shape, input_values.len());
+    let shape = tensor::default_shape_for(args.input.shape(), input_values.len());
     if matches!(args.axes, ReductionAxes::All) {
         let values = sorted_slice(input_values, args.nanflag);
         for (result, probability) in args.output.iter_mut().zip(&args.probabilities) {

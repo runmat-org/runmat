@@ -10,7 +10,7 @@ fn numeric_vectors_use_reverse_lexicographic_order() {
     let Value::Tensor(output) = call(Value::Tensor(input)).expect("perms") else {
         panic!("expected tensor")
     };
-    assert_eq!(output.shape, vec![6, 3]);
+    assert_eq!(output.shape(), [6, 3]);
     assert_eq!(output.numeric_dtype(), NumericDType::F64);
     assert_eq!(
         tensor_rows(&output),
@@ -37,7 +37,7 @@ fn columns_duplicates_scalars_and_empty_vectors_keep_compatible_semantics() {
     let Value::Tensor(output) = call(Value::Tensor(duplicates)).expect("perms") else {
         panic!("expected tensor")
     };
-    assert_eq!(output.rows, 6);
+    assert_eq!(output.rows(), 6);
     assert_eq!(tensor_rows(&output)[0], tensor_rows(&output)[1]);
 
     assert_eq!(call(Value::Num(7.0)).expect("scalar"), Value::Num(7.0));
@@ -50,7 +50,7 @@ fn columns_duplicates_scalars_and_empty_vectors_keep_compatible_semantics() {
         let Value::Tensor(output) = call(Value::Tensor(empty)).expect("perms") else {
             panic!("expected tensor")
         };
-        assert_eq!(output.shape, vec![1, 0]);
+        assert_eq!(output.shape(), [1, 0]);
     }
 }
 

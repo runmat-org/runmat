@@ -11,20 +11,20 @@ fn call(value: Value) -> BuiltinResult<Value> {
 }
 
 fn tensor_rows(tensor: &Tensor) -> Vec<Vec<f64>> {
-    (0..tensor.rows)
+    (0..tensor.rows())
         .map(|row| {
-            (0..tensor.cols)
-                .map(|column| tensor.materialize_f64()[column * tensor.rows + row])
+            (0..tensor.cols())
+                .map(|column| tensor.materialize_f64()[column * tensor.rows() + row])
                 .collect()
         })
         .collect()
 }
 
 fn complex_rows(tensor: &ComplexTensor) -> Vec<Vec<(f64, f64)>> {
-    (0..tensor.rows)
+    (0..tensor.rows())
         .map(|row| {
-            (0..tensor.cols)
-                .map(|column| tensor.materialize_f64()[column * tensor.rows + row])
+            (0..tensor.cols())
+                .map(|column| tensor.materialize_f64()[column * tensor.rows() + row])
                 .collect()
         })
         .collect()
