@@ -119,19 +119,24 @@ fn matrix_property(object: &ObjectInstance, name: &str) -> ConversionResult<DMat
     let value = property(object, name)?;
     match value {
         Value::Tensor(tensor) => {
-            ensure_matrix_shape(name, &tensor.shape)?;
+            ensure_matrix_shape(name, tensor.shape())?;
             let data = tensor::tensor_values_f64(tensor)
                 .into_iter()
                 .map(|re| Complex64::new(re, 0.0))
                 .collect::<Vec<_>>();
             ensure_finite_coefficients(name, &data)?;
-            Ok(DMatrix::from_column_slice(tensor.rows, tensor.cols, &data))
+            let (rows, cols) = rows_cols(tensor.shape());
+            Ok(DMatrix::from_column_slice(rows, cols, &data))
         }
         Value::ComplexTensor(tensor) => {
-            ensure_matrix_shape(name, &tensor.shape)?;
+            ensure_matrix_shape(name, tensor.shape())?;
             let data = tensor::complex_tensor_values_complex64(tensor);
             ensure_finite_coefficients(name, &data)?;
-            Ok(DMatrix::from_column_slice(tensor.rows, tensor.cols, &data))
+            Ok(DMatrix::from_column_slice(
+                tensor.rows(),
+                tensor.cols(),
+                &data,
+            ))
         }
         Value::LogicalArray(logical) => {
             ensure_matrix_shape(name, &logical.shape)?;
@@ -382,6 +387,24 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_value::{ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor};
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn state_matrix_property_preserves_rank_one_row_geometry() {
+        let mut object = ObjectInstance::new("ss".to_string());
+        for value in [
+            Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![2]).unwrap()),
+            Value::ComplexTensor(
+                ComplexTensor::new(vec![(2.0, 1.0), (3.0, 4.0)], vec![2]).unwrap(),
+            ),
+        ] {
+            object.properties.insert("B".into(), value);
+            let matrix = matrix_property(&object, "B").unwrap();
+            assert_eq!(matrix.shape(), (1, 2));
+            assert_eq!(matrix[(0, 0)].re, 2.0);
+            assert_eq!(matrix[(0, 1)].re, 3.0);
+        }
+    }
 
     #[test]
     fn ss_conversion_preflights_then_selectively_downloads_nested_properties() {

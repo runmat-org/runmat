@@ -79,9 +79,9 @@ fn compute_pol2cart(
     z: Option<&Tensor>,
     include_z_output: bool,
 ) -> BuiltinResult<(Tensor, Tensor, Option<Tensor>)> {
-    let theta_rho = matlab_broadcast_shape(&theta.shape, &rho.shape)?;
+    let theta_rho = matlab_broadcast_shape(theta.shape(), rho.shape())?;
     let final_shape = match z {
-        Some(z_tensor) => matlab_broadcast_shape(&theta_rho, &z_tensor.shape)?,
+        Some(z_tensor) => matlab_broadcast_shape(&theta_rho, z_tensor.shape())?,
         None => theta_rho,
     };
     let len = if final_shape.contains(&0) {
@@ -90,11 +90,11 @@ fn compute_pol2cart(
         final_shape.iter().copied().product::<usize>()
     };
 
-    let theta_plan = MatlabBroadcastIndexPlan::new(&theta.shape, &final_shape)?;
-    let rho_plan = MatlabBroadcastIndexPlan::new(&rho.shape, &final_shape)?;
+    let theta_plan = MatlabBroadcastIndexPlan::new(theta.shape(), &final_shape)?;
+    let rho_plan = MatlabBroadcastIndexPlan::new(rho.shape(), &final_shape)?;
     let z_plan = match z {
         Some(z_tensor) => Some(MatlabBroadcastIndexPlan::new(
-            &z_tensor.shape,
+            z_tensor.shape(),
             &final_shape,
         )?),
         None => None,
