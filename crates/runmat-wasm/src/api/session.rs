@@ -1326,7 +1326,9 @@ impl RunMatWasm {
             session.set_telemetry_sink(self.telemetry_sink.clone());
         }
         #[cfg(target_arch = "wasm32")]
-        *self.local_tasks.borrow_mut() = session.browser_local_task_supervisor();
+        {
+            *self.local_tasks.borrow_mut() = session.browser_local_task_supervisor();
+        }
         let mut slot = self.session.borrow_mut();
         *slot = session;
         let has_stdin_handler = JS_STDIN_HANDLER.with(|s| s.borrow().is_some());
@@ -1598,7 +1600,11 @@ impl RunMatWasm {
         self.ensure_not_disposed()?;
         let payload = {
             let mut session = self.session.borrow_mut();
-            WorkspacePayload::from(session.workspace_snapshot())
+            WorkspacePayload::from(
+                session
+                    .workspace_snapshot()
+                    .map_err(|err| runtime_error_to_js(&err))?,
+            )
         };
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize workspace snapshot: {err}")))
