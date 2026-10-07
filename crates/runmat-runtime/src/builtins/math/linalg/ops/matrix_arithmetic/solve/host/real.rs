@@ -12,8 +12,8 @@ pub(super) fn evaluate(
     lhs: &Tensor,
     rhs: &Tensor,
 ) -> BuiltinResult<Tensor> {
-    validation::ensure_matrix(orientation, &lhs.shape)?;
-    validation::ensure_matrix(orientation, &rhs.shape)?;
+    validation::ensure_matrix(orientation, lhs.shape())?;
+    validation::ensure_matrix(orientation, rhs.shape())?;
     let divisor = match orientation {
         SolveOrientation::Left if tensor::is_scalar_tensor(lhs) => Some((lhs, rhs)),
         SolveOrientation::Right if tensor::is_scalar_tensor(rhs) => Some((rhs, lhs)),

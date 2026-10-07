@@ -95,13 +95,16 @@ pub(super) async fn evaluate(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
             value,
             runmat_value::NumericDType::F32,
         ))),
-        ComplexTensor(value) => runmat_value::ComplexTensor::from_f64_values_with_dtype(
-            value.materialize_f64(),
-            value.shape,
-            runmat_value::NumericDType::F32,
-        )
-        .map(ComplexTensor)
-        .map_err(errors::invalid_input),
+        ComplexTensor(value) => {
+            let (storage, shape) = value.into_complex_storage_and_shape();
+            runmat_value::ComplexTensor::from_f64_values_with_dtype(
+                storage.materialize_f64(),
+                shape,
+                runmat_value::NumericDType::F32,
+            )
+            .map(ComplexTensor)
+            .map_err(errors::invalid_input)
+        }
         Num(value) => runmat_value::Tensor::from_f32(vec![value as f32], vec![1, 1])
             .map(Tensor)
             .map_err(errors::invalid_input),

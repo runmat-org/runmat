@@ -12,8 +12,8 @@ pub(super) fn evaluate(
     lhs: &ComplexTensor,
     rhs: &ComplexTensor,
 ) -> BuiltinResult<ComplexTensor> {
-    validation::ensure_matrix(orientation, &lhs.shape)?;
-    validation::ensure_matrix(orientation, &rhs.shape)?;
+    validation::ensure_matrix(orientation, lhs.shape())?;
+    validation::ensure_matrix(orientation, rhs.shape())?;
     let divisor = match orientation {
         SolveOrientation::Left if conversion::is_complex_scalar(lhs) => Some((lhs, rhs)),
         SolveOrientation::Right if conversion::is_complex_scalar(rhs) => Some((rhs, lhs)),
@@ -38,8 +38,8 @@ pub(super) fn evaluate(
 
     let lhs_data = conversion::complex_values(lhs);
     let rhs_data = conversion::complex_values(rhs);
-    let lhs_matrix = DMatrix::from_column_slice(lhs.rows, lhs.cols, &lhs_data);
-    let rhs_matrix = DMatrix::from_column_slice(rhs.rows, rhs.cols, &rhs_data);
+    let lhs_matrix = DMatrix::from_column_slice(lhs.rows(), lhs.cols(), &lhs_data);
+    let rhs_matrix = DMatrix::from_column_slice(rhs.rows(), rhs.cols(), &rhs_data);
     let solution = solver::solve(orientation, &lhs_matrix, &rhs_matrix)?;
     conversion::complex_tensor(orientation, solution, result_dtype(lhs, rhs))
 }

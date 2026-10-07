@@ -36,8 +36,8 @@ pub(super) fn ensure_matching_complex_dimension(
     rhs: &ComplexTensor,
 ) -> BuiltinResult<()> {
     let matches = match orientation {
-        SolveOrientation::Left => lhs.rows == rhs.rows,
-        SolveOrientation::Right => lhs.cols == rhs.cols,
+        SolveOrientation::Left => lhs.rows() == rhs.rows(),
+        SolveOrientation::Right => lhs.cols() == rhs.cols(),
     };
     matching_dimension_result(orientation, matches)
 }
@@ -81,8 +81,8 @@ pub(super) fn has_empty_complex_solve_dimension(
     rhs: &ComplexTensor,
 ) -> bool {
     match orientation {
-        SolveOrientation::Left => lhs.rows == 0,
-        SolveOrientation::Right => rhs.cols == 0,
+        SolveOrientation::Left => lhs.rows() == 0,
+        SolveOrientation::Right => rhs.cols() == 0,
     }
 }
 
@@ -92,7 +92,7 @@ pub(super) fn complex_output_dimensions(
     rhs: &ComplexTensor,
 ) -> (usize, usize) {
     match orientation {
-        SolveOrientation::Left => (lhs.cols, rhs.cols),
-        SolveOrientation::Right => (lhs.rows, rhs.rows),
+        SolveOrientation::Left => (lhs.cols(), rhs.cols()),
+        SolveOrientation::Right => (lhs.rows(), rhs.rows()),
     }
 }

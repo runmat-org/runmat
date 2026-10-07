@@ -11,7 +11,7 @@ use super::NumericInput;
 pub(super) fn classify(orientation: SolveOrientation, value: Value) -> BuiltinResult<NumericInput> {
     match value {
         Value::ComplexTensor(tensor) => {
-            super::validation::ensure_matrix(orientation, &tensor.shape)?;
+            super::validation::ensure_matrix(orientation, tensor.shape())?;
             Ok(NumericInput::Complex(tensor))
         }
         Value::Complex(real, imag) => ComplexTensor::new(vec![(real, imag)], vec![1, 1])
@@ -22,7 +22,7 @@ pub(super) fn classify(orientation: SolveOrientation, value: Value) -> BuiltinRe
         other => {
             let tensor = tensor::value_into_tensor_for(orientation.name(), other)
                 .map_err(|error| errors::invalid_input(orientation, error))?;
-            super::validation::ensure_matrix(orientation, &tensor.shape)?;
+            super::validation::ensure_matrix(orientation, tensor.shape())?;
             Ok(NumericInput::Real(tensor))
         }
     }
@@ -62,7 +62,7 @@ pub(super) fn promote_real(
         .map(|&real| (real, 0.0))
         .collect();
     let dtype = storage_dtype(tensor.numeric_dtype());
-    ComplexTensor::from_f64_values_with_dtype(data, tensor.shape.clone(), dtype)
+    ComplexTensor::from_f64_values_with_dtype(data, tensor.shape().to_vec(), dtype)
         .map_err(|error| errors::internal(orientation, format!("{}: {error}", orientation.name())))
 }
 
@@ -77,7 +77,7 @@ pub(super) fn scale_real(
         .collect();
     Tensor::new_with_dtype(
         values,
-        tensor.shape.clone(),
+        tensor.shape().to_vec(),
         storage_dtype(tensor.numeric_dtype()),
     )
     .map_err(|error| errors::internal(orientation, error))
@@ -98,7 +98,7 @@ pub(super) fn scale_complex(
         .collect();
     ComplexTensor::from_f64_values_with_dtype(
         data,
-        tensor.shape.clone(),
+        tensor.shape().to_vec(),
         storage_dtype(tensor.numeric_dtype()),
     )
     .map_err(|error| errors::internal(orientation, format!("{}: {error}", orientation.name())))
