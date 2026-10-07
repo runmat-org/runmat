@@ -26,6 +26,14 @@ use super::pp::{
 
 const NAME: &str = "interp2";
 
+fn interp2_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 fn interp2_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -218,7 +226,8 @@ impl ParsedInterp2 {
             let y = iter.next().expect("Y");
             let z_value = iter.next().expect("Z");
             let z = z_tensor(z_value).await?;
-            let (x_axis, y_axis) = axes_from_values(x, y, z.rows, z.cols).await?;
+            let (rows, cols) = interp2_matrix_dimensions(&z);
+            let (x_axis, y_axis) = axes_from_values(x, y, rows, cols).await?;
             let xq = iter.next().expect("Xq");
             let yq = iter.next().expect("Yq");
             (x_axis, y_axis, z, xq, yq, iter.collect::<Vec<_>>())
@@ -226,8 +235,9 @@ impl ParsedInterp2 {
             let mut iter = args.into_iter();
             let z_value = iter.next().expect("Z");
             let z = z_tensor(z_value).await?;
-            let x_axis: Vec<f64> = (1..=z.cols).map(|v| v as f64).collect();
-            let y_axis: Vec<f64> = (1..=z.rows).map(|v| v as f64).collect();
+            let (rows, cols) = interp2_matrix_dimensions(&z);
+            let x_axis: Vec<f64> = (1..=cols).map(|v| v as f64).collect();
+            let y_axis: Vec<f64> = (1..=rows).map(|v| v as f64).collect();
             let xq = iter.next().expect("Xq");
             let yq = iter.next().expect("Yq");
             (x_axis, y_axis, z, xq, yq, iter.collect::<Vec<_>>())
@@ -282,10 +292,11 @@ async fn z_tensor(value: Value) -> crate::BuiltinResult<Tensor> {
     let gathered = dispatcher::gather_if_needed_async(&value).await?;
     let z =
         tensor::value_into_tensor_for(NAME, gathered).map_err(|err| interp2_invalid_input(&err))?;
-    if z.shape.len() > 2 {
+    if z.shape().len() > 2 {
         return Err(interp2_invalid_argument("Z must be a 2-D matrix"));
     }
-    if z.rows < 2 || z.cols < 2 {
+    let (rows, cols) = interp2_matrix_dimensions(&z);
+    if rows < 2 || cols < 2 {
         return Err(interp2_invalid_argument(
             "Z must have at least two rows and two columns",
         ));
@@ -313,7 +324,7 @@ async fn axis_from_value(
     let gathered = dispatcher::gather_if_needed_async(&value).await?;
     let tensor_value = tensor::value_into_tensor_for(NAME, gathered.clone());
     if let Ok(t) = tensor_value {
-        if is_vector_shape(&t.shape) {
+        if is_vector_shape(t.shape()) {
             let expected = if is_x { cols } else { rows };
             if t.len() != expected {
                 return Err(interp2_invalid_argument(
@@ -322,7 +333,7 @@ async fn axis_from_value(
             }
             return Ok(tensor::tensor_into_values_f64(t));
         }
-        if t.rows == rows && t.cols == cols {
+        if interp2_matrix_dimensions(&t) == (rows, cols) {
             return if is_x {
                 Ok((0..cols)
                     .map(|col| tensor::tensor_value_f64(&t, col * rows))
@@ -427,7 +438,7 @@ fn eval_nearest(parsed: &ParsedInterp2, xq: f64, yq: f64) -> f64 {
 }
 
 fn z_at(z: &Tensor, row: usize, col: usize) -> f64 {
-    tensor::tensor_value_f64(z, row + col * z.rows)
+    tensor::tensor_value_f64(z, row + col * interp2_matrix_dimensions(z).0)
 }
 
 fn nearest_index(axis: &[f64], q: f64, extrap: &Extrapolation) -> Option<usize> {
@@ -465,6 +476,31 @@ mod tests {
     fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
         Value::Tensor(tensor)
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn interp2_sample_grid_preserves_dense_rank_boundaries() {
+        for (data, shape, dimensions) in [
+            (vec![7.0], Vec::new(), (0, 0)),
+            (vec![1.0, 2.0, 3.0, 4.0], vec![4], (1, 4)),
+        ] {
+            let z = Tensor::new(data, shape).unwrap();
+            assert_eq!(interp2_matrix_dimensions(&z), dimensions);
+            let error = block_on(interp2_builtin(vec![
+                Value::Tensor(z),
+                Value::Num(1.5),
+                Value::Num(1.5),
+            ]))
+            .expect_err("Z needs two rows and two columns");
+            assert_eq!(
+                error.identifier(),
+                INTERP2_ERROR_INVALID_ARGUMENT.identifier
+            );
+            assert!(error
+                .message()
+                .contains("at least two rows and two columns"));
+        }
     }
 
     #[test]
