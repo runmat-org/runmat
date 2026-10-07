@@ -32,8 +32,8 @@ where
     };
     let shape = crate::builtins::common::broadcast::broadcast_shapes(
         entry.identity.name,
-        &a.shape,
-        &b.shape,
+        a.shape(),
+        b.shape(),
     );
     let shape = shape
         .and_then(|shape| {

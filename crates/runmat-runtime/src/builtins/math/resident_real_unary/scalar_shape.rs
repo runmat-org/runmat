@@ -13,8 +13,8 @@ pub(in crate::builtins::math) fn preserve_elementwise_scalar_shape(
 ) -> BuiltinResult<Value> {
     let canonical_scalar = match &output {
         Value::Num(_) | Value::Complex(_, _) | Value::Int(_) | Value::Bool(_) => true,
-        Value::Tensor(tensor) => tensor.shape == [1, 1],
-        Value::ComplexTensor(tensor) => tensor.shape == [1, 1],
+        Value::Tensor(tensor) => tensor.shape() == [1, 1],
+        Value::ComplexTensor(tensor) => tensor.shape() == [1, 1],
         Value::LogicalArray(array) => array.shape == [1, 1],
         _ => false,
     };
@@ -76,7 +76,7 @@ mod tests {
         else {
             panic!("typed tensor expected");
         };
-        assert_eq!(integer.shape, vec![1, 1, 1]);
+        assert_eq!(integer.shape(), &[1, 1, 1]);
         assert_eq!(
             integer.integer_storage(),
             Some(&IntegerStorage::I16(vec![7]))
@@ -87,7 +87,7 @@ mod tests {
         else {
             panic!("complex tensor expected");
         };
-        assert_eq!(complex.shape, vec![1, 1, 1]);
+        assert_eq!(complex.shape(), &[1, 1, 1]);
         assert_eq!(complex.materialize_f64(), vec![(0.0, 2.0)]);
         let Value::Tensor(single) = preserve_elementwise_scalar_shape(
             Value::Tensor(Tensor::from_f32(vec![0.5], vec![1, 1]).unwrap()),
@@ -97,7 +97,7 @@ mod tests {
         .unwrap() else {
             panic!("Single tensor expected");
         };
-        assert_eq!(single.shape, vec![1, 1, 1]);
+        assert_eq!(single.shape(), &[1, 1, 1]);
         assert_eq!(single.numeric_dtype(), runmat_value::NumericDType::F32);
         let Value::ComplexTensor(single) = preserve_elementwise_scalar_shape(
             Value::ComplexTensor(ComplexTensor::from_f32(vec![(0.5, 1.0)], vec![1, 1]).unwrap()),
@@ -107,7 +107,7 @@ mod tests {
         .unwrap() else {
             panic!("complex Single tensor expected");
         };
-        assert_eq!(single.shape, vec![1, 1, 1]);
+        assert_eq!(single.shape(), &[1, 1, 1]);
         assert_eq!(single.numeric_dtype(), runmat_value::NumericDType::F32);
         let Value::LogicalArray(logical) = preserve_elementwise_scalar_shape(
             Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).unwrap()),
@@ -130,6 +130,6 @@ mod tests {
         else {
             panic!("existing carrier retained");
         };
-        assert_eq!(unmodified.shape, vec![1, 2]);
+        assert_eq!(unmodified.shape(), &[1, 2]);
     }
 }

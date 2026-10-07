@@ -142,7 +142,7 @@ fn ceil_numeric(value: Value) -> BuiltinResult<Value> {
 }
 
 fn ceil_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|err| builtin_error_with_detail(&CEIL_ERROR_INTERNAL, err))?;
@@ -160,8 +160,8 @@ fn ceil_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn ceil_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = ct.shape.clone();
-    let storage = match ct.into_complex_storage() {
+    let (storage, shape) = ct.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(values) => ComplexStorage::F64(
             values
                 .into_iter()
@@ -331,7 +331,7 @@ pub(crate) mod tests {
         let result = ceil_builtin(Value::Tensor(tensor), Vec::new()).expect("ceil");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), [2, 2]);
                 assert_eq!(t.materialize_f64(), vec![2.0, 5.0, -3.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -374,7 +374,7 @@ pub(crate) mod tests {
         let result = ceil_builtin(Value::CharArray(chars), Vec::new()).expect("ceil");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), [1, 2]);
                 assert_eq!(t.materialize_f64(), vec![65.0, 66.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -388,7 +388,7 @@ pub(crate) mod tests {
         let result = ceil_builtin(Value::LogicalArray(logical), Vec::new()).expect("ceil");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), [2, 2]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 0.0, 1.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -419,7 +419,7 @@ pub(crate) mod tests {
             .expect("integer");
         match ceil_builtin(Value::Tensor(tensor), Vec::new()).expect("ceil") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), [1, 2]);
                 assert_eq!(
                     out.integer_storage(),
                     Some(&IntegerStorage::U64(vec![u64::MAX, 3]))
@@ -467,12 +467,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.2, 1.9, -0.1, -3.8], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = ceil_builtin(Value::GpuTensor(handle), Vec::new()).expect("ceil");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), [2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 2.0, 0.0, -3.0]);
         });
     }
@@ -537,7 +537,7 @@ pub(crate) mod tests {
         let cpu = ceil_numeric(Value::Tensor(t.clone())).unwrap();
         let view = HostTensorView {
             data: &t.materialize_f64(),
-            shape: &t.shape,
+            shape: t.shape(),
         };
         let h = runmat_accelerate_api::provider()
             .unwrap()
@@ -547,7 +547,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
-                assert_eq!(gt.shape, ct.shape);
+                assert_eq!(gt.shape(), ct.shape());
                 assert_eq!(gt.materialize_f64(), ct.materialize_f64());
             }
             (Value::Num(c), gt) => {

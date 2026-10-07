@@ -201,7 +201,7 @@ fn fix_numeric(value: Value) -> BuiltinResult<Value> {
 }
 
 fn fix_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|e| builtin_error_with_detail(&FIX_ERROR_INTERNAL, e))?;
@@ -229,8 +229,8 @@ fn fix_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn fix_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = ct.shape.clone();
-    let storage = match ct.into_complex_storage() {
+    let (storage, shape) = ct.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(values) => ComplexStorage::F64(
             values
                 .into_iter()
@@ -371,7 +371,7 @@ pub(crate) mod tests {
         let result = fix_builtin(Value::Tensor(tensor)).expect("fix");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), [2, 2]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 4.0, -2.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -398,7 +398,7 @@ pub(crate) mod tests {
         let result = fix_builtin(Value::CharArray(chars)).expect("fix");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), [1, 3]);
                 assert_eq!(t.materialize_f64(), vec![65.0, 66.0, 67.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -450,7 +450,7 @@ pub(crate) mod tests {
             .expect("integer");
         match fix_builtin(Value::Tensor(tensor)).expect("fix") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), [1, 2]);
                 assert_eq!(
                     out.integer_storage(),
                     Some(&IntegerStorage::U64(vec![u64::MAX, 3]))
@@ -498,7 +498,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(out) = result else {
             panic!("expected complex tensor result");
         };
-        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.shape(), [2, 1]);
         assert_eq!(out.materialize_f64(), vec![(1.0, -2.0), (-3.0, 0.0)]);
     }
 
@@ -633,7 +633,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![-1.9, -0.1, 0.1, 2.6], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = fix_builtin(Value::GpuTensor(handle)).expect("fix");
@@ -653,7 +653,7 @@ pub(crate) mod tests {
         let cpu = fix_tensor(tensor.clone()).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = runmat_accelerate_api::provider()
             .unwrap()
@@ -661,7 +661,7 @@ pub(crate) mod tests {
             .unwrap();
         let gpu = block_on(fix_gpu(handle)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
-        assert_eq!(gathered.shape, cpu.shape);
+        assert_eq!(gathered.shape(), cpu.shape());
         assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
     }
 }

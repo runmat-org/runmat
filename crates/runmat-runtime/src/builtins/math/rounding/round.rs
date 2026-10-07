@@ -251,7 +251,7 @@ fn round_numeric(value: Value, strategy: RoundStrategy) -> BuiltinResult<Value> 
 }
 
 fn round_tensor(tensor: Tensor, strategy: RoundStrategy) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = match tensor
         .into_numeric_storage()
         .map_err(|err| builtin_error_with_detail(&ROUND_ERROR_INTERNAL, err))?
@@ -275,8 +275,8 @@ fn round_tensor(tensor: Tensor, strategy: RoundStrategy) -> BuiltinResult<Tensor
 }
 
 fn round_complex_tensor(ct: ComplexTensor, strategy: RoundStrategy) -> BuiltinResult<Value> {
-    let shape = ct.shape.clone();
-    let storage = match ct.into_complex_storage() {
+    let (storage, shape) = ct.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(values) => ComplexStorage::F64(
             values
                 .into_iter()
@@ -662,7 +662,7 @@ pub(crate) mod tests {
         let result = round_builtin(Value::Tensor(tensor), vec![Value::Num(2.0)]).expect("round");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
                 let expected = [1.23, 2.5, 3.5];
                 for (a, b) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12, "expected {b}, got {a}");
@@ -731,12 +731,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![-2.5, -0.2, 0.5, 1.8], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = round_builtin(Value::GpuTensor(handle), Vec::new()).expect("round");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), &[4, 1]);
             assert_eq!(gathered.materialize_f64(), vec![-3.0, 0.0, 1.0, 2.0]);
         });
     }
@@ -747,7 +747,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.2345, 2.499, 149.9, 150.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
@@ -757,7 +757,7 @@ pub(crate) mod tests {
                 "digit-aware round should stay GPU resident"
             );
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), &[4, 1]);
             assert_eq!(gathered.materialize_f64(), vec![0.0, 0.0, 100.0, 200.0]);
         });
     }
@@ -768,7 +768,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0012345, 12.3456, 98765.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = round_builtin(

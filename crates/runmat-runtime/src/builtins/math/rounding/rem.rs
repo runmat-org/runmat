@@ -272,7 +272,7 @@ fn rem_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 fn compute_rem_real(a: &Tensor, b: &Tensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&a.shape, &b.shape)
+    let plan = BroadcastPlan::new(a.shape(), b.shape())
         .map_err(|err| rem_error_with_detail(&REM_ERROR_SIZE_MISMATCH, err))?;
     let dtype = if a.numeric_dtype() == NumericDType::F32 || b.numeric_dtype() == NumericDType::F32
     {
