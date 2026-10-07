@@ -496,7 +496,7 @@ fn sort_logical(logical: LogicalArray, args: &SortArgs) -> crate::BuiltinResult<
     let sorted = match evaluation.sorted {
         Value::Int(IntValue::U8(value)) => Value::Bool(value != 0),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let storage = tensor
                 .into_numeric_storage()
                 .map_err(|e| sort_internal(format!("sort: {e}")))?
@@ -580,7 +580,7 @@ fn upload_sort_value(
 }
 
 fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<SortEvaluation> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let dim = args.dimension.unwrap_or_else(|| default_dimension(&shape));
     if dim == 0 {
         return Err(sort_error(
@@ -720,8 +720,9 @@ fn sort_complex_tensor(
     tensor: ComplexTensor,
     args: &SortArgs,
 ) -> crate::BuiltinResult<SortEvaluation> {
-    let shape = tensor.shape.clone();
-    let dim = args.dimension.unwrap_or_else(|| default_dimension(&shape));
+    let dim = args
+        .dimension
+        .unwrap_or_else(|| default_dimension(tensor.shape()));
     if dim == 0 {
         return Err(sort_error(
             &SORT_ERROR_INVALID_DIMENSION,
@@ -729,8 +730,8 @@ fn sort_complex_tensor(
         ));
     }
 
-    let dim_len = dimension_length(&shape, dim);
-    let storage = tensor.into_complex_storage();
+    let dim_len = dimension_length(tensor.shape(), dim);
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
     if storage.is_empty() || dim_len <= 1 {
         let indices = vec![1.0; storage.len()];
         let index_tensor =
@@ -1310,7 +1311,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1522,7 +1523,7 @@ pub(crate) mod tests {
         match sorted {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 1.0, 5.0, 3.0, 6.0]);
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), &[2, 3]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1542,7 +1543,7 @@ pub(crate) mod tests {
         match sorted {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 3.0, 4.0, 5.0]);
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), &[2, 3]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -1582,7 +1583,7 @@ pub(crate) mod tests {
         let (sorted, indices) = eval.into_values();
         match sorted {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), &[2, 3]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 2.0, 3.0, 4.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -2065,7 +2066,7 @@ pub(crate) mod tests {
         match sorted {
             Value::Tensor(t) => {
                 assert!(t.materialize_f64().is_empty());
-                assert_eq!(t.shape, tensor.shape);
+                assert_eq!(t.shape(), tensor.shape());
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -2189,7 +2190,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![3.0, 1.0, 2.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval = evaluate(Value::GpuTensor(handle), &[]).expect("evaluate");
@@ -2254,7 +2255,7 @@ pub(crate) mod tests {
 
         let gpu_view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&gpu_view).expect("upload");

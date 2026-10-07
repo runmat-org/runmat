@@ -232,8 +232,8 @@ fn value_kind(value: &Value) -> &'static str {
 }
 
 fn squeeze_numeric_tensor(tensor: Tensor) -> crate::BuiltinResult<Tensor> {
-    let shape = squeeze_shape(&tensor.shape);
-    if shape == tensor.shape {
+    let shape = squeeze_shape(tensor.shape());
+    if shape == tensor.shape() {
         return Ok(tensor);
     }
     tensor
@@ -242,8 +242,8 @@ fn squeeze_numeric_tensor(tensor: Tensor) -> crate::BuiltinResult<Tensor> {
 }
 
 fn squeeze_complex_tensor(ct: ComplexTensor) -> crate::BuiltinResult<ComplexTensor> {
-    let shape = squeeze_shape(&ct.shape);
-    if shape == ct.shape {
+    let shape = squeeze_shape(ct.shape());
+    if shape == ct.shape() {
         return Ok(ct);
     }
     ComplexTensor::from_complex_storage(ct.into_complex_storage(), shape)
@@ -340,7 +340,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 2, 2]).unwrap();
         let result = squeeze_builtin(Value::Tensor(tensor)).expect("squeeze ok");
         match result {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 2]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[2, 2]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -352,7 +352,7 @@ pub(crate) mod tests {
         let result = squeeze_builtin(Value::Tensor(tensor)).expect("squeeze ok");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![2, 1]);
+                assert_eq!(tensor.shape(), &[2, 1]);
                 assert_eq!(
                     tensor.integer_storage(),
                     Some(&IntegerStorage::U64(vec![0, u64::MAX]))
@@ -378,7 +378,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(output) = value else {
             panic!("expected complex tensor");
         };
-        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(output.shape(), &[2, 1]);
         assert_eq!(
             output
                 .integer_storage()
@@ -397,7 +397,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
         let result = squeeze_builtin(Value::Tensor(tensor)).expect("squeeze ok");
         match result {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![1, 3]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[1, 3]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -408,7 +408,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 1, 4, 1]).unwrap();
         let result = squeeze_builtin(Value::Tensor(tensor)).expect("squeeze ok");
         match result {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![4, 1]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[4, 1]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -441,7 +441,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(Vec::<f64>::new(), vec![1, 0, 3]).unwrap();
         let result = squeeze_builtin(Value::Tensor(tensor)).expect("squeeze ok");
         match result {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![0, 3]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[0, 3]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -453,12 +453,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let value = squeeze_builtin(Value::GpuTensor(handle)).expect("squeeze ok");
             let gathered = test_support::gather(value).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), &[2, 2]);
         });
     }
 
@@ -485,7 +485,7 @@ pub(crate) mod tests {
         .unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload source tensor");
 
@@ -499,7 +499,7 @@ pub(crate) mod tests {
 
         let downloaded = test_support::gather(Value::GpuTensor(gpu_handle.clone()))
             .expect("gather squeezed tensor");
-        assert_eq!(downloaded.shape.as_slice(), &[3, 4]);
+        assert_eq!(downloaded.shape(), &[3, 4]);
         assert_eq!(
             downloaded.materialize_f64().as_slice(),
             tensor.materialize_f64().as_slice()

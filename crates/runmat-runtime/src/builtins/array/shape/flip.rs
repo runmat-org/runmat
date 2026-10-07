@@ -267,7 +267,7 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     let spec = parse_flip_spec(&rest)?;
     match value {
         Value::Tensor(tensor) => {
-            let dims = resolve_dims(&spec, &tensor.shape);
+            let dims = resolve_dims(&spec, tensor.shape());
             Ok(flip_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::LogicalArray(array) => {
@@ -275,13 +275,13 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
             Ok(flip_logical_array(array, &dims).map(Value::LogicalArray)?)
         }
         Value::ComplexTensor(ct) => {
-            let dims = resolve_dims(&spec, &ct.shape);
+            let dims = resolve_dims(&spec, ct.shape());
             Ok(flip_complex_tensor(ct, &dims).map(Value::ComplexTensor)?)
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| flip_error_for("flip", format!("flip: {e}")))?;
-            let dims = resolve_dims(&spec, &tensor.shape);
+            let dims = resolve_dims(&spec, tensor.shape());
             Ok(flip_complex_tensor(tensor, &dims).map(complex_tensor_into_value)?)
         }
         Value::StringArray(strings) => {
@@ -296,19 +296,19 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         Value::Num(n) => {
             let tensor = tensor::value_into_tensor_for("flip", Value::Num(n))
                 .map_err(|e| flip_error_for("flip", e))?;
-            let dims = resolve_dims(&spec, &tensor.shape);
+            let dims = resolve_dims(&spec, tensor.shape());
             Ok(flip_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::Int(i) => {
             let tensor = tensor::value_into_tensor_for("flip", Value::Int(i))
                 .map_err(|e| flip_error_for("flip", e))?;
-            let dims = resolve_dims(&spec, &tensor.shape);
+            let dims = resolve_dims(&spec, tensor.shape());
             Ok(flip_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::Bool(flag) => {
             let tensor = tensor::value_into_tensor_for("flip", Value::Bool(flag))
                 .map_err(|e| flip_error_for("flip", e))?;
-            let dims = resolve_dims(&spec, &tensor.shape);
+            let dims = resolve_dims(&spec, tensor.shape());
             Ok(flip_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => {
@@ -507,7 +507,7 @@ fn parse_dims_value(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
 }
 
 fn parse_dims_tensor(tensor: &Tensor) -> crate::BuiltinResult<Vec<usize>> {
-    if !is_vector(&tensor.shape) {
+    if !is_vector(tensor.shape()) {
         return Err(flip_error_for(
             "flip",
             "flip: dimension vector must be a row or column vector",
@@ -629,7 +629,7 @@ pub(crate) fn flip_tensor_with(
     if tensor::tensor_element_len(&tensor) == 0 || dims.is_empty() {
         return Ok(tensor);
     }
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))?;
@@ -678,11 +678,10 @@ pub(crate) fn flip_complex_tensor_with(
     if tensor::complex_tensor_element_len(&tensor) == 0 || dims.is_empty() {
         return Ok(tensor);
     }
-    let shape = tensor.shape.clone();
     let indices = (0..tensor.len()).collect::<Vec<_>>();
-    let indices = flip_generic(&indices, &shape, dims, builtin)?;
-    let storage = tensor
-        .into_complex_storage()
+    let indices = flip_generic(&indices, tensor.shape(), dims, builtin)?;
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let storage = storage
         .gather(&indices)
         .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))?;
     ComplexTensor::from_complex_storage(storage, shape)
@@ -1158,7 +1157,7 @@ pub(crate) mod tests {
                 Some(IntegerElementType::U64)
             );
             let gathered = block_on(gpu_helpers::gather_tensor_async(&result)).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), &[2, 2]);
             assert_eq!(
                 gathered.integer_storage(),
                 Some(&IntegerStorage::U64(vec![
@@ -1254,7 +1253,7 @@ pub(crate) mod tests {
         let value = flip_builtin(Value::Tensor(tensor), Vec::new()).expect("flip matrix");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 2]);
+                assert_eq!(t.shape(), &[3, 2]);
                 assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 1.0, 6.0, 3.0, 5.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1288,7 +1287,7 @@ pub(crate) mod tests {
         .expect("flip dims");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2, 2]);
+                assert_eq!(t.shape(), &[2, 2, 2]);
                 assert_eq!(
                     t.materialize_f64(),
                     vec![6.0, 5.0, 8.0, 7.0, 2.0, 1.0, 4.0, 3.0]
@@ -1486,11 +1485,11 @@ pub(crate) mod tests {
                 Tensor::new((1..=8).map(|v| v as f64).collect(), vec![2, 2, 2]).expect("tensor");
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let cpu =
-                flip_tensor(tensor.clone(), &[default_flip_dim(&tensor.shape)]).expect("cpu flip");
+                flip_tensor(tensor.clone(), &[default_flip_dim(tensor.shape())]).expect("cpu flip");
             let value = flip_builtin(Value::GpuTensor(handle), Vec::new()).expect("flip gpu");
             let gathered = test_support::gather(value).expect("gather gpu result");
             assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
@@ -1510,7 +1509,7 @@ pub(crate) mod tests {
         let cpu = flip_tensor(tensor.clone(), &[1, 3]).expect("cpu flip");
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = runmat_accelerate_api::provider()
             .unwrap()

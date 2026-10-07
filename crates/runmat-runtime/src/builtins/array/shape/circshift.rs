@@ -496,7 +496,7 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
             Ok(vec![rounded as isize])
         }
         Value::Tensor(tensor) => {
-            if !is_vector_shape(&tensor.shape) && tensor_element_len(tensor) != 0 {
+            if !is_vector_shape(tensor.shape()) && tensor_element_len(tensor) != 0 {
                 return Err(circshift_invalid_shift(
                     "circshift: shifts must be specified as a scalar or vector",
                 ));
@@ -590,7 +590,7 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
             Ok(vec![rounded as usize])
         }
         Value::Tensor(tensor) => {
-            if !is_vector_shape(&tensor.shape) && tensor_element_len(tensor) != 0 {
+            if !is_vector_shape(tensor.shape()) && tensor_element_len(tensor) != 0 {
                 return Err(circshift_invalid_dims(
                     "circshift: dimension vectors must be row or column vectors",
                 ));
@@ -800,7 +800,7 @@ fn circshift_tensor(
     dims: &[usize],
     shifts: &[isize],
 ) -> crate::BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|e| circshift_internal(format!("circshift: {e}")))?;
@@ -848,8 +848,7 @@ fn circshift_complex_tensor(
     dims: &[usize],
     shifts: &[isize],
 ) -> crate::BuiltinResult<ComplexTensor> {
-    let shape = tensor.shape.clone();
-    let storage = tensor.into_complex_storage();
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
     let plan = build_shift_plan(&shape, dims, shifts)?;
     if storage.is_empty() || plan.is_noop() {
         return ComplexTensor::from_complex_storage(storage, shape)
@@ -1194,7 +1193,7 @@ pub(crate) mod tests {
             .expect("circshift") else {
                 panic!("expected exact real integer output");
             };
-            assert_eq!(output.shape, vec![2, 2]);
+            assert_eq!(output.shape(), &[2, 2]);
             assert_eq!(
                 output.integer_storage(),
                 Some(
@@ -1240,7 +1239,7 @@ pub(crate) mod tests {
         .expect("circshift");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![5, 1]);
+                assert_eq!(out.shape(), &[5, 1]);
                 assert_eq!(out.materialize_f64(), vec![4.0, 5.0, 1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1263,7 +1262,7 @@ pub(crate) mod tests {
         .expect("circshift");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![5, 1]);
+                assert_eq!(out.shape(), &[5, 1]);
                 assert_eq!(out.materialize_f64(), vec![3.0, 4.0, 5.0, 1.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1279,7 +1278,7 @@ pub(crate) mod tests {
             circshift_builtin(Value::Tensor(tensor), Value::Tensor(shift_vec), Vec::new()).unwrap();
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), &[2, 3]);
                 assert_eq!(out.materialize_f64(), vec![2.0, 5.0, 3.0, 6.0, 1.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1296,7 +1295,7 @@ pub(crate) mod tests {
             circshift_builtin(Value::Tensor(tensor), Value::Tensor(shift_vec), Vec::new()).unwrap();
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, expected.shape);
+                assert_eq!(out.shape(), expected.shape());
                 assert_eq!(out.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1315,7 +1314,7 @@ pub(crate) mod tests {
         .unwrap();
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), &[2, 2]);
                 assert_eq!(out.materialize_f64(), vec![2.0, 4.0, 1.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1338,7 +1337,7 @@ pub(crate) mod tests {
         .expect("circshift");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, expected.shape);
+                assert_eq!(out.shape(), expected.shape());
                 assert_eq!(out.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1382,7 +1381,7 @@ pub(crate) mod tests {
         .expect("circshift");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, expected.shape);
+                assert_eq!(out.shape(), expected.shape());
                 assert_eq!(out.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1444,7 +1443,7 @@ pub(crate) mod tests {
         .unwrap();
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, tensor.shape);
+                assert_eq!(out.shape(), tensor.shape());
                 assert_eq!(out.materialize_f64(), tensor.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1512,7 +1511,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = circshift_builtin(
@@ -1522,7 +1521,7 @@ pub(crate) mod tests {
             )
             .expect("circshift");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), &[2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![4.0, 2.0, 3.0, 1.0]);
         });
     }
@@ -1545,7 +1544,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload tensor");
         let gpu_value =
@@ -1554,7 +1553,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu_value).expect("gather gpu result");
         match cpu {
             Value::Tensor(expected) => {
-                assert_eq!(expected.shape, gathered.shape);
+                assert_eq!(expected.shape(), gathered.shape());
                 assert_eq!(expected.materialize_f64(), gathered.materialize_f64());
             }
             other => panic!("expected tensor result, got {other:?}"),

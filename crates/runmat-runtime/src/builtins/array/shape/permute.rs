@@ -214,7 +214,7 @@ async fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Val
     let order_vec = parse_order_argument("permute", order)?;
     match value {
         Value::Tensor(t) => {
-            validate_rank("permute", &order_vec, t.shape.len())?;
+            validate_rank("permute", &order_vec, t.shape().len())?;
             Ok(permute_tensor("permute", t, &order_vec).map(tensor::tensor_into_value)?)
         }
         Value::LogicalArray(la) => {
@@ -222,7 +222,7 @@ async fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Val
             Ok(permute_logical_array("permute", la, &order_vec).map(Value::LogicalArray)?)
         }
         Value::ComplexTensor(ct) => {
-            validate_rank("permute", &order_vec, ct.shape.len())?;
+            validate_rank("permute", &order_vec, ct.shape().len())?;
             Ok(permute_complex_tensor("permute", ct, &order_vec)
                 .map(Value::ComplexTensor)?)
         }
@@ -257,7 +257,7 @@ async fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Val
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             let tensor = tensor::value_into_tensor_for("permute", value)
                 .map_err(|e| permute_error("permute", e))?;
-            validate_rank("permute", &order_vec, tensor.shape.len())?;
+            validate_rank("permute", &order_vec, tensor.shape().len())?;
             Ok(permute_tensor("permute", tensor, &order_vec).map(tensor::tensor_into_value)?)
         }
         other => Err(permute_error(
@@ -419,7 +419,7 @@ pub(crate) fn permute_tensor(
     tensor: Tensor,
     order: &[usize],
 ) -> crate::BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))?;
@@ -478,8 +478,7 @@ pub(crate) fn permute_complex_tensor(
     ct: ComplexTensor,
     order: &[usize],
 ) -> crate::BuiltinResult<ComplexTensor> {
-    let shape = ct.shape.clone();
-    let storage = ct.into_complex_storage();
+    let (storage, shape) = ct.into_complex_storage_and_shape();
     let (storage, new_shape) = match storage {
         ComplexStorage::F64(values) => {
             let (values, shape) = permute_generic(builtin, &values, &shape, order)?;
@@ -699,7 +698,7 @@ fn compute_strides(shape: &[usize]) -> Vec<usize> {
 }
 
 fn is_vector(tensor: &Tensor) -> bool {
-    match tensor.shape.as_slice() {
+    match tensor.shape() {
         [] => true,
         [_] => true,
         [rows, cols] => *rows == 1 || *cols == 1,
@@ -751,7 +750,7 @@ pub(crate) mod tests {
         let value = permute_builtin(Value::Tensor(t), Value::Tensor(order)).expect("permute");
         match value {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 2, 4]);
+                assert_eq!(out.shape(), &[3, 2, 4]);
                 assert_eq!(out.materialize_f64().len(), 24);
             }
             _ => panic!("expected tensor result"),
@@ -766,7 +765,7 @@ pub(crate) mod tests {
         let value = permute_builtin(Value::Tensor(row), Value::Tensor(order)).expect("permute");
         match value {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1, 1]);
+                assert_eq!(out.shape(), &[3, 1, 1]);
             }
             _ => panic!("expected tensor result"),
         }
@@ -907,7 +906,7 @@ pub(crate) mod tests {
             permute_builtin(Value::ComplexTensor(ct), Value::Tensor(order)).expect("permute");
         match value {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), &[2, 2]);
                 assert_eq!(out.materialize_f64()[0], (1.0, 0.0));
             }
             _ => panic!("expected complex tensor"),
@@ -932,7 +931,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(output) = value else {
             panic!("expected complex tensor");
         };
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), &[2, 2]);
         assert_eq!(
             output
                 .integer_storage()
@@ -999,7 +998,7 @@ pub(crate) mod tests {
             .expect("integer tensor");
         let output = permute_tensor("permute", input, &[2, 1]).expect("permute");
 
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), &[2, 2]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![1, 3, u64::MAX, 4]))
@@ -1024,7 +1023,7 @@ pub(crate) mod tests {
             let host = tensor(&host_data, &[2, 2, 3]);
             let view = HostTensorView {
                 data: &host.materialize_f64(),
-                shape: &host.shape,
+                shape: host.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let order = tensor(&[3.0, 1.0, 2.0], &[1, 3]);
@@ -1034,7 +1033,7 @@ pub(crate) mod tests {
                 Value::GpuTensor(result) => {
                     let gathered =
                         block_on(gpu_helpers::gather_tensor_async(&result)).expect("gather");
-                    assert_eq!(gathered.shape, vec![3, 2, 2]);
+                    assert_eq!(gathered.shape(), &[3, 2, 2]);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
@@ -1063,7 +1062,7 @@ pub(crate) mod tests {
                 Some(IntegerElementType::U64)
             );
             let gathered = block_on(gpu_helpers::gather_tensor_async(&result)).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), &[2, 2]);
             assert_eq!(
                 gathered.integer_storage(),
                 Some(&IntegerStorage::U64(vec![
@@ -1095,7 +1094,7 @@ pub(crate) mod tests {
 
         let view = HostTensorView {
             data: &host.materialize_f64(),
-            shape: &host.shape,
+            shape: host.shape(),
         };
         let handle =
             runmat_accelerate_api::AccelProvider::upload(provider, &view).expect("upload to GPU");
@@ -1105,7 +1104,7 @@ pub(crate) mod tests {
 
         match cpu_value {
             Value::Tensor(ct) => {
-                assert_eq!(ct.shape, gathered.shape);
+                assert_eq!(ct.shape(), gathered.shape());
                 assert_eq!(ct.materialize_f64(), gathered.materialize_f64());
             }
             other => panic!("expected tensor result, got {other:?}"),

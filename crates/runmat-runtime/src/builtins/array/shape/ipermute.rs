@@ -190,7 +190,7 @@ async fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Va
 
     match value {
         Value::Tensor(t) => {
-            validate_rank("ipermute", &order_vec, t.shape.len())?;
+            validate_rank("ipermute", &order_vec, t.shape().len())?;
             Ok(permute_tensor("ipermute", t, &inverse)
                 .map(tensor::tensor_into_value)?)
         }
@@ -200,7 +200,7 @@ async fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Va
                 .map(Value::LogicalArray)?)
         }
         Value::ComplexTensor(ct) => {
-            validate_rank("ipermute", &order_vec, ct.shape.len())?;
+            validate_rank("ipermute", &order_vec, ct.shape().len())?;
             Ok(permute_complex_tensor("ipermute", ct, &inverse)
                 .map(Value::ComplexTensor)?)
         }
@@ -237,7 +237,7 @@ async fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Va
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             let tensor = tensor::value_into_tensor_for("ipermute", value)
                 .map_err(|e| ipermute_error(e))?;
-            validate_rank("ipermute", &order_vec, tensor.shape.len())?;
+            validate_rank("ipermute", &order_vec, tensor.shape().len())?;
             Ok(permute_tensor("ipermute", tensor, &inverse)
                 .map(tensor::tensor_into_value)?)
         }
@@ -319,7 +319,7 @@ pub(crate) mod tests {
         let restored = ipermute_builtin(permuted, Value::Tensor(order)).expect("ipermute");
         match (Value::Tensor(original_tensor), restored) {
             (Value::Tensor(orig), Value::Tensor(rest)) => {
-                assert_eq!(orig.shape, rest.shape);
+                assert_eq!(orig.shape(), rest.shape());
                 assert_eq!(orig.materialize_f64(), rest.materialize_f64());
             }
             _ => panic!("expected tensor pair"),
@@ -418,7 +418,7 @@ pub(crate) mod tests {
             let order = make_tensor(&[3.0, 1.0, 2.0], &[1, 3]);
             let view = runmat_accelerate_api::HostTensorView {
                 data: &host.materialize_f64(),
-                shape: &host.shape,
+                shape: host.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let order_vec = parse_order_argument("ipermute", Value::Tensor(order.clone()))
@@ -427,7 +427,7 @@ pub(crate) mod tests {
                 .expect("permute gpu");
             let restored = ipermute_builtin(permuted, Value::Tensor(order)).expect("ipermute gpu");
             let gathered = test_support::gather(restored).expect("gather");
-            assert_eq!(gathered.shape, host.shape);
+            assert_eq!(gathered.shape(), host.shape());
             assert_eq!(gathered.materialize_f64(), host.materialize_f64());
         });
     }
@@ -482,7 +482,7 @@ pub(crate) mod tests {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: &host.materialize_f64(),
-            shape: &host.shape,
+            shape: host.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let permuted_gpu =
@@ -492,7 +492,7 @@ pub(crate) mod tests {
 
         match cpu {
             Value::Tensor(ct) => {
-                assert_eq!(ct.shape, gathered.shape);
+                assert_eq!(ct.shape(), gathered.shape());
                 assert_eq!(ct.materialize_f64(), gathered.materialize_f64());
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -537,7 +537,7 @@ pub(crate) mod tests {
             .expect("ipermute");
         match restored {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 5, 1]);
+                assert_eq!(out.shape(), &[1, 5, 1]);
                 assert_eq!(out.materialize_f64(), row.materialize_f64());
             }
             Value::Num(n) => {

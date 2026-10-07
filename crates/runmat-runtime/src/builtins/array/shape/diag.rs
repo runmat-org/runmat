@@ -793,8 +793,8 @@ fn ensure_diag_compatibility(value: &Value, rest: &[Value]) -> BuiltinResult<()>
         crate::compatibility::ensure_builtin_extension_enabled(&DIAG_SIZE_EXTENSION, BUILTIN_NAME)?;
     }
     let shape = match value {
-        Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
-        Value::ComplexTensor(tensor) => Some(tensor.shape.as_slice()),
+        Value::Tensor(tensor) => Some(tensor.shape()),
+        Value::ComplexTensor(tensor) => Some(tensor.shape()),
         Value::LogicalArray(array) => Some(array.shape.as_slice()),
         Value::GpuTensor(handle) => Some(handle.shape()),
         _ => None,
@@ -1118,7 +1118,7 @@ fn coerce_diag_input(value: Value) -> BuiltinResult<DiagInput> {
 }
 
 fn evaluate_tensor(tensor: Tensor, args: &ParsedDiagArgs) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
@@ -1162,8 +1162,8 @@ fn evaluate_logical(array: LogicalArray, args: &ParsedDiagArgs) -> BuiltinResult
 }
 
 fn evaluate_complex(tensor: ComplexTensor, args: &ParsedDiagArgs) -> BuiltinResult<Value> {
-    let input_shape = tensor.shape.clone();
-    let (storage, shape) = match tensor.into_complex_storage() {
+    let (storage, input_shape) = tensor.into_complex_storage_and_shape();
+    let (storage, shape) = match storage {
         ComplexStorage::F64(values) => {
             let (values, shape) =
                 evaluate_column_major_diag(&values, &input_shape, args, (0.0f64, 0.0f64).into())?;
@@ -1712,7 +1712,7 @@ fn logical_array_from_value(value: Value) -> BuiltinResult<LogicalArray> {
                         })
                 })
                 .collect::<BuiltinResult<Vec<_>>>()?;
-            LogicalArray::new(data, tensor.shape)
+            LogicalArray::new(data, tensor.shape().to_vec())
                 .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
         }
         Value::ComplexTensor(tensor) => {
@@ -1731,7 +1731,7 @@ fn logical_array_from_value(value: Value) -> BuiltinResult<LogicalArray> {
                     .map(|(re, im)| if *re != 0.0 || *im != 0.0 { 1 } else { 0 })
                     .collect()
             };
-            LogicalArray::new(data, tensor.shape)
+            LogicalArray::new(data, tensor.shape().to_vec())
                 .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
         }
         Value::CharArray(chars) => {
@@ -1805,7 +1805,7 @@ fn complex_tensor_from_value(value: Value) -> BuiltinResult<ComplexTensor> {
         Value::Complex(re, im) => ComplexTensor::new(vec![(re, im)], vec![1, 1])
             .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}"))),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let data: Vec<(f64, f64)> = tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(|re| (re, 0.0))
@@ -1859,8 +1859,12 @@ fn complex_tensor_from_value_with_dtype(
     }
     ensure_integer_exact_for_complex_float(&value, dtype)?;
     let tensor = complex_tensor_from_value(value)?;
-    ComplexTensor::from_f64_values_with_dtype(tensor.materialize_f64(), tensor.shape, dtype)
-        .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
+    ComplexTensor::from_f64_values_with_dtype(
+        tensor.materialize_f64(),
+        tensor.shape().to_vec(),
+        dtype,
+    )
+    .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
 }
 
 fn ensure_integer_exact_for_complex_float(value: &Value, dtype: NumericDType) -> BuiltinResult<()> {
@@ -1994,7 +1998,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor output");
         };
-        assert_eq!(tensor.shape, vec![3, 1]);
+        assert_eq!(tensor.shape(), &[3, 1]);
         assert_eq!(tensor.materialize_f64(), vec![10.0, 20.0, 30.0]);
     }
 
@@ -2006,7 +2010,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor output");
         };
-        assert_eq!(tensor.shape, vec![2, 4]);
+        assert_eq!(tensor.shape(), &[2, 4]);
         assert_eq!(
             tensor.materialize_f64(),
             vec![1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0]
@@ -2021,7 +2025,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor output");
         };
-        assert_eq!(tensor.shape, vec![3, 4]);
+        assert_eq!(tensor.shape(), &[3, 4]);
         assert_eq!(
             tensor.materialize_f64(),
             vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0]
@@ -2039,7 +2043,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor output");
         };
-        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(tensor.shape(), &[2, 1]);
         assert_eq!(tensor.materialize_f64(), vec![4.0, 8.0]);
     }
 
@@ -2077,7 +2081,7 @@ mod tests {
             else {
                 panic!("expected exact integer matrix");
             };
-            assert_eq!(matrix.shape, vec![3, 3]);
+            assert_eq!(matrix.shape(), &[3, 3]);
             assert_eq!(matrix.integer_storage(), Some(&expected));
 
             let Value::Tensor(extracted) =
@@ -2085,7 +2089,7 @@ mod tests {
             else {
                 panic!("expected exact integer vector");
             };
-            assert_eq!(extracted.shape, vec![3, 1]);
+            assert_eq!(extracted.shape(), &[3, 1]);
             assert_eq!(extracted.integer_storage(), Some(&storage));
         }
 
@@ -2108,7 +2112,7 @@ mod tests {
         else {
             panic!("expected single matrix");
         };
-        assert_eq!(matrix.shape, vec![2, 2]);
+        assert_eq!(matrix.shape(), &[2, 2]);
         assert_eq!(
             matrix
                 .clone()
@@ -2122,7 +2126,7 @@ mod tests {
         else {
             panic!("expected single vector");
         };
-        assert_eq!(vector.shape, vec![2, 1]);
+        assert_eq!(vector.shape(), &[2, 1]);
         assert_eq!(
             vector.into_numeric_storage().expect("vector storage"),
             NumericStorage::F32(vec![1.25, -2.5])
@@ -2158,7 +2162,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor output");
         };
-        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(tensor.shape(), &[2, 1]);
         assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]);
     }
 
@@ -2239,7 +2243,7 @@ mod tests {
             let Value::Tensor(tensor) = out else {
                 panic!("expected tensor output for {class_name}");
             };
-            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.shape(), &[2, 2]);
             assert_eq!(tensor.integer_storage(), Some(&expected), "{class_name}");
         }
     }
@@ -2257,7 +2261,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor output");
         };
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(
             tensor.integer_storage(),
             Some(&IntegerStorage::I64(vec![i64::MAX, 0, 0, i64::MAX]))
@@ -2275,7 +2279,7 @@ mod tests {
         let Value::ComplexTensor(tensor) = out else {
             panic!("expected complex tensor output");
         };
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         let storage = tensor.integer_storage().expect("complex integer storage");
         assert_eq!(storage.real, IntegerStorage::U8(vec![2, 0, 0, u8::MAX]));
         assert_eq!(storage.imag, IntegerStorage::U8(vec![0, 0, 0, 5]));
@@ -2290,7 +2294,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor output");
         };
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(tensor.materialize_f64(), vec![1.0, 0.0, 0.0, 0.0]);
     }
 
@@ -2413,7 +2417,7 @@ mod tests {
         let Value::ComplexTensor(tensor) = out else {
             panic!("expected complex tensor output");
         };
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(
             tensor.materialize_f64(),
             vec![(2.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
@@ -2433,7 +2437,7 @@ mod tests {
         let Value::ComplexTensor(tensor) = out else {
             panic!("expected complex tensor output");
         };
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(
             tensor.materialize_f64(),
             vec![(-3.0, 0.0), (0.0, 0.0), (0.0, 0.0), (5.0, 0.0)]
@@ -2447,7 +2451,7 @@ mod tests {
             let proto_tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let view = HostTensorView {
                 data: &proto_tensor.materialize_f64(),
-                shape: &proto_tensor.shape,
+                shape: proto_tensor.shape(),
             };
             let proto = provider.upload(&view).expect("upload");
 
@@ -2510,7 +2514,7 @@ mod tests {
             else {
                 panic!("paired host output")
             };
-            assert_eq!(result.shape, vec![2, 2]);
+            assert_eq!(result.shape(), &[2, 2]);
             let storage = result.integer_storage().unwrap();
             assert_eq!(
                 storage.real,
@@ -2634,7 +2638,7 @@ mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: &vector.materialize_f64(),
-                    shape: &vector.shape,
+                    shape: vector.shape(),
                 })
                 .expect("upload");
 
@@ -2644,7 +2648,7 @@ mod tests {
                 "native diag(gpuArray(vector)) should remain resident"
             );
             let gathered = test_support::gather(square).expect("gather square");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), &[2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 0.0, 2.0]);
 
             let rectangular = run_diag(
@@ -2657,7 +2661,7 @@ mod tests {
                 "rectangular diag(gpuArray(vector), k, sz) should remain resident"
             );
             let gathered = test_support::gather(rectangular).expect("gather rectangular");
-            assert_eq!(gathered.shape, vec![3, 4]);
+            assert_eq!(gathered.shape(), &[3, 4]);
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0]
@@ -2706,7 +2710,7 @@ mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: &matrix.materialize_f64(),
-                    shape: &matrix.shape,
+                    shape: matrix.shape(),
                 })
                 .expect("upload matrix");
             let extracted =
@@ -2716,7 +2720,7 @@ mod tests {
                 "diag(gpuArray(matrix), k) should remain resident"
             );
             let gathered = test_support::gather(extracted).expect("gather extracted");
-            assert_eq!(gathered.shape, vec![2, 1]);
+            assert_eq!(gathered.shape(), &[2, 1]);
             assert_eq!(gathered.materialize_f64(), vec![4.0, 8.0]);
 
             let logical_handle = provider
@@ -2746,7 +2750,7 @@ mod tests {
             );
             let gathered =
                 test_support::gather(Value::GpuTensor(logical_result)).expect("gather logical");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), &[2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 0.0, 0.0]);
         });
     }
@@ -2769,7 +2773,7 @@ mod tests {
         let handle = provider
             .upload(&HostTensorView {
                 data: &vector.materialize_f64(),
-                shape: &vector.shape,
+                shape: vector.shape(),
             })
             .expect("upload vector");
         let placed = run_diag(
@@ -2779,7 +2783,7 @@ mod tests {
         .expect("diag placed");
         assert!(matches!(placed, Value::GpuTensor(_)));
         let gathered = test_support::gather(placed).expect("gather placed");
-        assert_eq!(gathered.shape, vec![5, 3]);
+        assert_eq!(gathered.shape(), &[5, 3]);
         assert_eq!(
             gathered.materialize_f64(),
             vec![0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.0, 0.0]
@@ -2793,14 +2797,14 @@ mod tests {
         let handle = provider
             .upload(&HostTensorView {
                 data: &matrix.materialize_f64(),
-                shape: &matrix.shape,
+                shape: matrix.shape(),
             })
             .expect("upload matrix");
         let extracted =
             run_diag(Value::GpuTensor(handle), vec![Value::Num(1.0)]).expect("diag extract");
         assert!(matches!(extracted, Value::GpuTensor(_)));
         let gathered = test_support::gather(extracted).expect("gather extracted");
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), &[2, 1]);
         assert_eq!(gathered.materialize_f64(), vec![2.0, 6.0]);
 
         let matrix = Tensor::new(
@@ -2811,13 +2815,13 @@ mod tests {
         let handle = provider
             .upload(&HostTensorView {
                 data: &matrix.materialize_f64(),
-                shape: &matrix.shape,
+                shape: matrix.shape(),
             })
             .expect("upload matrix");
         let empty = run_diag(Value::GpuTensor(handle), vec![Value::Num(10.0)]).expect("diag empty");
         assert!(matches!(empty, Value::GpuTensor(_)));
         let gathered = test_support::gather(empty).expect("gather empty");
-        assert_eq!(gathered.shape, vec![0, 1]);
+        assert_eq!(gathered.shape(), &[0, 1]);
         assert!(gathered.materialize_f64().is_empty());
     }
 
@@ -2899,7 +2903,7 @@ mod tests {
                 );
                 let gathered = test_support::gather(Value::GpuTensor(output_handle.clone()))
                     .expect("exact gather");
-                assert_eq!(gathered.shape, vec![2, 2]);
+                assert_eq!(gathered.shape(), &[2, 2]);
                 let zero = storage.zeros_like(1).value_at(0).unwrap();
                 let values = storage.exact_values();
                 let expected = storage

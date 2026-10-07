@@ -478,7 +478,7 @@ fn rot90_tensor(tensor: Tensor, steps: usize) -> crate::BuiltinResult<Tensor> {
     if steps == 0 {
         return Ok(tensor);
     }
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let indices = (0..tensor.len()).collect::<Vec<_>>();
     let (indices, shape) = rot90_generic(&indices, &shape, steps)?;
     let storage = tensor
@@ -497,7 +497,7 @@ fn rot90_complex_tensor(
         return Ok(tensor);
     }
     let indices = (0..tensor.len()).collect::<Vec<_>>();
-    let (indices, shape) = rot90_generic(&indices, &tensor.shape, steps)?;
+    let (indices, shape) = rot90_generic(&indices, tensor.shape(), steps)?;
     let storage = tensor
         .into_complex_storage()
         .gather(&indices)
@@ -806,7 +806,7 @@ pub(crate) mod tests {
             else {
                 panic!("expected exact real integer output");
             };
-            assert_eq!(output.shape, vec![2, 2]);
+            assert_eq!(output.shape(), &[2, 2]);
             assert_eq!(
                 output.integer_storage(),
                 Some(
@@ -855,7 +855,7 @@ pub(crate) mod tests {
         else {
             panic!("expected exact complex integer output");
         };
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), &[2, 2]);
         assert_eq!(
             output.integer_storage().cloned(),
             Some(
@@ -875,7 +875,7 @@ pub(crate) mod tests {
         let result = rot90_builtin(Value::Tensor(tensor), Vec::new()).expect("rot90");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 2]);
+                assert_eq!(out.shape(), &[3, 2]);
                 assert_eq!(out.materialize_f64(), vec![3.0, 2.0, 1.0, 6.0, 5.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -890,7 +890,7 @@ pub(crate) mod tests {
         let result = rot90_builtin(Value::Tensor(tensor), args).expect("rot90 k=2");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), &[2, 3]);
                 assert_eq!(out.materialize_f64(), vec![6.0, 3.0, 5.0, 2.0, 4.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -906,7 +906,7 @@ pub(crate) mod tests {
             .expect("rot90 clockwise");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 2]);
+                assert_eq!(out.shape(), &[3, 2]);
                 assert_eq!(out.materialize_f64(), vec![4.0, 5.0, 6.0, 1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -925,13 +925,13 @@ pub(crate) mod tests {
         .expect("rot90 counterclockwise");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), &[2, 2]);
                 // 90° counterclockwise should match the default call.
                 let default =
                     rot90_builtin(Value::Tensor(tensor), Vec::new()).expect("rot90 default");
                 match default {
                     Value::Tensor(default_tensor) => {
-                        assert_eq!(out.shape, default_tensor.shape);
+                        assert_eq!(out.shape(), default_tensor.shape());
                         assert_eq!(out.materialize_f64(), default_tensor.materialize_f64());
                     }
                     other => panic!("expected tensor, got {other:?}"),
@@ -949,7 +949,7 @@ pub(crate) mod tests {
         let result = rot90_builtin(Value::Tensor(tensor), args).expect("rot90 k=-1");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), &[2, 2]);
                 assert_eq!(out.materialize_f64(), vec![4.0, 5.0, 1.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -965,7 +965,7 @@ pub(crate) mod tests {
         let result = rot90_builtin(Value::Tensor(tensor), args).expect("rot90 tensor k");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), &[2, 2]);
                 assert_eq!(out.materialize_f64(), vec![4.0, 5.0, 1.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -981,7 +981,7 @@ pub(crate) mod tests {
         let result = rot90_builtin(Value::Tensor(tensor), args).expect("rot90 logical k");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), &[2, 2]);
                 assert_eq!(out.materialize_f64(), vec![2.0, 1.0, 5.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1010,7 +1010,7 @@ pub(crate) mod tests {
         let result = rot90_builtin(Value::Tensor(tensor), Vec::new()).expect("rot90 empty");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 0]);
+                assert_eq!(out.shape(), &[3, 0]);
                 assert!(out.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1025,7 +1025,7 @@ pub(crate) mod tests {
         let result = rot90_builtin(Value::Tensor(tensor), Vec::new()).expect("rot90 3d");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 2, 2]);
+                assert_eq!(out.shape(), &[3, 2, 2]);
                 assert_eq!(
                     out.materialize_f64(),
                     vec![5.0, 3.0, 1.0, 6.0, 4.0, 2.0, 11.0, 9.0, 7.0, 12.0, 10.0, 8.0]
@@ -1046,7 +1046,7 @@ pub(crate) mod tests {
         }
         match value {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3, 4]);
+                assert_eq!(out.shape(), &[2, 3, 4]);
                 assert_eq!(out.materialize_f64(), data);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1108,12 +1108,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let rotated = rot90_builtin(Value::GpuTensor(handle), Vec::new()).expect("rot90");
             let gathered = test_support::gather(rotated).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), &[2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![2.0, 1.0, 5.0, 4.0]);
         });
     }
@@ -1136,13 +1136,13 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_value = rot90_builtin(Value::GpuTensor(handle), Vec::new()).expect("gpu rot90");
         let gpu_tensor = test_support::gather(gpu_value).expect("gather");
 
-        assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
+        assert_eq!(gpu_tensor.shape(), cpu_tensor.shape());
         assert_eq!(gpu_tensor.materialize_f64(), cpu_tensor.materialize_f64());
     }
 }

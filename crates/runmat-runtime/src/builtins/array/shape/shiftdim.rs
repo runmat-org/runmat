@@ -424,8 +424,8 @@ fn floating_to_isize(value: f64) -> Option<isize> {
 
 fn value_shape(value: &Value) -> Result<Vec<usize>, RuntimeError> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor.shape.clone()),
-        Value::ComplexTensor(tensor) => Ok(tensor.shape.clone()),
+        Value::Tensor(tensor) => Ok(tensor.shape().to_vec()),
+        Value::ComplexTensor(tensor) => Ok(tensor.shape().to_vec()),
         Value::LogicalArray(array) => Ok(array.shape.clone()),
         Value::StringArray(array) => Ok(array.shape.clone()),
         Value::CharArray(array) => Ok(array.shape.clone()),
@@ -635,7 +635,7 @@ mod tests {
 
     fn tensor_shape(value: &Value) -> &[usize] {
         match value {
-            Value::Tensor(tensor) => &tensor.shape,
+            Value::Tensor(tensor) => tensor.shape(),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -694,7 +694,7 @@ mod tests {
         let Value::Tensor(output) = output else {
             panic!("expected tensor")
         };
-        assert_eq!(output.shape, vec![3, 4, 2]);
+        assert_eq!(output.shape(), &[3, 4, 2]);
         assert_eq!(
             output.materialize_f64(),
             vec![
@@ -729,14 +729,14 @@ mod tests {
         else {
             panic!("expected tensor")
         };
-        assert_eq!(output.shape, vec![0, 2]);
+        assert_eq!(output.shape(), &[0, 2]);
         assert!(output.is_empty());
 
         let Value::Tensor(output) = call(Value::Tensor(input), Some(Value::Num(-2.0))).unwrap()
         else {
             panic!("expected tensor")
         };
-        assert_eq!(output.shape, vec![1, 1, 1, 0, 2]);
+        assert_eq!(output.shape(), &[1, 1, 1, 0, 2]);
         assert!(output.is_empty());
     }
 
@@ -749,7 +749,7 @@ mod tests {
             let Value::Tensor(output) = output else {
                 panic!("expected tensor")
             };
-            assert_eq!(output.shape, vec![2, 2]);
+            assert_eq!(output.shape(), &[2, 2]);
             assert_eq!(output.integer_storage().unwrap().class_name(), class_name);
         }};
     }
@@ -789,7 +789,7 @@ mod tests {
             panic!("expected complex tensor")
         };
         assert_eq!(output.integer_storage(), Some(&storage));
-        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(output.shape(), &[2, 1]);
     }
 
     #[test]
@@ -801,7 +801,7 @@ mod tests {
             panic!("expected complex tensor")
         };
         assert!(matches!(output.complex_storage(), ComplexStorage::F32(_)));
-        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(output.shape(), &[2, 1]);
     }
 
     #[test]
@@ -995,7 +995,7 @@ mod tests {
         assert!(matches!(
             gathered,
             Value::ComplexTensor(value)
-                if value.shape == vec![2, 2]
+                if value.shape() == [2, 2]
                     && value.materialize_f64() == tensor.materialize_f64()
         ));
     }

@@ -638,7 +638,7 @@ pub fn unique_numeric_from_tensor(
     tensor: Tensor,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     match tensor
         .into_numeric_storage()
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?
@@ -1090,8 +1090,8 @@ fn unique_complex_from_tensor(
     tensor: ComplexTensor,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
-    let shape = tensor.shape.clone();
-    match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    match storage {
         ComplexStorage::F64(values) => unique_floating_complex(values, shape, opts),
         ComplexStorage::F32(values) => unique_floating_complex(values, shape, opts),
         ComplexStorage::Integer(_) => Err(unique_error_with(
@@ -1935,7 +1935,7 @@ impl UniqueEvaluation {
         self.values = match self.values {
             Value::Num(value) => Value::Bool(value != 0.0),
             Value::Tensor(tensor) => {
-                let shape = tensor.shape.clone();
+                let shape = tensor.shape().to_vec();
                 let data = tensor
                     .materialize_f64()
                     .into_iter()
@@ -2027,7 +2027,7 @@ pub(crate) mod tests {
         match values {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
             }
             Value::Num(_) => panic!("expected tensor result"),
             other => panic!("unexpected result {other:?}"),
@@ -2209,7 +2209,7 @@ pub(crate) mod tests {
         let (values, ia, ic) = eval.into_triple();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 2]);
+                assert_eq!(t.shape(), &[3, 2]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 2.0, 2.0, 3.0, 4.0]);
             }
             other => panic!("unexpected values {other:?}"),
@@ -2240,7 +2240,7 @@ pub(crate) mod tests {
         let (values, ia, ic) = eval.into_triple();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 1.0, 2.0]);
             }
             other => panic!("unexpected values {other:?}"),
@@ -2415,7 +2415,7 @@ pub(crate) mod tests {
         let Value::Tensor(values) = values else {
             panic!("expected native single rows");
         };
-        assert_eq!(values.shape, vec![2, 2]);
+        assert_eq!(values.shape(), &[2, 2]);
         assert_eq!(
             values.into_numeric_storage().unwrap(),
             NumericStorage::F32(vec![1.0, 2.0, 10.0, 20.0])
@@ -2464,7 +2464,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(values) = values else {
             panic!("expected native complex single rows");
         };
-        assert_eq!(values.shape, vec![2, 2]);
+        assert_eq!(values.shape(), &[2, 2]);
         assert_eq!(
             values.as_f32_slice().map(|values| values
                 .iter()
@@ -2497,7 +2497,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![5.0, 3.0, 5.0, 1.0], vec![1, 4]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval =
@@ -2505,7 +2505,7 @@ pub(crate) mod tests {
             let values = eval.into_values_value();
             match values {
                 Value::Tensor(t) => {
-                    assert_eq!(t.shape, vec![1, 3]);
+                    assert_eq!(t.shape(), &[1, 3]);
                     assert_eq!(t.materialize_f64(), vec![5.0, 3.0, 1.0]);
                 }
                 other => panic!("unexpected values {other:?}"),
@@ -2527,7 +2527,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("provider registered");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_eval = evaluate_sync(Value::GpuTensor(handle.clone()), &[]).expect("gpu unique");
@@ -2541,7 +2541,7 @@ pub(crate) mod tests {
         let gpu_ia = test_support::gather(gpu_ia).expect("gather gpu ia");
         let gpu_ic = test_support::gather(gpu_ic).expect("gather gpu ic");
 
-        assert_eq!(gpu_values.shape, host_values.shape);
+        assert_eq!(gpu_values.shape(), host_values.shape());
         assert_eq!(gpu_values.materialize_f64(), host_values.materialize_f64());
         assert_eq!(gpu_ia.materialize_f64(), host_ia.materialize_f64());
         assert_eq!(gpu_ic.materialize_f64(), host_ic.materialize_f64());
@@ -2622,7 +2622,7 @@ pub(crate) mod tests {
         let (values, ia, ic) = eval.into_triple();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 3]);
+                assert_eq!(t.shape(), &[0, 3]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("unexpected values {other:?}"),
@@ -2742,7 +2742,7 @@ pub(crate) mod tests {
         let Value::Tensor(values) = values else {
             panic!("expected numeric rows");
         };
-        assert_eq!(values.shape, vec![2, 2]);
+        assert_eq!(values.shape(), &[2, 2]);
         assert_eq!(values.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
         let Value::Tensor(ia) = ia else {
             panic!("expected row indices");
@@ -2814,7 +2814,7 @@ pub(crate) mod tests {
             let Value::Tensor(values) = values else {
                 panic!("expected exact integer values");
             };
-            assert_eq!(values.shape, vec![1, 2]);
+            assert_eq!(values.shape(), &[1, 2]);
             assert_eq!(values.integer_storage(), Some(&expected));
             let Value::Tensor(ia) = ia else {
                 panic!("expected ia");
@@ -2822,8 +2822,8 @@ pub(crate) mod tests {
             let Value::Tensor(ic) = ic else {
                 panic!("expected ic");
             };
-            assert_eq!(ia.shape, vec![2, 1]);
-            assert_eq!(ic.shape, vec![3, 1]);
+            assert_eq!(ia.shape(), &[2, 1]);
+            assert_eq!(ic.shape(), &[3, 1]);
         }
     }
 
@@ -2855,7 +2855,7 @@ pub(crate) mod tests {
                 let Value::Tensor(values) = values else {
                     panic!("expected exact integer values");
                 };
-                assert_eq!(values.shape, expected_shape);
+                assert_eq!(values.shape(), expected_shape);
                 assert_eq!(values.integer_storage(), Some(&storage));
             }
         }
@@ -2870,7 +2870,7 @@ pub(crate) mod tests {
         else {
             panic!("expected single tensor");
         };
-        assert_eq!(single.shape, vec![1, 2]);
+        assert_eq!(single.shape(), &[1, 2]);
         assert_eq!(single.as_f32_slice(), Some(&[1.0, 3.0][..]));
 
         let complex = ComplexTensor::from_f32(vec![(3.0, 1.0), (1.0, 0.0), (3.0, 1.0)], vec![1, 3])
@@ -2881,7 +2881,7 @@ pub(crate) mod tests {
         else {
             panic!("expected complex tensor");
         };
-        assert_eq!(complex.shape, vec![1, 2]);
+        assert_eq!(complex.shape(), &[1, 2]);
 
         let chars = CharArray::new(vec!['z', 'a', 'z'], 1, 3).expect("character row input");
         let Value::CharArray(chars) = evaluate_sync(Value::CharArray(chars), &[])
@@ -2957,7 +2957,7 @@ pub(crate) mod tests {
             assert!(runmat_accelerate_api::handle_is_logical(&output));
             let output_lease = output.allocation_lease().downgrade();
             let gathered = test_support::gather(Value::GpuTensor(output)).expect("logical payload");
-            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.shape(), &[1, 2]);
             assert_eq!(gathered.materialize_f64(), vec![0.0, 1.0]);
             assert!(input_lease.acquire().is_some());
             drop(logical_handle);
@@ -3007,7 +3007,7 @@ pub(crate) mod tests {
         let Value::Tensor(distinct) = distinct else {
             panic!("expected rows");
         };
-        assert_eq!(distinct.shape, vec![2, 2]);
+        assert_eq!(distinct.shape(), &[2, 2]);
         let collapsed = evaluate_sync(
             Value::Tensor(rows),
             &[
@@ -3021,7 +3021,7 @@ pub(crate) mod tests {
         let Value::Tensor(collapsed) = collapsed else {
             panic!("expected rows");
         };
-        assert_eq!(collapsed.shape, vec![1, 2]);
+        assert_eq!(collapsed.shape(), &[1, 2]);
 
         let complex =
             ComplexTensor::new(vec![(f64::NAN, 1.0), (f64::NAN, 1.0)], vec![2, 1]).unwrap();

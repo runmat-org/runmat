@@ -409,8 +409,8 @@ fn try_kron_gpu_host(
 
 fn value_shape(value: &Value) -> Option<&[usize]> {
     match value {
-        Value::Tensor(tensor) => Some(&tensor.shape),
-        Value::ComplexTensor(tensor) => Some(&tensor.shape),
+        Value::Tensor(tensor) => Some(tensor.shape()),
+        Value::ComplexTensor(tensor) => Some(tensor.shape()),
         Value::LogicalArray(array) => Some(&array.shape),
         Value::GpuTensor(handle) => Some(handle.shape()),
         _ => None,
@@ -570,7 +570,7 @@ fn integer_kron_operand(value: &Value) -> Option<KronIntegerOperand<'_>> {
         Value::Int(value) => Some(KronIntegerOperand::Scalar(value)),
         Value::Tensor(tensor) => tensor
             .integer_storage()
-            .map(|storage| KronIntegerOperand::Array(storage, &tensor.shape)),
+            .map(|storage| KronIntegerOperand::Array(storage, tensor.shape())),
         _ => None,
     }
 }
@@ -775,12 +775,12 @@ fn char_array_to_tensor(chars: &CharArray) -> crate::BuiltinResult<Tensor> {
 fn tensor_to_complex(tensor: &Tensor) -> crate::BuiltinResult<ComplexTensor> {
     let values = tensor::tensor_values_f64_cow(tensor);
     let data: Vec<(f64, f64)> = values.iter().map(|&re| (re, 0.0)).collect();
-    ComplexTensor::new(data, tensor.shape.clone())
+    ComplexTensor::new(data, tensor.shape().to_vec())
         .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL))
 }
 
 fn kron_tensor(a: &Tensor, b: &Tensor) -> crate::BuiltinResult<Tensor> {
-    let (shape_a, shape_b, shape_out) = aligned_shapes(&a.shape, &b.shape)?;
+    let (shape_a, shape_b, shape_out) = aligned_shapes(a.shape(), b.shape())?;
     let storage_a = a
         .clone()
         .into_numeric_storage()
@@ -846,7 +846,7 @@ fn kron_complex_tensor(
     a: &ComplexTensor,
     b: &ComplexTensor,
 ) -> crate::BuiltinResult<ComplexTensor> {
-    let (shape_a, shape_b, shape_out) = aligned_shapes(&a.shape, &b.shape)?;
+    let (shape_a, shape_b, shape_out) = aligned_shapes(a.shape(), b.shape())?;
     let total_out = checked_total(&shape_out, "kron")?;
     if total_out == 0 {
         return ComplexTensor::new(Vec::new(), shape_out)
@@ -993,7 +993,7 @@ pub(crate) mod tests {
         let result = kron_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).expect("kron");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![4, 4]);
+                assert_eq!(t.shape(), &[4, 4]);
                 assert_eq!(
                     t.materialize_f64(),
                     vec![
@@ -1014,7 +1014,7 @@ pub(crate) mod tests {
         let result = kron_builtin(a, Value::Tensor(b), Vec::new()).expect("kron");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert_eq!(t.materialize_f64(), vec![3.0, 6.0, 9.0, 12.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1108,7 +1108,7 @@ pub(crate) mod tests {
             let Value::Tensor(result) = result else {
                 panic!("integer matrix kron must return a tensor");
             };
-            assert_eq!(result.shape, vec![2, 2]);
+            assert_eq!(result.shape(), &[2, 2]);
             assert_eq!(result.integer_storage(), Some(&expected));
         }
     }
@@ -1139,7 +1139,7 @@ pub(crate) mod tests {
         let Value::Tensor(result) = result else {
             panic!("empty integer kron must return a tensor");
         };
-        assert_eq!(result.shape, vec![0, 2]);
+        assert_eq!(result.shape(), &[0, 2]);
         assert_eq!(
             result.integer_storage(),
             Some(&IntegerStorage::I64(Vec::new()))
@@ -1171,7 +1171,7 @@ pub(crate) mod tests {
         let result = kron_builtin(a, b, Vec::new()).expect("kron");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![2, 1]);
+                assert_eq!(ct.shape(), &[2, 1]);
                 assert_eq!(
                     ct.materialize_f64(),
                     vec![(0.0, 0.0), (1.0, 2.0 * 1.0 + 1.0 * 0.0)]
@@ -1205,7 +1205,7 @@ pub(crate) mod tests {
         .expect("kron");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 4]);
+                assert_eq!(t.shape(), &[2, 4]);
                 assert_eq!(
                     t.materialize_f64(),
                     vec![1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0]
@@ -1224,7 +1224,7 @@ pub(crate) mod tests {
             kron_builtin(Value::CharArray(chars), Value::Tensor(tensor), Vec::new()).expect("kron");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 let expected: Vec<f64> = "AB"
                     .chars()
                     .flat_map(|ch| [ch as u32 as f64, 2.0 * ch as u32 as f64])
@@ -1270,11 +1270,11 @@ pub(crate) mod tests {
             let b = Tensor::new(vec![0.0, 6.0, 5.0, 7.0], vec![2, 2]).unwrap();
             let view_a = HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             };
             let view_b = HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             };
             let handle_a = provider.upload(&view_a).expect("upload a");
             let handle_b = provider.upload(&view_b).expect("upload b");
@@ -1289,7 +1289,7 @@ pub(crate) mod tests {
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![4, 4]);
+            assert_eq!(gathered.shape(), &[4, 4]);
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![
@@ -1307,7 +1307,7 @@ pub(crate) mod tests {
             let gpu_tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
                 data: &gpu_tensor.materialize_f64(),
-                shape: &gpu_tensor.shape,
+                shape: gpu_tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let host = Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap();
@@ -1410,7 +1410,7 @@ pub(crate) mod tests {
         let result = kron_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).expect("kron");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 4]);
+                assert_eq!(t.shape(), &[0, 4]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1443,11 +1443,11 @@ pub(crate) mod tests {
 
         let view_a = HostTensorView {
             data: &a.materialize_f64(),
-            shape: &a.shape,
+            shape: a.shape(),
         };
         let view_b = HostTensorView {
             data: &b.materialize_f64(),
-            shape: &b.shape,
+            shape: b.shape(),
         };
         let handle_a = provider.upload(&view_a).expect("upload a");
         let handle_b = provider.upload(&view_b).expect("upload b");
@@ -1460,7 +1460,7 @@ pub(crate) mod tests {
         .expect("gpu");
         let gpu_tensor = test_support::gather(gpu_value).expect("gather");
 
-        assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
+        assert_eq!(gpu_tensor.shape(), cpu_tensor.shape());
         for (idx, (g, c)) in gpu_tensor
             .materialize_f64()
             .iter()

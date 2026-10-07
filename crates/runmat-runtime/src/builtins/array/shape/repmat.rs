@@ -609,7 +609,7 @@ fn repmat_tensor(tensor: &Tensor, reps: &[usize]) -> crate::BuiltinResult<Tensor
         .clone()
         .into_numeric_storage()
         .map_err(|e| repmat_internal(format!("repmat: {e}")))?;
-    let (storage, shape) = repmat_numeric_storage(&storage, &tensor.shape, reps)?;
+    let (storage, shape) = repmat_numeric_storage(&storage, tensor.shape(), reps)?;
     Tensor::from_numeric_storage(storage, shape)
         .map_err(|e| repmat_internal(format!("repmat: {e}")))
 }
@@ -624,7 +624,7 @@ fn repmat_complex_tensor(
     reps: &[usize],
 ) -> crate::BuiltinResult<ComplexTensor> {
     let indices = (0..tensor.len()).collect::<Vec<_>>();
-    let (indices, shape) = repmat_column_major(&indices, &tensor.shape, reps, "repmat")?;
+    let (indices, shape) = repmat_column_major(&indices, tensor.shape(), reps, "repmat")?;
     let storage = tensor
         .complex_storage()
         .gather(&indices)
@@ -904,10 +904,10 @@ pub(crate) mod tests {
         .expect("repmat");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![4, 6]);
-                let rows = t.shape[0];
+                assert_eq!(t.shape(), &[4, 6]);
+                let rows = t.shape()[0];
                 let values = t.as_f64_slice().expect("double output");
-                for col in 0..t.shape[1] {
+                for col in 0..t.shape()[1] {
                     let expected = if col % 2 == 0 {
                         vec![1.0, 3.0, 1.0, 3.0]
                     } else {
@@ -930,7 +930,7 @@ pub(crate) mod tests {
         let result =
             repmat_builtin(Value::Tensor(tensor), vec![Value::Tensor(reps)]).expect("repmat");
         match result {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![4, 6]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[4, 6]),
             other => panic!("expected tensor output, got {other:?}"),
         }
     }
@@ -943,7 +943,7 @@ pub(crate) mod tests {
             repmat_builtin(Value::Tensor(row), vec![Value::Int(IntValue::I32(2))]).expect("repmat");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 6]);
+                assert_eq!(t.shape(), &[2, 6]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -995,11 +995,11 @@ pub(crate) mod tests {
         .expect("repmat");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3, 6]);
+                assert_eq!(out.shape(), &[2, 3, 6]);
                 let values = out.as_f64_slice().expect("double output");
-                let rows = out.shape[0];
-                let cols = out.shape[1];
-                let depth = out.shape[2];
+                let rows = out.shape()[0];
+                let cols = out.shape()[1];
+                let depth = out.shape()[2];
                 for k in 0..depth {
                     for j in 0..cols {
                         for i in 0..rows {
@@ -1093,7 +1093,7 @@ pub(crate) mod tests {
         .expect("repmat");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 2]);
+                assert_eq!(t.shape(), &[0, 2]);
                 assert!(t.is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
@@ -1148,7 +1148,7 @@ pub(crate) mod tests {
         .expect("repmat");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![2, 2]);
+                assert_eq!(ct.shape(), &[2, 2]);
                 assert!(ct
                     .materialize_f64()
                     .iter()
@@ -1169,11 +1169,11 @@ pub(crate) mod tests {
         .expect("repmat");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![3, 4]);
-                let rows = ct.rows;
-                let cols = ct.cols;
-                let base_rows = base.rows;
-                let base_cols = base.cols;
+                assert_eq!(ct.shape(), &[3, 4]);
+                let rows = ct.rows();
+                let cols = ct.cols();
+                let base_rows = base.rows();
+                let base_cols = base.cols();
                 for col in 0..cols {
                     let orig_col = col % base_cols;
                     for row in 0..rows {
@@ -1211,7 +1211,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(output) = value else {
             panic!("expected complex tensor");
         };
-        assert_eq!(output.shape, vec![2, 4]);
+        assert_eq!(output.shape(), &[2, 4]);
         assert_eq!(
             output
                 .integer_storage()
@@ -1256,7 +1256,7 @@ pub(crate) mod tests {
             .expect("repmat") else {
                 panic!("expected exact real integer tensor");
             };
-            assert_eq!(output.shape, vec![2, 4]);
+            assert_eq!(output.shape(), &[2, 4]);
             assert_eq!(
                 output.integer_storage(),
                 Some(
@@ -1283,7 +1283,7 @@ pub(crate) mod tests {
         .expect("scalar repmat") else {
             panic!("expected exact real integer scalar output");
         };
-        assert_eq!(scalar.shape, vec![2, 3]);
+        assert_eq!(scalar.shape(), &[2, 3]);
         assert_eq!(
             scalar.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX; 6]))
@@ -1298,7 +1298,7 @@ pub(crate) mod tests {
         .expect("empty repmat") else {
             panic!("expected exact empty integer tensor");
         };
-        assert_eq!(empty.shape, vec![0, 2]);
+        assert_eq!(empty.shape(), &[0, 2]);
         assert_eq!(
             empty.integer_storage(),
             Some(&IntegerStorage::U64(Vec::new()))
@@ -1317,7 +1317,7 @@ pub(crate) mod tests {
         .expect("repmat") else {
             panic!("expected single tensor");
         };
-        assert_eq!(output.shape, vec![2, 4]);
+        assert_eq!(output.shape(), &[2, 4]);
         assert_eq!(
             output.into_numeric_storage().expect("single storage"),
             NumericStorage::F32(vec![1.25, 1.25, -2.5, -2.5, 1.25, 1.25, -2.5, -2.5])
@@ -1359,14 +1359,14 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
                 repmat_builtin(Value::GpuTensor(handle), vec![Value::Int(IntValue::I32(2))])
                     .expect("repmat");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![4, 2]);
+            assert_eq!(gathered.shape(), &[4, 2]);
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0]
@@ -1396,7 +1396,7 @@ pub(crate) mod tests {
                 Some(IntegerElementType::U64)
             );
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-            assert_eq!(gathered.shape, vec![4, 2]);
+            assert_eq!(gathered.shape(), &[4, 2]);
             assert_eq!(
                 gathered.integer_storage(),
                 Some(&IntegerStorage::U64(vec![
@@ -1455,7 +1455,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_value = repmat_builtin(
@@ -1464,7 +1464,7 @@ pub(crate) mod tests {
         )
         .expect("repmat gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         assert_eq!(gathered.materialize_f64(), cpu_tensor.materialize_f64());
     }
 }

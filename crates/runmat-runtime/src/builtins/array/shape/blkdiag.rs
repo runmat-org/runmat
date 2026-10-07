@@ -392,9 +392,9 @@ fn assemble_typed_integer_sparse_blocks(args: &[Value]) -> Option<BuiltinResult<
                         "blkdiag: typed sparse integer blocks require every input to use the same integer class",
                     )));
                 };
-                let (rows, cols) = match matrix_dims_from_shape(&tensor.shape) {
+                let (rows, cols) = match matrix_dims_from_shape(tensor.shape()) {
                     Some(dims) => dims,
-                    None => return Some(Err(validate_matrix_shape(&tensor.shape).unwrap_err())),
+                    None => return Some(Err(validate_matrix_shape(tensor.shape()).unwrap_err())),
                 };
                 let source = storage.exact_values();
                 let mut col_ptrs = Vec::with_capacity(cols + 1);
@@ -519,7 +519,7 @@ fn assemble_typed_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>>
     impl DenseIntegerBlock<'_> {
         fn shape(&self) -> &[usize] {
             match self {
-                Self::Tensor(tensor) => &tensor.shape,
+                Self::Tensor(tensor) => tensor.shape(),
                 Self::Scalar(_) => &SCALAR_SHAPE,
                 Self::Logical(array) => &array.shape,
             }
@@ -644,7 +644,7 @@ fn assemble_typed_complex_integer_blocks(args: &[Value]) -> Option<BuiltinResult
         } else {
             prototype = Some(storage);
         }
-        if let Err(error) = validate_matrix_shape(&tensor.shape) {
+        if let Err(error) = validate_matrix_shape(tensor.shape()) {
             return Some(Err(error));
         }
         tensors.push(tensor);
@@ -653,14 +653,14 @@ fn assemble_typed_complex_integer_blocks(args: &[Value]) -> Option<BuiltinResult
     let prototype = prototype.expect("typed complex input establishes an integer class");
     let rows = match tensors
         .iter()
-        .try_fold(0usize, |total, tensor| total.checked_add(tensor.rows))
+        .try_fold(0usize, |total, tensor| total.checked_add(tensor.rows()))
     {
         Some(rows) => rows,
         None => return Some(Err(size_overflow())),
     };
     let cols = match tensors
         .iter()
-        .try_fold(0usize, |total, tensor| total.checked_add(tensor.cols))
+        .try_fold(0usize, |total, tensor| total.checked_add(tensor.cols()))
     {
         Some(cols) => cols,
         None => return Some(Err(size_overflow())),
@@ -679,16 +679,16 @@ fn assemble_typed_complex_integer_blocks(args: &[Value]) -> Option<BuiltinResult
             .expect("typed complex input was checked above");
         let source_real = storage.real.exact_values();
         let source_imag = storage.imag.exact_values();
-        for col in 0..tensor.cols {
-            for row in 0..tensor.rows {
-                let src = row + col * tensor.rows;
+        for col in 0..tensor.cols() {
+            for row in 0..tensor.rows() {
+                let src = row + col * tensor.rows();
                 let dst = (row_offset + row) + (col_offset + col) * rows;
                 real[dst] = source_real[src].clone();
                 imag[dst] = source_imag[src].clone();
             }
         }
-        row_offset += tensor.rows;
-        col_offset += tensor.cols;
+        row_offset += tensor.rows();
+        col_offset += tensor.cols();
     }
     let real = match prototype.real.from_exact_values_like(real) {
         Ok(storage) => storage,
@@ -733,8 +733,8 @@ impl Block {
     fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::Tensor(tensor) => {
-                validate_matrix_shape(&tensor.shape)?;
-                if tensor.shape.is_empty() {
+                validate_matrix_shape(tensor.shape())?;
+                if tensor.shape().is_empty() {
                     return tensor
                         .reshape(vec![1, 1])
                         .map(Self::Real)
@@ -766,8 +766,8 @@ impl Block {
                 .map(Self::Complex)
                 .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail)),
             Value::ComplexTensor(tensor) => {
-                validate_matrix_shape(&tensor.shape)?;
-                if tensor.shape.is_empty() {
+                validate_matrix_shape(tensor.shape())?;
+                if tensor.shape().is_empty() {
                     return ComplexTensor::new(tensor.materialize_f64(), vec![1, 1])
                         .map(Self::Complex)
                         .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail));
@@ -793,9 +793,9 @@ impl Block {
 
     fn rows(&self) -> usize {
         match self {
-            Self::Real(tensor) => tensor.rows,
+            Self::Real(tensor) => matrix_dims_from_shape(tensor.shape()).map_or(0, |dims| dims.0),
             Self::Logical(array) => matrix_dims_from_shape(&array.shape).map_or(0, |dims| dims.0),
-            Self::Complex(tensor) => tensor.rows,
+            Self::Complex(tensor) => tensor.rows(),
             Self::Sparse(sparse) => sparse.rows,
             Self::Char(chars) => chars.rows,
         }
@@ -803,9 +803,9 @@ impl Block {
 
     fn cols(&self) -> usize {
         match self {
-            Self::Real(tensor) => tensor.cols,
+            Self::Real(tensor) => matrix_dims_from_shape(tensor.shape()).map_or(0, |dims| dims.1),
             Self::Logical(array) => matrix_dims_from_shape(&array.shape).map_or(0, |dims| dims.1),
-            Self::Complex(tensor) => tensor.cols,
+            Self::Complex(tensor) => tensor.cols(),
             Self::Sparse(sparse) => sparse.cols,
             Self::Char(chars) => chars.cols,
         }
@@ -1030,9 +1030,9 @@ fn assemble_complex(blocks: Vec<Block>, dtype: NumericDType) -> BuiltinResult<Va
     for block in &blocks {
         match block {
             Block::Complex(tensor) => {
-                for col in 0..tensor.cols {
-                    for row in 0..tensor.rows {
-                        let src = row + col * tensor.rows;
+                for col in 0..tensor.cols() {
+                    for row in 0..tensor.rows() {
+                        let src = row + col * tensor.rows();
                         let dst = (row_offset + row) + (col_offset + col) * rows;
                         data[dst] = tensor.materialize_f64()[src];
                     }
@@ -1040,9 +1040,11 @@ fn assemble_complex(blocks: Vec<Block>, dtype: NumericDType) -> BuiltinResult<Va
             }
             Block::Real(tensor) => {
                 let values = tensor::tensor_values_f64_cow(tensor);
-                for col in 0..tensor.cols {
-                    for row in 0..tensor.rows {
-                        let src = row + col * tensor.rows;
+                let (block_rows, block_cols) =
+                    matrix_dims_from_shape(tensor.shape()).expect("real block shape was validated");
+                for col in 0..block_cols {
+                    for row in 0..block_rows {
+                        let src = row + col * block_rows;
                         let dst = (row_offset + row) + (col_offset + col) * rows;
                         data[dst] = (values[src], 0.0);
                     }
@@ -1175,7 +1177,9 @@ fn block_into_sparse(block: Block) -> BuiltinResult<SparseTensor> {
             // Core sparse output is currently floating; expose the dense
             // conversion boundary instead of consulting a mirror.
             let values = tensor::tensor_values_f64_cow(&tensor);
-            dense_to_sparse(values.as_ref(), tensor.rows, tensor.cols)
+            let (rows, cols) =
+                matrix_dims_from_shape(tensor.shape()).expect("real block shape was validated");
+            dense_to_sparse(values.as_ref(), rows, cols)
         }
         Block::Logical(array) => {
             let (rows, cols) = matrix_dims_from_shape(&array.shape)
@@ -1236,12 +1240,12 @@ fn complex_to_real_sparse(tensor: &ComplexTensor) -> BuiltinResult<SparseTensor>
     let mut row_indices = Vec::new();
     let mut values = Vec::new();
     col_ptrs
-        .try_reserve_exact(tensor.cols.checked_add(1).ok_or_else(size_overflow)?)
+        .try_reserve_exact(tensor.cols().checked_add(1).ok_or_else(size_overflow)?)
         .map_err(|_| allocation_error("sparse column pointer allocation failed"))?;
     col_ptrs.push(0);
-    for col in 0..tensor.cols {
-        for row in 0..tensor.rows {
-            let (re, _) = tensor.materialize_f64()[row + col * tensor.rows];
+    for col in 0..tensor.cols() {
+        for row in 0..tensor.rows() {
+            let (re, _) = tensor.materialize_f64()[row + col * tensor.rows()];
             if re != 0.0 {
                 row_indices.push(row);
                 values.push(re);
@@ -1249,7 +1253,7 @@ fn complex_to_real_sparse(tensor: &ComplexTensor) -> BuiltinResult<SparseTensor>
         }
         col_ptrs.push(values.len());
     }
-    SparseTensor::new(tensor.rows, tensor.cols, col_ptrs, row_indices, values)
+    SparseTensor::new(tensor.rows(), tensor.cols(), col_ptrs, row_indices, values)
         .map_err(|detail| error_with_detail(&ERROR_INVALID_INPUT, detail))
 }
 
@@ -1260,9 +1264,11 @@ fn copy_real_block(
     col_offset: usize,
     tensor: &Tensor,
 ) -> BuiltinResult<()> {
-    for col in 0..tensor.cols {
-        for row in 0..tensor.rows {
-            let src = row + col * tensor.rows;
+    let (block_rows, block_cols) =
+        matrix_dims_from_shape(tensor.shape()).expect("real block shape was validated");
+    for col in 0..block_cols {
+        for row in 0..block_rows {
+            let src = row + col * block_rows;
             let dst = (row_offset + row) + (col_offset + col) * output_rows;
             let value = tensor
                 .numeric_value_at(src)
@@ -1464,7 +1470,7 @@ mod tests {
     fn empty_call_returns_empty_double_matrix() {
         match call(Vec::new()).unwrap() {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![0, 0]);
+                assert_eq!(tensor.shape(), &[0, 0]);
                 assert!(tensor.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1511,7 +1517,7 @@ mod tests {
             else {
                 panic!("expected real integer blkdiag output");
             };
-            assert_eq!(output.shape, vec![3, 2]);
+            assert_eq!(output.shape(), &[3, 2]);
             assert_eq!(
                 output.integer_storage(),
                 Some(
@@ -1562,7 +1568,7 @@ mod tests {
             panic!("expected integer tensor");
         };
         assert_eq!(output.numeric_dtype(), NumericDType::I8);
-        assert_eq!(output.shape, vec![5, 5]);
+        assert_eq!(output.shape(), &[5, 5]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::I8(vec![
@@ -1727,7 +1733,7 @@ mod tests {
         let b = Tensor::new(vec![5.0, 6.0], vec![1, 2]).unwrap();
         match call(vec![Value::Tensor(a), Value::Tensor(b)]).unwrap() {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 4]);
+                assert_eq!(out.shape(), &[3, 4]);
                 assert_eq!(
                     out.materialize_f64(),
                     vec![1.0, 3.0, 0.0, 2.0, 4.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 6.0]
@@ -1748,13 +1754,25 @@ mod tests {
         .unwrap()
         {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 5]);
+                assert_eq!(out.shape(), &[3, 5]);
                 assert_eq!(out.materialize_f64()[0], 1.0);
                 assert_eq!(out.materialize_f64()[1 + 3 * 3], 4.0);
                 assert_eq!(out.materialize_f64()[2 + 4 * 3], 5.0);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn rank_one_dense_input_is_a_row_block() {
+        let vector = Tensor::new(vec![2.0, 3.0], vec![2]).unwrap();
+        let result = call(vec![Value::Tensor(vector), Value::Num(4.0)]).unwrap();
+        let Value::Tensor(out) = result else {
+            panic!("expected dense tensor");
+        };
+        assert_eq!(out.shape(), &[2, 3]);
+        assert_eq!(out.materialize_f64(), vec![2.0, 0.0, 3.0, 0.0, 0.0, 4.0]);
     }
 
     #[test]
@@ -1775,7 +1793,7 @@ mod tests {
         let b = Tensor::new_with_dtype(vec![3.25], vec![1, 1], NumericDType::F32).unwrap();
         match call(vec![Value::Tensor(a), Value::Tensor(b)]).unwrap() {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 2]);
+                assert_eq!(out.shape(), &[3, 2]);
                 assert_eq!(out.numeric_dtype(), NumericDType::F32);
                 assert_eq!(out.materialize_f64()[0], 1.5);
                 assert_eq!(out.materialize_f64()[1], 2.5);
@@ -1790,7 +1808,7 @@ mod tests {
         let complex = ComplexTensor::new(vec![(1.0, 2.0), (3.0, -4.0)], vec![2, 1]).unwrap();
         match call(vec![Value::Num(9.0), Value::ComplexTensor(complex)]).unwrap() {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![3, 2]);
+                assert_eq!(out.shape(), &[3, 2]);
                 assert_eq!(out.materialize_f64()[0], (9.0, 0.0));
                 assert_eq!(out.materialize_f64()[4], (1.0, 2.0));
                 assert_eq!(out.materialize_f64()[5], (3.0, -4.0));
@@ -1805,7 +1823,7 @@ mod tests {
         let complex = ComplexTensor::from_f32(vec![(1.0, 2.0), (3.0, -4.0)], vec![2, 1]).unwrap();
         match call(vec![Value::Tensor(real), Value::ComplexTensor(complex)]).unwrap() {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![3, 2]);
+                assert_eq!(out.shape(), &[3, 2]);
                 assert_eq!(out.numeric_dtype(), NumericDType::F32);
                 assert_eq!(
                     out.as_f32_slice().map(|values| values
@@ -1897,7 +1915,7 @@ mod tests {
         let sparse = SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![2.0]).unwrap();
         match call(vec![Value::SparseTensor(sparse), Value::Complex(5.0, 1.0)]).unwrap() {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), &[2, 2]);
                 assert_eq!(
                     out.materialize_f64(),
                     vec![(2.0, 0.0), (0.0, 0.0), (0.0, 0.0), (5.0, 1.0)]
@@ -1953,7 +1971,7 @@ mod tests {
         .unwrap()
         {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![3, 3]);
+                assert_eq!(out.shape(), &[3, 3]);
                 assert_eq!(out.materialize_f64()[0], (7.0, 0.0));
                 assert_eq!(out.materialize_f64()[4], (1.0, 0.0));
                 assert_eq!(out.materialize_f64()[8], (2.0, -3.0));
@@ -1995,19 +2013,19 @@ mod tests {
             let ha = provider
                 .upload(&HostTensorView {
                     data: &a.materialize_f64(),
-                    shape: &a.shape,
+                    shape: a.shape(),
                 })
                 .unwrap();
             let hb = provider
                 .upload(&HostTensorView {
                     data: &b.materialize_f64(),
-                    shape: &b.shape,
+                    shape: b.shape(),
                 })
                 .unwrap();
             let value = call(vec![Value::GpuTensor(ha), Value::GpuTensor(hb)]).unwrap();
             assert!(matches!(value, Value::GpuTensor(_)));
             let gathered = test_support::gather(value).unwrap();
-            assert_eq!(gathered.shape, vec![3, 3]);
+            assert_eq!(gathered.shape(), &[3, 3]);
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![1.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 4.0]
@@ -2063,7 +2081,7 @@ mod tests {
                 panic!("expected gathered tensor");
             };
             assert_eq!(out.numeric_dtype(), NumericDType::F32);
-            assert_eq!(out.shape, vec![2, 2]);
+            assert_eq!(out.shape(), &[2, 2]);
         });
     }
 
@@ -2074,13 +2092,13 @@ mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 })
                 .unwrap();
             let value = call(vec![Value::GpuTensor(handle), Value::Num(2.0)]).unwrap();
             assert!(matches!(value, Value::GpuTensor(_)));
             let gathered = test_support::gather(value).unwrap();
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), &[2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 0.0, 2.0]);
         });
     }
@@ -2104,7 +2122,7 @@ mod tests {
             };
             assert!(runmat_accelerate_api::handle_is_logical(&handle));
             let gathered = test_support::gather(Value::GpuTensor(handle)).unwrap();
-            assert_eq!(gathered.shape, vec![3, 2]);
+            assert_eq!(gathered.shape(), &[3, 2]);
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
@@ -2129,7 +2147,7 @@ mod tests {
                 crate::builtins::math::fft::common::gather_gpu_complex_tensor(&handle, "blkdiag"),
             )
             .unwrap();
-            assert_eq!(gathered.shape, vec![3, 2]);
+            assert_eq!(gathered.shape(), &[3, 2]);
             assert_eq!(gathered.materialize_f64()[0], (9.0, 0.0));
             assert_eq!(gathered.materialize_f64()[4], (1.0, 2.0));
             assert_eq!(gathered.materialize_f64()[5], (3.0, -4.0));

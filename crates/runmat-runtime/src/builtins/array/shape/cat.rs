@@ -880,7 +880,10 @@ fn concat_floating_tensors(dim_zero: usize, tensors: Vec<Tensor>) -> BuiltinResu
     let use_single = tensors
         .iter()
         .any(|tensor| tensor.numeric_dtype() == NumericDType::F32);
-    let shapes: Vec<Vec<usize>> = tensors.iter().map(|tensor| tensor.shape.clone()).collect();
+    let shapes: Vec<Vec<usize>> = tensors
+        .iter()
+        .map(|tensor| tensor.shape().to_vec())
+        .collect();
     let storages: Vec<NumericStorage> = tensors
         .into_iter()
         .map(|tensor| {
@@ -936,7 +939,7 @@ fn leftmost_integer_target(values: &[Value]) -> Option<IntegerClass> {
             Value::Tensor(tensor) => {
                 if let Some(storage) = tensor.integer_storage() {
                     let target = IntegerClass::from_storage(storage);
-                    if !is_empty_concat_shape(&tensor.shape) {
+                    if !is_empty_concat_shape(tensor.shape()) {
                         return Some(target);
                     }
                     empty_integer_target.get_or_insert(target);
@@ -985,7 +988,7 @@ fn integer_concat_input(
 ) -> BuiltinResult<(Vec<usize>, Vec<runmat_value::IntValue>)> {
     match value {
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let values = match tensor
                 .into_numeric_storage()
                 .map_err(|error| cat_err(format!("cat: {error}")))?
@@ -1074,7 +1077,7 @@ fn cat_complex_arrays(
         tensors.push(tensor);
     }
 
-    let shapes: Vec<Vec<usize>> = tensors.iter().map(|t| t.shape.clone()).collect();
+    let shapes: Vec<Vec<usize>> = tensors.iter().map(|t| t.shape().to_vec()).collect();
     let output_dtype = if tensors
         .iter()
         .all(|tensor| tensor.numeric_dtype() == NumericDType::F32)
@@ -1102,7 +1105,7 @@ fn leftmost_complex_integer_target(values: &[Value]) -> Option<IntegerClass> {
             continue;
         };
         let target = IntegerClass::from_storage(&storage.real);
-        if !is_empty_concat_shape(&tensor.shape) {
+        if !is_empty_concat_shape(tensor.shape()) {
             return Some(target);
         }
         empty_target.get_or_insert(target);
@@ -1159,7 +1162,7 @@ fn typed_complex_integer_concat_input(
         Value::ComplexTensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
                 return Ok((
-                    tensor.shape.clone(),
+                    tensor.shape().to_vec(),
                     integer_values(storage.real.clone())
                         .iter()
                         .map(|value| target.cast_int(value))
@@ -1170,7 +1173,7 @@ fn typed_complex_integer_concat_input(
                         .collect(),
                 ));
             }
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let values = tensor.materialize_f64();
             Ok((
                 shape,
@@ -1190,7 +1193,7 @@ fn typed_complex_integer_concat_input(
             vec![target.cast_scalar(imag)],
         )),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let real: Vec<runmat_value::IntValue> = match tensor
                 .into_numeric_storage()
                 .map_err(|error| cat_err(format!("cat: {error}")))?
@@ -1257,7 +1260,7 @@ fn char_array_from_value(value: Value) -> BuiltinResult<CharArray> {
         Value::Num(n) => char_array_from_f64_with_prefix(n, "cat"),
         Value::Int(i) => char_array_from_f64_with_prefix(i.to_f64(), "cat"),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let column_major = match tensor
                 .into_numeric_storage()
                 .map_err(|error| cat_err(format!("cat: {error}")))?
@@ -1644,7 +1647,7 @@ fn value_into_string_array(value: Value) -> BuiltinResult<StringArray> {
             StringArray::new(data, shape).map_err(|e| cat_err(format!("cat: {e}")))
         }
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let data = match tensor
                 .into_numeric_storage()
                 .map_err(|error| cat_err(format!("cat: {error}")))?
@@ -1691,7 +1694,7 @@ fn value_into_string_array(value: Value) -> BuiltinResult<StringArray> {
 }
 
 fn tensor_to_complex(tensor: Tensor) -> BuiltinResult<ComplexTensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| cat_err(format!("cat: {error}")))?;
@@ -1888,7 +1891,7 @@ pub(crate) mod tests {
         .expect("cat");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![4, 2]);
+                assert_eq!(t.shape(), &[4, 2]);
                 assert_eq!(
                     t.materialize_f64(),
                     vec![1.0, 3.0, 5.0, 7.0, 2.0, 4.0, 6.0, 8.0]
@@ -1911,7 +1914,7 @@ pub(crate) mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(output.shape(), &[1, 3]);
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
         assert_eq!(
             output.into_numeric_storage().expect("single storage"),
@@ -1930,7 +1933,7 @@ pub(crate) mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(output.shape(), &[1, 3]);
         assert_eq!(output.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
@@ -1945,7 +1948,7 @@ pub(crate) mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(output.shape(), &[1, 3]);
         assert_eq!(output.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 
@@ -2003,7 +2006,7 @@ pub(crate) mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(output.shape(), &[1, 3]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX, 4, 5]))
@@ -2064,7 +2067,7 @@ pub(crate) mod tests {
                     std::mem::discriminant(left_storage),
                     "left={left_storage:?}, right={right_storage:?}"
                 );
-                assert_eq!(output.shape, vec![1, 2]);
+                assert_eq!(output.shape(), &[1, 2]);
             }
         }
     }
@@ -2081,7 +2084,7 @@ pub(crate) mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(output.shape(), &[2, 1]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::I16(vec![4, 8]))
@@ -2283,7 +2286,7 @@ pub(crate) mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![2, 3]);
+        assert_eq!(output.shape(), &[2, 3]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U8(vec![1, 2, 3, 4, 5, 6]))
@@ -2305,7 +2308,7 @@ pub(crate) mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![0, 5]);
+        assert_eq!(output.shape(), &[0, 5]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::I16(Vec::new()))
@@ -2385,7 +2388,7 @@ pub(crate) mod tests {
             else {
                 panic!("expected complex integer");
             };
-            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.shape(), &[1, 2]);
             let storage = gathered.integer_storage().expect("integer storage");
             assert_eq!(
                 storage.real,
@@ -2422,11 +2425,11 @@ pub(crate) mod tests {
             let b = Tensor::new(vec![5.0, 7.0], vec![2, 1]).unwrap();
             let view_a = HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             };
             let view_b = HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             };
             let ha = provider.upload(&view_a).expect("upload a");
             let hb = provider.upload(&view_b).expect("upload b");
@@ -2436,7 +2439,7 @@ pub(crate) mod tests {
             )
             .expect("cat");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), &[4, 1]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 5.0, 7.0]);
         });
     }
@@ -2449,7 +2452,7 @@ pub(crate) mod tests {
             let proto = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let proto_view = HostTensorView {
                 data: &proto.materialize_f64(),
-                shape: &proto.shape,
+                shape: proto.shape(),
             };
             let proto_handle = provider.upload(&proto_view).expect("upload proto");
 
@@ -2466,7 +2469,7 @@ pub(crate) mod tests {
             )
             .expect("cat with like");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), &[4, 1]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 5.0, 7.0]);
         });
     }
@@ -2480,7 +2483,7 @@ pub(crate) mod tests {
             let proto_handle = provider
                 .upload(&HostTensorView {
                     data: &proto.materialize_f64(),
-                    shape: &proto.shape,
+                    shape: proto.shape(),
                 })
                 .expect("upload proto");
             let left = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 4]), vec![1, 2])
@@ -2507,7 +2510,7 @@ pub(crate) mod tests {
                 Some(IntegerElementType::U64)
             );
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), &[1, 3]);
             assert_eq!(
                 gathered.integer_storage(),
                 Some(&IntegerStorage::U64(vec![
@@ -2551,7 +2554,7 @@ pub(crate) mod tests {
                 Some(IntegerElementType::U64)
             );
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), &[1, 3]);
             assert_eq!(
                 gathered.integer_storage(),
                 Some(&IntegerStorage::U64(vec![
@@ -2627,7 +2630,7 @@ pub(crate) mod tests {
         .expect("typed complex integer concatenation is documented") else {
             panic!("expected complex tensor");
         };
-        assert_eq!(complex_output.shape, vec![2, 1]);
+        assert_eq!(complex_output.shape(), &[2, 1]);
 
         test_support::with_test_provider(|provider| {
             let dim_values = [1_u16];
@@ -2682,7 +2685,7 @@ pub(crate) mod tests {
             )
             .expect("gpu empty omission");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 3]);
+            assert_eq!(gathered.shape(), &[2, 3]);
             assert_eq!(gathered.materialize_f64(), values);
         });
     }
@@ -2728,11 +2731,11 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
         let view_a = HostTensorView {
             data: &a.materialize_f64(),
-            shape: &a.shape,
+            shape: a.shape(),
         };
         let view_b = HostTensorView {
             data: &b.materialize_f64(),
-            shape: &b.shape,
+            shape: b.shape(),
         };
         let ha = provider.upload(&view_a).expect("upload a");
         let hb = provider.upload(&view_b).expect("upload b");
@@ -2742,7 +2745,7 @@ pub(crate) mod tests {
         )
         .expect("cat gpu");
         let gathered = test_support::gather(gpu_value).expect("gather");
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 
