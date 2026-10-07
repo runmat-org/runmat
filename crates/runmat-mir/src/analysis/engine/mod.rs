@@ -23,9 +23,11 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
     store.diagnostics.extend(program.diagnostics.clone());
     store.dependencies = analysis_dependencies(&store);
     store.program_points.clear();
+    store.fusion_stage_contracts.clear();
     store.regions.clear();
     store.functions.clear();
     store.classes.clear();
+    let mut liveness_by_function = std::collections::BTreeMap::new();
 
     for (function, body) in &assembly.bodies {
         let Ok(function_ordinal) = u32::try_from(function.0) else {
@@ -54,7 +56,26 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
             program.captures.get(function).map_or(&[], Vec::as_slice),
             &program.summaries,
         );
+        let convergence = if !flow.converged || program.nonconverged.contains(function) {
+            FunctionConvergence::DynamicRecursion
+        } else if flow.widened || program.widened.contains(function) {
+            FunctionConvergence::Widened
+        } else {
+            FunctionConvergence::Exact
+        };
+        let liveness = super::regions::analyze_liveness(body);
         store.diagnostics.extend(flow.diagnostics.clone());
+        store
+            .fusion_stage_contracts
+            .extend(super::fusion_stage::certify_body(
+                body,
+                program_function,
+                &flow.points,
+                &program.summaries,
+                &liveness,
+                convergence,
+            ));
+        liveness_by_function.insert(*function, liveness);
         store.program_points.extend(flow.points);
         let summary = program
             .summaries
@@ -98,17 +119,14 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
             outputs: summary.outputs.clone(),
             effects: summary.effects.clone(),
             capabilities: summary.capabilities.clone(),
-            convergence: if !flow.converged || program.nonconverged.contains(function) {
-                FunctionConvergence::DynamicRecursion
-            } else if flow.widened || program.widened.contains(function) {
-                FunctionConvergence::Widened
-            } else {
-                FunctionConvergence::Exact
-            },
+            convergence,
         });
     }
 
     store.program_points.sort_by_key(|point| point.point);
+    store
+        .fusion_stage_contracts
+        .sort_by_key(|contract| contract.point);
     store.functions.sort_by_key(|function| function.function);
     store.classes = assembly
         .classes
@@ -137,19 +155,22 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
         })
         .collect();
     let mut regions = Vec::new();
-    for (function, body) in &assembly.bodies {
-        let (Some(metadata), Ok(function)) = (
-            assembly.functions.get(function),
-            u32::try_from(function.0).map(ProgramFunctionId),
+    for (hir_function, body) in &assembly.bodies {
+        let (Some(metadata), Ok(program_function)) = (
+            assembly.functions.get(hir_function),
+            u32::try_from(hir_function.0).map(ProgramFunctionId),
         ) else {
             continue;
         };
         regions.extend(super::regions::discover_regions(
             body,
-            function,
+            program_function,
             metadata.source,
             &program.summaries,
             &store,
+            liveness_by_function
+                .get(hir_function)
+                .expect("liveness exists for every analyzed body"),
         ));
     }
     regions.sort_by_key(|region| region.contract.id);

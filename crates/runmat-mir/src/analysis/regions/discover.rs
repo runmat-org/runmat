@@ -10,7 +10,7 @@ use runmat_types::{
 
 use crate::{BasicBlockId, MirBody, MirOutputTarget, MirPlace, MirRvalue, MirStmt, MirStmtKind};
 
-use super::liveness::{analyze_liveness, BodyLiveness};
+use super::liveness::BodyLiveness;
 use super::uses::{consumer_sites, successors};
 use crate::analysis::inference::{statement_contract, FunctionSummary};
 use crate::analysis::{AnalysisStore, RegionAnalysis, RegionFutureConsumer};
@@ -26,8 +26,8 @@ pub(crate) fn discover_regions(
     source: runmat_types::ProgramSourceId,
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
     store: &AnalysisStore,
+    liveness: &BodyLiveness,
 ) -> Vec<RegionAnalysis> {
-    let liveness = analyze_liveness(body);
     let mut runs = local_runs(body, summaries);
     merge_linear_runs(body, &mut runs);
     runs.sort_by_key(|run| run.operations.first().copied());
@@ -44,7 +44,7 @@ pub(crate) fn discover_regions(
                 run,
                 summaries,
                 store,
-                &liveness,
+                liveness,
                 &consumers,
             )
         })
