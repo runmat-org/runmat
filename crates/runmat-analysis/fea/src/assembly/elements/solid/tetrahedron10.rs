@@ -181,14 +181,7 @@ pub enum Tetrahedron10ElementError {
 }
 
 pub(super) fn shape_values(barycentric: [f64; 4]) -> [f64; TETRAHEDRON10_ELEMENT_NODE_COUNT] {
-    let mut values = [0.0; TETRAHEDRON10_ELEMENT_NODE_COUNT];
-    for node in 0..4 {
-        values[node] = barycentric[node] * (2.0 * barycentric[node] - 1.0);
-    }
-    for (local_edge, [left, right]) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.into_iter().enumerate() {
-        values[4 + local_edge] = 4.0 * barycentric[left] * barycentric[right];
-    }
-    values
+    runmat_meshing_core::interpolation::tetrahedron10_lagrange_weights(barycentric)
 }
 
 pub(super) fn strain_displacement_matrix(

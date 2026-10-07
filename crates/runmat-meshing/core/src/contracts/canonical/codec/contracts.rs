@@ -32,7 +32,7 @@ canonical_contract!(
 );
 canonical_contract!(
     SolverMeshTransferMap,
-    "analysis.mesh.solver-transfer-map/v1",
+    "analysis.mesh.solver-transfer-map/v2",
     MeshingCanonicalLimits::ARTIFACT,
     SolverMeshTransferMap::validate
 );

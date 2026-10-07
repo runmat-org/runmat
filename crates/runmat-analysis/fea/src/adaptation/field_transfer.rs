@@ -1,31 +1,29 @@
 use std::collections::BTreeMap;
 
+mod error_measurement;
+pub use error_measurement::measure_solver_field_transfer_error;
 mod projection;
+#[cfg(test)]
+mod quadratic_tests;
 mod topology;
 
 use runmat_analysis_core::{AnalysisField, AnalysisFieldValues};
-use runmat_canonical_codec::CanonicalLimits;
 use runmat_meshing_core::{
-    FieldTopologyLocation, SolverMeshArtifact, SolverMeshTransferMap, StableDigest,
+    ElementOrder, FieldTopologyLocation, SolverMeshArtifact, SolverMeshTransferMap, StableDigest,
 };
 use serde::{Deserialize, Serialize};
-use sha2::{Digest as _, Sha256};
 
 use projection::{apply_projection, field_transfer_method};
 use topology::{
     component_count, stable_identities, target_midpoint_edges, transfer_map_for_location,
 };
 
-const FIELD_CODEC_PREFIX: &[u8] = b"runmat-analysis-fea-field-cbor/v1\0";
-const FIELD_CODEC_DOMAIN: &str = "analysis.fea.field/v1";
-const FIELD_CODEC_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(512 * 1024 * 1024, 20_000_000, 4096, 16);
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SolverFieldTransferMethod {
     StableIdentity,
-    QuadraticEdgeInterpolation,
+    LinearEdgeInterpolation,
+    QuadraticLagrangeInterpolation,
     BarycentricInterpolation,
     CentroidProjection,
     ConservativeProjection,
@@ -74,65 +72,6 @@ pub enum SolverFieldTransferError {
     UnsupportedTopologyChange,
     InconsistentQuadraticConnectivity,
     InvalidReferenceField,
-}
-
-pub fn measure_solver_field_transfer_error(
-    transfer: &SolverFieldTransferResult,
-    reference: &AnalysisField,
-) -> Result<SolverFieldTransferErrorEvidence, SolverFieldTransferError> {
-    if transfer.field.field_id != reference.field_id || transfer.field.shape != reference.shape {
-        return Err(SolverFieldTransferError::InvalidReferenceField);
-    }
-    let transferred = transfer
-        .field
-        .as_host_f64()
-        .ok_or(SolverFieldTransferError::DeviceFieldRequiresHostTransfer)?;
-    let reference_values = reference
-        .as_host_f64()
-        .ok_or(SolverFieldTransferError::DeviceFieldRequiresHostTransfer)?;
-    if transferred.len() != reference_values.len()
-        || transferred.iter().any(|value| !value.is_finite())
-        || reference_values.iter().any(|value| !value.is_finite())
-    {
-        return Err(SolverFieldTransferError::InvalidReferenceField);
-    }
-    let error_squared = transferred
-        .iter()
-        .zip(reference_values)
-        .map(|(transferred, reference)| (transferred - reference).powi(2))
-        .sum::<f64>();
-    let reference_squared = reference_values
-        .iter()
-        .map(|value| value * value)
-        .sum::<f64>();
-    let absolute_l2_error = error_squared.sqrt();
-    let relative_l2_error = if reference_squared == 0.0 {
-        if absolute_l2_error == 0.0 {
-            Some(0.0)
-        } else {
-            None
-        }
-    } else {
-        Some(absolute_l2_error / reference_squared.sqrt())
-    };
-    Ok(SolverFieldTransferErrorEvidence {
-        transfer: transfer.evidence.clone(),
-        transferred_field_digest: field_digest(&transfer.field)?,
-        reference_field_digest: field_digest(reference)?,
-        absolute_l2_error,
-        relative_l2_error,
-    })
-}
-
-fn field_digest(field: &AnalysisField) -> Result<StableDigest, SolverFieldTransferError> {
-    let encoded = runmat_canonical_codec::encode_contract(
-        FIELD_CODEC_PREFIX,
-        FIELD_CODEC_DOMAIN,
-        field,
-        FIELD_CODEC_LIMITS,
-    )
-    .map_err(|_| SolverFieldTransferError::InvalidReferenceField)?;
-    Ok(StableDigest::from_bytes(Sha256::digest(encoded).into()))
 }
 
 pub fn transfer_solver_field(
@@ -193,6 +132,8 @@ pub fn transfer_solver_field(
             )
         })
         .collect::<BTreeMap<_, _>>();
+    let quadratic_nodal_source = source_map.location == FieldTopologyLocation::Node
+        && source.resolved_request.element_order == ElementOrder::Tet10;
     let midpoint_edges = if source_map.location == FieldTopologyLocation::Node {
         target_midpoint_edges(target)?
     } else {
@@ -222,6 +163,10 @@ pub fn transfer_solver_field(
                 field_transfer_method(projection.method),
             )
         } else if let Some([left, right]) = midpoint_edges.get(&stable_identity).copied() {
+            // Endpoint averaging is exact only when elevating a linear source.
+            if quadratic_nodal_source {
+                return Err(SolverFieldTransferError::UnsupportedTopologyChange);
+            }
             let left = resolved_values
                 .get(&left)
                 .ok_or(SolverFieldTransferError::UnsupportedTopologyChange)?;
@@ -233,7 +178,7 @@ pub fn transfer_solver_field(
                     .zip(right)
                     .map(|(left, right)| 0.5 * (left + right))
                     .collect(),
-                SolverFieldTransferMethod::QuadraticEdgeInterpolation,
+                SolverFieldTransferMethod::LinearEdgeInterpolation,
             )
         } else {
             return Err(SolverFieldTransferError::UnsupportedTopologyChange);

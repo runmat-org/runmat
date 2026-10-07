@@ -26,6 +26,9 @@ pub(super) fn field_transfer_method(method: SolverTransferMethod) -> SolverField
         SolverTransferMethod::BarycentricInterpolation => {
             SolverFieldTransferMethod::BarycentricInterpolation
         }
+        SolverTransferMethod::QuadraticLagrangeInterpolation => {
+            SolverFieldTransferMethod::QuadraticLagrangeInterpolation
+        }
         SolverTransferMethod::CentroidProjection => SolverFieldTransferMethod::CentroidProjection,
         SolverTransferMethod::ConservativeProjection => {
             SolverFieldTransferMethod::ConservativeProjection

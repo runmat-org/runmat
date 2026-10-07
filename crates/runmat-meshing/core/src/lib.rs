@@ -2,6 +2,7 @@ extern crate self as runmat_meshing_core;
 
 pub mod contracts;
 pub mod fixtures;
+pub mod interpolation;
 pub mod quality;
 pub use contracts::canonical::{
     build_chunked_stage_payload, build_closed_stage_manifest, decode_stage_manifest_streams,

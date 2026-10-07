@@ -1,3 +1,5 @@
+mod quadratic;
+
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 use runmat_meshing_core::{
     solver_volume_element_identity, AlgorithmVersionSet, CancellationPolicy,

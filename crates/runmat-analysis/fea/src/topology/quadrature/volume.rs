@@ -86,13 +86,12 @@ pub(crate) fn volume_shape(
         derivatives[..4].copy_from_slice(&TETRAHEDRON_DERIVATIVES);
         return (values, derivatives);
     }
+    values = runmat_meshing_core::interpolation::tetrahedron10_lagrange_weights(barycentric);
     for node in 0..4 {
-        values[node] = barycentric[node] * (2.0 * barycentric[node] - 1.0);
         derivatives[node] = TETRAHEDRON_DERIVATIVES[node]
             .map(|derivative| (4.0 * barycentric[node] - 1.0) * derivative);
     }
     for (edge, [left, right]) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.into_iter().enumerate() {
-        values[4 + edge] = 4.0 * barycentric[left] * barycentric[right];
         derivatives[4 + edge] = std::array::from_fn(|axis| {
             4.0 * (barycentric[right] * TETRAHEDRON_DERIVATIVES[left][axis]
                 + barycentric[left] * TETRAHEDRON_DERIVATIVES[right][axis])

@@ -2,15 +2,18 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use super::{GeometryRevisionRef, MeshingContractError, SolverMeshArtifact, StableDigest};
+use super::{
+    ElementOrder, GeometryRevisionRef, MeshingContractError, SolverMeshArtifact, StableDigest,
+};
 
-pub const SOLVER_MESH_TRANSFER_SCHEMA_VERSION: u16 = 1;
+pub const SOLVER_MESH_TRANSFER_SCHEMA_VERSION: u16 = 2;
 const MAX_TRANSFER_SOURCES: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SolverTransferMethod {
     BarycentricInterpolation,
+    QuadraticLagrangeInterpolation,
     CentroidProjection,
     ConservativeProjection,
 }
@@ -65,7 +68,10 @@ impl SolverMeshTransferMap {
         validate_transfers(
             "node transfers",
             &self.node_transfers,
-            &[SolverTransferMethod::BarycentricInterpolation],
+            &[
+                SolverTransferMethod::BarycentricInterpolation,
+                SolverTransferMethod::QuadraticLagrangeInterpolation,
+            ],
         )?;
         validate_transfers(
             "volume element transfers",
@@ -109,6 +115,20 @@ impl SolverMeshTransferMap {
             return Err(invalid(
                 "solver mesh transfer binding",
                 "artifact digests and exact geometry revision must match",
+            ));
+        }
+        let nodal_method = match source.resolved_request.element_order {
+            ElementOrder::Tet4 => SolverTransferMethod::BarycentricInterpolation,
+            ElementOrder::Tet10 => SolverTransferMethod::QuadraticLagrangeInterpolation,
+        };
+        if self
+            .node_transfers
+            .iter()
+            .any(|entry| entry.method != nodal_method)
+        {
+            return Err(invalid(
+                "node transfers",
+                "nodal interpolation must retain the source element order",
             ));
         }
         validate_closure(
@@ -194,11 +214,19 @@ fn validate_transfers(
             if source.stable_identity == StableDigest::ZERO
                 || source_previous.is_some_and(|identity| identity >= source.stable_identity)
                 || !source.weight.is_finite()
-                || source.weight <= 0.0
+                || match transfer.method {
+                    SolverTransferMethod::QuadraticLagrangeInterpolation => {
+                        source.weight == 0.0
+                            || source.weight < -0.125 - 64.0 * f64::EPSILON
+                            || source.weight > 1.0 + 64.0 * f64::EPSILON
+                            || transfer.sources.len() > 10
+                    }
+                    _ => source.weight <= 0.0,
+                }
             {
                 return Err(invalid(
                     field,
-                    "weighted sources must be positive, finite, unique, and canonical",
+                    "weighted sources must obey the admitted interpolation rule and be finite, unique, and canonical",
                 ));
             }
             weight_sum += source.weight;
@@ -244,6 +272,9 @@ fn validate_closure(
 fn invalid(field: &str, reason: impl Into<String>) -> MeshingContractError {
     MeshingContractError::invalid(field, reason)
 }
+
+#[cfg(test)]
+mod quadratic_tests;
 
 #[cfg(test)]
 mod tests {
