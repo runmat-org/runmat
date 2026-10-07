@@ -51,7 +51,16 @@ fn print_inference_preserves_statement_and_status_forms() {
             &PRINT_CATALOG_ENTRY,
         );
         assert_eq!(!result.diagnostics.is_empty(), count > 1);
-        assert_eq!(result.outputs.len(), usize::from(count == 1));
+        assert_eq!(result.outputs.len(), count);
+        if count > 0 {
+            assert_eq!(result.outputs[0], ValueFact::scalar(ValueKindFact::Logical));
+        }
+        if count > 1 {
+            assert_eq!(
+                result.outputs[1],
+                ValueFact::unknown(DynamicReason::UnsupportedRepresentation)
+            );
+        }
         assert!(result.effects.0.contains(&EffectKind::FilesystemWrite));
         assert!(result.effects.0.contains(&EffectKind::UserInterface));
     }

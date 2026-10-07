@@ -31,7 +31,16 @@ fn drawnow_inference_keeps_statement_and_runmat_status_forms() {
             &DRAWNOW_CATALOG_ENTRY,
         );
         assert_eq!(!result.diagnostics.is_empty(), count > 1);
-        assert_eq!(result.outputs.len(), usize::from(count == 1));
+        assert_eq!(result.outputs.len(), count);
+        if count > 0 {
+            assert_eq!(result.outputs[0], ValueFact::scalar(ValueKindFact::Logical));
+        }
+        if count > 1 {
+            assert_eq!(
+                result.outputs[1],
+                ValueFact::unknown(DynamicReason::UnsupportedRepresentation)
+            );
+        }
         assert!(result.effects.0.contains(&EffectKind::UserInterface));
         assert!(result.effects.0.contains(&EffectKind::HostCallback));
     }
