@@ -12,7 +12,7 @@ fn arrayfun_basic_sin() {
     .expect("arrayfun");
     match result {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![2, 3]);
+            assert_eq!(out.shape(), &[2, 3]);
             assert_eq!(values(&out), expected);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -44,7 +44,7 @@ fn arrayfun_semantic_function_handle_uses_semantic_invoker() {
     let result = call(handle, vec![Value::Tensor(tensor)]).expect("semantic arrayfun");
     match result {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![1, 2]);
+            assert_eq!(out.shape(), &[1, 2]);
             assert_eq!(values(&out), vec![11.0, 12.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -80,7 +80,7 @@ fn arrayfun_name_only_callback_uses_semantic_resolver() {
     .expect("resolved name-only arrayfun");
     match result {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![1, 2]);
+            assert_eq!(out.shape(), &[1, 2]);
             assert_eq!(values(&out), vec![21.0, 22.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -122,7 +122,7 @@ fn arrayfun_external_handle_uses_semantic_resolver() {
     .expect("resolved external-handle arrayfun");
     match result {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![1, 2]);
+            assert_eq!(out.shape(), &[1, 2]);
             assert_eq!(values(&out), vec![31.0, 32.0]);
         }
         other => panic!("expected tensor, got {other:?}"),

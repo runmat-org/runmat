@@ -30,7 +30,7 @@ fn precision_alignment_preserves_low_rank_real_and_complex_shapes() {
         else {
             panic!("real result expected")
         };
-        assert_eq!(real.shape(), &[]);
+        assert!(real.shape().is_empty());
         assert_eq!(real.numeric_dtype(), dtype);
         assert_eq!(real.materialize_f64(), vec![1.25]);
 

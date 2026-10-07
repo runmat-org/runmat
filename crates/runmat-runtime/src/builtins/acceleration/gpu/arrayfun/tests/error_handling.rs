@@ -34,7 +34,7 @@ fn arrayfun_error_handler_recovers() {
     .expect("arrayfun error handler");
     match result {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![3, 1]);
+            assert_eq!(out.shape(), &[3, 1]);
             assert_eq!(values(&out), vec![42.0, 42.0, 42.0]);
         }
         other => panic!("expected tensor, got {other:?}"),

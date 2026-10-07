@@ -82,7 +82,7 @@ fn arrayfun_gpu_overload_uses_documented_compatible_size_expansion_exactly() {
             panic!("expected resident output");
         };
         let gathered = test_support::gather(Value::GpuTensor(output.clone())).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 3]);
+        assert_eq!(gathered.shape(), &[2, 3]);
         assert_eq!(
             gathered.integer_storage(),
             Some(&IntegerStorage::U64(vec![

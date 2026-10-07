@@ -54,7 +54,7 @@ fn empty_and_nonempty_integer_pages_share_class_admission() {
             result.integer_storage(),
             Some(&IntegerStorage::U64(vec![9_007_199_254_740_993; pages]))
         );
-        assert_eq!(result.shape, vec![1, 1, pages]);
+        assert_eq!(result.shape(), &[1, 1, pages]);
     }
 }
 
@@ -161,6 +161,6 @@ fn single_complex_pages_and_empty_pages_retain_class() {
             panic!("complex page array");
         };
         assert_eq!(result.numeric_dtype(), NumericDType::F32);
-        assert_eq!(result.shape, shape);
+        assert_eq!(result.shape(), shape);
     }
 }

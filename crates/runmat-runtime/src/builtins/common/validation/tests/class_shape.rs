@@ -125,8 +125,8 @@ fn resident_nd_and_class_queries_preserve_owning_facts() {
             assert!(value_underlying_type_matches(&value, vec!["double".into()]).unwrap());
             let logical = provider
                 .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
-                    data: &vec![1; tensor.shape.iter().product()],
-                    shape: &tensor.shape,
+                    data: &vec![1; tensor.shape().iter().product()],
+                    shape: tensor.shape(),
                 })
                 .unwrap();
             let logical_weak = logical.downgrade();

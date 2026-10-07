@@ -171,7 +171,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let explicit = handle
@@ -184,7 +184,7 @@ pub(crate) mod tests {
                 block_on(gather_builtin(vec![Value::GpuTensor(handle.clone())])).expect("gather");
             match result {
                 Value::Tensor(host) => {
-                    assert_eq!(host.shape, tensor.shape);
+                    assert_eq!(host.shape(), tensor.shape());
                     assert_eq!(host.materialize_f64(), tensor.materialize_f64());
                 }
                 other => panic!("expected tensor result, got {other:?}"),
@@ -228,7 +228,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![7.0, 8.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let cell = CellArray::new(vec![Value::GpuTensor(handle), Value::from("host")], 1, 2)
@@ -240,7 +240,7 @@ pub(crate) mod tests {
             let first = gathered.get(0, 0).expect("first element");
             match first {
                 Value::Tensor(t) => {
-                    assert_eq!(t.shape, vec![2, 1]);
+                    assert_eq!(t.shape(), &[2, 1]);
                     assert_eq!(t.materialize_f64(), tensor.materialize_f64());
                 }
                 other => panic!("expected tensor in cell, got {other:?}"),
@@ -258,7 +258,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![3.5, -1.25], vec![2, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let mut st = StructValue::new();
@@ -272,7 +272,7 @@ pub(crate) mod tests {
             let Some(Value::Tensor(host)) = gathered.fields.get("data") else {
                 panic!("missing tensor field");
             };
-            assert_eq!(host.shape, vec![2, 1]);
+            assert_eq!(host.shape(), &[2, 1]);
             assert_eq!(host.materialize_f64(), tensor.materialize_f64());
             let Some(Value::String(label)) = gathered.fields.get("label") else {
                 panic!("missing label");
@@ -300,7 +300,7 @@ pub(crate) mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: &values,
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 })
                 .expect("upload");
             let cell = CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1).expect("cell");
@@ -359,7 +359,7 @@ pub(crate) mod tests {
                 let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
                 let view = HostTensorView {
                     data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 };
                 let handle = provider.upload(&view).expect("upload");
                 let eval =
@@ -368,7 +368,7 @@ pub(crate) mod tests {
                 assert_eq!(outputs.len(), 1);
                 match outputs.into_iter().next().unwrap() {
                     Value::Tensor(host) => {
-                        assert_eq!(host.shape, tensor.shape);
+                        assert_eq!(host.shape(), tensor.shape());
                         assert_eq!(host.materialize_f64(), tensor.materialize_f64());
                     }
                     other => panic!("expected tensor value, got {other:?}"),

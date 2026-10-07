@@ -64,7 +64,7 @@ fn pagefun_mtimes_char_array_handle() {
     let result = block_on(result).expect("pagefun char array");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![19.0, 43.0, 22.0, 50.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -83,7 +83,7 @@ fn pagefun_mtimes_external_function_handle() {
     let result = block_on(result).expect("pagefun external function handle");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![19.0, 43.0, 22.0, 50.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -108,7 +108,7 @@ fn pagefun_mtimes_semantic_function_handle() {
     let result = block_on(result).expect("pagefun semantic function handle");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![19.0, 43.0, 22.0, 50.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -129,7 +129,7 @@ fn pagefun_mtimes_string_array_handle() {
     let result = block_on(result).expect("pagefun string array");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![19.0, 43.0, 22.0, 50.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),

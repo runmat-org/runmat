@@ -28,7 +28,7 @@ fn arrayfun_single_segment_external_handle_uses_runtime_name_resolution() {
     .expect("single-segment external-handle arrayfun should resolve via runtime-name policy");
     match result {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![1, 2]);
+            assert_eq!(out.shape(), &[1, 2]);
             assert_eq!(values(&out), vec![41.0, 42.0]);
         }
         other => panic!("expected tensor, got {other:?}"),

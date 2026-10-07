@@ -177,7 +177,7 @@ mod tests {
                 panic!("integer tensor output");
             };
             assert_eq!(output.integer_storage(), Some(&storage));
-            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(output.shape(), &[1, 2]);
         }
     }
 

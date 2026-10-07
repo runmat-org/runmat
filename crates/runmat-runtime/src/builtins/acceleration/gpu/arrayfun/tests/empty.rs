@@ -30,7 +30,7 @@ fn empty_known_callback_preserves_integer_output_class() {
     let Value::Tensor(result) = result else {
         panic!("expected numeric output");
     };
-    assert_eq!(result.shape, vec![0, 2]);
+    assert_eq!(result.shape(), &[0, 2]);
     assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::U64);
     assert!(result.is_empty());
 }

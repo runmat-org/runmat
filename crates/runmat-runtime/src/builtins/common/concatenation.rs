@@ -1626,7 +1626,7 @@ mod tests {
         let single_row = Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let double_row = Tensor::new(vec![3.25, 4.5], vec![1, 2]).unwrap();
         let vertical = vcat_matrices(&single_row, &double_row).unwrap();
-        assert_eq!(vertical.shape, vec![2, 2]);
+        assert_eq!(vertical.shape(), &[2, 2]);
         assert_eq!(
             vertical.into_numeric_storage().unwrap(),
             NumericStorage::F32(vec![1.0, 3.25, 2.0, 4.5])
@@ -1635,7 +1635,7 @@ mod tests {
         let single_column = Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let double_column = Tensor::new(vec![3.25, 4.5], vec![2, 1]).unwrap();
         let horizontal = hcat_matrices(&single_column, &double_column).unwrap();
-        assert_eq!(horizontal.shape, vec![2, 2]);
+        assert_eq!(horizontal.shape(), &[2, 2]);
         assert_eq!(
             horizontal.into_numeric_storage().unwrap(),
             NumericStorage::F32(vec![1.0, 2.0, 3.25, 4.5])
@@ -1652,8 +1652,8 @@ mod tests {
         let Value::Tensor(vertical) = vcat_values(&[empty.clone(), empty]).unwrap() else {
             panic!("expected vertical empty tensor");
         };
-        assert_eq!(horizontal.shape, vec![0, 0]);
-        assert_eq!(vertical.shape, vec![0, 0]);
+        assert_eq!(horizontal.shape(), &[0, 0]);
+        assert_eq!(vertical.shape(), &[0, 0]);
         assert!(horizontal.is_empty());
         assert!(vertical.is_empty());
     }
@@ -1700,7 +1700,7 @@ mod tests {
         let right = Tensor::new(vec![3.5, 4.5], vec![2, 1]).expect("right double tensor");
 
         let horizontal = hcat_matrices(&left, &right).expect("integer hcat");
-        assert_eq!(horizontal.shape, vec![2, 2]);
+        assert_eq!(horizontal.shape(), &[2, 2]);
         assert_eq!(
             horizontal.integer_storage(),
             Some(&runmat_value::IntegerStorage::U64(vec![
@@ -1719,7 +1719,7 @@ mod tests {
         )
         .expect("bottom integer tensor");
         let vertical = vcat_matrices(&top, &bottom).expect("integer vcat");
-        assert_eq!(vertical.shape, vec![2, 2]);
+        assert_eq!(vertical.shape(), &[2, 2]);
         assert_eq!(
             vertical.integer_storage(),
             Some(&runmat_value::IntegerStorage::I8(vec![12, i8::MAX, -8, 2,]))
@@ -1779,7 +1779,7 @@ mod tests {
         let Value::Tensor(row) = row else {
             panic!("expected integer tensor row");
         };
-        assert_eq!(row.shape, vec![1, 3]);
+        assert_eq!(row.shape(), &[1, 3]);
         assert_eq!(
             row.integer_storage(),
             Some(&runmat_value::IntegerStorage::U64(vec![
@@ -1798,7 +1798,7 @@ mod tests {
         let Value::Tensor(column) = column else {
             panic!("expected integer tensor column");
         };
-        assert_eq!(column.shape, vec![3, 1]);
+        assert_eq!(column.shape(), &[3, 1]);
         assert_eq!(
             column.integer_storage(),
             Some(&runmat_value::IntegerStorage::I16(vec![
@@ -1819,7 +1819,7 @@ mod tests {
         else {
             panic!("expected tensor");
         };
-        assert_eq!(row.shape, vec![0, 0]);
+        assert_eq!(row.shape(), &[0, 0]);
         assert_eq!(
             row.integer_storage(),
             Some(&runmat_value::IntegerStorage::U32(Vec::new()))
@@ -1829,7 +1829,7 @@ mod tests {
         else {
             panic!("expected tensor");
         };
-        assert_eq!(column.shape, vec![0, 0]);
+        assert_eq!(column.shape(), &[0, 0]);
         assert_eq!(
             column.integer_storage(),
             Some(&runmat_value::IntegerStorage::U32(Vec::new()))

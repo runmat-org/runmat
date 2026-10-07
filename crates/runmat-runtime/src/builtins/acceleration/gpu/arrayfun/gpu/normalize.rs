@@ -56,7 +56,7 @@ mod tests {
         let Value::Tensor(value) = result else {
             panic!("uniform numeric array")
         };
-        assert_eq!(value.shape, [1, 1, 1]);
+        assert_eq!(value.shape(), &[1, 1, 1]);
         assert_eq!(
             value.numeric_value_at(0),
             Some(runmat_value::NumericScalar::F64(3.0))
@@ -72,7 +72,7 @@ mod tests {
             panic!("integer array")
         };
         assert_eq!(value.integer_storage(), Some(&storage));
-        assert_eq!(value.shape, [2, 1]);
+        assert_eq!(value.shape(), &[2, 1]);
         let input =
             Value::ComplexTensor(ComplexTensor::from_f32(vec![(1.0, 2.0)], vec![1, 1]).unwrap());
         let result = futures::executor::block_on(uniform(input, &[1, 1, 1], &[])).unwrap();
@@ -80,6 +80,6 @@ mod tests {
             panic!("complex array")
         };
         assert_eq!(value.numeric_dtype(), runmat_value::NumericDType::F32);
-        assert_eq!(value.shape, [1, 1, 1]);
+        assert_eq!(value.shape(), &[1, 1, 1]);
     }
 }
