@@ -188,6 +188,17 @@ fn compiled_deal_enforces_counts_and_accepts_zero_outputs() {
 }
 
 #[test]
+fn compiled_deal_discarded_output_keeps_exact_selected_integer() {
+    let values = execute_source(
+        "u = uint64(9007199254740992) + uint64(1); [~, selected] = deal(int8(-7), u); assert(isa(selected, 'uint64')); assert(selected == u);",
+    )
+    .expect("compiled deal with discarded first output");
+    assert!(values
+        .iter()
+        .any(|value| matches!(value, Value::Int(IntValue::U64(9_007_199_254_740_993)))));
+}
+
+#[test]
 fn compiled_dcgain_rejects_integer_sys_but_accepts_integer_tf_coefficients() {
     let error = execute_source("g = dcgain(int64(7));").expect_err("integer sys rejection");
     assert_eq!(error.identifier(), Some("RunMat:dcgain:InvalidModel"));

@@ -87,6 +87,108 @@ mod tests {
     }
 
     #[test]
+    fn rejected_nested_resident_input_retains_no_hidden_allocation_owner() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, HostNumericDataOwned,
+            HostNumericTensorOwned, IntegerElementType,
+        };
+
+        let owner = TestAllocationOwner::new();
+        let allocation = owner
+            .allocate_numeric(HostNumericTensorOwned {
+                data: HostNumericDataOwned::U64(vec![9_007_199_254_740_993]),
+                shape: vec![1, 1],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("own exact U64 fixture payload");
+        let handle = allocation.handle;
+        let weak_view = handle.downgrade();
+        let nested = Value::Cell(
+            runmat_value::CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1)
+                .expect("nested resident fixture"),
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&handle),
+            Some(IntegerElementType::U64)
+        );
+        {
+            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+            let mismatch =
+                call(vec![nested.clone(), Value::Num(1.0)], 1).expect_err("count fails first");
+            assert_eq!(
+                mismatch.identifier(),
+                Some("RunMat:deal:InputOutputCountMismatch")
+            );
+            let gated = call(vec![nested.clone()], 2).expect_err("resident input is gated");
+            assert_eq!(
+                gated.identifier(),
+                DEAL_RESIDENT_INPUT_EXTENSION.error_identifier
+            );
+        }
+        assert_eq!(allocation.probe.retirements(), 0);
+        assert!(
+            weak_view.acquire().is_ok(),
+            "call errors must not retire the input"
+        );
+        drop(nested);
+        drop(handle);
+        assert_eq!(
+            allocation.probe.retirements(),
+            1,
+            "rejected calls must not retain hidden output aliases"
+        );
+        assert!(weak_view.acquire().is_err());
+    }
+
+    #[test]
+    fn replicated_resident_outputs_independently_retain_the_native_allocation() {
+        use runmat_accelerate_api::{
+            allocation::AllocationReleaseOutcome, test_support::TestAllocationOwner,
+            GpuTensorStorage, HostNumericDataOwned, HostNumericTensorOwned, IntegerElementType,
+        };
+
+        let allocation = TestAllocationOwner::new()
+            .allocate_numeric(HostNumericTensorOwned {
+                data: HostNumericDataOwned::U64(vec![9_007_199_254_740_993]),
+                shape: vec![1, 1],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("own exact U64 fixture payload");
+        let handle = allocation.handle;
+        let weak_view = handle.downgrade();
+        let input = Value::Cell(
+            runmat_value::CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1)
+                .expect("nested resident input"),
+        );
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let Value::OutputList(mut outputs) = call(vec![input.clone()], 2).expect("replicate")
+        else {
+            panic!("two resident outputs");
+        };
+        let first = outputs.remove(0);
+        let second = outputs.remove(0);
+        drop(outputs);
+        drop(input);
+        assert_eq!(
+            handle.release().expect("release original input view"),
+            AllocationReleaseOutcome::ReferenceReleased
+        );
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(first);
+        let retained = weak_view.acquire().expect("second output retains the view");
+        assert_eq!(retained.shape(), &[1, 1]);
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&retained),
+            Some(IntegerElementType::U64)
+        );
+        drop(retained);
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(second);
+        assert_eq!(allocation.probe.retirements(), 1);
+        assert!(weak_view.acquire().is_err());
+    }
+
+    #[test]
     fn replicated_managed_aliases_survive_gc_until_output_roots_retire() {
         runmat_gc::gc_test_context(|| {
             let allocation = runmat_gc::gc_allocate_rooted(Value::String("deal payload".into()))

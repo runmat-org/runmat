@@ -54,10 +54,11 @@ fn check_wgpu_resident_aliases(require_device: bool) {
             result,
             Value::OutputList(vec![nested.clone(), nested.clone()])
         );
-        let Value::OutputList(outputs) = &result else {
+        let Value::OutputList(mut outputs) = result else {
             panic!("two resident outputs");
         };
-        for output in outputs {
+        assert_eq!(outputs.len(), 2);
+        for output in &outputs {
             let Value::Cell(cell) = output else {
                 panic!("nested resident output");
             };
@@ -70,6 +71,11 @@ fn check_wgpu_resident_aliases(require_device: bool) {
                 runmat_accelerate_api::provider_for_handle(alias).expect("output owner"),
                 provider
             ));
+            assert_eq!(alias.shape(), &[1, 2]);
+            assert_eq!(
+                runmat_accelerate_api::handle_integer_type(alias),
+                Some(IntegerElementType::U64)
+            );
         }
         let transfers_after = provider.telemetry_snapshot();
         assert_eq!(transfers_after.upload_bytes, transfers_before.upload_bytes);
@@ -77,22 +83,42 @@ fn check_wgpu_resident_aliases(require_device: bool) {
             transfers_after.download_bytes,
             transfers_before.download_bytes
         );
-        let output_roots =
-            crate::execution::RootedValueHandles::for_values(std::iter::once(&result))
-                .expect("root returned aliases during collection");
+        let first_output = outputs.remove(0);
+        let second_output = outputs.remove(0);
+        drop(outputs);
         drop(nested);
-        drop(handle);
-        runmat_gc::gc_collect_major().expect("collect with live returned aliases");
+        assert_eq!(
+            handle
+                .release()
+                .expect("release original input view reference"),
+            runmat_accelerate_api::allocation::AllocationReleaseOutcome::ReferenceReleased
+        );
+        runmat_gc::gc_collect_major().expect("collect with two live returned aliases");
+        assert!(
+            lease.acquire().is_some(),
+            "each output retains the native allocation"
+        );
+        drop(first_output);
+        runmat_gc::gc_collect_major().expect("collect with one live returned alias");
         let output_handle = weak_view
             .acquire()
-            .expect("returned aliases retain the view");
+            .expect("second output independently retains the view");
+        assert_eq!(output_handle.shape(), &[1, 2]);
+        assert!(runmat_accelerate_api::same_provider_instance(
+            runmat_accelerate_api::provider_for_handle(&output_handle)
+                .expect("retained output owner"),
+            provider
+        ));
         let downloaded = futures::executor::block_on(provider.download_integer(&output_handle))
             .expect("download exact WGPU input after deal");
         assert_eq!(downloaded.data, HostIntegerDataOwned::U64(original));
         drop(output_handle);
-        drop(output_roots);
-        drop(result);
-        runmat_gc::gc_collect_major().expect("collect after returned aliases retire");
+        assert!(
+            lease.acquire().is_some(),
+            "second output remains live after inspection"
+        );
+        drop(second_output);
+        runmat_gc::gc_collect_major().expect("collect after final returned alias retires");
         assert!(
             lease.acquire().is_none(),
             "returned aliases must retire their owner"
