@@ -96,9 +96,37 @@ impl AnchoredEnergySource {
     }
 
     pub(crate) fn prove(
-        mut self,
+        self,
         matrix: &RealSparseMatrix,
         prescribed: &[bool],
+        normalization: f64,
+    ) -> Result<EnergyVerdict, EnergyError> {
+        self.prove_projected(
+            matrix,
+            EnergyProjection::Identity(prescribed),
+            prescribed.len() as u64,
+            normalization,
+        )
+    }
+
+    pub(crate) fn prove_selection(
+        self,
+        matrix: &RealSparseMatrix,
+        rows: &[Option<usize>],
+    ) -> Result<EnergyVerdict, EnergyError> {
+        self.prove_projected(
+            matrix,
+            EnergyProjection::Selection(rows),
+            std::mem::size_of_val(rows) as u64,
+            1.0,
+        )
+    }
+
+    fn prove_projected(
+        mut self,
+        matrix: &RealSparseMatrix,
+        projection: EnergyProjection<'_>,
+        projection_bytes: u64,
         normalization: f64,
     ) -> Result<EnergyVerdict, EnergyError> {
         if self.captured != self.blocks.len() || !normalization.is_finite() || normalization <= 0. {
@@ -106,12 +134,12 @@ impl AnchoredEnergySource {
         }
         let envelope = CoercivityWorkEnvelope::derive(matrix.pattern())
             .map_err(|_| EnergyError::Arithmetic)?;
-        let mut check = AnchoredEnergyCheck::new_with_retained(
+        let mut check = AnchoredEnergyCheck::new_projected(
             matrix,
-            prescribed,
+            projection,
             envelope,
             self.resident_bytes
-                .checked_add(prescribed.len() as u64)
+                .checked_add(projection_bytes)
                 .ok_or(EnergyError::Arithmetic)?,
             self.values.len() as u64,
         )?;

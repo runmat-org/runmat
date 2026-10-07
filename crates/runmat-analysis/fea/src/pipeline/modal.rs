@@ -3,10 +3,7 @@ use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
-    assembly::{
-        assemble_structural_perturbation_system, assemble_structural_system,
-        StructuralFormulationRequirement,
-    },
+    assembly::solver_solid::SolidEnergyPreparation,
     contracts::{
         ComputeBackend, FeaModalRunResult, FeaRunError, FeaRunResult, ModalSolveOptions,
         FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS, FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO,
@@ -22,9 +19,10 @@ use crate::{
     pipeline::modal_basis::{ModalBasisArtifact, ModalBasisInputs},
     pipeline::observation_history::required_mode_history_indices,
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
-    solve::modal::solve_modal_system,
+    solve::modal::solve_modal_system_reusing,
 };
 
+mod assembly;
 mod recovery;
 
 use recovery::recover_modal_core;
@@ -211,18 +209,14 @@ fn execute_modal_core(
         Some(1),
         Some(5),
     );
-    let assemble = if linearization.is_some() {
-        assemble_structural_perturbation_system
-    } else {
-        assemble_structural_system
-    };
-    let summary = assemble(
+    let mut solid_energy = SolidEnergyPreparation::default();
+    let summary = assembly::assemble(
         model,
         &excitations,
-        options.solver_mesh.clone(),
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
-    )
-    .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
+        options.solver_mesh.as_ref(),
+        linearization.is_some(),
+        &mut solid_energy,
+    )?;
     let summary = if let Some(linearization) = linearization {
         super::prestress::prestressed_structural_summary(&summary, linearization)
             .map_err(FeaRunError::Assembly)?
@@ -253,12 +247,13 @@ fn execute_modal_core(
         Some(2),
         Some(5),
     );
-    let modal = solve_modal_system(
+    let modal = solve_modal_system_reusing(
         &summary,
         options.truncation.requested_mode_count(),
         options.truncation.eigenspace_relative_tolerance(),
         options.convergence,
         backend,
+        &mut solid_energy.into_reuse(),
     );
     emit_phase(
         "fea.run_modal",

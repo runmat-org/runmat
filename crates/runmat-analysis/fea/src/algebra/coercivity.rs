@@ -14,6 +14,7 @@ const RHS_DOMAIN: &str = "fea-coercivity-rhs";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 const SYMMETRY_RELATIVE_TOLERANCE: f64 = 1.0e-12;
 
+mod energy;
 mod symbolic;
 
 pub(crate) use symbolic::{CoercivitySymbolicPlan, CoercivityWorkEnvelope};
@@ -112,52 +113,6 @@ impl CoercivityCertificate {
                 ..
             } => (dimension, 0, scalar_operations, resident_bytes),
         }
-    }
-
-    pub(crate) fn prove_local_energy(
-        matrix: &RealSparseMatrix,
-        prescribed: &[bool],
-        source: super::anchored_energy::AnchoredEnergySource,
-        normalization: f64,
-    ) -> Result<Self, CoercivityError> {
-        use super::anchored_energy::EnergyVerdict;
-        let certificate = match source.prove(matrix, prescribed, normalization)? {
-            EnergyVerdict::Verified(certificate) => certificate,
-            EnergyVerdict::Indeterminate {
-                graph_lower,
-                error_upper,
-            } => {
-                return Err(CoercivityError::EnergyIndeterminate {
-                    graph_lower_bits: graph_lower.to_bits(),
-                    error_upper_bits: error_upper.to_bits(),
-                })
-            }
-        };
-        if certificate.operator_identity()
-            != matrix
-                .numerical_identity()
-                .map_err(|e| CoercivityError::Encoding(e.to_string()))?
-        {
-            return Err(CoercivityError::BindingMismatch);
-        }
-        let mut result = Self {
-            pattern_identity: matrix
-                .pattern_identity()
-                .map_err(|e| CoercivityError::Encoding(e.to_string()))?,
-            values_identity: matrix
-                .values_identity()
-                .map_err(|e| CoercivityError::Encoding(e.to_string()))?,
-            dimension: matrix.rows(),
-            proof: CoercivityProof::AnchoredLocalEnergy {
-                lower_bound_bits: certificate.lower_bound().to_bits(),
-                assembly_error_upper_bits: certificate.assembly_error_upper().to_bits(),
-                scalar_operations: certificate.scalar_operations(),
-                resident_bytes: certificate.resident_bytes(),
-            },
-            identity: Digest::sha256([]),
-        };
-        result.identity = result.expected_identity()?;
-        Ok(result)
     }
 
     pub(super) fn prove(matrix: &RealSparseMatrix) -> Result<Self, CoercivityError> {

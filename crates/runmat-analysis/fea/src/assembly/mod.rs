@@ -59,10 +59,7 @@ use self::{
     explicit_elements::{
         assemble_explicit_elements, validate_explicit_topology, ExplicitElementAssembly,
     },
-    solver_solid::{
-        assemble_solver_solid_operators_with_execution, solver_solid_topology,
-        SolverSolidAssemblyError,
-    },
+    solver_solid::{solver_solid_topology, SolverSolidAssemblyError},
     structural_inputs::{
         apply_synthetic_structural_rhs, explicit_load_kind, requested_moment_norm,
         structural_boundary_implementations, structural_source_implementations,
@@ -643,13 +640,6 @@ pub use moment_projection::MomentProjectionSummary;
 
 pub use coupling_summary::{ElectroThermalAssemblySummary, ThermoMechanicalAssemblySummary};
 
-pub(super) struct AssemblyExecution<'a> {
-    structural_requirement: Option<StructuralFormulationRequirement>,
-    supplied_constraint_plan: Option<&'a CanonicalStructuralConstraintPlan>,
-    local_execution: crate::planning::resource::LocalExecutionPlan,
-    solved_nodal_temperature_k: Option<&'a [f64]>,
-}
-
 pub(super) fn assemble_linear_system_impl(
     model: &AnalysisModel,
     excitations: &RealizedExcitations,
@@ -663,6 +653,7 @@ pub(super) fn assemble_linear_system_impl(
         supplied_constraint_plan,
         local_execution,
         solved_nodal_temperature_k,
+        solid_energy,
     } = execution;
     if solved_nodal_temperature_k.is_some()
         && (solver_mesh.is_none()
@@ -1086,9 +1077,13 @@ pub(super) fn assemble_linear_system_impl(
         .filter(|_| structural_requirement.is_some())
         .zip(solid_properties.as_ref())
         .map(|(mesh, properties)| {
-            #[cfg(test)]
-            transient_basis::tests::record_operator_assembly();
-            assemble_solver_solid_operators_with_execution(mesh, properties, local_execution)
+            solver_solid::assemble_preparing(
+                mesh,
+                properties,
+                local_execution,
+                solid_energy,
+                (&constrained, affine_constraint_reduction.as_ref()),
+            )
         })
         .transpose()
         .map_err(LinearAssemblyError::SolidOperator)?;

@@ -5,11 +5,19 @@ use crate::algebra::CoercivityCertificate;
 #[derive(Default)]
 pub(crate) struct LinearPreparationReuse {
     certificate: Option<CoercivityCertificate>,
-    local_energy: Option<(
+    local_energy: Option<LocalEnergySource>,
+}
+
+enum LocalEnergySource {
+    Identity(
         crate::algebra::anchored_energy::AnchoredEnergySource,
         Vec<bool>,
         f64,
-    )>,
+    ),
+    Selection(
+        crate::algebra::anchored_energy::AnchoredEnergySource,
+        Vec<Option<usize>>,
+    ),
 }
 
 impl LinearPreparationReuse {
@@ -28,7 +36,21 @@ impl LinearPreparationReuse {
     ) -> Self {
         Self {
             certificate: None,
-            local_energy: Some((source, prescribed, normalization)),
+            local_energy: Some(LocalEnergySource::Identity(
+                source,
+                prescribed,
+                normalization,
+            )),
+        }
+    }
+
+    pub(crate) fn with_selected_energy(
+        source: crate::algebra::anchored_energy::AnchoredEnergySource,
+        rows: Vec<Option<usize>>,
+    ) -> Self {
+        Self {
+            certificate: None,
+            local_energy: Some(LocalEnergySource::Selection(source, rows)),
         }
     }
 
@@ -53,13 +75,20 @@ impl LinearPreparationReuse {
         // A failed replacement cannot leave a stale proof available for later work.
         let local_energy = self.local_energy.take();
         self.clear();
-        let evidence = if let Some((local, prescribed, normalization)) = local_energy {
-            let certificate = CoercivityCertificate::prove_local_energy(
-                matrix,
-                &prescribed,
-                local,
-                normalization,
-            )?;
+        let evidence = if let Some(local) = local_energy {
+            let certificate = match local {
+                LocalEnergySource::Identity(local, prescribed, normalization) => {
+                    CoercivityCertificate::prove_local_energy(
+                        matrix,
+                        &prescribed,
+                        local,
+                        normalization,
+                    )?
+                }
+                LocalEnergySource::Selection(local, rows) => {
+                    CoercivityCertificate::prove_selected_energy(matrix, local, &rows)?
+                }
+            };
             PreparedSolverAdmissibility::bind_existing_with_source(
                 certificate,
                 matrix,

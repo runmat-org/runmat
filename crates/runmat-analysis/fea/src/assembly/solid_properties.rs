@@ -65,14 +65,7 @@ mod tests {
             Some(&mesh),
             Some(context),
             None,
-            AssemblyExecution {
-                solved_nodal_temperature_k: None,
-                structural_requirement: Some(
-                    StructuralFormulationRequirement::PhysicalDiscretization,
-                ),
-                supplied_constraint_plan: None,
-                local_execution: crate::planning::resource::LocalExecutionPlan::serial(),
-            },
+            AssemblyExecution::serial_physical(),
         )
         .expect_err("uncapable coupled owner must fail before operator work");
         assert!(matches!(

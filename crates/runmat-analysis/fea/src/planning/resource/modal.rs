@@ -2,10 +2,7 @@ use crate::{
     algebra::CoercivityWorkEnvelope,
     constraints::CanonicalStructuralConstraintPlan,
     execution::{CanonicalSemanticState, StructuralModalWorkload},
-    post::fields::structural_observable_field_definitions,
-    results::observation::{
-        resolve_structural_observation_plan, ObservationLimits, ResolvedObservationPlan,
-    },
+    results::observation::ResolvedObservationPlan,
     solve::modal::{MODAL_BOUNDARY_PROBE_WIDTH, MODAL_MASS_ORTHOGONALIZATION_PASSES},
     ComputeBackend,
 };
@@ -30,7 +27,13 @@ const ACCELERATOR_CG_RESIDENT_VECTOR_COUNT: u64 = 6;
 const FIXED_WORKER_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
 const FIXED_WORKER_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
 
+mod arithmetic;
+mod energy;
+mod observations;
 mod sizing;
+use arithmetic::{checked_add, checked_bytes, checked_mul, count};
+use observations::resolve_modal_observations;
+pub(super) use sizing::structural_modal_accelerator_minimum_bytes;
 
 use sizing::{
     modal_output_value_count, modal_phase_value_count, modal_result_payload_bytes,
@@ -179,13 +182,23 @@ pub fn build_structural_modal_resource_plan(
         reduced_dimension,
         "modal dense projected values",
     )?;
-    let workspace_bytes = modal_workspace_bytes(
-        full_dimension,
-        reduced_dimension,
-        residual_vector_count,
-        reduced_tangent_nonzeros,
-        reduced_mass_nonzeros,
-        admission.resident_bytes_limit(),
+    let source_bytes = energy::original_energy_source_bytes(
+        mesh,
+        &reduction,
+        linearization.is_some(),
+        workload.model(),
+    )?;
+    let workspace_bytes = checked_add(
+        modal_workspace_bytes(
+            full_dimension,
+            reduced_dimension,
+            residual_vector_count,
+            reduced_tangent_nonzeros,
+            reduced_mass_nonzeros,
+            admission.resident_bytes_limit(),
+        )?,
+        source_bytes,
+        "modal original energy source",
     )?;
     let modal_output_values =
         modal_output_value_count(full_dimension, reduced_dimension, residual_vector_count)?;
@@ -277,8 +290,11 @@ pub fn build_structural_modal_resource_plan(
             .0,
         "modal output construction",
     )?;
-    let phase_resident_bytes =
-        output_construction_bytes.max(modal_result_payload_bytes(modal_phase_values, 0)?);
+    let phase_resident_bytes = checked_add(
+        output_construction_bytes.max(modal_result_payload_bytes(modal_phase_values, 0)?),
+        source_bytes,
+        "modal phase and original source",
+    )?;
     let accelerators = modal_accelerator_requirements(
         workload.backend(),
         accelerator_requests,
@@ -309,6 +325,7 @@ pub fn build_structural_modal_resource_plan(
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
         phase: FeaResourcePhase::StructuralModalExtraction(workload.identity()),
         demand: FeaResourceDemand::StructuralModalExtraction(StructuralModalResourceDemand {
+            original_energy_source_bytes: ByteCount(source_bytes),
             workload: workload.identity(),
             prestress_linearization: linearization.map(|linearization| linearization.identity()),
             geometric_stiffness_nonzero_count: Count(geometric_stiffness_nonzeros),
@@ -454,74 +471,4 @@ fn modal_accelerator_requirements(
         count: request.count,
         memory_bytes_each: ByteCount(request.memory_bytes_each),
     }])
-}
-
-/// Known device-resident lower envelope for the native sparse CG adapter used by modal solves.
-pub(super) fn structural_modal_accelerator_minimum_bytes(
-    reduced_dimension: u64,
-    stiffness_nonzeros: u64,
-) -> Result<u64, ResourcePlanningError> {
-    let row_offsets = checked_bytes(
-        checked_add(reduced_dimension, 1, "accelerator row offsets")?,
-        8,
-        "accelerator row offsets",
-    )?;
-    let sparse_entries = checked_bytes(stiffness_nonzeros, 16, "accelerator sparse entries")?;
-    let diagonal = checked_bytes(reduced_dimension, 8, "accelerator diagonal")?;
-    let vectors = checked_bytes(
-        checked_mul(
-            reduced_dimension,
-            ACCELERATOR_CG_RESIDENT_VECTOR_COUNT,
-            "accelerator vectors",
-        )?,
-        8,
-        "accelerator vectors",
-    )?;
-    [row_offsets, sparse_entries, diagonal, vectors]
-        .into_iter()
-        .try_fold(0_u64, |total, value| {
-            checked_add(total, value, "modal accelerator")
-        })
-}
-
-fn resolve_modal_observations(
-    mesh: Option<&SolverMeshArtifact>,
-    constraints: &CanonicalStructuralConstraintPlan,
-    workload: &StructuralModalWorkload,
-) -> Result<ResolvedObservationPlan, ResourcePlanningError> {
-    let fields = structural_observable_field_definitions()
-        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    resolve_structural_observation_plan(
-        workload
-            .procedure_step()
-            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
-        workload.model(),
-        mesh,
-        constraints,
-        &fields,
-        ObservationLimits::default(),
-    )
-    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))
-}
-
-fn count(value: usize, label: &'static str) -> Result<u64, ResourcePlanningError> {
-    u64::try_from(value).map_err(|_| ResourcePlanningError::Overflow(label))
-}
-
-fn checked_bytes(
-    count: u64,
-    width: u64,
-    label: &'static str,
-) -> Result<u64, ResourcePlanningError> {
-    checked_mul(count, width, label)
-}
-
-fn checked_mul(left: u64, right: u64, label: &'static str) -> Result<u64, ResourcePlanningError> {
-    left.checked_mul(right)
-        .ok_or(ResourcePlanningError::Overflow(label))
-}
-
-fn checked_add(left: u64, right: u64, label: &'static str) -> Result<u64, ResourcePlanningError> {
-    left.checked_add(right)
-        .ok_or(ResourcePlanningError::Overflow(label))
 }

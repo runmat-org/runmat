@@ -18,6 +18,66 @@ fn check<'a>(matrix: &'a RealSparseMatrix, fixed: &'a [bool]) -> AnchoredEnergyC
     )
     .unwrap()
 }
+
+#[test]
+fn eliminated_anchor_and_permuted_selection_match_independent_chain_eigenvalue() {
+    // Full vertices [ground, near, far], actual CSR order [far, near].
+    let matrix = matrix(&[1., -1., -1., 2.], 2);
+    let selection = [None, Some(1), Some(0)];
+    let mut proof = AnchoredEnergyCheck::new_selection(
+        &matrix,
+        &selection,
+        CoercivityWorkEnvelope::derive(matrix.pattern()).unwrap(),
+    )
+    .unwrap();
+    for nodes in [[0, 1], [1, 2]] {
+        proof.push_block(&nodes, &[1., -1., -1., 1.]).unwrap();
+    }
+    let EnergyVerdict::Verified(proof) = proof.finish().unwrap() else {
+        panic!("grounded chain")
+    };
+    assert!(proof.lower_bound() > 0.0);
+    assert!(proof.lower_bound() < (3.0 - 5.0_f64.sqrt()) / 2.0);
+    assert!(proof.assembly_error_upper() < 1e-12);
+}
+
+#[test]
+fn incomplete_duplicate_and_out_of_range_selection_reject() {
+    let matrix = matrix(&[1., 0., 0., 1.], 2);
+    for selection in [
+        vec![None, Some(0)],
+        vec![None, Some(0), Some(0)],
+        vec![None, Some(0), Some(2)],
+    ] {
+        assert!(matches!(
+            AnchoredEnergyCheck::new_selection(
+                &matrix,
+                &selection,
+                CoercivityWorkEnvelope::derive(matrix.pattern()).unwrap()
+            ),
+            Err(EnergyError::Shape)
+        ));
+    }
+}
+
+#[test]
+fn reduced_operator_corruption_cannot_borrow_eliminated_anchor_proof() {
+    let matrix = matrix(&[0.1, -1., -1., 2.], 2);
+    let selection = [None, Some(1), Some(0)];
+    let mut proof = AnchoredEnergyCheck::new_selection(
+        &matrix,
+        &selection,
+        CoercivityWorkEnvelope::derive(matrix.pattern()).unwrap(),
+    )
+    .unwrap();
+    for nodes in [[0, 1], [1, 2]] {
+        proof.push_block(&nodes, &[1., -1., -1., 1.]).unwrap();
+    }
+    assert!(matches!(
+        proof.finish().unwrap(),
+        EnergyVerdict::Indeterminate { .. }
+    ));
+}
 #[test]
 fn anchored_chain_bound_is_below_independent_exact_smallest_eigenvalue() {
     let matrix = matrix(&[1., 0., 0., 0., 2., -1., 0., -1., 1.], 3);

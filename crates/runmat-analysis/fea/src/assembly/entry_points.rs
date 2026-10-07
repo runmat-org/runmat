@@ -5,6 +5,7 @@ use super::*;
 enum StructuralCouplingInput<'a> {
     Authored {
         solved_nodal_temperature_k: Option<&'a [f64]>,
+        solid_energy: Option<&'a mut solver_solid::SolidEnergyPreparation>,
     },
     ElasticPerturbation,
 }
@@ -54,6 +55,7 @@ pub(crate) fn assemble_structural_system_borrowed(
         crate::planning::resource::LocalExecutionPlan::serial(),
         StructuralCouplingInput::Authored {
             solved_nodal_temperature_k: None,
+            solid_energy: None,
         },
     )
 }
@@ -94,6 +96,7 @@ pub(crate) fn assemble_structural_system_with_execution(
         local_execution,
         StructuralCouplingInput::Authored {
             solved_nodal_temperature_k,
+            solid_energy: None,
         },
     )
 }
@@ -107,38 +110,48 @@ fn assemble_with_mesh(
     local_execution: crate::planning::resource::LocalExecutionPlan,
     coupling: StructuralCouplingInput<'_>,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
-    let (thermo_mechanical_context, electro_thermal_context, solved_nodal_temperature_k) =
-        match coupling {
-            StructuralCouplingInput::Authored {
+    let (
+        thermo_mechanical_context,
+        electro_thermal_context,
+        solved_nodal_temperature_k,
+        solid_energy,
+    ) = match coupling {
+        StructuralCouplingInput::Authored {
+            solved_nodal_temperature_k,
+            solid_energy,
+        } => {
+            let (thermal, electrical) =
+                crate::excitation::realize_coupling_contexts(model, excitations)
+                    .map_err(LinearAssemblyError::CouplingRealization)?;
+            (
+                thermal,
+                electrical,
                 solved_nodal_temperature_k,
-            } => {
-                let (thermal, electrical) =
-                    crate::excitation::realize_coupling_contexts(model, excitations)
-                        .map_err(LinearAssemblyError::CouplingRealization)?;
-                (thermal, electrical, solved_nodal_temperature_k)
-            }
-            StructuralCouplingInput::ElasticPerturbation => {
-                use crate::excitation::RealizedExcitationKind;
-                if excitations.iter().any(|excitation| {
-                    matches!(
-                        excitation.kind,
-                        RealizedExcitationKind::TemperatureField(_)
-                            | RealizedExcitationKind::TerminalVoltage(_)
-                            | RealizedExcitationKind::ElectricCurrent(_)
-                            | RealizedExcitationKind::ElectricCharge(_)
-                            | RealizedExcitationKind::ElectricChargeDensity(_)
-                            | RealizedExcitationKind::CurrentDensity(_)
-                            | RealizedExcitationKind::MagneticVolumeCurrentDensity(_)
-                            | RealizedExcitationKind::MagneticVectorPotential(_)
-                    )
-                }) {
-                    return Err(LinearAssemblyError::CouplingRealization(
+                solid_energy,
+            )
+        }
+        StructuralCouplingInput::ElasticPerturbation => {
+            use crate::excitation::RealizedExcitationKind;
+            if excitations.iter().any(|excitation| {
+                matches!(
+                    excitation.kind,
+                    RealizedExcitationKind::TemperatureField(_)
+                        | RealizedExcitationKind::TerminalVoltage(_)
+                        | RealizedExcitationKind::ElectricCurrent(_)
+                        | RealizedExcitationKind::ElectricCharge(_)
+                        | RealizedExcitationKind::ElectricChargeDensity(_)
+                        | RealizedExcitationKind::CurrentDensity(_)
+                        | RealizedExcitationKind::MagneticVolumeCurrentDensity(_)
+                        | RealizedExcitationKind::MagneticVectorPotential(_)
+                )
+            }) {
+                return Err(LinearAssemblyError::CouplingRealization(
                         "elastic perturbation cannot reapply active temperature or electrical coupling excitations".into(),
                     ));
-                }
-                (None, None, None)
             }
-        };
+            (None, None, None, None)
+        }
+    };
     if solved_nodal_temperature_k.is_some()
         && excitations.iter().any(|excitation| {
             matches!(
@@ -162,6 +175,48 @@ fn assemble_with_mesh(
             supplied_constraint_plan: constraint_plan,
             local_execution,
             solved_nodal_temperature_k,
+            solid_energy,
         },
     )
+}
+
+pub(crate) fn assemble_structural_modal_system(
+    model: &AnalysisModel,
+    excitations: &RealizedExcitations,
+    solver_mesh: Option<&SolverMeshArtifact>,
+    solid_energy: &mut solver_solid::SolidEnergyPreparation,
+) -> Result<AssemblySummary, LinearAssemblyError> {
+    assemble_with_mesh(
+        model,
+        excitations,
+        solver_mesh,
+        Some(StructuralFormulationRequirement::ExperimentalSyntheticOperator),
+        None,
+        crate::planning::resource::LocalExecutionPlan::serial(),
+        StructuralCouplingInput::Authored {
+            solved_nodal_temperature_k: None,
+            solid_energy: Some(solid_energy),
+        },
+    )
+}
+
+pub(crate) struct AssemblyExecution<'a> {
+    pub(super) structural_requirement: Option<StructuralFormulationRequirement>,
+    pub(super) supplied_constraint_plan: Option<&'a CanonicalStructuralConstraintPlan>,
+    pub(super) local_execution: crate::planning::resource::LocalExecutionPlan,
+    pub(super) solved_nodal_temperature_k: Option<&'a [f64]>,
+    pub(super) solid_energy: Option<&'a mut solver_solid::SolidEnergyPreparation>,
+}
+
+#[cfg(test)]
+impl AssemblyExecution<'_> {
+    pub(super) fn serial_physical() -> Self {
+        Self {
+            structural_requirement: Some(StructuralFormulationRequirement::PhysicalDiscretization),
+            supplied_constraint_plan: None,
+            local_execution: crate::planning::resource::LocalExecutionPlan::serial(),
+            solved_nodal_temperature_k: None,
+            solid_energy: None,
+        }
+    }
 }

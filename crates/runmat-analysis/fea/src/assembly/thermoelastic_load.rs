@@ -224,7 +224,7 @@ mod tests {
     use crate::{
         assembly::{
             assemble_linear_system_impl, solver_solid::assemble_solver_solid_operators,
-            AssemblyExecution, StructuralFormulationRequirement,
+            AssemblyExecution,
         },
         excitation::RealizedExcitations,
         fixtures::{fixture_model, FixtureId},
@@ -528,14 +528,7 @@ mod tests {
             Some(&mesh),
             Some(context),
             None,
-            AssemblyExecution {
-                solved_nodal_temperature_k: None,
-                structural_requirement: Some(
-                    StructuralFormulationRequirement::PhysicalDiscretization,
-                ),
-                supplied_constraint_plan: None,
-                local_execution: crate::planning::resource::LocalExecutionPlan::serial(),
-            },
+            AssemblyExecution::serial_physical(),
         )
         .expect("physical thermoelastic assembly");
         assert_eq!(

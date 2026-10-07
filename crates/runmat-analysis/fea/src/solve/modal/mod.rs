@@ -20,6 +20,8 @@ mod truncation;
 
 use diagnostics::push_modal_quality_diagnostics;
 use subspace::solve_lowest_eigenspace;
+mod preparation;
+pub use preparation::solve_modal_system;
 use truncation::resolve_truncation_boundary;
 
 pub(crate) const MODAL_BOUNDARY_PROBE_WIDTH: usize = 4;
@@ -45,12 +47,13 @@ pub struct ModalSolveResult {
     pub boundary_probe_frequency_hz: Option<f64>,
 }
 
-pub fn solve_modal_system(
+pub(crate) fn solve_modal_system_reusing(
     summary: &AssemblySummary,
     requested_mode_count: usize,
     eigenspace_relative_tolerance: f64,
     convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
     backend: ComputeBackend,
+    reuse: &mut crate::algebra::LinearPreparationReuse,
 ) -> ModalSolveResult {
     if summary.dof_count == 0 || requested_mode_count == 0 {
         return ModalSolveResult {
@@ -153,42 +156,41 @@ pub fn solve_modal_system(
             };
         }
     };
-    if let Err(error) = reduced_operator.prepare_linear() {
-        return ModalSolveResult {
-            converged: false,
-            frequencies_hz: Vec::new(),
-            mode_shapes: Vec::new(),
-            residual_norms: Vec::new(),
-            diagnostics: vec![FeaDiagnostic {
-                code: "FEA_MODAL_SOLVER_ADMISSION_FAILED".into(),
-                severity: FeaDiagnosticSeverity::Error,
-                message: format!(
-                    "modal stiffness admission failed on the constraint space: {error}"
-                ),
-            }],
-            solver_method: SolverMethod::MatrixFreeSubspaceIteration,
-            solver_backend: LinearAlgebraBackendKind::CpuReference,
-            preconditioner: SolverPreconditioner::None,
-            solver_host_sync_count: 0,
-            device_apply_k_count: 0,
-            device_apply_k_attempt_count: 0,
-            accelerator_evidence: Vec::new(),
-            available_mode_count: reduced_operator.dof_count(),
-            boundary_probe_count: 0,
-            boundary_probe_frequency_hz: None,
-        };
-    }
-    let mut solve_summary = summary.clone();
-    solve_summary.dof_count = reduced_operator.dof_count();
-    solve_summary.constrained_dof_count = 0;
-    solve_summary.operator = reduced_operator;
+    let prepared = match reduced_operator.prepare_linear_reusing(reuse) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            return ModalSolveResult {
+                converged: false,
+                frequencies_hz: Vec::new(),
+                mode_shapes: Vec::new(),
+                residual_norms: Vec::new(),
+                diagnostics: vec![FeaDiagnostic {
+                    code: "FEA_MODAL_SOLVER_ADMISSION_FAILED".into(),
+                    severity: FeaDiagnosticSeverity::Error,
+                    message: format!(
+                        "modal stiffness admission failed on the constraint space: {error}"
+                    ),
+                }],
+                solver_method: SolverMethod::MatrixFreeSubspaceIteration,
+                solver_backend: LinearAlgebraBackendKind::CpuReference,
+                preconditioner: SolverPreconditioner::None,
+                solver_host_sync_count: 0,
+                device_apply_k_count: 0,
+                device_apply_k_attempt_count: 0,
+                accelerator_evidence: Vec::new(),
+                available_mode_count: reduced_operator.dof_count(),
+                boundary_probe_count: 0,
+                boundary_probe_frequency_hz: None,
+            }
+        }
+    };
     let accelerator_requested = backend == ComputeBackend::Gpu;
     let mut solver_backend = LinearAlgebraBackendKind::CpuReference;
     let mut solver_host_sync_count = 0u32;
     let mut device_apply_k_count = 0u32;
     let mut device_apply_k_attempt_count = 0u32;
 
-    let unconstrained: Vec<usize> = (0..solve_summary.operator.dof_count()).collect();
+    let unconstrained: Vec<usize> = (0..reduced_operator.dof_count()).collect();
     let target_mode_count = requested_mode_count.min(unconstrained.len());
 
     let mut modes: Vec<ModalCandidate> = Vec::with_capacity(target_mode_count.saturating_add(4));
@@ -197,13 +199,7 @@ pub fn solve_modal_system(
     let mut boundary_probe_frequency_hz = None;
     let mut accelerator_admission_fallback = None;
     let prepared_accelerator_system = if accelerator_requested {
-        let prepared = prepare_accelerator_linear_system(
-            solve_summary
-                .operator
-                .prepare_linear()
-                .expect("modal coercivity was checked before accelerator preparation"),
-            64,
-        );
+        let prepared = prepare_accelerator_linear_system(prepared.clone(), 64);
         match prepared {
             Ok(prepared) => Some(prepared),
             Err(error) if error.permits_cpu_fallback() => {
@@ -243,10 +239,6 @@ pub fn solve_modal_system(
     };
     let mut linear_diagnostics = Vec::new();
     let (cpu_preconditioner_kind, cpu_preconditioner) = if prepared_accelerator_system.is_none() {
-        let prepared = solve_summary
-            .operator
-            .prepare_linear()
-            .expect("modal coercivity was checked before preconditioner construction");
         match build_spd_preconditioner(&prepared, SpdPreconditionerKind::Ilu0) {
             Ok(preconditioner) => (Some(SolverPreconditioner::Ilu0), Some(preconditioner)),
             Err(error) => {
@@ -304,7 +296,7 @@ pub fn solve_modal_system(
     let mut subspace_converged = false;
     while subspace_dimension > 0 && !crate::is_fea_cancelled() {
         let result = solve_lowest_eigenspace(
-            &solve_summary.operator,
+            &reduced_operator,
             subspace_dimension,
             target_mode_count.saturating_add(1),
             convergence.relative_residual_tolerance(),
@@ -314,7 +306,7 @@ pub fn solve_modal_system(
                     return None;
                 }
                 let attempt = solve_spd_system_cg(
-                    &solve_summary.operator,
+                    &reduced_operator,
                     rhs,
                     SpdCgSolveOptions {
                         max_iters: 64,

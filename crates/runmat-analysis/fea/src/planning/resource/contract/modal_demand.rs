@@ -16,6 +16,9 @@ use super::{
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StructuralModalResourceDemand {
+    /// Additional exact original local stiffness inventory and selection workspace.
+    /// Re-derived from the original mesh, constraints and physical operator family.
+    pub original_energy_source_bytes: super::ByteCount,
     pub workload: StructuralModalWorkloadIdentity,
     pub operator: StructuralOperatorResourceDemand,
     /// Exact preload linearization carried by a prestressed-modal task.

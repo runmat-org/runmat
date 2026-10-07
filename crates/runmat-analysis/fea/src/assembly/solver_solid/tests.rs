@@ -8,6 +8,36 @@ use runmat_meshing_core::{
 };
 
 #[test]
+fn original_energy_capture_preserves_every_physical_operator_and_parallel_sum() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = artifact(order);
+        let properties = inventory(&mesh, material(100., 1.));
+        let original = assemble_solver_solid_operators(&mesh, &properties).unwrap();
+        for axis in 0..3 {
+            let mut fixed = vec![true; mesh.topology.nodes.len() * 3];
+            for node in 1..mesh.topology.nodes.len() {
+                fixed[3 * node + axis] = false;
+            }
+            for threads in [1, 2] {
+                let mut source = SolidEnergyPreparation::default();
+                source.begin(&mesh, &fixed, None).unwrap();
+                let captured = assemble_solver_solid_operators_capturing(
+                    &mesh,
+                    &properties,
+                    LocalExecutionPlan::from_thread_count(
+                        crate::planning::resource::LocalThreadCount::new(threads).unwrap(),
+                    )
+                    .unwrap(),
+                    Some(&mut source),
+                )
+                .unwrap();
+                assert_eq!(captured, original);
+            }
+        }
+    }
+}
+
+#[test]
 fn scoped_solid_assembly_matches_serial_operators_exactly() {
     let artifact = crate::tests::multi_region_tetrahedron_solver_mesh();
     let properties = inventory(&artifact, material(70.0e9, 2_700.0));
@@ -86,6 +116,7 @@ fn scoped_solid_assembly_preserves_shared_row_sum_across_waves() {
         &nodes,
         nodes.len() * 3,
         LocalExecutionPlan::serial(),
+        None,
     )
     .unwrap();
     let plan = LocalExecutionPlan::from_thread_count(
@@ -93,7 +124,7 @@ fn scoped_solid_assembly_preserves_shared_row_sum_across_waves() {
     )
     .unwrap();
     let parallel =
-        assemble_solid_rows(&elements, &properties, &nodes, nodes.len() * 3, plan).unwrap();
+        assemble_solid_rows(&elements, &properties, &nodes, nodes.len() * 3, plan, None).unwrap();
     assert_eq!(parallel.stiffness, serial.stiffness);
     assert_eq!(parallel.mass, serial.mass);
     assert_eq!(parallel.damping, serial.damping);

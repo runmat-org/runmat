@@ -4,6 +4,7 @@
 //! exp(+i omega t) and Rayleigh damping give the complex denominator below.
 use super::*;
 
+mod coercivity;
 mod execution;
 
 pub(super) fn first_mode_reference(x: f64, k: f64) -> [f64; 2] {

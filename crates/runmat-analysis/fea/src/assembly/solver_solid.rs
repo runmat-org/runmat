@@ -1,3 +1,6 @@
+mod energy;
+pub(in crate::assembly) use energy::assemble_preparing;
+pub(crate) use energy::SolidEnergyPreparation;
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::MechanicalDampingModel;
@@ -157,6 +160,15 @@ pub fn assemble_solver_solid_operators_with_execution(
     properties: &CompiledPropertyMap,
     local_execution: LocalExecutionPlan,
 ) -> Result<SolverSolidOperators, SolverSolidAssemblyError> {
+    assemble_solver_solid_operators_capturing(artifact, properties, local_execution, None)
+}
+
+pub(in crate::assembly) fn assemble_solver_solid_operators_capturing(
+    artifact: &SolverMeshArtifact,
+    properties: &CompiledPropertyMap,
+    local_execution: LocalExecutionPlan,
+    capture: Option<&mut SolidEnergyPreparation>,
+) -> Result<SolverSolidOperators, SolverSolidAssemblyError> {
     let topology = solver_solid_topology(artifact)?;
     if properties.identity.mesh_digest != Some(artifact.canonical_digest) {
         return Err(SolverSolidAssemblyError::InvalidMaterialCoverage(
@@ -176,6 +188,7 @@ pub fn assemble_solver_solid_operators_with_execution(
         &nodes,
         topology.dof_count,
         local_execution,
+        capture,
     )?;
     Ok(SolverSolidOperators {
         stiffness: sparse(rows.stiffness, OperatorRole::Stiffness)?,
@@ -192,6 +205,7 @@ fn assemble_solid_rows(
     nodes: &NodeIndex,
     dof_count: usize,
     local_execution: LocalExecutionPlan,
+    mut capture: Option<&mut SolidEnergyPreparation>,
 ) -> Result<SolidOperatorRows, SolverSolidAssemblyError> {
     let mut rows = SolidOperatorRows::new(dof_count);
     let cancellation = crate::progress::cancellation_token();
@@ -220,7 +234,7 @@ fn assemble_solid_rows(
             other => SolverSolidAssemblyError::LocalExecution(format!("{other:?}")),
         })?;
         for contribution in chunks.into_iter().flatten() {
-            contribution.scatter(&mut rows)?;
+            contribution.scatter(&mut rows, capture.as_deref_mut())?;
         }
     }
     Ok(rows)
@@ -239,7 +253,17 @@ struct SolidElementMatrices<const N: usize, const D: usize> {
 }
 
 impl SolidElementContribution {
-    fn scatter(self, rows: &mut SolidOperatorRows) -> Result<(), SolverSolidAssemblyError> {
+    fn scatter(
+        self,
+        rows: &mut SolidOperatorRows,
+        capture: Option<&mut SolidEnergyPreparation>,
+    ) -> Result<(), SolverSolidAssemblyError> {
+        if let Some(capture) = capture {
+            match &self {
+                Self::Tet4(matrices) => capture.capture(&matrices.offsets, &matrices.stiffness)?,
+                Self::Tet10(matrices) => capture.capture(&matrices.offsets, &matrices.stiffness)?,
+            }
+        }
         match self {
             Self::Tet4(matrices) => rows.add_element(
                 &matrices.offsets,

@@ -1,8 +1,7 @@
 use runmat_analysis_core::{
-    AnalysisConstraint, ExcitationTarget, FormulationRequirement, IndependentDomain,
-    PrescribedStructuralDofs, ProcedureStep, ProcedureStepId, ReferenceStatePolicy, RegionTarget,
-    SequenceDependency, SequenceDependencyReason, StateId, StateTransition, StateTransitionMethod,
-    StructuralConstraint, StructuralConstraintKind, TopologyTransitionPolicy, TransitionId,
+    FormulationRequirement, IndependentDomain, ProcedureStep, ProcedureStepId,
+    ReferenceStatePolicy, SequenceDependency, SequenceDependencyReason, StateId, StateTransition,
+    StateTransitionMethod, TopologyTransitionPolicy, TransitionId,
 };
 use runmat_analysis_execution::{
     execute_serial_analysis, import_structural_frequency_entry,
@@ -29,7 +28,6 @@ use runmat_analysis_fea::{
         StructuralPrestressedFrequencySolverTemplate, StructuralPrestressedFrequencyTemplate,
         StructuralStepWorkload, StructuralStudyWorkloads,
     },
-    fixtures::{fixture_model, FixtureId},
     frequency::FrequencyResponsePlan,
     pipeline::modal_governance::ModalConvergencePolicy,
     planning::resource::{build_resource_plan, ByteCount, FeaResourceDemand},
@@ -104,38 +102,7 @@ fn fixture_model_and_mesh() -> (
     runmat_analysis_core::AnalysisModel,
     runmat_meshing_core::SolverMeshArtifact,
 ) {
-    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    *model.material_assignments[0]
-        .target
-        .selected_region_id_mut()
-        .expect("fixture uses selected material region") = "region".into();
-    model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
-        constraint_id: "fixed-face".into(),
-        frame: runmat_analysis_core::CoordinateFrame::Global,
-        kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-            target: RegionTarget::boundary("face:0"),
-            translations: [
-                runmat_analysis_core::StructuralTranslationDof::Ux,
-                runmat_analysis_core::StructuralTranslationDof::Uy,
-                runmat_analysis_core::StructuralTranslationDof::Uz,
-            ]
-            .into_iter()
-            .map(|dof| runmat_analysis_core::TranslationDofValue {
-                dof,
-                value: runmat_analysis_core::PrescribedValue::Constant(
-                    runmat_analysis_core::Displacement::new(0.0),
-                ),
-            })
-            .collect(),
-            rotations: Vec::new(),
-        }),
-    })];
-    model.excitations[0].excitation_mut().target =
-        ExcitationTarget::Region(RegionTarget::boundary("face:3"));
-    (
-        model,
-        runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4),
-    )
+    super::structural_fixture::model_and_mesh(ElementOrder::Tet4)
 }
 
 fn direct_fixture() -> (

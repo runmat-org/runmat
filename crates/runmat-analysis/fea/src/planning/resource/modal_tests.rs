@@ -1,3 +1,4 @@
+mod local_energy;
 mod proof_workspace;
 use runmat_analysis_core::{
     FormulationRequirement, IndependentDomain, ProcedureStep, ProcedureStepId,

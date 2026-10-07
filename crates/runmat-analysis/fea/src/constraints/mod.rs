@@ -5,6 +5,9 @@
 //! plan; it must not reinterpret authored targets or coordinate frames.
 
 mod algebra;
+#[path = "algebra/translation_selection.rs"]
+mod translation_selection;
+pub(crate) use translation_selection::HomogeneousTranslationSelection;
 mod compilation;
 mod compile;
 mod contract;

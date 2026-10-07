@@ -200,3 +200,31 @@ pub(super) fn prepared_output_covers_transport(output: &PreparedOutputResourceFa
         && output.construction_resident_bytes_admission_budget
             >= output.encoded_payload_bytes_upper_bound
 }
+
+/// Known device-resident lower envelope for the native sparse CG adapter used by modal solves.
+pub(in crate::planning::resource) fn structural_modal_accelerator_minimum_bytes(
+    reduced_dimension: u64,
+    stiffness_nonzeros: u64,
+) -> Result<u64, ResourcePlanningError> {
+    let row_offsets = checked_bytes(
+        checked_add(reduced_dimension, 1, "accelerator row offsets")?,
+        8,
+        "accelerator row offsets",
+    )?;
+    let sparse_entries = checked_bytes(stiffness_nonzeros, 16, "accelerator sparse entries")?;
+    let diagonal = checked_bytes(reduced_dimension, 8, "accelerator diagonal")?;
+    let vectors = checked_bytes(
+        checked_mul(
+            reduced_dimension,
+            super::ACCELERATOR_CG_RESIDENT_VECTOR_COUNT,
+            "accelerator vectors",
+        )?,
+        8,
+        "accelerator vectors",
+    )?;
+    [row_offsets, sparse_entries, diagonal, vectors]
+        .into_iter()
+        .try_fold(0_u64, |total, value| {
+            checked_add(total, value, "modal accelerator")
+        })
+}

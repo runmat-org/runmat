@@ -78,6 +78,7 @@ pub(super) fn validate_modal_demand(
     let SolveResourcePolicy::SymmetricSubspaceIteration {
         reduced_dimension,
         maximum_subspace_dimension,
+        workspace_bytes_upper_bound,
         ..
     } = demand.operator.solve
     else {
@@ -100,7 +101,11 @@ pub(super) fn validate_modal_demand(
     } else {
         crate::pipeline::modal_residual::RESIDUAL_MASS_ORTHOGONALIZATION_PASSES as u64
     };
-    if demand.retained_mode_count_upper_bound.0 == 0
+    if workspace_bytes_upper_bound.0 < demand.original_energy_source_bytes.0
+        || demand.operator.phase_resources.resident_bytes_upper_bound.0
+            < demand.original_energy_source_bytes.0
+        || (demand.prestress_linearization.is_some() && demand.original_energy_source_bytes.0 != 0)
+        || demand.retained_mode_count_upper_bound.0 == 0
         || demand.retained_mode_count_upper_bound.0 > reduced_dimension.0
         || demand.modal_phase_value_count_upper_bound.0
             < demand.modal_output_value_count_upper_bound.0

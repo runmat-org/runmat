@@ -6,6 +6,8 @@ use super::{CoercivityWorkEnvelope, MatrixSymmetry, RealSparseMatrix};
 use runmat_execution::Digest;
 use std::collections::{BTreeMap, VecDeque};
 mod local;
+mod projection;
+use projection::EnergyProjection;
 mod source;
 pub(crate) use source::AnchoredEnergySource;
 mod outward;
@@ -69,7 +71,7 @@ pub(crate) enum EnergyVerdict {
 
 pub(crate) struct AnchoredEnergyCheck<'a> {
     matrix: &'a RealSparseMatrix,
-    prescribed: &'a [bool],
+    projection: EnergyProjection<'a>,
     entries: Vec<Interval>,
     graph: Vec<Vec<usize>>,
     missing: BTreeMap<(usize, usize), Interval>,
@@ -89,12 +91,18 @@ impl<'a> AnchoredEnergyCheck<'a> {
         prescribed: &'a [bool],
         admitted: CoercivityWorkEnvelope,
     ) -> Result<Self, EnergyError> {
-        Self::new_with_retained(matrix, prescribed, admitted, 0, 0)
+        Self::new_projected(
+            matrix,
+            EnergyProjection::Identity(prescribed),
+            admitted,
+            0,
+            0,
+        )
     }
 
-    fn new_with_retained(
+    fn new_projected(
         matrix: &'a RealSparseMatrix,
-        prescribed: &'a [bool],
+        projection: EnergyProjection<'a>,
         admitted: CoercivityWorkEnvelope,
         retained_bytes: u64,
         source_operations: u64,
@@ -104,7 +112,6 @@ impl<'a> AnchoredEnergyCheck<'a> {
         if n == 0
             || matrix.columns() != n
             || matrix.properties().symmetry != MatrixSymmetry::Symmetric
-            || prescribed.len() != n
             || admitted.dimension() != n as u64
         {
             return Err(EnergyError::Shape);
@@ -133,7 +140,7 @@ impl<'a> AnchoredEnergyCheck<'a> {
         }
         let resident = (matrix.values().len() as u64)
             .checked_mul(128)
-            .and_then(|v| v.checked_add((n as u64).checked_mul(80)?))
+            .and_then(|v| v.checked_add((projection.len() as u64).checked_mul(80)?))
             .and_then(|v| v.checked_add(retained_bytes))
             .ok_or(EnergyError::Arithmetic)?;
         if resident > admitted.resident_bytes_limit() {
@@ -144,22 +151,13 @@ impl<'a> AnchoredEnergyCheck<'a> {
                 resident_limit: admitted.resident_bytes_limit(),
             });
         }
-        let mut entries = vec![Interval::exact(0.0); matrix.values().len()];
-        for (row, fixed) in prescribed.iter().enumerate() {
-            if *fixed {
-                let index = matrix
-                    .pattern()
-                    .row_range(row)
-                    .find(|&i| matrix.pattern().column(i) == row)
-                    .ok_or(EnergyError::Shape)?;
-                entries[index] = Interval::exact(1.0);
-            }
-        }
+        projection.validate(n)?;
+        let entries = projection.seed_entries(matrix)?;
         Ok(Self {
             matrix,
-            prescribed,
+            projection,
             entries,
-            graph: vec![Vec::new(); n],
+            graph: vec![Vec::new(); projection.len()],
             missing: BTreeMap::new(),
             minimum_local: f64::INFINITY,
             operations,
@@ -211,7 +209,7 @@ impl<'a> AnchoredEnergyCheck<'a> {
         if !(2..=32).contains(&n)
             || values.len() != n * n
             || values.iter().any(|v| !v.is_finite())
-            || nodes.iter().any(|&i| i >= self.matrix.rows())
+            || nodes.iter().any(|&i| i >= self.projection.len())
             || nodes
                 .iter()
                 .enumerate()
@@ -219,7 +217,10 @@ impl<'a> AnchoredEnergyCheck<'a> {
         {
             return Err(EnergyError::InvalidBlock);
         }
-        if nodes.iter().all(|&node| self.prescribed[node]) {
+        if nodes
+            .iter()
+            .all(|&node| self.projection.row(node).is_none())
+        {
             return Ok(());
         }
         // Only Q enters the local proof. Reserve subtraction/absolute/max work
@@ -317,13 +318,13 @@ impl<'a> AnchoredEnergyCheck<'a> {
         // were seeded once in new(). Entries eliminated by prescribed rows need
         // neither reconstruction nor a second dense local block.
         for (i, &row) in nodes.iter().enumerate() {
-            if self.prescribed[row] {
+            let Some(row) = self.projection.row(row) else {
                 continue;
-            }
+            };
             for (j, &column) in nodes.iter().enumerate() {
-                if self.prescribed[column] {
+                let Some(column) = self.projection.row(column) else {
                     continue;
-                }
+                };
                 let mut contribution = Interval::exact(0.0);
                 match (i, j) {
                     (0, 0) => {
@@ -394,14 +395,14 @@ impl<'a> AnchoredEnergyCheck<'a> {
         self.charge(
             ((self.matrix.values().len() + self.missing.len()) as u64)
                 .checked_mul(16)
-                .and_then(|v| v.checked_add((n as u64) * 16))
+                .and_then(|v| v.checked_add((self.projection.len() as u64) * 16))
                 .ok_or(EnergyError::Arithmetic)?,
         )?;
-        let mut distances = vec![usize::MAX; n];
+        let mut distances = vec![usize::MAX; self.projection.len()];
         let mut queue = VecDeque::new();
-        for (i, fixed) in self.prescribed.iter().enumerate() {
-            if *fixed {
-                distances[i] = 0;
+        for (i, distance) in distances.iter_mut().enumerate() {
+            if self.projection.row(i).is_none() {
+                *distance = 0;
                 queue.push_back(i);
             }
         }
