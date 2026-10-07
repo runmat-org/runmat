@@ -22,11 +22,11 @@ pub async fn generic_index(base: &Value, indices: &[usize]) -> Result<Value, Run
             indices.iter().copied().map(SliceSelector::Scalar).collect();
         match base {
             Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
-                let plan = build_index_plan(&selectors, indices.len(), &tensor.shape)?;
+                let plan = build_index_plan(&selectors, indices.len(), tensor.shape())?;
                 return read_tensor_slice_from_plan(tensor, &plan);
             }
             Value::ComplexTensor(tensor) if tensor.integer_storage().is_some() => {
-                let plan = build_index_plan(&selectors, indices.len(), &tensor.shape)?;
+                let plan = build_index_plan(&selectors, indices.len(), tensor.shape())?;
                 return read_complex_slice_from_plan(tensor, &plan);
             }
             Value::SparseTensor(sparse) if sparse.integer_storage().is_some() => {

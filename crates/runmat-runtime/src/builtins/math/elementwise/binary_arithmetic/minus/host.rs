@@ -120,7 +120,7 @@ fn classify_operand(value: Value) -> BuiltinResult<MinusOperand> {
 }
 
 fn minus_real_real(lhs: Tensor, rhs: Tensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())
         .map_err(|err| minus_error_with_detail(&MINUS_ERROR_SIZE_MISMATCH, &err))?;
     let output_shape = plan.output_shape().to_vec();
     let lhs = lhs
@@ -170,7 +170,7 @@ fn minus_real_real(lhs: Tensor, rhs: Tensor) -> BuiltinResult<Value> {
 }
 
 fn minus_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())
         .map_err(|err| minus_error_with_detail(&MINUS_ERROR_SIZE_MISMATCH, &err))?;
     let output = match (lhs.complex_storage(), rhs.complex_storage()) {
         (ComplexStorage::F64(lhs), ComplexStorage::F64(rhs)) => {
@@ -225,7 +225,7 @@ fn minus_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinRes
 }
 
 fn minus_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())
         .map_err(|err| minus_error_with_detail(&MINUS_ERROR_SIZE_MISMATCH, &err))?;
     let rhs = rhs
         .clone()
@@ -238,7 +238,7 @@ fn minus_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value>
 }
 
 fn minus_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())
         .map_err(|err| minus_error_with_detail(&MINUS_ERROR_SIZE_MISMATCH, &err))?;
     let lhs = lhs
         .clone()

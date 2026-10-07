@@ -62,8 +62,8 @@ pub fn try_tensor_slice_2d_fast_path(
     if dims != 2 {
         return Ok(None);
     }
-    let rows = tensor.shape.first().copied().unwrap_or(1);
-    let cols = tensor.shape.get(1).copied().unwrap_or(1);
+    let rows = tensor.shape().first().copied().unwrap_or(1);
+    let cols = tensor.shape().get(1).copied().unwrap_or(1);
     match (&selectors[0], &selectors[1]) {
         (SliceSelector::Colon, SliceSelector::Scalar(j)) => {
             let j0 = *j - 1;
@@ -131,11 +131,11 @@ pub async fn read_tensor_slice_nd(
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
     let selectors =
-        build_slice_selectors(dims, colon_mask, end_mask, numeric, &tensor.shape).await?;
+        build_slice_selectors(dims, colon_mask, end_mask, numeric, tensor.shape()).await?;
     if let Some(value) = try_tensor_slice_2d_fast_path(tensor, dims, &selectors)? {
         return Ok(value);
     }
-    let plan = build_index_plan(&selectors, dims, &tensor.shape)?;
+    let plan = build_index_plan(&selectors, dims, tensor.shape())?;
     let indices: Vec<usize> = plan.indices.iter().map(|&index| index as usize).collect();
     numeric_selection_value(tensor, &indices, plan.output_shape)
 }
@@ -915,8 +915,8 @@ pub async fn read_complex_slice(
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
     let selectors =
-        build_slice_selectors(dims, colon_mask, end_mask, numeric, &tensor.shape).await?;
-    let plan = build_index_plan(&selectors, dims, &tensor.shape)?;
+        build_slice_selectors(dims, colon_mask, end_mask, numeric, tensor.shape()).await?;
+    let plan = build_index_plan(&selectors, dims, tensor.shape())?;
     read_complex_slice_from_plan(tensor, &plan)
 }
 
@@ -1372,7 +1372,7 @@ mod tests {
             panic!("expected native-single tensor result");
         };
         assert_eq!(out.numeric_dtype(), runmat_value::NumericDType::F32);
-        assert_eq!(out.shape, vec![1, 2]);
+        assert_eq!(out.shape(), [1, 2]);
         assert_eq!(out.numeric_value_at(0), Some(NumericScalar::F32(3.75)));
         assert_eq!(out.numeric_value_at(1), Some(NumericScalar::F32(1.25)));
     }
@@ -1442,7 +1442,7 @@ mod tests {
         else {
             panic!("typed complex selection must remain a complex tensor");
         };
-        assert_eq!(result.shape, vec![1, 2]);
+        assert_eq!(result.shape(), [1, 2]);
         assert_eq!(
             result.integer_storage().cloned(),
             Some(

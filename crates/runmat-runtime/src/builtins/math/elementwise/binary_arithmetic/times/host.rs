@@ -80,7 +80,7 @@ pub(crate) fn times_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 fn times_real_real(lhs: Tensor, rhs: Tensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())
         .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, &err))?;
     let output_shape = plan.output_shape().to_vec();
     let lhs = lhs
@@ -130,7 +130,7 @@ fn times_real_real(lhs: Tensor, rhs: Tensor) -> BuiltinResult<Value> {
 }
 
 fn times_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())
         .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, &err))?;
     let output = match (lhs.complex_storage(), rhs.complex_storage()) {
         (ComplexStorage::F64(lhs), ComplexStorage::F64(rhs)) => {
@@ -177,7 +177,7 @@ fn times_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinRes
 }
 
 fn times_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())
         .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, &err))?;
     let rhs = rhs
         .clone()
@@ -190,7 +190,7 @@ fn times_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value>
 }
 
 fn times_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())
         .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, &err))?;
     let lhs = lhs
         .clone()

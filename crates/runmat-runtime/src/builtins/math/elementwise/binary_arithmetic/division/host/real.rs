@@ -10,7 +10,7 @@ pub(super) fn division_real_real(
     lhs: Tensor,
     rhs: Tensor,
 ) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())
         .map_err(|err| context.error_with_detail(context.size_mismatch, &err))?;
     let output_shape = plan.output_shape().to_vec();
     let lhs = lhs
