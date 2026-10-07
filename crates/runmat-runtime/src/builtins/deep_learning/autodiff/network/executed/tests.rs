@@ -167,7 +167,7 @@ fn public_forward_tape_uses_every_numerical_layer_and_matches_finite_differences
                 let second = block_on(dlgradient_direct(loss, vec![x])).unwrap();
                 assert_eq!(tensor(&first), tensor(&second), "repeat reverse {kind:?}");
                 assert_eq!(tensor(&first).numeric_dtype(), dtype);
-                assert_eq!(tensor(&first).shape, [2, 1, 3]);
+                assert_eq!(tensor(&first).shape(), &[2, 1, 3]);
                 tensor(&first).materialize_f64()
             };
             let step = if dtype == NumericDType::F32 {

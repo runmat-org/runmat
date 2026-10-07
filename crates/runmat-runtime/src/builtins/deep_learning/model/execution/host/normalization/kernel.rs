@@ -65,7 +65,7 @@ pub(in crate::builtins::deep_learning) fn forward(
             inv_std_input,
         } = forward_values(x, gamma, beta, &geometry);
         (
-            Tensor::from_numeric_storage(NumericStorage::F32(output), input.shape.clone()),
+            Tensor::from_numeric_storage(NumericStorage::F32(output), input.shape().to_vec()),
             NormalizationStatsData::F32 {
                 scale,
                 mean_scaled,
@@ -86,7 +86,7 @@ pub(in crate::builtins::deep_learning) fn forward(
             inv_std_input,
         } = forward_values(x, gamma, beta, &geometry);
         (
-            Tensor::from_numeric_storage(NumericStorage::F64(output), input.shape.clone()),
+            Tensor::from_numeric_storage(NumericStorage::F64(output), input.shape().to_vec()),
             NormalizationStatsData::F64 {
                 scale,
                 mean_scaled,

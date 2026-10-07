@@ -145,7 +145,7 @@ fn gradient_tree_for_target_impl(
                     let target_tensor = host_tensor_from_value(target, "dlgradient", "target")?;
                     floating_tensor_from_f64(
                         vec![0.0; tensor::tensor_element_len(&target_tensor)],
-                        target_tensor.shape.clone(),
+                        target_tensor.shape().to_vec(),
                         target_tensor.numeric_dtype(),
                         "dlgradient",
                     )?
@@ -299,7 +299,7 @@ fn zero_for_unconnected_resident_target(target: &Value) -> BuiltinResult<Value> 
             let tensor = host_tensor_from_value(target, "dlgradient", "target")?;
             Ok(Value::Tensor(floating_tensor_from_f64(
                 vec![0.0; tensor::tensor_element_len(&tensor)],
-                tensor.shape.clone(),
+                tensor.shape().to_vec(),
                 tensor.numeric_dtype(),
                 "dlgradient",
             )?))

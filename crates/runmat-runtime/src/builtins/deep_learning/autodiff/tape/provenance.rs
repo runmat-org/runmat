@@ -38,7 +38,7 @@ impl DataProvenance {
         match (self, value) {
             (Self::Dense, Value::Tensor(current)) if node.host().is_some() => {
                 let node = node.host().expect("host provenance guards host node");
-                current.shape == node.shape
+                current.shape() == node.shape()
                     && current.numeric_dtype() == node.numeric_dtype()
                     && current
                         .host_buffer()

@@ -122,6 +122,36 @@ fn tape_identity_requires_original_dense_storage_class_and_shape() {
     assert_eq!(tape.borrow().nodes.len(), 1);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn low_rank_tape_gradient_preserves_source_shape_dtype_and_values() {
+    for (shape, values, expected) in [
+        (Vec::new(), vec![2.0_f32], vec![4.0_f64]),
+        (vec![2], vec![2.0_f32, 3.0], vec![4.0_f64, 6.0]),
+    ] {
+        let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
+        let input = annotate_dlarray_value(wrapped(Value::Tensor(
+            Tensor::from_f32(values, shape.clone()).expect("low-rank input"),
+        )))
+        .expect("traced low-rank input");
+        let squared = dlarray_times_builtin(input.clone(), input.clone()).expect("square input");
+        let loss =
+            dlarray_sum_builtin(squared, vec![Value::String("all".into())]).expect("scalar loss");
+        let Value::Object(gradient) =
+            futures::executor::block_on(dlgradient_direct(loss, vec![input]))
+                .expect("low-rank gradient")
+        else {
+            panic!("expected gradient dlarray");
+        };
+        let Some(Value::Tensor(data)) = gradient.properties.get("Data") else {
+            panic!("expected gradient tensor");
+        };
+        assert_eq!(data.shape(), shape.as_slice());
+        assert_eq!(data.numeric_dtype(), NumericDType::F32);
+        assert_eq!(data.materialize_f64(), expected);
+    }
+}
+
 #[test]
 fn scalar_and_logical_tape_sources_preserve_exact_provenance_without_payload_scans() {
     let tape = Rc::new(RefCell::new(Tape::new()));
@@ -308,7 +338,7 @@ fn single_matrix_product_retains_owning_input_precision() {
     let Value::Tensor(data) = result.properties.get("Data").unwrap() else {
         panic!("tensor result")
     };
-    assert_eq!(data.shape, vec![2, 2]);
+    assert_eq!(data.shape(), &[2, 2]);
     assert_eq!(
         data.clone().into_numeric_storage().unwrap(),
         NumericStorage::F32(vec![23.0, 34.0, 31.0, 46.0])
@@ -352,7 +382,7 @@ fn mixed_floating_arithmetic_is_symmetric_and_keeps_dlarray_metadata() {
             panic!("dlarray data")
         };
         assert_eq!(data.numeric_dtype(), NumericDType::F32);
-        assert_eq!(data.shape, vec![1, 2]);
+        assert_eq!(data.shape(), &[1, 2]);
     }
     let double = wrapped(Value::Tensor(
         Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap(),
@@ -459,7 +489,7 @@ fn sum_all_accepts_character_and_string_text_with_typed_gradients() {
             panic!("gradient Data")
         };
         assert_eq!(data.numeric_dtype(), NumericDType::F32);
-        assert_eq!(data.shape, [1, 3]);
+        assert_eq!(data.shape(), &[1, 3]);
         assert_eq!(data.materialize_f64(), [2.0, 4.0, 6.0]);
     }
 }
@@ -487,7 +517,7 @@ fn matrix_method_supports_scalar_multiplication_but_rejects_nd_matrices() {
         panic!("result Data")
     };
     assert_eq!(data.numeric_dtype(), NumericDType::F32);
-    assert_eq!(data.shape, vec![1, 2]);
+    assert_eq!(data.shape(), &[1, 2]);
     assert_eq!(data.materialize_f64(), [3.0, 6.0]);
 
     let nd = wrapped(Value::Tensor(

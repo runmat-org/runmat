@@ -237,10 +237,10 @@ fn matches_axes(
 ) -> bool {
     match value {
         HostValue::Real(tensor) => {
-            tensor.shape.as_slice() == axes.shape() && tensor.len() == axes.element_count()
+            tensor.shape() == axes.shape() && tensor.len() == axes.element_count()
         }
         HostValue::Complex(tensor) => {
-            tensor.shape.as_slice() == axes.shape() && tensor.len() == axes.element_count()
+            tensor.shape() == axes.shape() && tensor.len() == axes.element_count()
         }
     }
 }

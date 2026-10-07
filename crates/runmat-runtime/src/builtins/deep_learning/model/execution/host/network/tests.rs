@@ -109,3 +109,51 @@ fn identity_only_route_rejects_mismatched_input_axes() {
     let wrong = axes("BC", &[1, 2]);
     assert!(execute(&[HostStep::Input], HostValue::Real(input), wrong, false).is_err());
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn identity_trace_preserves_rank_one_real_and_complex_and_rejects_reshaped_gradients() {
+    let input = Tensor::from_f32(vec![1., 2.], vec![2]).unwrap();
+    let result = execute(
+        &[HostStep::Input],
+        HostValue::Real(input),
+        axes("C", &[2]),
+        true,
+    )
+    .unwrap();
+    let trace = result.trace.as_ref().unwrap();
+    let reverse = backward(trace, result.value, &[]).unwrap();
+    let HostValue::Real(gradient) = reverse.input_gradient else {
+        panic!("real gradient expected")
+    };
+    assert_eq!(gradient.shape(), &[2]);
+    assert_eq!(gradient.as_f32_slice(), Some(&[1., 2.][..]));
+    let row = Tensor::from_f32(vec![1., 2.], vec![1, 2]).unwrap();
+    assert!(matches!(
+        backward(trace, HostValue::Real(row), &[]),
+        Err(super::types::HostError::TraceMismatch)
+    ));
+
+    let input = runmat_value::ComplexTensor::from_f32(vec![(1., -1.), (2., -2.)], vec![2]).unwrap();
+    let result = execute(
+        &[HostStep::Input],
+        HostValue::Complex(input),
+        axes("C", &[2]),
+        true,
+    )
+    .unwrap();
+    let trace = result.trace.as_ref().unwrap();
+    let reverse = backward(trace, result.value, &[]).unwrap();
+    let HostValue::Complex(gradient) = reverse.input_gradient else {
+        panic!("complex gradient expected")
+    };
+    assert_eq!(gradient.shape(), &[2]);
+    assert_eq!(gradient.numeric_dtype(), NumericDType::F32);
+    assert_eq!(gradient.materialize_f64(), vec![(1., -1.), (2., -2.)]);
+    let row =
+        runmat_value::ComplexTensor::from_f32(vec![(1., -1.), (2., -2.)], vec![1, 2]).unwrap();
+    assert!(matches!(
+        backward(trace, HostValue::Complex(row), &[]),
+        Err(super::types::HostError::TraceMismatch)
+    ));
+}

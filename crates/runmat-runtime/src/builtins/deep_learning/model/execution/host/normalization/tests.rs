@@ -26,6 +26,37 @@ fn options(operation: DeepLearningNormalizationAxes) -> NormalizationOptions {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn channel_only_normalization_preserves_rank_one_single_and_exact_admission() {
+    let input = Tensor::from_f32(vec![1., 3.], vec![2]).unwrap();
+    let scale = Tensor::from_f32(vec![1., 1.], vec![2, 1]).unwrap();
+    let offset = Tensor::from_f32(vec![0., 0.], vec![2, 1]).unwrap();
+    let admitted = axes("C", input.shape());
+    let opts = options(DeepLearningNormalizationAxes::ChannelOnly);
+    let output = forward(&input, &scale, &offset, &admitted, opts).unwrap();
+    assert_eq!(output.tensor.shape(), &[2]);
+    assert_eq!(
+        output.tensor.numeric_dtype(),
+        runmat_value::NumericDType::F32
+    );
+    let expected = 1.0_f32 / (1.0_f32 + 1.0e-5_f32).sqrt();
+    let actual = output.tensor.as_f32_slice().unwrap();
+    assert!((actual[0] + expected).abs() < 1.0e-6);
+    assert!((actual[1] - expected).abs() < 1.0e-6);
+
+    let mismatched = Tensor::from_f32(vec![1., 3.], vec![1, 2]).unwrap();
+    assert!(matches!(
+        forward(&mismatched, &scale, &offset, &admitted, opts),
+        Err(NormalizationError::ShapeMismatch)
+    ));
+    let row_scale = Tensor::from_f32(vec![1., 1.], vec![1, 2]).unwrap();
+    assert!(matches!(
+        forward(&input, &row_scale, &offset, &admitted, opts),
+        Err(NormalizationError::ShapeMismatch)
+    ));
+}
+
 #[test]
 fn auto_normalizes_channels_independently_per_batch_and_time() {
     let mut values = Vec::new();

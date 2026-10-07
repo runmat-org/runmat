@@ -228,7 +228,7 @@ fn prepared_single_reverse_restores_each_double_learnable_and_initial_state_pare
                     let gradient =
                         block_on(dlgradient_direct(loss.clone(), vec![target.clone()])).unwrap();
                     assert_eq!(tensor(&gradient).numeric_dtype(), NumericDType::F64);
-                    assert_eq!(tensor(&gradient).shape, tensor(&target).shape);
+                    assert_eq!(tensor(&gradient).shape(), tensor(&target).shape());
                     (role, tensor(&target).clone(), tensor(&gradient).clone())
                 })
                 .collect::<Vec<_>>()
@@ -243,7 +243,7 @@ fn prepared_single_reverse_restores_each_double_learnable_and_initial_state_pare
                     let changed = replace_parent(
                         &net,
                         role,
-                        Value::Tensor(Tensor::new(values, original.shape.clone()).unwrap()),
+                        Value::Tensor(Tensor::new(values, original.shape().to_vec()).unwrap()),
                     );
                     objective(&changed, &data)
                 };

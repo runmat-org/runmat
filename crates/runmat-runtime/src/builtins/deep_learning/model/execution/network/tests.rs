@@ -64,6 +64,7 @@ fn predict_column_input_returns_batch_major_native_single_scores() {
         panic!("host score tensor expected")
     };
     assert_eq!(scores.numeric_dtype(), NumericDType::F32);
+    assert_eq!(scores.shape(), result.output_axes.shape());
     assert_eq!(scores.as_f32_slice().unwrap(), &[0.5, 2.5, 4.5]);
 }
 

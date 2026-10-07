@@ -36,7 +36,7 @@ fn observation_major_moves_batch_first_with_nonsquare_native_single_payload() {
         panic!("real result expected")
     };
     assert_eq!(result.numeric_dtype(), NumericDType::F32);
-    assert_eq!(result.shape, vec![3, 2, 2]);
+    assert_eq!(result.shape(), &[3, 2, 2]);
     assert_eq!(
         result.as_f32_slice().unwrap(),
         &[1.0, 2.0, 3.0, 10.0, 20.0, 30.0, 4.0, 5.0, 6.0, 40.0, 50.0, 60.0]
@@ -65,7 +65,7 @@ fn observation_major_preserves_both_complex_components_and_class() {
         panic!("complex result expected")
     };
     assert_eq!(result.numeric_dtype(), NumericDType::F32);
-    assert_eq!(result.shape, vec![3, 2]);
+    assert_eq!(result.shape(), &[3, 2]);
     let values = result.as_f32_slice().unwrap();
     let pairs = values
         .iter()
@@ -92,4 +92,18 @@ fn unbatched_and_already_observation_major_outputs_are_noops() {
             target_axes(&source, NetworkOutputLayout::ObservationMajor, "predict").unwrap();
         assert_eq!(target, source);
     }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn observation_major_rejects_same_size_host_output_with_wrong_admitted_shape() {
+    let source = axes("CB", &[2, 3]);
+    let target = target_axes(&source, NetworkOutputLayout::ObservationMajor, "predict").unwrap();
+    let input = Tensor::from_f32(vec![1.0; 6], vec![1, 6]).unwrap();
+    let Err(error) = present_host(HostValue::Real(input), &source, &target, "predict") else {
+        panic!("mismatched host output shape must reject before reordering")
+    };
+    assert!(error
+        .message()
+        .contains("host output shape differs from admitted axes"));
 }

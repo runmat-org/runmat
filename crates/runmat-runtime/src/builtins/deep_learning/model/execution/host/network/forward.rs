@@ -64,10 +64,10 @@ pub(in crate::builtins::deep_learning) fn execute(
 fn matches_payload_axes(value: &HostValue, axes: &AxisPlan) -> bool {
     match value {
         HostValue::Real(tensor) => {
-            tensor.shape.as_slice() == axes.shape() && tensor.len() == axes.element_count()
+            tensor.shape() == axes.shape() && tensor.len() == axes.element_count()
         }
         HostValue::Complex(tensor) => {
-            tensor.shape.as_slice() == axes.shape() && tensor.len() == axes.element_count()
+            tensor.shape() == axes.shape() && tensor.len() == axes.element_count()
         }
     }
 }

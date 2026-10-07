@@ -47,7 +47,7 @@ fn parent(value: &Value) -> BuiltinResult<Option<ParentBinding>> {
     let tensor = value_for_node(node)?;
     Ok(Some(ParentBinding {
         node,
-        shape: tensor.shape.clone(),
+        shape: tensor.shape().to_vec(),
         dtype: tensor.numeric_dtype(),
     }))
 }

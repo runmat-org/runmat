@@ -208,7 +208,7 @@ fn public_parameter_table_names_are_metadata_not_builtin_role_authority() {
                 panic!("gradient tensor expected")
             };
             assert_eq!(data.numeric_dtype(), NumericDType::F32);
-            assert_eq!(data.shape, [1, 1]);
+            assert_eq!(data.shape(), &[1, 1]);
             assert_eq!(
                 data.as_f32_slice().unwrap(),
                 &[if index == 0 { 1.0 } else { 0.0 }]

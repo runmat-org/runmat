@@ -136,7 +136,7 @@ pub(super) enum NodeValue {
 impl NodeValue {
     pub(super) fn shape(&self) -> &[usize] {
         match self {
-            Self::Host(value) => &value.shape,
+            Self::Host(value) => value.shape(),
             Self::Resident(value) => value.shape(),
         }
     }
@@ -373,8 +373,8 @@ pub(super) fn push_binary_node(
         kind(
             lhs.node,
             rhs.node,
-            lhs.tensor.shape.clone(),
-            rhs.tensor.shape.clone(),
+            lhs.tensor.shape().to_vec(),
+            rhs.tensor.shape().to_vec(),
         ),
     )?))
 }

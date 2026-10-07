@@ -136,7 +136,7 @@ impl Geometry {
         scale: &Tensor,
         offset: &Tensor,
     ) -> Result<(), NormalizationError> {
-        if input.shape.as_slice() != self.axes.shape() || input.len() != self.axes.element_count() {
+        if input.shape() != self.axes.shape() || input.len() != self.axes.element_count() {
             return Err(NormalizationError::ShapeMismatch);
         }
         if scale.numeric_dtype() != input.numeric_dtype()
@@ -144,7 +144,7 @@ impl Geometry {
         {
             return Err(NormalizationError::UnsupportedPrecision);
         }
-        self.validate_shapes(&scale.shape, &offset.shape, input.numeric_dtype())
+        self.validate_shapes(scale.shape(), offset.shape(), input.numeric_dtype())
     }
 
     pub fn validate_shapes(

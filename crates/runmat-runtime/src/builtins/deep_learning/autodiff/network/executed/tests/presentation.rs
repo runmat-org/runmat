@@ -35,7 +35,7 @@ fn rank_changing_predict_inverts_observation_major_axes_in_the_shared_reverse() 
             let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
             let x = annotate_dlarray_value(unformatted_input(data.clone(), dtype)).unwrap();
             let y = predict(&net, x.clone());
-            assert_eq!(tensor(&y).shape, [3, 2]);
+            assert_eq!(tensor(&y).shape(), &[3, 2]);
             assert_eq!(tensor(&y).numeric_dtype(), dtype);
             let loss = dlarray_sum_builtin(
                 dlarray_times_builtin(y, values(weights.to_vec(), vec![3, 2], dtype)).unwrap(),
@@ -43,7 +43,7 @@ fn rank_changing_predict_inverts_observation_major_axes_in_the_shared_reverse() 
             )
             .unwrap();
             let gradient = block_on(dlgradient_direct(loss, vec![x])).unwrap();
-            assert_eq!(tensor(&gradient).shape, [2, 3, 4]);
+            assert_eq!(tensor(&gradient).shape(), &[2, 3, 4]);
             assert_eq!(tensor(&gradient).numeric_dtype(), dtype);
             tensor(&gradient).materialize_f64()
         };

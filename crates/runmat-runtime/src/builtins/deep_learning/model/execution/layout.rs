@@ -66,7 +66,7 @@ pub(in crate::builtins::deep_learning) fn present_host(
     }
     match value {
         HostValue::Real(tensor) => {
-            if tensor.shape != source.shape() {
+            if tensor.shape() != source.shape() {
                 return Err(fail(
                     function,
                     "host output shape differs from admitted axes",
@@ -87,7 +87,7 @@ pub(in crate::builtins::deep_learning) fn present_host(
                 .map_err(|error| fail(function, error))
         }
         HostValue::Complex(tensor) => {
-            if tensor.shape != source.shape() {
+            if tensor.shape() != source.shape() {
                 return Err(fail(
                     function,
                     "complex output shape differs from admitted axes",

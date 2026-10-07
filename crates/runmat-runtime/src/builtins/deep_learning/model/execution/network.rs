@@ -267,7 +267,7 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
                         return Err(error);
                     }
                 };
-            if tensor.shape != output_axes.shape()
+            if tensor.shape() != output_axes.shape()
                 || tensor.numeric_dtype() != plan.execution_precision()
             {
                 if let Some(observation) = observation.take() {
