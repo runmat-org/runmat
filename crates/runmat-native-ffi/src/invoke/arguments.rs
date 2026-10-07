@@ -255,7 +255,7 @@ pub(super) fn pointee_from_value(
                 ensure_storage_matches(*scalar, storage.numeric_dtype())?;
                 Ok(PointeeSlot::Array {
                     storage,
-                    shape: tensor.shape.clone(),
+                    shape: tensor.shape().to_vec(),
                     writable,
                 })
             } else if matches!(
