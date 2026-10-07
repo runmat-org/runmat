@@ -78,7 +78,7 @@ fn actual_dispatch_prepares_admitted_pairs_and_preserves_results() {
             let Value::Tensor(value) = result else {
                 panic!("{name}: expected tensor")
             };
-            assert_eq!(value.shape, vec![1, 2]);
+            assert_eq!(value.shape(), &[1, 2]);
             assert_eq!(value.as_f64_slice().unwrap(), expected.as_slice(), "{name}");
             assert_eq!(calls.get(), before + 1, "{name}");
         }

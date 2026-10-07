@@ -248,7 +248,7 @@ fn typed_unsupported_cast_respects_each_builtin_host_boundary_and_input_lifetime
             ("corrcoef", Value::Tensor(output)) => {
                 // This builtin's documented fallback is host reference execution;
                 // unlike cov, it does not promise device restoration.
-                assert_eq!(output.shape, vec![2, 2]);
+                assert_eq!(output.shape(), &[2, 2]);
                 assert_eq!(output.numeric_dtype(), NumericDType::F32);
                 assert!(output
                     .materialize_f64()

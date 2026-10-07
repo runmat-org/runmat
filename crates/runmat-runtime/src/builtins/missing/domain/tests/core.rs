@@ -1,5 +1,6 @@
 use super::super::entrypoints::{anymissing_builtin, ismissing_builtin, missing_builtin};
 use super::*;
+use runmat_value::ComplexTensor;
 
 #[test]
 fn ismissing_preserves_typed_struct_array_shape_and_schema() {

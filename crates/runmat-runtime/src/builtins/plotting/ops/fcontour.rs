@@ -1298,7 +1298,9 @@ mod tests {
     fn fcontour_domain_rejects_low_rank_tensor_vectors() {
         for (shape, data) in [(Vec::new(), vec![-2.0]), (vec![2], vec![-2.0, 2.0])] {
             let value = Value::Tensor(Tensor::new(data, shape).expect("domain tensor"));
-            let error = parse_domain(&value).expect_err("low-rank domain tensor");
+            let error = parse_domain(&value)
+                .err()
+                .expect("low-rank domain tensor must be rejected");
             assert!(error.message().contains("row or column vector"));
         }
     }

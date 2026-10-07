@@ -1,6 +1,6 @@
 use super::*;
 use futures::executor::block_on;
-use runmat_value::{IntValue, LogicalArray, NumericStorage, Tensor};
+use runmat_value::{IntValue, IntegerStorage, LogicalArray, NumericStorage, Tensor};
 
 fn call(value: Value) -> BuiltinResult<Value> {
     block_on(isprime_builtin(value, Vec::new()))

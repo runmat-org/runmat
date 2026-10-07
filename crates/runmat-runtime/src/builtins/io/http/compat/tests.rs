@@ -1,4 +1,5 @@
 use super::*;
+use runmat_value::Tensor;
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen_test::wasm_bindgen_test]
