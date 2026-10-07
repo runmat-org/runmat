@@ -204,6 +204,7 @@ function validatePortablePairs(inventory, results, plannedLanes) {
     for (const example of inventory.examples) {
         if (example.harness !== "Portable" || example.admission.kind !== "executable") continue;
         const units = inventory.executionUnits.filter((unit) => unit.exampleIdentity === example.identity && plannedLanes.has(unit.lane));
+        if (units.length === 0) continue;
         const laneResults = units.map((unit) => resultById.get(unit.executionIdentity));
         if (laneResults.some((result) => !result)) throw new Error(`Portable example is missing a lane result: ${example.identity}`);
         const expectedIdentifier = example.verification?.ExpectedError?.identifier;

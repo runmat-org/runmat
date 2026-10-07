@@ -117,26 +117,7 @@ test("product-scoped plans contain only that product and cannot claim full closu
 
 test("public-product plans exclude private Desktop evidence without claiming full closure", () => {
     const exported = exportFixture();
-    exported.builtins.push({
-        key: "desktop-dialog",
-        authority: "catalog",
-        category: "io/dialog",
-        examples: [{
-            id: "open",
-            input: "input('Name: ', 's');",
-            harness: "InteractiveHost",
-            compatibility: "RunMat",
-            verification: "Succeeds",
-            requirements: { host: "DesktopHostOnly", engine: "Default", compiler: [], runtime: [], toolchain: [] },
-            fixture: {
-                DesktopHostOnly: {
-                    id: { local_name: "desktop-dialog" },
-                    entries: [],
-                    interactions: [{ LineInput: { prompt: "Name: ", echo: true, outcome: { Line: "Ada" } } }]
-                }
-            }
-        }]
-    });
+    exported.builtins.push(desktopBuiltinFixture());
     const inventory = buildInventory(exported, inventoryOptions());
     const complete = buildPlan(inventory);
     assert.ok(complete.products.some((product) => product.kind === "desktop-native"));
@@ -146,6 +127,28 @@ test("public-product plans exclude private Desktop evidence without claiming ful
     assert.throws(
         () => reconcileShardResults(inventory, publicProducts, completeResults(inventory, publicProducts), { closure: true }),
         /all-product execution plan/u
+    );
+});
+
+test("Desktop-scoped reconciliation ignores unrelated Portable pairs without weakening all-product completeness", () => {
+    const exported = exportFixture();
+    exported.builtins.push(desktopBuiltinFixture());
+    const inventory = buildInventory(exported, inventoryOptions());
+    const artifacts = [...artifactDefinitions(), desktopArtifactDefinition()];
+
+    const desktopPlan = buildPlan(inventory, null, { product: "desktop-native" });
+    const desktopResults = completeResults(inventory, desktopPlan, artifacts);
+    const desktopReport = reconcileShardResults(inventory, desktopPlan, desktopResults);
+    assert.equal(desktopReport.status, "passed");
+    assert.equal(desktopReport.productScope, "desktop-native");
+    assert.equal(desktopReport.summary.executionUnits, 1);
+
+    const allProductsPlan = buildPlan(inventory);
+    const allProductResults = completeResults(inventory, allProductsPlan, artifacts);
+    const withoutBrowserHost = allProductResults.filter((manifest) => manifest.lane !== "browser-host");
+    assert.throws(
+        () => reconcileShardResults(inventory, allProductsPlan, withoutBrowserHost),
+        /Missing shard results/u
     );
 });
 
@@ -608,6 +611,29 @@ function exportFixture() {
     };
 }
 
+function desktopBuiltinFixture() {
+    return {
+        key: "desktop-dialog",
+        authority: "catalog",
+        category: "io/dialog",
+        examples: [{
+            id: "open",
+            input: "input('Name: ', 's');",
+            harness: "InteractiveHost",
+            compatibility: "RunMat",
+            verification: "Succeeds",
+            requirements: { host: "DesktopHostOnly", engine: "Default", compiler: [], runtime: [], toolchain: [] },
+            fixture: {
+                DesktopHostOnly: {
+                    id: { local_name: "desktop-dialog" },
+                    entries: [],
+                    interactions: [{ LineInput: { prompt: "Name: ", echo: true, outcome: { Line: "Ada" } } }]
+                }
+            }
+        }]
+    };
+}
+
 function artifactDefinitions() {
     return [
         buildArtifactManifest({
@@ -626,6 +652,19 @@ function artifactDefinitions() {
             files: [{ path: "runmat.js", size: 2, sha256: sha256("js") }, { path: "runmat.wasm", size: 4, sha256: sha256("wasm") }]
         })
     ];
+}
+
+function desktopArtifactDefinition() {
+    const producerRevision = "abcdef0123456789abcdef0123456789abcdef01";
+    const manifest = buildArtifactManifest({
+        product: "desktop-native", artifactProfile: "desktop-host", sourceRevision: SOURCE,
+        producerRevision,
+        layout: { kind: "recursive-tree", root: "desktop-product" },
+        entrypoints: [{ role: "runmat-desktop-binary", path: "runmat-desktop" }],
+        files: [{ path: "runmat-desktop", size: 7, sha256: sha256("desktop") }]
+    });
+    validateArtifactManifest(manifest, { sourceRevision: SOURCE, producerRevision });
+    return manifest;
 }
 
 function withVerifiedArtifacts(callback) {
@@ -695,11 +734,11 @@ function inventoryOptions() {
     return { sourceRevision: SOURCE, sourceState: "clean", runnerDigest: RUNNER, scope: {} };
 }
 
-function completeResults(inventory, plan) {
+function completeResults(inventory, plan, artifacts = artifactDefinitions()) {
     const units = new Map(inventory.executionUnits.map((unit) => [unit.executionIdentity, unit]));
     return plan.lanes.flatMap((lanePlan) => lanePlan.shards.map((shard) => {
         const unavailable = ["native-loopback-network", "native-foreign-runtime", "interactive-host"].includes(lanePlan.lane);
-        const artifactManifestDigest = unavailable ? null : artifactDefinitions().find((artifact) => artifact.product === lanePlan.product).artifactManifestDigest;
+        const artifactManifestDigest = unavailable ? null : artifacts.find((artifact) => artifact.product === lanePlan.product).artifactManifestDigest;
         const runtimeFeatureProbe = !unavailable && lanePlan.product === "native-cli"
             ? probeNativeRuntimeFeatures("/staged/runmat", artifactManifestDigest, () => ({
                 status: 0, stderr: "", stdout: JSON.stringify({
