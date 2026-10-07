@@ -45,7 +45,7 @@ fn real_complex_tensor_to_real_tensor() {
     let result = real_builtin(Value::ComplexTensor(complex)).expect("real");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 1]);
+            assert_eq!(t.shape(), &[2, 1]);
             assert!((t.materialize_f64()[0] - 1.0).abs() < 1e-12);
             assert!((t.materialize_f64()[1] + 3.0).abs() < 1e-12);
         }
@@ -59,7 +59,7 @@ fn real_complex_single_preserves_native_class_shape_and_empty_storage() {
     let Value::Tensor(output) = real_builtin(Value::ComplexTensor(complex)).expect("real") else {
         panic!("expected single real tensor");
     };
-    assert_eq!(output.shape, vec![2, 1]);
+    assert_eq!(output.shape(), &[2, 1]);
     assert_eq!(
         output.into_numeric_storage().unwrap(),
         NumericStorage::F32(vec![1.25, -3.0])
@@ -69,7 +69,7 @@ fn real_complex_single_preserves_native_class_shape_and_empty_storage() {
     let Value::Tensor(output) = real_builtin(Value::ComplexTensor(empty)).expect("real") else {
         panic!("expected empty single real tensor");
     };
-    assert_eq!(output.shape, vec![0, 4]);
+    assert_eq!(output.shape(), &[0, 4]);
     assert_eq!(
         output.into_numeric_storage().unwrap(),
         NumericStorage::F32(Vec::new())
@@ -116,7 +116,7 @@ fn real_integer_complex_tensor_reads_component_storage_exactly() {
     let Value::Tensor(tensor) = result else {
         panic!("expected typed real tensor");
     };
-    assert_eq!(tensor.shape, vec![2, 1]);
+    assert_eq!(tensor.shape(), &[2, 1]);
     assert_eq!(
         tensor.integer_storage(),
         Some(&runmat_value::IntegerStorage::I64(
@@ -132,7 +132,7 @@ fn real_logical_array_to_numeric() {
     let result = real_builtin(Value::LogicalArray(logical)).expect("real");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 1.0, 0.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -146,7 +146,7 @@ fn real_char_array_codes() {
     let result = real_builtin(Value::CharArray(chars)).expect("real");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), &[1, 2]);
             assert_eq!(t.materialize_f64(), vec![65.0, 90.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -160,4 +160,23 @@ fn real_string_error() {
     let identifier = err.identifier().map(str::to_string);
     assert!(err.message().contains("expected numeric"));
     assert_eq!(identifier.as_deref(), REAL_ERROR_INVALID_INPUT.identifier);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn real_projects_low_rank_complex_inputs_through_existing_scalar_policy() {
+    let scalar = ComplexTensor::new(vec![(3.0, 4.0)], Vec::new()).expect("rank-zero complex");
+    assert_eq!(
+        real_builtin(Value::ComplexTensor(scalar)).expect("real scalar"),
+        Value::Num(3.0)
+    );
+
+    let vector =
+        ComplexTensor::new(vec![(3.0, 4.0), (-2.0, 7.0)], vec![2]).expect("rank-one complex");
+    let Value::Tensor(output) = real_builtin(Value::ComplexTensor(vector)).expect("real vector")
+    else {
+        panic!("rank-one projection remains a tensor")
+    };
+    assert_eq!(output.shape(), &[2]);
+    assert_eq!(output.materialize_f64(), vec![3.0, -2.0]);
 }

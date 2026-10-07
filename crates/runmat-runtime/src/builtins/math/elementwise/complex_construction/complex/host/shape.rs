@@ -10,7 +10,7 @@ pub(in crate::builtins::math::elementwise::complex_construction::complex) fn com
     real: &Tensor,
     imaginary: &Tensor,
 ) -> BuiltinResult<Vec<usize>> {
-    compatible_shapes(&real.shape, &imaginary.shape)
+    compatible_shapes(real.shape(), imaginary.shape())
 }
 
 pub(in crate::builtins::math::elementwise::complex_construction::complex) fn compatible_shapes(

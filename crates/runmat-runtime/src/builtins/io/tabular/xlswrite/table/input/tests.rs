@@ -16,6 +16,58 @@ use std::task::{Context, Poll};
 
 struct PendingTurn(Rc<Cell<bool>>);
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn numeric_projection_preserves_low_rank_geometry_and_exact_integer_cells() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let _restore = runmat_filesystem::replace_provider(Arc::new(
+        MemoryFsProvider::with_current_dir("/xlswrite-input"),
+    ));
+    let selected = selected();
+    for (shape, values, dimensions) in [
+        (vec![], vec![u64::MAX], (1, 1)),
+        (vec![2], vec![u64::MAX, 9_007_199_254_740_993], (2, 1)),
+    ] {
+        let tensor = Tensor::new_integer(runmat_value::IntegerStorage::U64(values.clone()), shape)
+            .expect("exact integer tensor");
+        let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
+        futures::executor::block_on(XlsTable::preflight_host_known(
+            &Value::Tensor(tensor.clone()),
+            &mut cooperation,
+        ))
+        .expect("low-rank admission");
+        let table = futures::executor::block_on(XlsTable::from_value_cooperative(
+            Value::Tensor(tensor),
+            None,
+            &mut cooperation,
+            &selected,
+        ))
+        .expect("low-rank worksheet projection");
+        assert_eq!((table.rows, table.cols), dimensions);
+        assert_eq!(table.cells.len(), values.len());
+        for (cell, expected) in table.cells.iter().zip(values) {
+            assert!(
+                matches!(cell, CellValue::Integer(runmat_value::IntValue::U64(value)) if *value == expected)
+            );
+        }
+    }
+    let pages = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 1, 2]).unwrap());
+    let mut cooperation = TabularCooperation::new(None, BUILTIN_NAME);
+    assert!(
+        futures::executor::block_on(XlsTable::preflight_host_known(&pages, &mut cooperation,))
+            .is_err()
+    );
+    assert!(
+        futures::executor::block_on(XlsTable::from_value_cooperative(
+            pages,
+            None,
+            &mut cooperation,
+            &selected,
+        ))
+        .is_err()
+    );
+}
+
 impl Future for PendingTurn {
     type Output = Result<(), ExecutionServiceError>;
 

@@ -7,7 +7,7 @@ fn conj_gpu_provider_roundtrip() {
         let tensor = Tensor::new(vec![0.0, 1.0, -3.0, 4.0], vec![4, 1]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = conj_builtin(Value::GpuTensor(handle)).expect("conj");
@@ -70,7 +70,7 @@ fn conj_complex_gpu_provider_stays_resident() {
         let Value::ComplexTensor(ct) = gathered else {
             panic!("expected complex tensor");
         };
-        assert_eq!(ct.shape, vec![2, 1]);
+        assert_eq!(ct.shape(), &[2, 1]);
         assert_eq!(ct.materialize_f64(), vec![(1.0, -2.0), (-3.0, 4.0)]);
     });
 }

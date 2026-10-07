@@ -101,7 +101,7 @@ fn conj_complex_tensor_to_complex_tensor() {
     let result = conj_builtin(Value::ComplexTensor(tensor)).expect("conj");
     match result {
         Value::ComplexTensor(ct) => {
-            assert_eq!(ct.shape, vec![2, 1]);
+            assert_eq!(ct.shape(), &[2, 1]);
             assert_eq!(ct.materialize_f64()[0], (1.0, -2.0));
             assert_eq!(ct.materialize_f64()[1], (-3.0, 4.0));
         }
@@ -117,7 +117,7 @@ fn conj_complex_tensor_zero_imag_remains_complex() {
     let result = conj_builtin(Value::ComplexTensor(tensor)).expect("conj");
     match result {
         Value::ComplexTensor(t) => {
-            assert_eq!(t.shape, vec![2, 1]);
+            assert_eq!(t.shape(), &[2, 1]);
             assert_eq!(t.materialize_f64(), vec![(1.0, -0.0), (2.0, 0.0)]);
         }
         other => panic!("expected complex tensor, got {other:?}"),
@@ -131,7 +131,7 @@ fn conj_complex_single_preserves_native_class_shape_and_empty_storage() {
     else {
         panic!("expected complex single tensor");
     };
-    assert_eq!(output.shape, vec![1, 2]);
+    assert_eq!(output.shape(), &[1, 2]);
     assert_eq!(
         output.as_f32_slice().map(|values| values
             .iter()
@@ -145,7 +145,7 @@ fn conj_complex_single_preserves_native_class_shape_and_empty_storage() {
     else {
         panic!("expected empty complex single tensor");
     };
-    assert_eq!(output.shape, vec![0, 2]);
+    assert_eq!(output.shape(), &[0, 2]);
     assert_eq!(output.as_f32_slice(), Some(&[][..]));
 }
 
@@ -206,7 +206,7 @@ fn conj_complex_integer_tensor_reads_storage_without_mirror() {
     let Value::ComplexTensor(output) = result else {
         panic!("expected typed complex integer tensor");
     };
-    assert_eq!(output.shape, vec![1, 2]);
+    assert_eq!(output.shape(), &[1, 2]);
     assert_eq!(
         output.integer_storage().cloned(),
         Some(
@@ -227,7 +227,7 @@ fn conj_char_array_returns_double_codes() {
     let result = conj_builtin(Value::CharArray(chars)).expect("conj");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), &[1, 2]);
             assert_eq!(t.materialize_f64(), vec![72.0, 105.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -251,4 +251,25 @@ fn conj_errors_on_string_input() {
     let identifier = err.identifier().map(str::to_string);
     assert!(err.message().contains("expected numeric input"));
     assert_eq!(identifier.as_deref(), CONJ_ERROR_INVALID_INPUT.identifier);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn conj_preserves_rank_zero_and_rank_one_complex_tensor_geometry() {
+    for (values, shape, expected) in [
+        (vec![(1.0, 2.0)], Vec::new(), vec![(1.0, -2.0)]),
+        (
+            vec![(1.0, 2.0), (-3.0, -4.0)],
+            vec![2],
+            vec![(1.0, -2.0), (-3.0, 4.0)],
+        ),
+    ] {
+        let input = ComplexTensor::new(values, shape.clone()).expect("complex input");
+        let Value::ComplexTensor(output) = conj_builtin(Value::ComplexTensor(input)).expect("conj")
+        else {
+            panic!("complex tensor input retains tensor representation")
+        };
+        assert_eq!(output.shape(), shape.as_slice());
+        assert_eq!(output.materialize_f64(), expected);
+    }
 }

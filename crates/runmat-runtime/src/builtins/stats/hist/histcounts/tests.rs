@@ -19,6 +19,34 @@ fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
     Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn histcounts_three_outputs_preserve_low_rank_bin_indices() {
+    let _outputs = crate::output_count::push_output_count(Some(3));
+    for (samples, shape, expected_counts, expected_bins) in [
+        (vec![0.5], Vec::new(), vec![1.0, 0.0], vec![1.0]),
+        (vec![0.5, 1.5], vec![2], vec![1.0, 1.0], vec![1.0, 2.0]),
+    ] {
+        let input = Value::Tensor(Tensor::new(samples, shape.clone()).unwrap());
+        let edges = Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0], vec![3]).unwrap());
+        let Value::OutputList(outputs) = block_on(histcounts_builtin(input, vec![edges]))
+            .expect("three-output low-rank histogram")
+        else {
+            panic!("expected three histogram outputs")
+        };
+        let outputs: [Value; 3] = outputs.try_into().expect("three outputs");
+        let [Value::Tensor(counts), Value::Tensor(bin_edges), Value::Tensor(bins)] = outputs else {
+            panic!("expected tensor histogram outputs")
+        };
+        assert_eq!(counts.shape(), &[1, 2]);
+        assert_eq!(counts.materialize_f64(), expected_counts);
+        assert_eq!(bin_edges.shape(), &[1, 3]);
+        assert_eq!(bin_edges.materialize_f64(), vec![0.0, 1.0, 2.0]);
+        assert_eq!(bins.shape(), shape.as_slice());
+        assert_eq!(bins.materialize_f64(), expected_bins);
+    }
+}
+
 #[test]
 fn wide_integer_edges_classify_without_rounding_and_keep_exact_widths() {
     let base = 9_007_199_254_740_992_u64;
@@ -115,7 +143,7 @@ fn third_output_preserves_input_shape_and_marks_excluded_observations() {
     let Value::Tensor(bins) = outputs.next().unwrap() else {
         panic!("bin indices must be a tensor");
     };
-    assert_eq!(bins.shape, vec![2, 3]);
+    assert_eq!(bins.shape(), &[2, 3]);
     assert_eq!(bins.materialize_f64(), vec![0.0, 1.0, 2.0, 3.0, 3.0, 0.0]);
 }
 

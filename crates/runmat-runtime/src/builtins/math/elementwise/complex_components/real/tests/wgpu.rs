@@ -15,7 +15,7 @@ fn real_wgpu_matches_cpu_identity() {
     let cpu = real_real(Value::Tensor(tensor.clone())).unwrap();
     let view = runmat_accelerate_api::HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let h = runmat_accelerate_api::provider()
         .unwrap()
@@ -28,7 +28,7 @@ fn real_wgpu_matches_cpu_identity() {
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).unwrap(),
         other => panic!("unexpected cpu value {other:?}"),
     };
-    assert_eq!(gathered.shape, cpu_tensor.shape);
+    assert_eq!(gathered.shape.as_slice(), cpu_tensor.shape());
     let tol = match runmat_accelerate_api::provider().unwrap().precision() {
         runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
         runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

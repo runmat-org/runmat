@@ -14,8 +14,8 @@ fn empty_literal_edges_accept_vector_and_matrix_data() {
             None,
         ))
         .unwrap();
-        assert_eq!(result.counts.shape, expected);
-        assert_eq!(result.indices.shape, vec![0, 0]);
+        assert_eq!(result.counts.shape(), expected.as_slice());
+        assert_eq!(result.indices.shape(), &[0, 0]);
     }
 }
 
@@ -30,7 +30,7 @@ fn floating_dimension_tolerance_remains_accepted() {
     let Value::Tensor(counts) = result else {
         panic!("counts")
     };
-    assert_eq!(counts.shape, vec![2, 2]);
+    assert_eq!(counts.shape(), &[2, 2]);
 }
 
 #[test]
@@ -115,6 +115,32 @@ fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
     Value::Tensor(tensor)
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn histc_low_rank_vector_calls_preserve_input_and_edge_shapes() {
+    for (x_values, edges, shape, expected_counts, expected_indices) in [
+        (vec![0.5], vec![0.5], Vec::new(), vec![1.0], vec![1.0]),
+        (
+            vec![0.0, 1.0],
+            vec![0.0, 1.0],
+            vec![2],
+            vec![1.0, 1.0],
+            vec![1.0, 2.0],
+        ),
+    ] {
+        let result = block_on(evaluate(
+            tensor(x_values, shape.clone()),
+            tensor(edges, shape.clone()),
+            None,
+        ))
+        .expect("low-rank vector histogram");
+        assert_eq!(result.counts.shape(), shape.as_slice());
+        assert_eq!(result.indices.shape(), shape.as_slice());
+        assert_eq!(result.counts.materialize_f64(), expected_counts);
+        assert_eq!(result.indices.materialize_f64(), expected_indices);
+    }
+}
+
 #[test]
 fn histc_counts_vector_and_returns_indices() {
     let ages = tensor(
@@ -125,7 +151,7 @@ fn histc_counts_vector_and_returns_indices() {
     );
     let edges = tensor(vec![0.0, 10.0, 25.0, 50.0, 75.0], vec![1, 5]);
     let result = block_on(evaluate(ages, edges, None)).expect("histc");
-    assert_eq!(result.counts.shape, vec![1, 5]);
+    assert_eq!(result.counts.shape(), &[1, 5]);
     assert_eq!(values(result.counts), vec![2.0, 5.0, 1.0, 3.0, 1.0]);
     assert_eq!(
         values(result.indices),
@@ -138,7 +164,7 @@ fn histc_operates_down_matrix_columns_by_default() {
     let x = tensor(vec![0.0, 0.5, 1.5, 1.0, 2.0, 3.0], vec![3, 2]);
     let edges = tensor(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]);
     let result = block_on(evaluate(x, edges, None)).expect("histc");
-    assert_eq!(result.counts.shape, vec![4, 2]);
+    assert_eq!(result.counts.shape(), &[4, 2]);
     assert_eq!(
         values(result.counts),
         vec![2.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0]
@@ -151,7 +177,7 @@ fn histc_respects_explicit_dimension() {
     let x = tensor(vec![0.0, 2.0, 1.0, 3.0, 2.0, 4.0], vec![2, 3]);
     let edges = tensor(vec![0.0, 2.0, 4.0], vec![1, 3]);
     let result = block_on(evaluate(x, edges, Some(2))).expect("histc");
-    assert_eq!(result.counts.shape, vec![2, 3]);
+    assert_eq!(result.counts.shape(), &[2, 3]);
     assert_eq!(values(result.counts), vec![2.0, 0.0, 1.0, 2.0, 0.0, 1.0]);
     assert_eq!(values(result.indices), vec![1.0, 2.0, 1.0, 2.0, 2.0, 3.0]);
 }
@@ -161,7 +187,7 @@ fn histc_supports_per_slice_edge_columns() {
     let x = tensor(vec![0.5, 1.5, 10.0, 20.0], vec![2, 2]);
     let edges = tensor(vec![0.0, 1.0, 2.0, 0.0, 15.0, 30.0], vec![3, 2]);
     let result = block_on(evaluate(x, edges, None)).expect("histc");
-    assert_eq!(result.counts.shape, vec![3, 2]);
+    assert_eq!(result.counts.shape(), &[3, 2]);
     assert_eq!(values(result.counts), vec![1.0, 1.0, 0.0, 1.0, 1.0, 0.0]);
 }
 
@@ -202,7 +228,7 @@ fn histc_reads_typed_integer_inputs_and_edges_exactly() {
 
     let result = block_on(evaluate(x, edges, None)).expect("histc");
 
-    assert_eq!(result.counts.shape, vec![1, 3]);
+    assert_eq!(result.counts.shape(), &[1, 3]);
     assert_eq!(values(result.counts), vec![1.0, 2.0, 1.0]);
     assert_eq!(values(result.indices), vec![1.0, 2.0, 2.0, 3.0]);
 }
@@ -243,7 +269,7 @@ fn histc_reads_typed_integer_matrix_edge_columns_exactly() {
 
     let result = block_on(evaluate(x, edges, None)).expect("histc");
 
-    assert_eq!(result.counts.shape, vec![3, 2]);
+    assert_eq!(result.counts.shape(), &[3, 2]);
     assert_eq!(values(result.counts), vec![1.0, 1.0, 0.0, 1.0, 1.0, 0.0]);
 }
 
@@ -295,9 +321,9 @@ fn histc_empty_edges_return_empty_counts_and_indices() {
     let x = tensor(vec![1.0, 2.0, 3.0], vec![1, 3]);
     let edges = tensor(Vec::new(), vec![1, 0]);
     let result = block_on(evaluate(x, edges, None)).expect("histc empty edges");
-    assert_eq!(result.counts.shape, vec![1, 0]);
+    assert_eq!(result.counts.shape(), &[1, 0]);
     assert!(result.counts.materialize_f64().is_empty());
-    assert_eq!(result.indices.shape, vec![0, 0]);
+    assert_eq!(result.indices.shape(), &[0, 0]);
     assert!(result.indices.materialize_f64().is_empty());
 }
 

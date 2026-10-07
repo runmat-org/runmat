@@ -51,20 +51,19 @@ pub(super) fn host_to_real_tensor(value: Value) -> BuiltinResult<Tensor> {
 }
 
 pub(super) fn complex_real_tensor(tensor: ComplexTensor) -> BuiltinResult<Tensor> {
-    if let Some(storage) = tensor.integer_storage() {
-        let data = storage
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let data = match storage {
+        runmat_value::ComplexStorage::Integer(storage) => storage
             .real
             .exact_values()
             .into_iter()
             .map(|value| value.to_f64())
-            .collect();
-        return Tensor::new(data, tensor.shape)
-            .map_err(|err| internal_error(format!("histc: {err}")));
-    }
-    let data = tensor
-        .materialize_f64()
-        .into_iter()
-        .map(|(re, _)| re)
-        .collect();
-    Tensor::new(data, tensor.shape).map_err(|err| internal_error(format!("histc: {err}")))
+            .collect(),
+        storage => storage
+            .materialize_f64()
+            .into_iter()
+            .map(|(re, _)| re)
+            .collect(),
+    };
+    Tensor::new(data, shape).map_err(|err| internal_error(format!("histc: {err}")))
 }

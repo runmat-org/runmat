@@ -111,7 +111,7 @@ async fn de2bi_builtin(d: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             DE2BI_NAME,
         )?;
     }
-    if matches!(&d, Value::Tensor(tensor) if tensor.shape.len() > 2)
+    if matches!(&d, Value::Tensor(tensor) if tensor.shape().len() > 2)
         || matches!(&d, Value::GpuTensor(handle) if handle.shape().len() > 2)
     {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -870,8 +870,8 @@ async fn digit_matrix_from_value(
 }
 
 fn digit_matrix_from_tensor(tensor: Tensor, builtin: &'static str) -> BuiltinResult<DigitMatrix> {
-    ensure_matrix_shape(&tensor.shape, builtin, "B")?;
-    let (rows, cols) = matrix_extents(&tensor.shape);
+    ensure_matrix_shape(tensor.shape(), builtin, "B")?;
+    let (rows, cols) = matrix_extents(tensor.shape());
     let dtype = tensor.numeric_dtype();
     let data = match tensor
         .into_numeric_storage()
@@ -1397,11 +1397,30 @@ mod tests {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let unsigned = de2bi(Value::Int(IntValue::U64(u64::MAX)), vec![]);
         assert_eq!(unsigned.numeric_dtype(), NumericDType::U64);
-        assert_eq!(unsigned.shape, vec![1, 64]);
+        assert_eq!(unsigned.shape(), &[1, 64]);
         assert_eq!(unsigned.materialize_f64().iter().sum::<f64>(), 64.0);
         let nd = de2bi(tensor(vec![1.0, 2.0], vec![1, 1, 2]), vec![]);
-        assert_eq!(nd.shape, vec![2, 2]);
+        assert_eq!(nd.shape(), &[2, 2]);
         assert_eq!(nd.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn low_rank_digit_inputs_follow_conversion_matrix_geometry() {
+        let Value::Tensor(empty) = bi2de(tensor(vec![1.0], vec![]), vec![]) else {
+            panic!("rank-zero digit geometry has no matrix rows")
+        };
+        assert_eq!(empty.shape(), &[0, 1]);
+        assert!(empty.materialize_f64().is_empty());
+        assert_eq!(
+            bi2de(tensor(vec![1.0, 0.0, 1.0], vec![3]), vec![]),
+            Value::Num(5.0)
+        );
+        for shape in [vec![], vec![1]] {
+            let digits = de2bi(tensor(vec![5.0], shape), vec![]);
+            assert_eq!(digits.shape(), &[1, 3]);
+            assert_eq!(digits.materialize_f64(), vec![1.0, 0.0, 1.0]);
+        }
     }
 
     #[test]
@@ -1410,9 +1429,9 @@ mod tests {
         let Value::Tensor(empty_decimals) = empty_digits else {
             panic!("empty digit matrix should return an empty column");
         };
-        assert_eq!(empty_decimals.shape, vec![0, 1]);
+        assert_eq!(empty_decimals.shape(), &[0, 1]);
         let empty_expansion = de2bi(tensor(vec![], vec![0, 3]), vec![]);
-        assert_eq!(empty_expansion.shape, vec![0, 0]);
+        assert_eq!(empty_expansion.shape(), &[0, 0]);
         let err = block_on(super::bi2de_builtin(
             tensor(vec![1.0, 0.0], vec![1, 1, 2]),
             vec![],
@@ -1575,7 +1594,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected column vector")
         };
-        assert_eq!(tensor.shape, vec![3, 1]);
+        assert_eq!(tensor.shape(), &[3, 1]);
         assert_eq!(tensor.materialize_f64(), vec![5.0, 6.0, 3.0]);
     }
 
@@ -1610,7 +1629,7 @@ mod tests {
     #[test]
     fn de2bi_uses_minimum_width_right_msb() {
         let out = de2bi(tensor(vec![0.0, 1.0, 2.0, 5.0], vec![1, 4]), vec![]);
-        assert_eq!(out.shape, vec![4, 3]);
+        assert_eq!(out.shape(), &[4, 3]);
         assert_eq!(
             out.materialize_f64(),
             vec![
@@ -1627,7 +1646,7 @@ mod tests {
             tensor(vec![5.0, 21.0], vec![2, 1]),
             vec![Value::Num(4.0), Value::Num(3.0), Value::from("left-msb")],
         );
-        assert_eq!(out.shape, vec![2, 4]);
+        assert_eq!(out.shape(), &[2, 4]);
         assert_eq!(
             out.materialize_f64(),
             vec![
@@ -1663,7 +1682,7 @@ mod tests {
                 Value::from("left-msb"),
             ],
         );
-        assert_eq!(out.shape, vec![2, 3]);
+        assert_eq!(out.shape(), &[2, 3]);
         assert_eq!(
             out.materialize_f64(),
             vec![
@@ -1845,7 +1864,7 @@ mod tests {
         let Value::Tensor(out) = bin2dec(Value::CharArray(chars)) else {
             panic!("expected tensor");
         };
-        assert_eq!(out.shape, vec![3, 1]);
+        assert_eq!(out.shape(), &[3, 1]);
         assert_eq!(out.materialize_f64(), vec![1023.0, 122.0, 14.0]);
 
         let strings = StringArray::new(
@@ -1856,7 +1875,7 @@ mod tests {
         let Value::Tensor(out) = bin2dec(Value::StringArray(strings)) else {
             panic!("expected tensor");
         };
-        assert_eq!(out.shape, vec![1, 3]);
+        assert_eq!(out.shape(), &[1, 3]);
         assert_eq!(out.materialize_f64(), vec![1023.0, 122.0, 14.0]);
     }
 
@@ -1884,7 +1903,7 @@ mod tests {
         let Value::Tensor(out) = bin2dec(Value::Cell(cell)) else {
             panic!("expected tensor");
         };
-        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.shape(), &[2, 1]);
         assert_eq!(out.materialize_f64(), vec![5.0, 8.0]);
     }
 
@@ -1923,7 +1942,7 @@ mod tests {
         let Value::Tensor(out) = hex2dec(Value::StringArray(strings)) else {
             panic!("expected tensor");
         };
-        assert_eq!(out.shape, vec![1, 3]);
+        assert_eq!(out.shape(), &[1, 3]);
         assert_eq!(out.materialize_f64(), vec![1023.0, 122.0, 14.0]);
 
         assert_eq!(value_data(hex2dec(Value::from("0xFF"))), vec![255.0]);

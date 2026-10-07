@@ -62,7 +62,7 @@ fn unary_complex_single_preserves_native_class_shape_and_empty_storage() {
     let Value::ComplexTensor(output) = result else {
         panic!("expected complex single tensor");
     };
-    assert_eq!(output.shape, vec![2, 1]);
+    assert_eq!(output.shape(), &[2, 1]);
     assert_eq!(
         output.as_f32_slice().map(|values| values
             .iter()
@@ -76,7 +76,7 @@ fn unary_complex_single_preserves_native_class_shape_and_empty_storage() {
     let Value::ComplexTensor(output) = result else {
         panic!("expected empty complex single tensor");
     };
-    assert_eq!(output.shape, vec![0, 3]);
+    assert_eq!(output.shape(), &[0, 3]);
     assert_eq!(output.as_f32_slice(), Some(&[][..]));
 }
 
@@ -88,7 +88,7 @@ fn complex_floating_composition_preserves_native_or_promoted_storage_without_mat
     let Value::ComplexTensor(output) = result else {
         panic!("expected broadcast complex single tensor");
     };
-    assert_eq!(output.shape, vec![1, 2]);
+    assert_eq!(output.shape(), &[1, 2]);
     assert_eq!(
         output.as_f32_slice().map(|values| values
             .iter()
@@ -117,6 +117,59 @@ fn complex_floating_composition_preserves_native_or_promoted_storage_without_mat
     let Value::ComplexTensor(output) = result else {
         panic!("expected empty complex single tensor");
     };
-    assert_eq!(output.shape, vec![0, 2]);
+    assert_eq!(output.shape(), &[0, 2]);
     assert_eq!(output.as_f32_slice(), Some(&[][..]));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn complex_low_rank_construction_preserves_scalarization_and_single_class() {
+    let real = Tensor::new(vec![1.0], Vec::new()).expect("rank-zero real");
+    let imaginary = Tensor::new(vec![2.0], Vec::new()).expect("rank-zero imaginary");
+    assert_eq!(
+        complex_call(Value::Tensor(real), vec![Value::Tensor(imaginary)]).expect("complex scalar"),
+        Value::Complex(1.0, 2.0)
+    );
+
+    let real = Tensor::from_f32(vec![1.0], Vec::new()).expect("single rank-zero real");
+    let imaginary = Tensor::from_f32(vec![2.0], Vec::new()).expect("single rank-zero imaginary");
+    let Value::ComplexTensor(single) =
+        complex_call(Value::Tensor(real), vec![Value::Tensor(imaginary)])
+            .expect("single complex scalar")
+    else {
+        panic!("single complex scalar retains tensor class")
+    };
+    assert_eq!(single.shape(), &[]);
+    assert_eq!(single.numeric_dtype(), NumericDType::F32);
+    let component: (f32, f32) = single.as_f32_slice().unwrap()[0].into();
+    assert_eq!(component, (1.0_f32, 2.0_f32));
+
+    let input = Tensor::from_f32(vec![1.0, 3.0], vec![2]).expect("single rank-one input");
+    let Value::ComplexTensor(unary) =
+        complex_call(Value::Tensor(input), Vec::new()).expect("single unary complex")
+    else {
+        panic!("single unary construction remains a complex tensor")
+    };
+    assert_eq!(unary.shape(), &[2]);
+    assert_eq!(unary.numeric_dtype(), NumericDType::F32);
+    assert_eq!(
+        unary
+            .as_f32_slice()
+            .unwrap()
+            .iter()
+            .copied()
+            .map(<(f32, f32)>::from)
+            .collect::<Vec<_>>(),
+        vec![(1.0, 0.0), (3.0, 0.0)]
+    );
+
+    let real = Tensor::new(vec![1.0, 3.0], vec![2]).expect("rank-one real");
+    let imaginary = Tensor::new(vec![2.0], Vec::new()).expect("scalar imaginary");
+    let Value::ComplexTensor(vector) =
+        complex_call(Value::Tensor(real), vec![Value::Tensor(imaginary)]).expect("complex vector")
+    else {
+        panic!("rank-one complex output remains a tensor")
+    };
+    assert_eq!(vector.shape(), &[2]);
+    assert_eq!(vector.materialize_f64(), vec![(1.0, 2.0), (3.0, 2.0)]);
 }

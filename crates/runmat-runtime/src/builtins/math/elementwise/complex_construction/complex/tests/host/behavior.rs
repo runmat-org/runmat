@@ -15,7 +15,7 @@ fn complex_row_vector_pair() {
     let result = complex_call(Value::Tensor(lhs), vec![Value::Tensor(rhs)]).expect("complex");
     match result {
         Value::ComplexTensor(ct) => {
-            assert_eq!(ct.shape, vec![1, 3]);
+            assert_eq!(ct.shape(), &[1, 3]);
             assert_eq!(
                 ct.materialize_f64(),
                 vec![(1.0, 4.0), (2.0, 5.0), (3.0, 6.0)]
@@ -32,7 +32,7 @@ fn complex_scalar_vector_broadcast_real_left() {
     let result = complex_call(Value::Num(0.0), vec![Value::Tensor(imag)]).expect("complex");
     match result {
         Value::ComplexTensor(ct) => {
-            assert_eq!(ct.shape, vec![1, 3]);
+            assert_eq!(ct.shape(), &[1, 3]);
             assert_eq!(
                 ct.materialize_f64(),
                 vec![(0.0, 1.0), (0.0, 2.0), (0.0, 3.0)]
@@ -49,7 +49,7 @@ fn complex_scalar_vector_broadcast_real_right() {
     let result = complex_call(Value::Tensor(real), vec![Value::Num(0.0)]).expect("complex");
     match result {
         Value::ComplexTensor(ct) => {
-            assert_eq!(ct.shape, vec![1, 3]);
+            assert_eq!(ct.shape(), &[1, 3]);
             assert_eq!(
                 ct.materialize_f64(),
                 vec![(1.0, 0.0), (2.0, 0.0), (3.0, 0.0)]
@@ -67,7 +67,7 @@ fn complex_column_vectors() {
     let result = complex_call(Value::Tensor(lhs), vec![Value::Tensor(rhs)]).expect("complex");
     match result {
         Value::ComplexTensor(ct) => {
-            assert_eq!(ct.shape, vec![2, 1]);
+            assert_eq!(ct.shape(), &[2, 1]);
             assert_eq!(ct.materialize_f64(), vec![(1.0, 3.0), (2.0, 4.0)]);
         }
         other => panic!("expected ComplexTensor result, got {other:?}"),
@@ -159,7 +159,7 @@ fn complex_unary_tensor_zero_imag() {
     let result = complex_call(Value::Tensor(tensor), Vec::new()).expect("complex");
     match result {
         Value::ComplexTensor(ct) => {
-            assert_eq!(ct.shape, vec![1, 2]);
+            assert_eq!(ct.shape(), &[1, 2]);
             assert_eq!(ct.materialize_f64(), vec![(1.0, 0.0), (2.0, 0.0)]);
         }
         other => panic!("expected ComplexTensor result, got {other:?}"),
@@ -205,7 +205,7 @@ fn complex_logical_array_input() {
     let result = complex_call(Value::LogicalArray(lhs), vec![Value::Tensor(rhs)]).expect("complex");
     match result {
         Value::ComplexTensor(ct) => {
-            assert_eq!(ct.shape, vec![2, 2]);
+            assert_eq!(ct.shape(), &[2, 2]);
             assert_eq!(
                 ct.materialize_f64(),
                 vec![(1.0, 10.0), (0.0, 20.0), (0.0, 30.0), (1.0, 40.0)]
@@ -245,7 +245,7 @@ fn complex_empty_tensor_inputs() {
     let result = complex_call(Value::Tensor(lhs), vec![Value::Tensor(rhs)]).expect("complex");
     match result {
         Value::ComplexTensor(ct) => {
-            assert_eq!(ct.shape, vec![0, 3]);
+            assert_eq!(ct.shape(), &[0, 3]);
             assert!(ct.materialize_f64().is_empty());
         }
         other => panic!("expected empty ComplexTensor, got {other:?}"),

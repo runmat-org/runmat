@@ -24,7 +24,7 @@ pub(super) fn histc_from_tensors(
     dim: Option<usize>,
 ) -> BuiltinResult<HistcResult> {
     let x_values = tensor::tensor_values_f64(&x);
-    let x_shape = canonical_shape(&x.shape);
+    let x_shape = canonical_shape(x.shape());
     let vector_call = dim.is_none() && is_vector_shape(&x_shape);
     let dim_index = match dim {
         Some(dim) => dim - 1,
@@ -50,7 +50,7 @@ pub(super) fn histc_from_tensors(
     } else {
         let mut out = shape.clone();
         out[dim_index] = edges.rows;
-        trim_trailing_added_dims(out, x.shape.len(), dim_index)
+        trim_trailing_added_dims(out, x.shape().len(), dim_index)
     };
     let mut counts = vec![0.0; checked_product(&counts_shape)?];
     let empty_edges = edges.rows == 0;
@@ -96,8 +96,15 @@ pub(super) fn histc_from_tensors(
     Ok(HistcResult {
         counts: Tensor::new(counts, counts_shape)
             .map_err(|err| internal_error(format!("histc: {err}")))?,
-        indices: Tensor::new(indices, if empty_edges { vec![0, 0] } else { x.shape })
-            .map_err(|err| internal_error(format!("histc: {err}")))?,
+        indices: Tensor::new(
+            indices,
+            if empty_edges {
+                vec![0, 0]
+            } else {
+                x.shape().to_vec()
+            },
+        )
+        .map_err(|err| internal_error(format!("histc: {err}")))?,
     })
 }
 

@@ -75,7 +75,7 @@ impl XlsTable {
         cooperation: &mut TabularCooperation<'_>,
         selected: &TabularFsPath,
     ) -> BuiltinResult<Self> {
-        ensure_shape_2d(&tensor.shape, "numeric array")?;
+        ensure_shape_2d(tensor.shape(), "numeric array")?;
         let rows = tensor.rows();
         let cols = tensor.cols();
         let count = checked_cell_count(rows, cols, "numeric array")?;

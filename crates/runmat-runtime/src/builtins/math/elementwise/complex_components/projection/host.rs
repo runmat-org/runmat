@@ -36,7 +36,7 @@ fn project_real_value(kind: ProjectionKind, value: Value) -> BuiltinResult<Value
 }
 
 fn zero_tensor(kind: ProjectionKind, tensor: Tensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| kind.internal(error))?;
@@ -45,8 +45,8 @@ fn zero_tensor(kind: ProjectionKind, tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn project_complex_tensor(kind: ProjectionKind, tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
-    let storage = match (kind, tensor.into_complex_storage()) {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let storage = match (kind, storage) {
         (ProjectionKind::Real, ComplexStorage::F64(values)) => {
             NumericStorage::F64(values.into_iter().map(|(real, _)| real).collect())
         }

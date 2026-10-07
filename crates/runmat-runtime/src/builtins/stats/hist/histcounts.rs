@@ -120,7 +120,7 @@ fn histcounts_from_tensor(
     options: &HistcountsOptions,
     include_bins: bool,
 ) -> BuiltinResult<HistcountsEvaluation> {
-    let input_shape = tensor.shape.clone();
+    let input_shape = tensor.shape().to_vec();
     let exact_samples = tensor
         .integer_storage()
         .map(|storage| storage.exact_values());

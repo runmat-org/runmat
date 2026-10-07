@@ -9,7 +9,7 @@ pub(super) struct EdgeSets {
 
 impl EdgeSets {
     pub(super) fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
-        let shape = tensor.shape.clone();
+        let shape = tensor.shape().to_vec();
         let data = tensor::tensor_into_values_f64(tensor);
         if data.is_empty() || is_vector_shape(&shape) {
             validate_edges(&data)?;

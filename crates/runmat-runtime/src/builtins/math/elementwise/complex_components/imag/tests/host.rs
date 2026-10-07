@@ -74,7 +74,7 @@ fn imag_typed_real_integer_tensor_zeros_from_storage_without_mirror() {
     let Value::Tensor(output) = result else {
         panic!("expected typed integer zero tensor");
     };
-    assert_eq!(output.shape, vec![1, 3]);
+    assert_eq!(output.shape(), &[1, 3]);
     assert_eq!(
         output.integer_storage(),
         Some(&runmat_value::IntegerStorage::U64(vec![0, 0, 0]))
@@ -88,7 +88,7 @@ fn imag_tensor_real_is_zero() {
     let result = imag_builtin(Value::Tensor(tensor)).expect("imag");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![4, 1]);
+            assert_eq!(t.shape(), &[4, 1]);
             assert!(t.materialize_f64().iter().all(|v| *v == 0.0));
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -101,7 +101,7 @@ fn imag_real_and_complex_single_preserve_native_class_and_shape() {
     let Value::Tensor(output) = imag_builtin(Value::Tensor(real)).expect("imag") else {
         panic!("expected single zero tensor");
     };
-    assert_eq!(output.shape, vec![1, 2]);
+    assert_eq!(output.shape(), &[1, 2]);
     assert_eq!(
         output.into_numeric_storage().unwrap(),
         NumericStorage::F32(vec![0.0, 0.0])
@@ -111,7 +111,7 @@ fn imag_real_and_complex_single_preserve_native_class_and_shape() {
     let Value::Tensor(output) = imag_builtin(Value::ComplexTensor(complex)).expect("imag") else {
         panic!("expected single imaginary tensor");
     };
-    assert_eq!(output.shape, vec![2, 1]);
+    assert_eq!(output.shape(), &[2, 1]);
     assert_eq!(
         output.into_numeric_storage().unwrap(),
         NumericStorage::F32(vec![2.5, 4.0])
@@ -125,7 +125,7 @@ fn imag_empty_tensor_zero_length() {
     let result = imag_builtin(Value::Tensor(tensor)).expect("imag");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![0, 3]);
+            assert_eq!(t.shape(), &[0, 3]);
             assert!(t.materialize_f64().is_empty());
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -138,7 +138,7 @@ fn imag_empty_complex_single_preserves_native_class_and_shape() {
     let Value::Tensor(output) = imag_builtin(Value::ComplexTensor(complex)).expect("imag") else {
         panic!("expected empty single imaginary tensor");
     };
-    assert_eq!(output.shape, vec![0, 3]);
+    assert_eq!(output.shape(), &[0, 3]);
     assert_eq!(
         output.into_numeric_storage().unwrap(),
         NumericStorage::F32(Vec::new())
@@ -153,7 +153,7 @@ fn imag_complex_tensor_to_tensor_of_imag_parts() {
     let result = imag_builtin(Value::ComplexTensor(complex)).expect("imag");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 1]);
+            assert_eq!(t.shape(), &[2, 1]);
             assert_eq!(t.materialize_f64(), vec![2.0, 4.5]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -167,7 +167,7 @@ fn imag_logical_array_zero() {
     let result = imag_builtin(Value::LogicalArray(logical)).expect("imag");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![0.0; 4]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -181,7 +181,7 @@ fn imag_char_array_zeroes() {
     let result = imag_builtin(Value::CharArray(chars)).expect("imag");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), &[1, 2]);
             assert_eq!(t.materialize_f64(), vec![0.0, 0.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -203,4 +203,23 @@ fn imag_string_array_error() {
     let arr = StringArray::new(vec!["a".to_string(), "b".to_string()], vec![2, 1]).expect("array");
     let err = imag_builtin(Value::StringArray(arr)).expect_err("imag should error");
     assert!(err.message().contains("expected numeric"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn imag_projects_low_rank_complex_inputs_through_existing_scalar_policy() {
+    let scalar = ComplexTensor::new(vec![(3.0, 4.0)], Vec::new()).expect("rank-zero complex");
+    assert_eq!(
+        imag_builtin(Value::ComplexTensor(scalar)).expect("imag scalar"),
+        Value::Num(4.0)
+    );
+
+    let vector =
+        ComplexTensor::new(vec![(3.0, 4.0), (-2.0, 7.0)], vec![2]).expect("rank-one complex");
+    let Value::Tensor(output) = imag_builtin(Value::ComplexTensor(vector)).expect("imag vector")
+    else {
+        panic!("rank-one projection remains a tensor")
+    };
+    assert_eq!(output.shape(), &[2]);
+    assert_eq!(output.materialize_f64(), vec![4.0, 7.0]);
 }

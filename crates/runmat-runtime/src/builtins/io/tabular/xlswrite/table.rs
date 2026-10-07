@@ -35,7 +35,7 @@ impl XlsTable {
                 cooperation.completed(cell.data.len() % 1024).await
             }
             Value::Tensor(tensor) => {
-                ensure_shape_2d(&tensor.shape, "numeric array")?;
+                ensure_shape_2d(tensor.shape(), "numeric array")?;
                 checked_cell_count(tensor.rows(), tensor.cols(), "numeric array")?;
                 Ok(())
             }

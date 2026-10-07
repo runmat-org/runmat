@@ -12,7 +12,7 @@ fn conj_wgpu_matches_cpu_for_real() {
     let cpu = conj_real(Value::Tensor(tensor.clone())).unwrap();
     let view = runmat_accelerate_api::HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let handle = runmat_accelerate_api::provider()
         .unwrap()
@@ -22,7 +22,7 @@ fn conj_wgpu_matches_cpu_for_real() {
     let gathered = test_support::gather(gpu).expect("gather");
     match (cpu, gathered) {
         (Value::Tensor(ct), gt) => {
-            assert_eq!(ct.shape, gt.shape);
+            assert_eq!(ct.shape(), gt.shape.as_slice());
             assert_eq!(ct.materialize_f64(), gt.materialize_f64());
         }
         _ => panic!("unexpected shapes"),

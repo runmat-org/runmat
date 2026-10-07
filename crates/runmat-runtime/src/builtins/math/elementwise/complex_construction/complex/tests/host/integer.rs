@@ -1,5 +1,50 @@
 use super::super::*;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn complex_exact_integer_low_rank_inputs_preserve_shape_class_and_values() {
+    let scalar = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), Vec::new())
+        .expect("rank-zero uint64");
+    let Value::ComplexTensor(scalar) =
+        complex_call(Value::Tensor(scalar), Vec::new()).expect("unary complex")
+    else {
+        panic!("integer scalar retains exact complex tensor storage")
+    };
+    assert_eq!(scalar.shape(), &[]);
+    assert_eq!(
+        scalar.integer_storage().cloned(),
+        Some(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX]),
+                IntegerStorage::U64(vec![0]),
+            )
+            .unwrap()
+        )
+    );
+
+    let vector = Tensor::new_integer(
+        IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        vec![2],
+    )
+    .expect("rank-one uint64");
+    let Value::ComplexTensor(vector) =
+        complex_call(Value::Tensor(vector), vec![Value::Num(1.0)]).expect("binary complex")
+    else {
+        panic!("integer vector retains exact complex tensor storage")
+    };
+    assert_eq!(vector.shape(), &[2]);
+    assert_eq!(
+        vector.integer_storage().cloned(),
+        Some(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+                IntegerStorage::U64(vec![1, 1]),
+            )
+            .unwrap()
+        )
+    );
+}
+
 #[test]
 fn complex_integer_components_preserve_uint64_storage_and_scalar_double_expansion() {
     let real = Tensor::new_integer(
@@ -11,7 +56,7 @@ fn complex_integer_components_preserve_uint64_storage_and_scalar_double_expansio
     let Value::ComplexTensor(complex) = result else {
         panic!("integer complex values must retain complex tensor storage");
     };
-    assert_eq!(complex.shape, vec![1, 2]);
+    assert_eq!(complex.shape(), &[1, 2]);
     assert_eq!(
         complex.integer_storage().cloned(),
         Some(
@@ -35,7 +80,7 @@ fn complex_integer_components_broadcast_from_storage_without_mirrors() {
     let Value::ComplexTensor(output) = result else {
         panic!("expected typed complex integer tensor");
     };
-    assert_eq!(output.shape, vec![3, 1]);
+    assert_eq!(output.shape(), &[3, 1]);
     assert_eq!(
         output.integer_storage().cloned(),
         Some(
@@ -58,7 +103,7 @@ fn complex_integer_scalar_keeps_exact_complex_storage() {
     let Value::ComplexTensor(complex) = result else {
         panic!("integer complex scalar must retain exact storage");
     };
-    assert_eq!(complex.shape, vec![1, 1]);
+    assert_eq!(complex.shape(), &[1, 1]);
     assert_eq!(
         complex.integer_storage().cloned(),
         Some(
@@ -170,7 +215,7 @@ fn complex_preserves_integer_inputs() {
     .expect("complex");
     match result {
         Value::ComplexTensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 1]);
+            assert_eq!(tensor.shape(), &[1, 1]);
             assert_eq!(
                 tensor.integer_storage().cloned(),
                 Some(

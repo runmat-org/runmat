@@ -34,7 +34,7 @@ pub(super) fn compose(real: &RealInput, imaginary: &RealInput) -> BuiltinResult<
 }
 
 fn lift_real(input: RealInput) -> BuiltinResult<Value> {
-    let shape = input.tensor.shape.clone();
+    let shape = input.tensor.shape().to_vec();
     let scalar = shape::is_scalar(&input.tensor);
     let storage = input
         .tensor

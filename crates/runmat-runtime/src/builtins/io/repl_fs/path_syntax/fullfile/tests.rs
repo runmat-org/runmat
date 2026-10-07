@@ -3,6 +3,28 @@ use runmat_value::{CellArray, CharArray, StringArray, Value};
 
 mod provider;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn numeric_character_admission_preserves_low_rank_row_policy() {
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    for shape in [vec![], vec![1]] {
+        let codes = runmat_value::Tensor::new(vec![97.0], shape).unwrap();
+        assert_eq!(
+            run(vec![Value::Tensor(codes)]).unwrap(),
+            Value::CharArray(CharArray::new_row("a"))
+        );
+    }
+    for shape in [vec![2], vec![1, 1, 2]] {
+        let codes = runmat_value::Tensor::new(vec![97.0, 98.0], shape).unwrap();
+        assert!(run(vec![Value::Tensor(codes)]).is_err());
+    }
+    let row = runmat_value::Tensor::new(vec![97.0, 98.0], vec![1, 2, 1]).unwrap();
+    assert_eq!(
+        run(vec![Value::Tensor(row)]).unwrap(),
+        Value::CharArray(CharArray::new_row("ab"))
+    );
+}
+
 fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     block_on(super::execute::run(args))
 }

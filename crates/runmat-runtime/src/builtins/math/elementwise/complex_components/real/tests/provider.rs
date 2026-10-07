@@ -7,7 +7,7 @@ fn real_gpu_provider_roundtrip() {
         let tensor = Tensor::new(vec![1.0, -2.0, 3.5, -4.25], vec![4, 1]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = real_builtin(Value::GpuTensor(handle)).expect("real");

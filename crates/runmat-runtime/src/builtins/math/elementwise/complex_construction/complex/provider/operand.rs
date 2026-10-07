@@ -28,7 +28,7 @@ impl<'a> RealOperand<'a> {
     pub(super) fn shape(&self) -> &[usize] {
         match self {
             Self::Resident(handle) => handle.shape(),
-            Self::Host(tensor) => &tensor.shape,
+            Self::Host(tensor) => tensor.shape(),
         }
     }
 }

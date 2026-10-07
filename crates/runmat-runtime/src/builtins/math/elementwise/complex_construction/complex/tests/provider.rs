@@ -12,7 +12,7 @@ fn complex_mixed_gpu_path_preserves_integer_class_rule_without_floating_upload()
         let imag_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &imag.materialize_f64(),
-                shape: &imag.shape,
+                shape: imag.shape(),
             })
             .expect("upload imag");
 
@@ -29,7 +29,7 @@ fn complex_host_integer_with_resident_scalar_double_restores_exact_owner_output(
         let handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &scalar.materialize_f64(),
-                shape: &scalar.shape,
+                shape: scalar.shape(),
             })
             .expect("upload");
         let real =
@@ -92,7 +92,7 @@ fn complex_unary_gpu_stays_resident() {
         let handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &real.materialize_f64(),
-                shape: &real.shape,
+                shape: real.shape(),
             })
             .expect("upload");
         let result = complex_call(Value::GpuTensor(handle), Vec::new()).expect("complex");
@@ -108,7 +108,7 @@ fn complex_unary_gpu_stays_resident() {
         let Value::ComplexTensor(ct) = gathered else {
             panic!("expected gathered complex tensor");
         };
-        assert_eq!(ct.shape, vec![3, 1]);
+        assert_eq!(ct.shape(), &[3, 1]);
         assert_eq!(
             ct.materialize_f64(),
             vec![(1.0, 0.0), (-2.0, 0.0), (3.5, 0.0)]
@@ -124,7 +124,7 @@ fn complex_binary_gpu_stays_resident_with_scalar_expansion() {
         let real_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &real.materialize_f64(),
-                shape: &real.shape,
+                shape: real.shape(),
             })
             .expect("upload real");
         let result =
@@ -141,7 +141,7 @@ fn complex_binary_gpu_stays_resident_with_scalar_expansion() {
         let Value::ComplexTensor(ct) = gathered else {
             panic!("expected gathered complex tensor");
         };
-        assert_eq!(ct.shape, vec![1, 3]);
+        assert_eq!(ct.shape(), &[1, 3]);
         assert_eq!(
             ct.materialize_f64(),
             vec![(1.0, -4.0), (2.0, -4.0), (3.0, -4.0)]
@@ -198,13 +198,13 @@ fn complex_empty_gpu_inputs_stay_resident() {
         let real_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &real.materialize_f64(),
-                shape: &real.shape,
+                shape: real.shape(),
             })
             .expect("upload real");
         let imag_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &imag.materialize_f64(),
-                shape: &imag.shape,
+                shape: imag.shape(),
             })
             .expect("upload imag");
         let result = complex_call(
@@ -224,7 +224,7 @@ fn complex_empty_gpu_inputs_stay_resident() {
         let Value::ComplexTensor(ct) = gathered else {
             panic!("expected gathered complex tensor");
         };
-        assert_eq!(ct.shape, vec![0, 3]);
+        assert_eq!(ct.shape(), &[0, 3]);
         assert!(ct.materialize_f64().is_empty());
     });
 }
@@ -238,13 +238,13 @@ fn complex_gpu_shape_mismatch_fallback_reports_size_error() {
         let real_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &real.materialize_f64(),
-                shape: &real.shape,
+                shape: real.shape(),
             })
             .expect("upload real");
         let imag_handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &imag.materialize_f64(),
-                shape: &imag.shape,
+                shape: imag.shape(),
             })
             .expect("upload imag");
         let err = complex_call(

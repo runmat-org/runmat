@@ -13,7 +13,7 @@ fn imag_wgpu_matches_cpu_zero() {
     let cpu = imag_real(Value::Tensor(tensor.clone())).unwrap();
     let view = runmat_accelerate_api::HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let h = runmat_accelerate_api::AccelProvider::upload(provider, &view).unwrap();
     let gpu = block_on(imag_gpu(h)).unwrap();
@@ -23,7 +23,7 @@ fn imag_wgpu_matches_cpu_zero() {
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).unwrap(),
         other => panic!("unexpected cpu value {other:?}"),
     };
-    assert_eq!(gathered.shape, cpu_tensor.shape);
+    assert_eq!(gathered.shape.as_slice(), cpu_tensor.shape());
     assert_eq!(
         gathered.materialize_f64().len(),
         cpu_tensor.materialize_f64().len()
