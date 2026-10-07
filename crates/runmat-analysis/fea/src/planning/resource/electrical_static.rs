@@ -257,6 +257,17 @@ pub fn build_electrical_static_resource_plan(
         add(mul(metadata, 3)?, mul(nodes, 48)?)?,
         mul(elements, 128)?,
     )?;
+    // Original once-captured local contributions remain live through prepared proof.
+    // The checker additionally verifies their combined residency against the unchanged
+    // actual-operator proof envelope before construction.
+    let energy_source =
+        crate::algebra::anchored_energy::AnchoredEnergySource::resident_bytes_for_widths(
+            mesh.topology
+                .volume_elements
+                .iter()
+                .map(|element| element.node_ids.len()),
+        )
+        .map_err(invalid)?;
     let reservation = [
         support_preparation_bytes(mesh)?,
         mul(projection, 3)?,
@@ -264,6 +275,7 @@ pub fn build_electrical_static_resource_plan(
         metadata,
         matrices,
         proof,
+        add(energy_source, nodes)?,
         vectors,
         recovery,
         charge_sources,

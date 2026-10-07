@@ -5,6 +5,11 @@ use crate::algebra::CoercivityCertificate;
 #[derive(Default)]
 pub(crate) struct LinearPreparationReuse {
     certificate: Option<CoercivityCertificate>,
+    local_energy: Option<(
+        crate::algebra::anchored_energy::AnchoredEnergySource,
+        Vec<bool>,
+        f64,
+    )>,
 }
 
 impl LinearPreparationReuse {
@@ -12,6 +17,19 @@ impl LinearPreparationReuse {
 
     pub(crate) fn clear(&mut self) {
         self.certificate = None;
+        self.local_energy = None;
+    }
+
+    /// Original source is consumed once and freed after proof; no serialized claim enters.
+    pub(crate) fn with_local_energy(
+        source: crate::algebra::anchored_energy::AnchoredEnergySource,
+        prescribed: Vec<bool>,
+        normalization: f64,
+    ) -> Self {
+        Self {
+            certificate: None,
+            local_energy: Some((source, prescribed, normalization)),
+        }
     }
 
     pub(super) fn prepare(
@@ -33,8 +51,24 @@ impl LinearPreparationReuse {
             );
         }
         // A failed replacement cannot leave a stale proof available for later work.
+        let local_energy = self.local_energy.take();
         self.clear();
-        let evidence = PreparedSolverAdmissibility::prove(matrix, rhs, source)?;
+        let evidence = if let Some((local, prescribed, normalization)) = local_energy {
+            let certificate = CoercivityCertificate::prove_local_energy(
+                matrix,
+                &prescribed,
+                local,
+                normalization,
+            )?;
+            PreparedSolverAdmissibility::bind_existing_with_source(
+                certificate,
+                matrix,
+                rhs,
+                source,
+            )?
+        } else {
+            PreparedSolverAdmissibility::prove(matrix, rhs, source)?
+        };
         self.certificate = Some(evidence.coercivity().clone());
         Ok(evidence)
     }

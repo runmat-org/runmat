@@ -61,7 +61,7 @@ pub struct CanonicalElectricalResponse {
 }
 
 pub(super) fn solve(
-    assembly: ElectricalAssembly,
+    mut assembly: ElectricalAssembly,
     equation: StaticElectricalEquation,
     residual_target: f64,
     admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
@@ -141,7 +141,7 @@ pub(super) fn solve(
         .collect();
     let system = AssembledRealSystem::try_new_with_nullspace_evidence(
         operators,
-        constrained,
+        constrained.clone(),
         rhs,
         Some(proof),
     )
@@ -150,6 +150,13 @@ pub(super) fn solve(
     let lifted_rhs = system.linear_rhs();
     let rhs_norm = backend.dot(&lifted_rhs, &lifted_rhs).sqrt();
     drop(lifted_rhs);
+    let mut preparation = crate::algebra::LinearPreparationReuse::with_local_energy(
+        assembly.local_energy.take().ok_or_else(|| {
+            ElectricalStaticError::Operator("missing original local-energy source".into())
+        })?,
+        constrained,
+        scale.recip(),
+    );
     let solution = crate::solve::linear::solve_operator_system_scoped(
         &system,
         crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
@@ -160,7 +167,7 @@ pub(super) fn solve(
             plan: crate::planning::resource::LocalExecutionPlan::serial(),
             admission,
             relative_tolerance: residual_target,
-            preparation: None,
+            preparation: Some(&mut preparation),
         },
     )
     .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;

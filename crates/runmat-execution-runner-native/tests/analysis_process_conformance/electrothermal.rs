@@ -22,6 +22,10 @@ use runmat_execution_runner_native::{
 };
 use runmat_meshing_core::ElementOrder;
 
+#[path = "../../src/analysis_kernel/electrical_static/fixture.rs"]
+mod electrical;
+use electrical::electrical_fixture;
+
 #[path = "../../src/analysis_kernel/thermal/tests/electrothermal/fixture.rs"]
 mod fixture;
 

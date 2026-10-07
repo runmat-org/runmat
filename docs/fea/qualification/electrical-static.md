@@ -15,6 +15,23 @@ production resource admission or a release-qualified envelope. A numerical-only 
 workload/result contract now binds that kernel to its explicit equation, producer,
 source and canonical topology; it does not open scheduler or authored execution.
 
+## Current admitted proof and original refinement gate (2026-10-07)
+
+The unchanged electrical suite now passes36/36, including the original finest Tet10
+`harmonic_quadratic_potential_has_tet10_exact_field_and_tet4_convergence` gate.
+Original element contributions are captured during one quadrature pass and verified
+against the actual constrained CSR using [anchored local energies](anchored-local-energy.md).
+Shared preparation owns the process-local proof; ordinary PCG, constraints, recovery,
+fields and physical balances are unchanged. Source/checker demand fits the original
+proof limits, and source storage is additive in the pre-assembly task plan (revision79).
+
+Shared algebra71/71, resource170/170, bridge13/13 and native6/6 pass. Strict FEA,
+bridge and native library/test lint pass. Actual electrothermal workers and cold
+publication pass both orders; exact source and unrelated-change preservation are verified. Cold retained fields remain consistency/provenance evidence,
+not a decoded proof or independent accuracy certificate. Production remains closed.
+Statements below about the original largest-Tet10 failure describe earlier checkpoints;
+that particular failure is superseded by the current unchanged-reference pass.
+
 ## Form and independent references
 
 The scalar weak form is `Kij=integral a grad(Ni).grad(Nj) dV`, with

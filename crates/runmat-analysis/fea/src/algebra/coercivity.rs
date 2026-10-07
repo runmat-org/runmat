@@ -7,7 +7,7 @@ use super::{
     MatrixSymmetry, NullspaceEliminationEvidence, PreparedNullspaceEvidence, RealSparseMatrix,
 };
 
-const CERTIFICATE_PREFIX: &[u8] = b"runmat-fea-coercivity-certificate/v1\0";
+const CERTIFICATE_PREFIX: &[u8] = b"runmat-fea-coercivity-certificate/v2\0";
 const CERTIFICATE_DOMAIN: &str = "fea-coercivity-certificate";
 const PREPARED_DOMAIN: &str = "fea-prepared-solver-admissibility";
 const RHS_DOMAIN: &str = "fea-coercivity-rhs";
@@ -42,6 +42,13 @@ pub enum CoercivityError {
     BindingMismatch,
     #[error("coercivity evidence identity encoding failed: {0}")]
     Encoding(String),
+    #[error(transparent)]
+    Energy(#[from] super::EnergyError),
+    #[error("anchored local energy did not establish coercivity: graph lower bound {}, error upper bound {}", f64::from_bits(*.graph_lower_bits), f64::from_bits(*.error_upper_bits))]
+    EnergyIndeterminate {
+        graph_lower_bits: u64,
+        error_upper_bits: u64,
+    },
 }
 
 /// A process-local numerical certificate that the exact sparse operator admitted to an SPD
@@ -52,10 +59,24 @@ pub struct CoercivityCertificate {
     pattern_identity: Digest,
     values_identity: Digest,
     dimension: usize,
-    minimum_scaled_pivot_bits: u64,
-    factor_nonzero_count: u64,
-    update_count: u64,
+    proof: CoercivityProof,
     identity: Digest,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CoercivityProof {
+    SparseLdl {
+        minimum_scaled_pivot_bits: u64,
+        factor_nonzero_count: u64,
+        update_count: u64,
+    },
+    AnchoredLocalEnergy {
+        lower_bound_bits: u64,
+        assembly_error_upper_bits: u64,
+        scalar_operations: u64,
+        resident_bytes: u64,
+    },
 }
 
 /// Binds algebraic coercivity, the exact prepared right-hand side, and optional physics-owned
@@ -69,17 +90,74 @@ pub struct PreparedSolverAdmissibility {
 }
 
 impl CoercivityCertificate {
+    /// Global sparse factor entries are zero for the local-energy method; local
+    /// factor scratch and the retained source are included in resident bytes.
     pub(crate) fn work_counts(&self) -> (u64, u64, u64, u64) {
         let dimension = u64::try_from(self.dimension).expect("proved dimension fits u64");
-        let resident_bytes =
-            symbolic::symbolic_resident_bytes(dimension, self.factor_nonzero_count)
-                .expect("proved symbolic residency fits u64");
-        (
-            dimension,
-            self.factor_nonzero_count,
-            self.update_count,
-            resident_bytes,
-        )
+        match self.proof {
+            CoercivityProof::SparseLdl {
+                factor_nonzero_count,
+                update_count,
+                ..
+            } => (
+                dimension,
+                factor_nonzero_count,
+                update_count,
+                symbolic::symbolic_resident_bytes(dimension, factor_nonzero_count)
+                    .expect("proved symbolic residency fits u64"),
+            ),
+            CoercivityProof::AnchoredLocalEnergy {
+                scalar_operations,
+                resident_bytes,
+                ..
+            } => (dimension, 0, scalar_operations, resident_bytes),
+        }
+    }
+
+    pub(crate) fn prove_local_energy(
+        matrix: &RealSparseMatrix,
+        prescribed: &[bool],
+        source: super::anchored_energy::AnchoredEnergySource,
+        normalization: f64,
+    ) -> Result<Self, CoercivityError> {
+        use super::anchored_energy::EnergyVerdict;
+        let certificate = match source.prove(matrix, prescribed, normalization)? {
+            EnergyVerdict::Verified(certificate) => certificate,
+            EnergyVerdict::Indeterminate {
+                graph_lower,
+                error_upper,
+            } => {
+                return Err(CoercivityError::EnergyIndeterminate {
+                    graph_lower_bits: graph_lower.to_bits(),
+                    error_upper_bits: error_upper.to_bits(),
+                })
+            }
+        };
+        if certificate.operator_identity()
+            != matrix
+                .numerical_identity()
+                .map_err(|e| CoercivityError::Encoding(e.to_string()))?
+        {
+            return Err(CoercivityError::BindingMismatch);
+        }
+        let mut result = Self {
+            pattern_identity: matrix
+                .pattern_identity()
+                .map_err(|e| CoercivityError::Encoding(e.to_string()))?,
+            values_identity: matrix
+                .values_identity()
+                .map_err(|e| CoercivityError::Encoding(e.to_string()))?,
+            dimension: matrix.rows(),
+            proof: CoercivityProof::AnchoredLocalEnergy {
+                lower_bound_bits: certificate.lower_bound().to_bits(),
+                assembly_error_upper_bits: certificate.assembly_error_upper().to_bits(),
+                scalar_operations: certificate.scalar_operations(),
+                resident_bytes: certificate.resident_bytes(),
+            },
+            identity: Digest::sha256([]),
+        };
+        result.identity = result.expected_identity()?;
+        Ok(result)
     }
 
     pub(super) fn prove(matrix: &RealSparseMatrix) -> Result<Self, CoercivityError> {
@@ -176,9 +254,11 @@ impl CoercivityCertificate {
             pattern_identity,
             values_identity,
             dimension,
-            minimum_scaled_pivot_bits: minimum_scaled_pivot.to_bits(),
-            factor_nonzero_count: symbolic.factor_nonzero_count(),
-            update_count: symbolic.update_count(),
+            proof: CoercivityProof::SparseLdl {
+                minimum_scaled_pivot_bits: minimum_scaled_pivot.to_bits(),
+                factor_nonzero_count: symbolic.factor_nonzero_count(),
+                update_count: symbolic.update_count(),
+            },
             identity: Digest::sha256([]),
         };
         certificate.identity = certificate.expected_identity()?;
@@ -195,13 +275,33 @@ impl CoercivityCertificate {
                 != matrix
                     .values_identity()
                     .map_err(|error| CoercivityError::Encoding(error.to_string()))?
-            || self.minimum_scaled_pivot_bits == 0
-            || !f64::from_bits(self.minimum_scaled_pivot_bits).is_finite()
+            || !self.proof_is_positive()
             || self.identity != self.expected_identity()?
         {
             return Err(CoercivityError::BindingMismatch);
         }
         Ok(())
+    }
+
+    fn proof_is_positive(&self) -> bool {
+        let bits = match self.proof {
+            CoercivityProof::SparseLdl {
+                minimum_scaled_pivot_bits,
+                ..
+            } => minimum_scaled_pivot_bits,
+            CoercivityProof::AnchoredLocalEnergy {
+                lower_bound_bits,
+                assembly_error_upper_bits,
+                ..
+            } => {
+                let error = f64::from_bits(assembly_error_upper_bits);
+                if !error.is_finite() || error < 0. {
+                    return false;
+                }
+                lower_bound_bits
+            }
+        };
+        f64::from_bits(bits).is_finite() && f64::from_bits(bits) > 0.
     }
 
     fn expected_identity(&self) -> Result<Digest, CoercivityError> {
@@ -211,9 +311,7 @@ impl CoercivityCertificate {
                 self.pattern_identity,
                 self.values_identity,
                 self.dimension,
-                self.minimum_scaled_pivot_bits,
-                self.factor_nonzero_count,
-                self.update_count,
+                &self.proof,
             ),
         )
     }
@@ -357,10 +455,10 @@ mod tests {
             PreparedSolverAdmissibility::prove(&operator, &[1.0, 2.0, 3.0], None).unwrap();
         let symbolic = CoercivitySymbolicPlan::derive_for_matrix(&operator).unwrap();
         assert_eq!(
-            evidence.coercivity.factor_nonzero_count,
+            evidence.coercivity.work_counts().1,
             symbolic.factor_nonzero_count()
         );
-        assert_eq!(evidence.coercivity.update_count, symbolic.update_count());
+        assert_eq!(evidence.coercivity.work_counts().2, symbolic.update_count());
         evidence.validate_for(&operator, &[1.0, 2.0, 3.0]).unwrap();
         assert_eq!(
             evidence.validate_for(&operator, &[1.0, 2.0, 4.0]),

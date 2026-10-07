@@ -9,6 +9,7 @@ use crate::{
 use runmat_analysis_core::*;
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 pub(crate) mod charge_density;
+mod energy;
 
 pub(crate) fn mesh(order: ElementOrder, cells: usize) -> SolverMeshArtifact {
     match order {

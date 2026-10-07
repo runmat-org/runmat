@@ -121,3 +121,8 @@ pub(super) fn execute(
         AnalysisKernelOutput::prepared(profile_objects),
     ])
 }
+
+#[cfg(test)]
+pub(super) mod fixture;
+#[cfg(test)]
+mod tests;

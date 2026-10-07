@@ -145,3 +145,42 @@ fn physical_nullspace_provenance_is_rebound_from_the_current_original_source() {
     assert_eq!(after, changed.prepare_linear().unwrap());
     assert_ne!(first.rhs(), after.rhs());
 }
+
+#[test]
+fn source_owned_energy_proof_rebinds_rhs_and_invalidates_changed_operator() {
+    use crate::algebra::anchored_energy::AnchoredEnergySource;
+    let operator = RealSparseMatrix::from_dense(
+        &[1., 0., 0., 0., 2., -1., 0., -1., 1.],
+        3,
+        OperatorRole::Stiffness,
+        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    )
+    .unwrap();
+    let bytes = AnchoredEnergySource::resident_bytes_for_widths([2, 2].into_iter()).unwrap();
+    let mut source = AnchoredEnergySource::new([2, 2].into_iter(), bytes).unwrap();
+    for nodes in [[0, 1], [1, 2]] {
+        source
+            .capture_next(&nodes)
+            .unwrap()
+            .copy_from_slice(&[1., -1., -1., 1.]);
+    }
+    let mut reuse = LinearPreparationReuse::with_local_energy(source, vec![true, false, false], 1.);
+    let before = reuse.prepare(&operator, &[0., 1., 0.], None).unwrap();
+    assert!(reuse.local_energy.is_none());
+    let after = reuse.prepare(&operator, &[0., 2., 0.], None).unwrap();
+    assert_eq!(before.coercivity(), after.coercivity());
+    assert_ne!(before, after);
+    assert_eq!(
+        after.validate_for(&operator, &[0., 1., 0.]),
+        Err(CoercivityError::BindingMismatch)
+    );
+    let corrupt = RealSparseMatrix::from_dense(
+        &[1., 0., 0., 0., 0.1, -1., 0., -1., 1.],
+        3,
+        OperatorRole::Stiffness,
+        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    )
+    .unwrap();
+    assert!(reuse.prepare(&corrupt, &[0., 2., 0.], None).is_err());
+    assert!(reuse.certificate.is_none() && reuse.local_energy.is_none());
+}

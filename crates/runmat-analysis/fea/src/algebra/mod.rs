@@ -1,3 +1,5 @@
+pub(crate) mod anchored_energy;
+pub use anchored_energy::EnergyError;
 mod coercivity;
 mod compatibility;
 mod matrix;

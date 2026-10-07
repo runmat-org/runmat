@@ -53,8 +53,9 @@ under their exact plan; source-free plan substitution and one-byte-under total-m
 ceilings reject. This is an analytical requested-heap envelope, not measured peak RSS.
 
 Core117/117, all language142/142, full bridge142/142 and focused charge physics/cold
-tests10/10 pass. The broader electrical suite passes33 and retains its largest Tet10
-proof-resource failure. The native authored OCCT Tet10 signed/gauged prism test passes
+tests10/10 pass. That checkpoint had33 broader electrical passes and a largest Tet10
+proof-resource failure. The 2026-10-07 anchored local-energy integration supersedes that
+failure: the unchanged suite now passes36/36, including the original refinement gate. The native authored OCCT Tet10 signed/gauged prism test passes
 to check actual region resolution, worker solve, four persisted full/partial fields,
 receipt/state/root closure and independent analytic data after cold import: both signed
 producer processes,686 nodes/347 elements, test138.22s. Strict core/FEA/language/bridge/

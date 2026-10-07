@@ -1,5 +1,6 @@
 //! Native thermal-only execution of retained electrical loss; not scheduler/restart evidence.
 use super::*;
+use crate::analysis_kernel::electrical_static::fixture::electrical_fixture;
 use runmat_analysis_fea::execution::RetainedJouleHeatSource;
 use runmat_execution_artifact::cache::FilesystemObjectStore;
 use runmat_meshing_core::SolverMeshArtifact;

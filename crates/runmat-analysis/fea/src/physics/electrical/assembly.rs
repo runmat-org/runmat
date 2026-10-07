@@ -12,6 +12,7 @@ use runmat_analysis_core::StaticElectricalEquation;
 pub(super) struct ElectricalAssembly {
     pub projection: AnalysisProjection,
     pub stiffness: RealSparseMatrix,
+    pub local_energy: Option<crate::algebra::anchored_energy::AnchoredEnergySource>,
     pub coefficients: Vec<f64>,
     pub prescribed: Vec<Option<f64>>,
     pub terminal_nodes: Vec<(String, Vec<usize>)>,
@@ -40,6 +41,18 @@ impl ElectricalAssembly {
                 .into(),
             ),
         });
+        let widths = projection
+            .elements
+            .iter()
+            .map(|element| element.node_indices.len());
+        let source_bytes =
+            crate::algebra::anchored_energy::AnchoredEnergySource::resident_bytes_for_widths(
+                widths.clone(),
+            )
+            .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
+        let mut local_energy =
+            crate::algebra::anchored_energy::AnchoredEnergySource::new(widths, source_bytes)
+                .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
         let mut coefficients = Vec::with_capacity(projection.elements.len());
         for element in &projection.elements {
             let material = &properties
@@ -70,6 +83,10 @@ impl ElectricalAssembly {
                 ));
             }
             coefficients.push(coefficient);
+            let local_values = local_energy
+                .capture_next(&element.node_indices)
+                .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
+            let width = element.node_indices.len();
             projection
                 .visit_element_quadrature(element, |point| {
                     for (i, &row) in element.node_indices.iter().enumerate() {
@@ -79,7 +96,9 @@ impl ElectricalAssembly {
                                 .zip(point.physical_shape_gradients()[j])
                                 .map(|(a, b)| a * b)
                                 .sum::<f64>();
-                            stiffness.add(row, column, coefficient * dot * point.volume_weight_m3);
+                            let contribution = coefficient * dot * point.volume_weight_m3;
+                            stiffness.add(row, column, contribution);
+                            local_values[i * width + j] += contribution;
                         }
                     }
                 })
@@ -91,6 +110,7 @@ impl ElectricalAssembly {
                 .finish()
                 .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?,
             coefficients,
+            local_energy: Some(local_energy),
             prescribed: vec![None; count],
             terminal_nodes: Vec::new(),
             charge_sources: None,
