@@ -1,6 +1,42 @@
 use super::*;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn jsonencode_preserves_rank_zero_and_rank_one_numeric_serialization() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    for shape in [Vec::new(), vec![1]] {
+        let real = Value::Tensor(Tensor::new(vec![7.0], shape.clone()).unwrap());
+        assert_eq!(
+            as_string(block_on(jsonencode_builtin(real, Vec::new())).unwrap()),
+            "7"
+        );
+        let integer = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), shape.clone()).unwrap(),
+        );
+        assert_eq!(
+            as_string(block_on(jsonencode_builtin(integer, Vec::new())).unwrap()),
+            u64::MAX.to_string()
+        );
+        let complex = Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 2.0)], shape).unwrap());
+        assert_eq!(
+            as_string(block_on(jsonencode_builtin(complex, Vec::new())).unwrap()),
+            "{\"real\":1,\"imag\":2}"
+        );
+    }
+    let vector = Value::Tensor(Tensor::new(vec![7.0, 8.0], vec![2]).unwrap());
+    assert_eq!(
+        as_string(block_on(jsonencode_builtin(vector, Vec::new())).unwrap()),
+        "[7,8]"
+    );
+    let vector =
+        Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![2]).unwrap());
+    assert_eq!(
+        as_string(block_on(jsonencode_builtin(vector, Vec::new())).unwrap()),
+        "[{\"real\":1,\"imag\":2},{\"real\":3,\"imag\":4}]"
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsonencode_options_reject_non_scalar_tensor_bool() {
     let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).expect("tensor");
@@ -251,14 +287,14 @@ fn jsonencode_integer_metadata_distinguishes_public_real_and_extended_complex() 
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn jsonencode_gpu_tensor_gathers_host_data() {
     test_support::with_test_provider(|provider| {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).expect("tensor");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let encoded =
@@ -268,7 +304,7 @@ fn jsonencode_gpu_tensor_gathers_host_data() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg(feature = "wgpu")]
 fn jsonencode_gpu_tensor_wgpu_gathers_host_data() {
     let ensure = runmat_accelerate::backend::wgpu::provider::ensure_wgpu_provider();
@@ -280,7 +316,7 @@ fn jsonencode_gpu_tensor_wgpu_gathers_host_data() {
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("tensor");
     let view = runmat_accelerate_api::HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let handle = provider.upload(&view).expect("upload");
     let encoded =

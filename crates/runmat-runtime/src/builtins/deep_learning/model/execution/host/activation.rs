@@ -70,7 +70,7 @@ pub(in crate::builtins::deep_learning) fn forward(
         )),
         _ => return Err(ActivationError::UnsupportedPrecision),
     };
-    Tensor::from_numeric_storage(storage, input.shape.clone()).map_err(ActivationError::Storage)
+    Tensor::from_numeric_storage(storage, input.shape().to_vec()).map_err(ActivationError::Storage)
 }
 
 pub(in crate::builtins::deep_learning) fn backward(
@@ -79,7 +79,7 @@ pub(in crate::builtins::deep_learning) fn backward(
     operation: Activation,
 ) -> Result<Tensor, ActivationError> {
     operation.admit(input.numeric_dtype())?;
-    if input.shape != dy.shape || input.numeric_dtype() != dy.numeric_dtype() {
+    if input.shape() != dy.shape() || input.numeric_dtype() != dy.numeric_dtype() {
         return Err(ActivationError::GradientMismatch);
     }
     let storage = match input.numeric_dtype() {
@@ -101,7 +101,7 @@ pub(in crate::builtins::deep_learning) fn backward(
         )),
         _ => return Err(ActivationError::UnsupportedPrecision),
     };
-    Tensor::from_numeric_storage(storage, input.shape.clone()).map_err(ActivationError::Storage)
+    Tensor::from_numeric_storage(storage, input.shape().to_vec()).map_err(ActivationError::Storage)
 }
 
 fn values<T: Real>(input: &[T], operation: Activation) -> Vec<T> {
@@ -195,5 +195,32 @@ mod tests {
             .as_f64_slice()
             .unwrap()[0]
             .is_nan());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn forward_and_adjoint_preserve_exact_rank_and_reject_equal_length_shape_mismatch() {
+        let scalar = Tensor::new(vec![2.0], vec![]).unwrap();
+        let scalar_gradient = Tensor::new(vec![3.0], vec![]).unwrap();
+        let scalar_output = forward(&scalar, Activation::Relu).unwrap();
+        let scalar_adjoint = backward(&scalar, &scalar_gradient, Activation::Relu).unwrap();
+        assert!(scalar_output.shape().is_empty());
+        assert!(scalar_adjoint.shape().is_empty());
+        assert_eq!(scalar_adjoint.as_f64_slice().unwrap(), &[3.0]);
+
+        let vector = Tensor::from_f32(vec![-2.0, 4.0], vec![2]).unwrap();
+        let vector_gradient = Tensor::from_f32(vec![5.0, 6.0], vec![2]).unwrap();
+        let vector_output = forward(&vector, Activation::Relu).unwrap();
+        let vector_adjoint = backward(&vector, &vector_gradient, Activation::Relu).unwrap();
+        assert_eq!(vector_output.shape(), &[2]);
+        assert_eq!(vector_output.as_f32_slice().unwrap(), &[0.0, 4.0]);
+        assert_eq!(vector_adjoint.shape(), &[2]);
+        assert_eq!(vector_adjoint.as_f32_slice().unwrap(), &[0.0, 6.0]);
+
+        let wrong_shape = Tensor::from_f32(vec![5.0, 6.0], vec![1, 2]).unwrap();
+        assert!(matches!(
+            backward(&vector, &wrong_shape, Activation::Relu),
+            Err(ActivationError::GradientMismatch)
+        ));
     }
 }

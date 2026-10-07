@@ -19,7 +19,7 @@ pub(in crate::builtins::deep_learning) fn backward(
     output_gradient: &Tensor,
 ) -> Result<DenseGradients, DenseError> {
     let geometry = Geometry::new(input, weights, bias, axes)?;
-    if output_gradient.shape.as_slice() != geometry.output_axes.shape()
+    if output_gradient.shape() != geometry.output_axes.shape()
         || output_gradient.numeric_dtype() != input.numeric_dtype()
     {
         return Err(DenseError::Invalid(
@@ -52,11 +52,12 @@ pub(in crate::builtins::deep_learning) fn backward(
         return Err(DenseError::UnsupportedPrecision);
     };
     Ok(DenseGradients {
-        input: Tensor::from_numeric_storage(dx, input.shape.clone())
+        input: Tensor::from_numeric_storage(dx, input.shape().to_vec())
             .map_err(DenseError::Storage)?,
-        weights: Tensor::from_numeric_storage(dw, weights.shape.clone())
+        weights: Tensor::from_numeric_storage(dw, weights.shape().to_vec())
             .map_err(DenseError::Storage)?,
-        bias: Tensor::from_numeric_storage(db, bias.shape.clone()).map_err(DenseError::Storage)?,
+        bias: Tensor::from_numeric_storage(db, bias.shape().to_vec())
+            .map_err(DenseError::Storage)?,
     })
 }
 

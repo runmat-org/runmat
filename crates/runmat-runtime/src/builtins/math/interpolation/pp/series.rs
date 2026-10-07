@@ -43,7 +43,7 @@ pub async fn query_points(value: Value, name: &'static str) -> BuiltinResult<Que
     let gathered = materialize_if_resident(value).await?;
     let tensor = tensor::value_into_tensor_for(name, gathered)
         .map_err(|err| interp_error(name, format!("{name}: {err}")))?;
-    let shape = canonical_shape(&tensor.shape, tensor_len(&tensor));
+    let shape = canonical_shape(tensor.shape(), tensor_len(&tensor));
     Ok(QueryPoints {
         values: tensor::tensor_into_values_f64(tensor),
         shape,
@@ -58,7 +58,7 @@ pub async fn vector_from_value(
     let gathered = materialize_if_resident(value).await?;
     let tensor = tensor::value_into_tensor_for(name, gathered)
         .map_err(|err| interp_error(name, format!("{name}: {err}")))?;
-    if !is_vector_shape(&tensor.shape) && tensor_len(&tensor) > 1 {
+    if !is_vector_shape(tensor.shape()) && tensor_len(&tensor) > 1 {
         return Err(interp_error(
             name,
             format!("{name}: {label} must be a vector"),
@@ -100,7 +100,7 @@ pub async fn spline_samples_from_values(
     let y_host = materialize_if_resident(y_value).await?;
     let y_tensor = tensor::value_into_tensor_for(name, y_host)
         .map_err(|err| interp_error(name, format!("{name}: {err}")))?;
-    let y_shape = canonical_shape(&y_tensor.shape, tensor_len(&y_tensor));
+    let y_shape = canonical_shape(y_tensor.shape(), tensor_len(&y_tensor));
     let y = tensor::tensor_into_values_f64(y_tensor);
     let endpoint_count = x
         .len()
@@ -156,7 +156,7 @@ fn series_from_tensor(
     axis: SampleAxis,
     name: &'static str,
 ) -> BuiltinResult<NumericSeries> {
-    let y_shape = canonical_shape(&y_tensor.shape, tensor_len(&y_tensor));
+    let y_shape = canonical_shape(y_tensor.shape(), tensor_len(&y_tensor));
     let y = tensor::tensor_into_values_f64(y_tensor);
     series_from_data(x, y_shape, y, axis, name)
 }

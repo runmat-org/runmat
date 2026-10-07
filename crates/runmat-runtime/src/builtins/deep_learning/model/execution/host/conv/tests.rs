@@ -49,9 +49,9 @@ fn multichannel_cbt_and_scb_have_independent_nonzero_oracles() {
         vec![2, 2, 3],
     )
     .unwrap();
-    let result = forward(&cbt, &weights, &bias, &axes("CBT", &cbt.shape), valid()).unwrap();
+    let result = forward(&cbt, &weights, &bias, &axes("CBT", cbt.shape()), valid()).unwrap();
     assert_eq!(result.axes.layout().labels(), "CBT");
-    assert_eq!(result.tensor.shape, vec![1, 2, 2]);
+    assert_eq!(result.tensor.shape(), &[1, 2, 2]);
     assert_eq!(values(&result.tensor), vec![120., 339., 193., 412.]);
 
     let scb = Tensor::new(
@@ -59,9 +59,9 @@ fn multichannel_cbt_and_scb_have_independent_nonzero_oracles() {
         vec![3, 2, 2],
     )
     .unwrap();
-    let result = forward(&scb, &weights, &bias, &axes("SCB", &scb.shape), valid()).unwrap();
+    let result = forward(&scb, &weights, &bias, &axes("SCB", scb.shape()), valid()).unwrap();
     assert_eq!(result.axes.layout().labels(), "SCB");
-    assert_eq!(result.tensor.shape, vec![2, 1, 2]);
+    assert_eq!(result.tensor.shape(), &[2, 1, 2]);
     assert_eq!(values(&result.tensor), vec![120., 193., 339., 412.]);
 }
 
@@ -74,12 +74,12 @@ fn scbt_keeps_time_independent_and_single_precision_native() {
         &input,
         &weights,
         &bias,
-        &axes("SCBT", &input.shape),
+        &axes("SCBT", input.shape()),
         valid(),
     )
     .unwrap();
     assert_eq!(result.axes.layout().labels(), "SCBT");
-    assert_eq!(result.tensor.shape, vec![2, 1, 1, 2]);
+    assert_eq!(result.tensor.shape(), &[2, 1, 1, 2]);
     assert_eq!(
         result.tensor.into_numeric_storage().unwrap(),
         NumericStorage::F32(vec![9., 14., 17., 27.])
@@ -91,7 +91,7 @@ fn stride_dilation_padding_and_boundary_modes_are_numerical() {
     let input = Tensor::new(vec![1., 2., 3., 4.], vec![1, 1, 4]).unwrap();
     let weights = Tensor::new(vec![2., 3.], vec![2, 1, 1]).unwrap();
     let bias = Tensor::new(vec![0.], vec![1, 1]).unwrap();
-    let axes = axes("CBT", &input.shape);
+    let axes = axes("CBT", input.shape());
     let mut options = valid();
     options.stride = 2;
     options.dilation = 2;
@@ -140,9 +140,15 @@ fn objective(x: &[f64], w: &[f64], b: f64, dy: &[f64]) -> f64 {
     let input = Tensor::new(x.to_vec(), vec![1, 1, 3]).unwrap();
     let weights = Tensor::new(w.to_vec(), vec![2, 1, 1]).unwrap();
     let bias = Tensor::new(vec![b], vec![1, 1]).unwrap();
-    let y = forward(&input, &weights, &bias, &axes("CBT", &input.shape), valid())
-        .unwrap()
-        .tensor;
+    let y = forward(
+        &input,
+        &weights,
+        &bias,
+        &axes("CBT", input.shape()),
+        valid(),
+    )
+    .unwrap()
+    .tensor;
     values(&y).iter().zip(dy).map(|(y, g)| y * g).sum()
 }
 
@@ -161,7 +167,7 @@ fn all_adjoint_components_match_independent_finite_differences() {
         &weights,
         &bias,
         &gradient,
-        &axes("CBT", &input.shape),
+        &axes("CBT", input.shape()),
         valid(),
     )
     .unwrap();
@@ -200,7 +206,7 @@ fn f32_constant_padding_adjoint_has_exact_nonzero_components() {
         padding_value: PaddingValue::Constant(3.),
         ..valid()
     };
-    let axes = axes("CBT", &x.shape);
+    let axes = axes("CBT", x.shape());
     assert_eq!(
         values(&forward(&x, &w, &b, &axes, options).unwrap().tensor),
         vec![17., 14.]
@@ -220,19 +226,35 @@ fn f32_constant_padding_adjoint_has_exact_nonzero_components() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn backward_rejects_equal_length_but_different_convolution_output_shape() {
+    let input = Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![1, 1, 3]).unwrap();
+    let weights = Tensor::from_f32(vec![4.0, 5.0], vec![2, 1, 1]).unwrap();
+    let bias = Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap();
+    let wrong_shape = Tensor::from_f32(vec![1.0, 1.0], vec![2, 1, 1]).unwrap();
+    let plan = axes("CBT", input.shape());
+    assert!(matches!(
+        backward(&input, &weights, &bias, &wrong_shape, &plan, valid()),
+        Err(ConvError::Invalid(
+            "output gradient shape must equal convolution output shape"
+        ))
+    ));
+}
+
 #[test]
 fn empty_overflow_and_precision_mismatch_reject_before_allocation() {
     let x = Tensor::new(vec![], vec![1, 1, 0]).unwrap();
     let w = Tensor::new(vec![1.], vec![1, 1, 1]).unwrap();
     let b = Tensor::new(vec![0.], vec![1, 1]).unwrap();
     assert!(matches!(
-        forward(&x, &w, &b, &axes("CBT", &x.shape), valid()),
+        forward(&x, &w, &b, &axes("CBT", x.shape()), valid()),
         Err(ConvError::Invalid(_))
     ));
     let x = Tensor::new(vec![1.], vec![1, 1, 1]).unwrap();
     let single_w = Tensor::from_f32(vec![1.], vec![1, 1, 1]).unwrap();
     assert!(matches!(
-        forward(&x, &single_w, &b, &axes("CBT", &x.shape), valid()),
+        forward(&x, &single_w, &b, &axes("CBT", x.shape()), valid()),
         Err(ConvError::UnsupportedPrecision)
     ));
     let mut options = valid();
@@ -241,7 +263,7 @@ fn empty_overflow_and_precision_mismatch_reject_before_allocation() {
         right: 1,
     };
     assert!(matches!(
-        forward(&x, &w, &b, &axes("CBT", &x.shape), options),
+        forward(&x, &w, &b, &axes("CBT", x.shape()), options),
         Err(ConvError::ShapeOverflow)
     ));
 }
@@ -301,7 +323,7 @@ fn multichannel_spatial_sequence_stride_dilation_and_repeated_padding_adjoints()
         let weights = Tensor::new(w.clone(), vec![3, 2, 2]).unwrap();
         let bias = Tensor::new(b.clone(), vec![1, 2]).unwrap();
         let output = forward(&input, &weights, &bias, &axes, options).unwrap();
-        let output_shape = output.tensor.shape.clone();
+        let output_shape = output.tensor.shape().to_vec();
         let dy: Vec<f64> = (0..output.tensor.len())
             .map(|i| (i as f64 * 0.11) - 0.7)
             .collect();
@@ -363,12 +385,12 @@ fn empty_batch_retains_zero_output_and_zero_parameter_gradients() {
     let input = Tensor::new(vec![], vec![3, 2, 0]).unwrap();
     let weights = Tensor::new(vec![1.; 12], vec![3, 2, 2]).unwrap();
     let bias = Tensor::new(vec![0., 0.], vec![1, 2]).unwrap();
-    let axes = axes("SCB", &input.shape);
+    let axes = axes("SCB", input.shape());
     let result = forward(&input, &weights, &bias, &axes, valid()).unwrap();
-    assert_eq!(result.tensor.shape, vec![1, 2, 0]);
-    let gradient = Tensor::new(vec![], result.tensor.shape).unwrap();
+    assert_eq!(result.tensor.shape(), &[1, 2, 0]);
+    let gradient = Tensor::new(vec![], result.tensor.shape().to_vec()).unwrap();
     let adjoints = backward(&input, &weights, &bias, &gradient, &axes, valid()).unwrap();
-    assert_eq!(adjoints.input.shape, input.shape);
+    assert_eq!(adjoints.input.shape(), input.shape());
     assert!(adjoints
         .weights
         .as_f64_slice()

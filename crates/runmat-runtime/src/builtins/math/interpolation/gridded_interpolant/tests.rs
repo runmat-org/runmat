@@ -171,7 +171,7 @@ fn one_dimensional_linear_interpolation_and_none_extrapolation() {
     .unwrap();
     match subsref(obj, vec![row(&[-1.0, 0.5, 1.5, 3.0])]).unwrap() {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 4]);
+            assert_eq!(tensor.shape(), &[1, 4]);
             assert!(tensor.materialize_f64()[0].is_nan());
             assert_eq!(tensor.materialize_f64()[1], 5.0);
             assert_eq!(tensor.materialize_f64()[2], 25.0);
@@ -179,6 +179,31 @@ fn one_dimensional_linear_interpolation_and_none_extrapolation() {
         }
         other => panic!("expected tensor, got {other:?}"),
     }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn one_dimensional_queries_preserve_rank_zero_and_rank_one_projection() {
+    let interpolant = || {
+        call(vec![col(&[0.0, 1.0, 2.0]), col(&[0.0, 10.0, 20.0])])
+            .expect("one-dimensional interpolant")
+    };
+    let scalar = subsref(
+        interpolant(),
+        vec![Value::Tensor(Tensor::new(vec![0.5], Vec::new()).unwrap())],
+    )
+    .expect("rank-zero query");
+    assert_eq!(scalar, Value::Num(5.0));
+
+    let Value::Tensor(vector) = subsref(
+        interpolant(),
+        vec![Value::Tensor(Tensor::new(vec![0.5, 1.5], vec![2]).unwrap())],
+    )
+    .expect("rank-one query") else {
+        panic!("expected rank-one tensor");
+    };
+    assert_eq!(vector.shape(), &[2]);
+    assert_eq!(vector.materialize_f64(), vec![5.0, 15.0]);
 }
 
 #[test]
@@ -234,7 +259,7 @@ fn full_query_grid_visits_column_major_points_without_changing_shape() {
     let Value::Tensor(tensor) = result else {
         panic!("expected array result");
     };
-    assert_eq!(tensor.shape, vec![2, 2]);
+    assert_eq!(tensor.shape(), &[2, 2]);
     assert_eq!(tensor.materialize_f64(), vec![0.0, 10.0, 20.0, 30.0]);
 }
 
@@ -253,7 +278,7 @@ fn grid_vectors_values_and_queries_read_typed_integer_storage_exactly() {
     let query = int_tensor(IntegerStorage::I16(vec![0, 1, 0, 2]), vec![2, 2]);
     match subsref(obj, vec![query]).unwrap() {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 1]);
+            assert_eq!(tensor.shape(), &[2, 1]);
             assert_eq!(tensor.materialize_f64(), vec![0.0, 30.0]);
         }
         other => panic!("expected tensor, got {other:?}"),

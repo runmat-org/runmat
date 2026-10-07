@@ -123,7 +123,7 @@ impl Geometry {
         axes: &AxisPlan,
         options: ConvOptions,
     ) -> Result<Self, ConvError> {
-        if axes.shape() != input.shape.as_slice() || input.len() != axes.element_count() {
+        if axes.shape() != input.shape() || input.len() != axes.element_count() {
             return Err(ConvError::Invalid(
                 "input axes and payload must match the input",
             ));
@@ -136,8 +136,8 @@ impl Geometry {
         }
         Self::from_shapes(
             axes,
-            &weights.shape,
-            &bias.shape,
+            weights.shape(),
+            bias.shape(),
             input.numeric_dtype(),
             options,
         )

@@ -305,7 +305,7 @@ async fn real_coordinate_data_from_value(
         Value::Int(value) => Ok((vec![value.to_f64()], vec![1, 1])),
         Value::Bool(value) => Ok((vec![if value { 1.0 } else { 0.0 }], vec![1, 1])),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             Ok((tensor_utils::tensor_into_values_f64(tensor), shape))
         }
         Value::LogicalArray(array) => Ok((
@@ -321,16 +321,17 @@ async fn real_coordinate_data_from_value(
             Ok((vec![re], vec![1, 1]))
         }
         Value::ComplexTensor(tensor) => {
-            for &(_, im) in &tensor.materialize_f64() {
+            let (storage, shape) = tensor.into_complex_storage_and_shape();
+            for &(_, im) in &storage.materialize_f64() {
                 validate_real_coordinate(operand, im)?;
             }
             Ok((
-                tensor
+                storage
                     .materialize_f64()
                     .into_iter()
                     .map(|(re, _)| re)
                     .collect(),
-                tensor.shape,
+                shape,
             ))
         }
         other => Err(error_with_detail(
@@ -356,7 +357,7 @@ async fn numeric_data_from_value(
             false,
         )),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             Ok((
                 tensor_utils::tensor_into_values_f64(tensor)
                     .into_iter()
@@ -380,12 +381,13 @@ async fn numeric_data_from_value(
             Ok((vec![(re, im)], vec![1, 1], true))
         }
         Value::ComplexTensor(tensor) => {
+            let (storage, shape) = tensor.into_complex_storage_and_shape();
             if operand.is_coordinate() {
-                for &(_, im) in &tensor.materialize_f64() {
+                for &(_, im) in &storage.materialize_f64() {
                     validate_real_coordinate(operand, im)?;
                 }
             }
-            Ok((tensor.materialize_f64(), tensor.shape, true))
+            Ok((storage.materialize_f64(), shape, true))
         }
         other => Err(error_with_detail(
             &ERROR_INVALID_INPUT,
@@ -515,7 +517,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(tensor.shape(), &[1, 2]);
         assert_eq!(tensor.materialize_f64(), vec![15.0, 30.0]);
     }
 
@@ -622,7 +624,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(tensor.materialize_f64(), vec![15.0, 30.0, 150.0, 300.0]);
     }
 
@@ -637,8 +639,37 @@ mod tests {
         let Value::ComplexTensor(tensor) = out else {
             panic!("expected complex tensor");
         };
-        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(tensor.shape(), &[1, 2]);
         assert_eq!(tensor.materialize_f64(), vec![(15.0, 2.0), (30.0, 5.0)]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn interp1q_complex_values_preserve_rank_zero_and_rank_one_query_projection() {
+        let values = || {
+            Value::ComplexTensor(
+                ComplexTensor::new(vec![(10.0, 1.0), (20.0, 3.0), (40.0, 7.0)], vec![3, 1])
+                    .unwrap(),
+            )
+        };
+        let scalar = block_on(interp1q_builtin(
+            row(&[1.0, 2.0, 3.0]),
+            values(),
+            Value::Tensor(Tensor::new(vec![1.5], Vec::new()).unwrap()),
+        ))
+        .expect("rank-zero complex interpolation query");
+        assert_eq!(scalar, Value::Complex(15.0, 2.0));
+
+        let Value::ComplexTensor(vector) = block_on(interp1q_builtin(
+            row(&[1.0, 2.0, 3.0]),
+            values(),
+            Value::Tensor(Tensor::new(vec![1.5, 2.5], vec![2]).unwrap()),
+        ))
+        .expect("rank-one complex interpolation query") else {
+            panic!("expected rank-one complex tensor");
+        };
+        assert_eq!(vector.shape(), &[2]);
+        assert_eq!(vector.materialize_f64(), vec![(15.0, 2.0), (30.0, 5.0)]);
     }
 
     #[test]
@@ -676,7 +707,7 @@ mod tests {
         let Value::ComplexTensor(tensor) = out else {
             panic!("expected complex tensor");
         };
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), &[2, 2]);
         assert_eq!(
             tensor.materialize_f64(),
             vec![(15.0, 2.0), (30.0, 5.0), (150.0, -2.0), (300.0, -5.0)]

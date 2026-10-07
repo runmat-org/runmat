@@ -127,11 +127,11 @@ fn tensor_to_json(tensor: &Tensor, options: &JsonEncodeOptions) -> BuiltinResult
     if tensor::tensor_element_len(tensor) == 0 {
         return Ok(JsonValue::Array(Vec::new()));
     }
-    let keep_dims = compute_keep_dims(&tensor.shape, true);
+    let keep_dims = compute_keep_dims(tensor.shape(), true);
     if keep_dims.is_empty() {
         return tensor_value_to_json(tensor, 0, options);
     }
-    build_strided_array(&tensor.shape, &keep_dims, |offset| {
+    build_strided_array(tensor.shape(), &keep_dims, |offset| {
         tensor_value_to_json(tensor, offset, options)
     })
 }
@@ -191,11 +191,11 @@ fn complex_tensor_to_json(
     if tensor::complex_tensor_element_len(ct) == 0 {
         return Ok(JsonValue::Array(Vec::new()));
     }
-    let keep_dims = compute_keep_dims(&ct.shape, true);
+    let keep_dims = compute_keep_dims(ct.shape(), true);
     if keep_dims.is_empty() {
         return complex_tensor_value_to_json(ct, 0, options);
     }
-    build_strided_array(&ct.shape, &keep_dims, |offset| {
+    build_strided_array(ct.shape(), &keep_dims, |offset| {
         complex_tensor_value_to_json(ct, offset, options)
     })
 }

@@ -22,8 +22,8 @@ pub(super) fn evaluate_interpolant(
         .map(Vec::len)
         .try_fold(1usize, |acc, len| acc.checked_mul(len))
         .ok_or_else(|| invalid("grid size exceeds platform limits"))?;
-    let mut extra_shape = if spec.values.shape.len() > grid_rank {
-        spec.values.shape[grid_rank..].to_vec()
+    let mut extra_shape = if spec.values.shape().len() > grid_rank {
+        spec.values.shape()[grid_rank..].to_vec()
     } else {
         Vec::new()
     };
@@ -165,7 +165,7 @@ pub(super) fn parse_query_plan(
             });
         }
         let tensor = numeric_tensor(args.into_iter().next().unwrap(), "Xq")?;
-        if tensor.shape.len() != 2 {
+        if tensor.shape().len() != 2 {
             return Err(invalid(
                 "matrix query must be a two-dimensional m-by-n array",
             ));
@@ -232,7 +232,7 @@ pub(super) fn numeric_query_values(
         }
         Value::Tensor(tensor) => {
             ensure_exact_integer_tensor(&tensor, name)?;
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             Ok((tensor_utils::tensor_into_values_f64(tensor), shape))
         }
         other => Err(invalid(format!("{name} must be numeric, got {other:?}"))),

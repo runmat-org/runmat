@@ -20,7 +20,7 @@ pub(in crate::builtins::deep_learning) fn backward(
     options: ConvOptions,
 ) -> Result<ConvGradients, ConvError> {
     let geometry = Geometry::new(input, weights, bias, axes, options)?;
-    if output_gradient.shape != geometry.output_shape {
+    if output_gradient.shape() != geometry.output_shape.as_slice() {
         return Err(ConvError::Invalid(
             "output gradient shape must equal convolution output shape",
         ));
@@ -55,11 +55,11 @@ pub(in crate::builtins::deep_learning) fn backward(
         },
     };
     Ok(ConvGradients {
-        input: Tensor::from_numeric_storage(input_grad, input.shape.clone())
+        input: Tensor::from_numeric_storage(input_grad, input.shape().to_vec())
             .map_err(ConvError::Storage)?,
-        weights: Tensor::from_numeric_storage(weight_grad, weights.shape.clone())
+        weights: Tensor::from_numeric_storage(weight_grad, weights.shape().to_vec())
             .map_err(ConvError::Storage)?,
-        bias: Tensor::from_numeric_storage(bias_grad, bias.shape.clone())
+        bias: Tensor::from_numeric_storage(bias_grad, bias.shape().to_vec())
             .map_err(ConvError::Storage)?,
     })
 }

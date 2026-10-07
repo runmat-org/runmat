@@ -61,7 +61,7 @@ impl Geometry {
         bias: &Tensor,
         axes: &AxisPlan,
     ) -> Result<Self, DenseError> {
-        if input.shape.as_slice() != axes.shape() || input.len() != axes.element_count() {
+        if input.shape() != axes.shape() || input.len() != axes.element_count() {
             return Err(DenseError::Invalid(
                 "fullyConnectedLayer input and axes disagree",
             ));
@@ -73,7 +73,7 @@ impl Geometry {
         {
             return Err(DenseError::UnsupportedPrecision);
         }
-        Self::from_shapes(axes, &weights.shape, &bias.shape)
+        Self::from_shapes(axes, weights.shape(), bias.shape())
     }
 
     /// The identical geometry used by execution, without allocating a fake

@@ -26,6 +26,50 @@ fn query_points_read_typed_integer_storage_length_and_values() {
     assert_eq!(query.values, vec![1.0, 3.0]);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn query_points_preserve_rank_zero_and_rank_one_canonical_shapes() {
+    let scalar = futures::executor::block_on(query_points(
+        Value::Tensor(Tensor::new(vec![1.5], Vec::new()).unwrap()),
+        "interp1",
+    ))
+    .expect("rank-zero query");
+    assert_eq!(scalar.shape, vec![1, 1]);
+    assert_eq!(scalar.values, vec![1.5]);
+
+    let vector = futures::executor::block_on(query_points(
+        Value::Tensor(Tensor::new(vec![1.5, 2.5], vec![2]).unwrap()),
+        "interp1",
+    ))
+    .expect("rank-one query");
+    assert_eq!(vector.shape, vec![2]);
+    assert_eq!(vector.values, vec![1.5, 2.5]);
+
+    let pp = build_spline_pp(&scalar_series(&[1.0, 4.0, 9.0]), "spline").unwrap();
+    let scalar_value = evaluate_pp(
+        &pp,
+        &scalar,
+        &Extrapolation::Extrapolate,
+        PpOutputLayout::QueryLeading,
+        "ppval",
+    )
+    .expect("rank-zero pp query");
+    assert_eq!(scalar_value, Value::Num(2.25));
+
+    let Value::Tensor(vector_value) = evaluate_pp(
+        &pp,
+        &vector,
+        &Extrapolation::Extrapolate,
+        PpOutputLayout::QueryLeading,
+        "ppval",
+    )
+    .expect("rank-one pp query") else {
+        panic!("expected rank-one pp output tensor");
+    };
+    assert_eq!(vector_value.shape(), &[2]);
+    assert_eq!(vector_value.materialize_f64(), vec![2.25, 6.25]);
+}
+
 #[test]
 fn implicit_series_reads_typed_integer_storage_length_and_values() {
     let y_tensor =
@@ -103,7 +147,7 @@ fn external_pp_requires_piece_major_coefficient_matrix_geometry() {
     let Some(Value::Tensor(coefs)) = fields.fields.get("coefs") else {
         panic!("generated coefficients must be a tensor");
     };
-    assert_eq!(coefs.shape, vec![2, 4]);
+    assert_eq!(coefs.shape(), &[2, 4]);
 
     let parsed = futures::executor::block_on(pp_from_value(public.clone(), "ppval"))
         .expect("piece-major vector-valued pp");
@@ -303,7 +347,7 @@ fn ppval_multiseries_places_component_dimension_before_queries() {
     let Value::Tensor(tensor) = value else {
         panic!("expected tensor");
     };
-    assert_eq!(tensor.shape, vec![2, 2]);
+    assert_eq!(tensor.shape(), &[2, 2]);
     assert_eq!(tensor.materialize_f64().len(), 4);
     assert!((tensor.materialize_f64()[0] - 2.25).abs() < 1e-10);
     assert!((tensor.materialize_f64()[1] - 225.0).abs() < 1e-10);
@@ -361,7 +405,7 @@ fn final_sample_axis_roundtrips_nonsquare_component_and_query_dimensions() {
     .unwrap() else {
         panic!("array-valued pp evaluation must be a tensor");
     };
-    assert_eq!(result.shape, vec![2, 3, 2, 2]);
+    assert_eq!(result.shape(), &[2, 3, 2, 2]);
     let values = result.materialize_f64();
     for sample in 0..4 {
         for component in 0..6 {
@@ -399,7 +443,7 @@ fn legacy_first_axis_samples_remain_admitted_when_last_axis_does_not_match() {
     .unwrap() else {
         panic!("two-series evaluation must be a tensor");
     };
-    assert_eq!(result.shape, vec![1, 2, 2]);
+    assert_eq!(result.shape(), &[1, 2, 2]);
     assert_eq!(result.materialize_f64(), vec![1.0, 9.0, 10.0, 90.0]);
 }
 
