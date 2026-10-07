@@ -1,36 +1,60 @@
 use super::super::*;
 use std::collections::{HashMap, HashSet};
 
+fn gradient_matmul_dimensions(shape: &[usize]) -> (usize, usize) {
+    match shape {
+        [] => (0, 0),
+        [cols] => (1, *cols),
+        [rows, cols, ..] => (*rows, *cols),
+    }
+}
+
 fn matmul_grad_lhs(grad: &Tensor, lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Tensor> {
     let grad_values = floating_tensor_values(grad, "dlgradient")?;
     let rhs_values = floating_tensor_values(rhs, "dlgradient")?;
+    let (lhs_rows, lhs_cols) = gradient_matmul_dimensions(lhs.shape());
+    let (rhs_rows, rhs_cols) = gradient_matmul_dimensions(rhs.shape());
+    let (grad_rows, _) = gradient_matmul_dimensions(grad.shape());
     let mut data = vec![0.0; tensor::tensor_element_len(lhs)];
-    for row in 0..lhs.rows {
-        for col in 0..lhs.cols {
+    for row in 0..lhs_rows {
+        for col in 0..lhs_cols {
             let mut acc = 0.0;
-            for k in 0..rhs.cols {
-                acc += grad_values[row + k * grad.rows] * rhs_values[col + k * rhs.rows];
+            for k in 0..rhs_cols {
+                acc += grad_values[row + k * grad_rows] * rhs_values[col + k * rhs_rows];
             }
-            data[row + col * lhs.rows] = acc;
+            data[row + col * lhs_rows] = acc;
         }
     }
-    floating_tensor_from_f64(data, lhs.shape.clone(), lhs.numeric_dtype(), "dlgradient")
+    floating_tensor_from_f64(
+        data,
+        lhs.shape().to_vec(),
+        lhs.numeric_dtype(),
+        "dlgradient",
+    )
 }
 
 fn matmul_grad_rhs(grad: &Tensor, lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Tensor> {
     let grad_values = floating_tensor_values(grad, "dlgradient")?;
     let lhs_values = floating_tensor_values(lhs, "dlgradient")?;
+    let (lhs_rows, _) = gradient_matmul_dimensions(lhs.shape());
+    let (rhs_rows, rhs_cols) = gradient_matmul_dimensions(rhs.shape());
+    let (grad_rows, _) = gradient_matmul_dimensions(grad.shape());
     let mut data = vec![0.0; tensor::tensor_element_len(rhs)];
-    for row in 0..rhs.rows {
-        for col in 0..rhs.cols {
+    for row in 0..rhs_rows {
+        for col in 0..rhs_cols {
             let mut acc = 0.0;
-            for k in 0..lhs.rows {
-                acc += lhs_values[k + row * lhs.rows] * grad_values[k + col * grad.rows];
+            for k in 0..lhs_rows {
+                acc += lhs_values[k + row * lhs_rows] * grad_values[k + col * grad_rows];
             }
-            data[row + col * rhs.rows] = acc;
+            data[row + col * rhs_rows] = acc;
         }
     }
-    floating_tensor_from_f64(data, rhs.shape.clone(), rhs.numeric_dtype(), "dlgradient")
+    floating_tensor_from_f64(
+        data,
+        rhs.shape().to_vec(),
+        rhs.numeric_dtype(),
+        "dlgradient",
+    )
 }
 
 pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>> {
@@ -103,7 +127,7 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
                     reduce_gradient(
                         &grad_values,
                         lhs_shape,
-                        &value.shape,
+                        value.shape(),
                         node_dtype(nodes, *lhs, value.numeric_dtype()),
                     )?,
                 );
@@ -113,7 +137,7 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
                     reduce_gradient(
                         &grad_values,
                         rhs_shape,
-                        &value.shape,
+                        value.shape(),
                         node_dtype(nodes, *rhs, value.numeric_dtype()),
                     )?,
                 );
@@ -130,13 +154,13 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
                     reduce_gradient(
                         &grad_values,
                         lhs_shape,
-                        &value.shape,
+                        value.shape(),
                         node_dtype(nodes, *lhs, value.numeric_dtype()),
                     )?,
                 );
                 let rhs_dtype = node_dtype(nodes, *rhs, value.numeric_dtype());
-                let rhs_grad = reduce_gradient(&grad_values, rhs_shape, &value.shape, rhs_dtype)?;
-                let rhs_shape = rhs_grad.shape.clone();
+                let rhs_grad = reduce_gradient(&grad_values, rhs_shape, value.shape(), rhs_dtype)?;
+                let rhs_shape = rhs_grad.shape().to_vec();
                 let rhs_grad = floating_tensor_from_f64(
                     floating_tensor_values(&rhs_grad, "dlgradient")?
                         .into_iter()
@@ -168,7 +192,7 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
                         reduce_gradient(
                             &data,
                             lhs_shape,
-                            &value.shape,
+                            value.shape(),
                             node_dtype(nodes, Some(parent), value.numeric_dtype()),
                         )?,
                     );
@@ -185,7 +209,7 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
                         reduce_gradient(
                             &data,
                             rhs_shape,
-                            &value.shape,
+                            value.shape(),
                             node_dtype(nodes, Some(parent), value.numeric_dtype()),
                         )?,
                     );
@@ -211,7 +235,7 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
                         reduce_gradient(
                             &data,
                             lhs_shape,
-                            &value.shape,
+                            value.shape(),
                             node_dtype(nodes, Some(parent), value.numeric_dtype()),
                         )?,
                     );
@@ -229,7 +253,7 @@ pub(super) fn backward(loss_node: usize) -> BuiltinResult<HashMap<usize, Tensor>
                         reduce_gradient(
                             &data,
                             rhs_shape,
-                            &value.shape,
+                            value.shape(),
                             node_dtype(nodes, Some(parent), value.numeric_dtype()),
                         )?,
                     );
@@ -334,4 +358,30 @@ fn accumulate_parent(grads: &mut HashMap<usize, Tensor>, id: Option<usize>, grad
             }
         })
         .or_insert(grad);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn matmul_backward_keeps_rank_zero_and_rank_one_cached_geometry() {
+        assert_eq!(gradient_matmul_dimensions(&[]), (0, 0));
+        assert_eq!(gradient_matmul_dimensions(&[2]), (1, 2));
+
+        let seed = Tensor::new(vec![3.0], vec![1, 1]).expect("gradient seed");
+        let rank_zero = Tensor::new(vec![7.0], vec![]).expect("rank-zero operand");
+        let rhs = Tensor::new(vec![10.0, 20.0], vec![2, 1]).expect("rhs");
+        let rank_zero_gradient =
+            matmul_grad_lhs(&seed, &rank_zero, &rhs).expect("rank-zero local backward kernel");
+        assert!(rank_zero_gradient.shape().is_empty());
+        assert_eq!(rank_zero_gradient.materialize_f64(), vec![0.0]);
+
+        let rank_one = Tensor::new(vec![1.0, 2.0], vec![2]).expect("rank-one operand");
+        let rank_one_gradient =
+            matmul_grad_lhs(&seed, &rank_one, &rhs).expect("rank-one local backward kernel");
+        assert_eq!(rank_one_gradient.shape(), [2]);
+        assert_eq!(rank_one_gradient.materialize_f64(), vec![30.0, 60.0]);
+    }
 }

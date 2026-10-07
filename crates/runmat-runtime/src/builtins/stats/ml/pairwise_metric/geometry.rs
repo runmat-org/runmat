@@ -1,15 +1,15 @@
 //! Scale and covariance geometry used by standardized and Mahalanobis metrics.
 
-use super::compute::{matrix_value, row_value};
+use super::compute::{matrix_value, observation_matrix_dimensions, row_value};
 use super::{distance_error, internal_error, MetricCaller, EPS};
 use crate::BuiltinResult;
 use runmat_value::Tensor;
 
 pub(super) fn variance_scale(name: MetricCaller, x: &Tensor) -> BuiltinResult<Vec<f64>> {
-    let cols = x.cols;
+    let (rows, cols) = observation_matrix_dimensions(x);
     let mut counts = vec![0usize; cols];
     let mut means = vec![0.0; cols];
-    for row in 0..x.rows {
+    for row in 0..rows {
         for col in 0..cols {
             let value = row_value(x, row, col);
             if !value.is_nan() {
@@ -28,7 +28,7 @@ pub(super) fn variance_scale(name: MetricCaller, x: &Tensor) -> BuiltinResult<Ve
         means[col] /= counts[col] as f64;
     }
     let mut vars = vec![0.0; cols];
-    for row in 0..x.rows {
+    for row in 0..rows {
         for col in 0..cols {
             let value = row_value(x, row, col);
             if !value.is_nan() {
@@ -47,8 +47,7 @@ pub(super) fn variance_scale(name: MetricCaller, x: &Tensor) -> BuiltinResult<Ve
 }
 
 pub(super) fn covariance_matrix(name: MetricCaller, x: &Tensor) -> BuiltinResult<Vec<f64>> {
-    let cols = x.cols;
-    let rows = x.rows;
+    let (rows, cols) = observation_matrix_dimensions(x);
     if rows < 2 {
         return Err(distance_error(
             name,
@@ -56,7 +55,7 @@ pub(super) fn covariance_matrix(name: MetricCaller, x: &Tensor) -> BuiltinResult
         ));
     }
     let mut means = vec![0.0; cols];
-    for row in 0..x.rows {
+    for row in 0..rows {
         for (col, mean) in means.iter_mut().enumerate().take(cols) {
             *mean += row_value(x, row, col);
         }
@@ -80,8 +79,8 @@ pub(super) fn covariance_matrix(name: MetricCaller, x: &Tensor) -> BuiltinResult
 }
 
 fn accumulate_covariance(out: &mut [f64], data: &Tensor, means: &[f64]) {
-    let cols = data.cols;
-    for row in 0..data.rows {
+    let (rows, cols) = observation_matrix_dimensions(data);
+    for row in 0..rows {
         for a in 0..cols {
             let av = row_value(data, row, a) - means[a];
             for b in 0..cols {
