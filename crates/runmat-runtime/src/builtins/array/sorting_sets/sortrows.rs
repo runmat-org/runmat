@@ -549,9 +549,9 @@ fn sortrows_host_with_args(
 
 fn value_shape(value: &Value) -> Vec<usize> {
     match value {
-        Value::Tensor(tensor) => tensor.shape.clone(),
+        Value::Tensor(tensor) => tensor.shape().to_vec(),
         Value::LogicalArray(logical) => logical.shape.clone(),
-        Value::ComplexTensor(tensor) => tensor.shape.clone(),
+        Value::ComplexTensor(tensor) => tensor.shape().to_vec(),
         Value::CharArray(array) => array.shape.clone(),
         Value::GpuTensor(handle) => handle.shape().to_vec(),
         _ => vec![1, 1],
@@ -569,7 +569,7 @@ fn sortrows_logical_with_args(
     let sorted = match evaluation.sorted {
         Value::Int(integer) => Value::Bool(integer.to_i64() != 0),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let storage = tensor
                 .into_numeric_storage()
                 .map_err(|error| sortrows_internal_error(format!("sortrows: {error}")))?
@@ -603,7 +603,7 @@ fn sortrows_real_tensor_with_args(
 ) -> crate::BuiltinResult<SortRowsEvaluation> {
     let rows = tensor.rows();
     let cols = tensor.cols();
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))?;
@@ -633,10 +633,9 @@ fn sortrows_complex_tensor_with_args(
     tensor: ComplexTensor,
     args: &SortRowsArgs,
 ) -> crate::BuiltinResult<SortRowsEvaluation> {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
-    let shape = tensor.shape.clone();
-    let storage = tensor.into_complex_storage();
+    let rows = tensor.rows();
+    let cols = tensor.cols();
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
 
     if rows <= 1 || cols == 0 || storage.is_empty() || args.columns.is_empty() {
         let indices = identity_indices(rows)?;
@@ -1363,7 +1362,7 @@ fn parse_column_vector(
             parse_single_column(column, num_cols).map(Some)
         }
         Value::Tensor(tensor) => {
-            if !is_vector(&tensor.shape) {
+            if !is_vector(tensor.shape()) {
                 return Err(sortrows_error_with(
                     &SORTROWS_ERROR_INVALID_ARGUMENT,
                     "sortrows: column specification must be a vector",
@@ -1578,7 +1577,7 @@ pub(crate) mod tests {
         let (sorted, indices) = eval.into_values();
         match sorted {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 2]);
+                assert_eq!(t.shape(), &[3, 2]);
                 assert_double_values(&t, &[1.0, 2.0, 3.0, 1.0, 5.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1830,7 +1829,7 @@ pub(crate) mod tests {
             assert!(runmat_accelerate_api::handle_is_logical(&output));
             let output_lease = output.allocation_lease().downgrade();
             let gathered = test_support::gather(Value::GpuTensor(output)).expect("logical payload");
-            assert_eq!(gathered.shape, vec![3, 2]);
+            assert_eq!(gathered.shape(), &[3, 2]);
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![0.0, 1.0, 1.0, 1.0, 0.0, 0.0]
@@ -2190,7 +2189,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![3.0, 1.0, 2.0, 4.0, 1.0, 5.0], vec![3, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: tensor.as_f64_slice().expect("double upload tensor"),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval = evaluate(Value::GpuTensor(handle), &[]).expect("evaluate");
@@ -2228,7 +2227,7 @@ pub(crate) mod tests {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: tensor.as_f64_slice().expect("double upload tensor"),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
         let handle = provider.upload(&view).expect("upload");
@@ -2243,9 +2242,9 @@ pub(crate) mod tests {
             other => panic!("expected tensor indices, got {other:?}"),
         };
 
-        assert_eq!(gpu_sorted.shape, cpu_sorted.shape);
+        assert_eq!(gpu_sorted.shape(), cpu_sorted.shape());
         assert_eq!(gpu_sorted.as_f64_slice(), cpu_sorted.as_f64_slice());
-        assert_eq!(gpu_indices.shape, cpu_indices.shape);
+        assert_eq!(gpu_indices.shape(), cpu_indices.shape());
         assert_eq!(gpu_indices.as_f64_slice(), cpu_indices.as_f64_slice());
 
         drop(handle);

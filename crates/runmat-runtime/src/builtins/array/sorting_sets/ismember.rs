@@ -495,8 +495,8 @@ fn ismember_numeric_tensors(
     if a_dtype != b_dtype && a_dtype != NumericDType::F64 && b_dtype != NumericDType::F64 {
         return Err(ismember_error(&ISMEMBER_ERROR_NUMERIC_CLASS_MISMATCH));
     }
-    let a_shape = a.shape.clone();
-    let b_shape = b.shape.clone();
+    let a_shape = a.shape().to_vec();
+    let b_shape = b.shape().to_vec();
     let a_storage = a.into_numeric_storage().map_err(ismember_internal_error)?;
     let b_storage = b.into_numeric_storage().map_err(ismember_internal_error)?;
     match (a_storage, b_storage) {
@@ -558,9 +558,9 @@ fn ismember_integer_elements(a: &Tensor, b: &Tensor) -> crate::BuiltinResult<IsM
             locations.push(0.0);
         }
     }
-    let logical = LogicalArray::new(mask, a.shape.clone())
+    let logical = LogicalArray::new(mask, a.shape().to_vec())
         .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
-    let locations = Tensor::new(locations, a.shape.clone())
+    let locations = Tensor::new(locations, a.shape().to_vec())
         .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
     Ok(IsMemberEvaluation::new(logical, locations))
 }
@@ -701,9 +701,9 @@ fn ismember_complex(
     b: ComplexTensor,
     rows: bool,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
-    let a_shape = a.shape.clone();
-    let b_shape = b.shape.clone();
-    match (a.into_complex_storage(), b.into_complex_storage()) {
+    let (a_storage, a_shape) = a.into_complex_storage_and_shape();
+    let (b_storage, b_shape) = b.into_complex_storage_and_shape();
+    match (a_storage, b_storage) {
         (ComplexStorage::F64(a), ComplexStorage::F64(b)) => {
             ismember_floating_complex(a, a_shape, b, b_shape, rows)
         }
@@ -1027,7 +1027,7 @@ fn ismember_string_rows(
 }
 
 fn tensor_rows_cols(t: &Tensor, name: &str) -> crate::BuiltinResult<(usize, usize)> {
-    shape_rows_cols(&t.shape, name)
+    shape_rows_cols(t.shape(), name)
 }
 
 fn shape_rows_cols(shape: &[usize], name: &str) -> crate::BuiltinResult<(usize, usize)> {
@@ -1155,6 +1155,42 @@ pub(crate) mod tests {
 
     fn builtin_sync(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         futures::executor::block_on(ismember_builtin(a, b, rest))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn public_invocation_preserves_rank_zero_rows_and_rank_one_element_geometry() {
+        let _outputs = crate::output_count::push_output_count(Some(2));
+
+        let rank_zero = Tensor::new(vec![7.0], vec![]).expect("rank-zero input");
+        let Value::OutputList(outputs) = builtin_sync(
+            Value::Tensor(rank_zero.clone()),
+            Value::Tensor(rank_zero),
+            vec![Value::from("rows")],
+        )
+        .expect("rank-zero rows membership") else {
+            panic!("expected two outputs");
+        };
+        assert_eq!(outputs, vec![Value::Bool(true), Value::Num(1.0)]);
+
+        let rank_one = Tensor::new(vec![1.0, 2.0], vec![2]).expect("rank-one input");
+        let set = Tensor::new(vec![2.0], vec![1]).expect("rank-one set");
+        let Value::OutputList(outputs) =
+            builtin_sync(Value::Tensor(rank_one), Value::Tensor(set), Vec::new())
+                .expect("rank-one element membership")
+        else {
+            panic!("expected two outputs");
+        };
+        let Value::LogicalArray(mask) = &outputs[0] else {
+            panic!("expected logical rank-one output");
+        };
+        assert_eq!(mask.shape, vec![2]);
+        assert_eq!(mask.data.as_slice(), &[0, 1]);
+        let Value::Tensor(locations) = &outputs[1] else {
+            panic!("expected rank-one location tensor");
+        };
+        assert_eq!(locations.shape(), &[2]);
+        assert_eq!(locations.materialize_f64(), vec![0.0, 1.0]);
     }
 
     #[test]
@@ -1506,7 +1542,7 @@ pub(crate) mod tests {
         let eval = ismember_numeric_rows(a, b).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 1, 1]);
         assert_eq!(eval.loc.materialize_f64(), vec![3.0, 1.0, 3.0]);
-        assert_eq!(eval.loc.shape, vec![3, 1]);
+        assert_eq!(eval.loc.shape(), &[3, 1]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1716,11 +1752,11 @@ pub(crate) mod tests {
             let set = Tensor::new(vec![4.0, 5.0], vec![2, 1]).unwrap();
             let view_a = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let view_b = runmat_accelerate_api::HostTensorView {
                 data: &set.materialize_f64(),
-                shape: &set.shape,
+                shape: set.shape(),
             };
             let handle_a = provider.upload(&view_a).expect("upload a");
             let handle_b = provider.upload(&view_b).expect("upload b");
@@ -1739,11 +1775,11 @@ pub(crate) mod tests {
             let bank = Tensor::new(vec![1.0, 5.0, 3.0, 2.0, 6.0, 4.0], vec![3, 2]).unwrap();
             let view_a = runmat_accelerate_api::HostTensorView {
                 data: &rows.materialize_f64(),
-                shape: &rows.shape,
+                shape: rows.shape(),
             };
             let view_b = runmat_accelerate_api::HostTensorView {
                 data: &bank.materialize_f64(),
-                shape: &bank.shape,
+                shape: bank.shape(),
             };
             let handle_a = provider.upload(&view_a).expect("upload a");
             let handle_b = provider.upload(&view_b).expect("upload b");
@@ -1776,11 +1812,11 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view_a = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let view_b = HostTensorView {
             data: &set.materialize_f64(),
-            shape: &set.shape,
+            shape: set.shape(),
         };
         let handle_a = provider.upload(&view_a).expect("upload a");
         let handle_b = provider.upload(&view_b).expect("upload b");
@@ -1803,11 +1839,11 @@ pub(crate) mod tests {
             ismember_numeric_from_tensors(matrix.clone(), bank.clone(), true).expect("cpu rows");
         let view_matrix = HostTensorView {
             data: &matrix.materialize_f64(),
-            shape: &matrix.shape,
+            shape: matrix.shape(),
         };
         let view_bank = HostTensorView {
             data: &bank.materialize_f64(),
-            shape: &bank.shape,
+            shape: bank.shape(),
         };
         let handle_matrix = provider.upload(&view_matrix).expect("upload matrix");
         let handle_bank = provider.upload(&view_bank).expect("upload bank");
