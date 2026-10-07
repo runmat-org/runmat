@@ -2,13 +2,13 @@ use super::*;
 pub(super) fn tensor_matrix_storage(value: Value) -> BuiltinResult<(NumericStorage, usize, usize)> {
     match value {
         Value::Tensor(t) => {
-            if t.shape.len() > 2 {
+            if t.shape().len() > 2 {
                 return Err(pagefun_error_with_detail(
                     &PAGEFUN_ERROR_RESULT_TYPE,
                     "operator returned an array with more than two dimensions",
                 ));
             }
-            let canonical = canonical_matrix_shape(&t.shape);
+            let canonical = canonical_matrix_shape(t.shape());
             let rows = canonical[0];
             let cols = canonical[1];
             let data = t
@@ -95,13 +95,13 @@ pub(super) fn extend_same_class(
 pub(super) fn complex_matrix_data(value: Value) -> BuiltinResult<ComplexMatrixData> {
     match value {
         Value::ComplexTensor(t) => {
-            if t.shape.len() > 2 {
+            if t.shape().len() > 2 {
                 return Err(pagefun_error_with_detail(
                     &PAGEFUN_ERROR_RESULT_TYPE,
                     "operator returned an array with more than two dimensions",
                 ));
             }
-            let canonical = canonical_matrix_shape(&t.shape);
+            let canonical = canonical_matrix_shape(t.shape());
             let rows = canonical[0];
             let cols = canonical[1];
             if rows * cols != t.materialize_f64().len() {

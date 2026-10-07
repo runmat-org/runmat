@@ -45,8 +45,8 @@ pub(super) fn validate_operand_metadata(operands: &[Value]) -> BuiltinResult<()>
         }
         let shape = match value {
             Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(..) => vec![1, 1],
-            Value::Tensor(t) => canonical_matrix_shape(&t.shape),
-            Value::ComplexTensor(t) => canonical_matrix_shape(&t.shape),
+            Value::Tensor(t) => canonical_matrix_shape(t.shape()),
+            Value::ComplexTensor(t) => canonical_matrix_shape(t.shape()),
             Value::LogicalArray(t) => canonical_matrix_shape(&t.shape),
             Value::GpuTensor(handle) => canonical_matrix_shape(handle.shape()),
             _ => return Err(pagefun_error(&PAGEFUN_ERROR_INVALID_INPUT)),

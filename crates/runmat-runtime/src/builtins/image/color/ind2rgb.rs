@@ -84,7 +84,7 @@ async fn ind2rgb_builtin(
         .collect();
     let selected = if admitted && !resident_sources.is_empty() {
         let indexed_shape = match &indexed {
-            Value::Tensor(tensor) => tensor.shape.clone(),
+            Value::Tensor(tensor) => tensor.shape().to_vec(),
             Value::GpuTensor(handle) => handle.shape().to_vec(),
             Value::Num(_) | Value::Int(_) => vec![1, 1],
             _ => unreachable!("admitted indexed input"),
@@ -153,7 +153,7 @@ fn admit_inputs(indexed: &Value, map: &Value) -> BuiltinResult<bool> {
             ));
         }
         Value::Tensor(tensor) => {
-            if tensor.shape.len() != 2 {
+            if tensor.shape().len() != 2 {
                 return Err(ind2rgb_error_with_message(
                     "ind2rgb: indexed image must be an MxN matrix",
                     &IND2RGB_ERROR_INVALID_INPUT,
@@ -336,7 +336,7 @@ async fn ind2rgb_execute(
     };
     resident_guard.restore();
     let indexed_dtype = indexed.numeric_dtype();
-    if indexed.shape.len() != 2 {
+    if indexed.shape().len() != 2 {
         return Err(ind2rgb_error_with_message(
             "ind2rgb: indexed image must be an MxN matrix",
             &IND2RGB_ERROR_INVALID_INPUT,
@@ -381,7 +381,7 @@ async fn ind2rgb_execute(
     };
 
     let pixels = indexed.len();
-    let mut shape = indexed.shape.clone();
+    let mut shape = indexed.shape().to_vec();
     shape.push(3);
     let indexed_values = common::tensor_values_f64(&indexed);
     let map_values = common::tensor_values_f64(&map);

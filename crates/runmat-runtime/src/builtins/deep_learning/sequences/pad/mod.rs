@@ -247,16 +247,16 @@ pub(in crate::builtins::deep_learning) async fn padsequences_builtin(
         });
     };
     for seq in &padded[1..] {
-        if !non_padding_dims_match(&first.0.shape, &seq.0.shape, padding_dim) {
+        if !non_padding_dims_match(first.0.shape(), seq.0.shape(), padding_dim) {
             return Err(deep_learning_error(
                 "padsequences",
                 "padsequences: non-padding dimensions must match when UniformOutput is true",
             ));
         }
     }
-    let mut output_shape = first.0.shape.clone();
+    let mut output_shape = first.0.shape().to_vec();
     output_shape.push(padded.len());
-    let block_len = checked_numel(&first.0.shape, "padsequences")?;
+    let block_len = checked_numel(first.0.shape(), "padsequences")?;
     let total = block_len.checked_mul(padded.len()).ok_or_else(|| {
         deep_learning_error("padsequences", "padsequences: output size overflows usize")
     })?;

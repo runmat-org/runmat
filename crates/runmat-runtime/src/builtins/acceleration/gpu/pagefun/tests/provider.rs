@@ -9,11 +9,11 @@ fn pagefun_gpu_roundtrip_mtimes() {
 
         let view_lhs = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let view_rhs = HostTensorView {
             data: &identity.materialize_f64(),
-            shape: &identity.shape,
+            shape: identity.shape(),
         };
         let lhs = provider.upload(&view_lhs).expect("upload lhs");
         let rhs = provider.upload(&view_rhs).expect("upload rhs");
@@ -26,7 +26,7 @@ fn pagefun_gpu_roundtrip_mtimes() {
         let result = block_on(result).expect("pagefun");
 
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 2, 2]);
+        assert_eq!(gathered.shape(), &[2, 2, 2]);
         assert_eq!(
             gathered.materialize_f64(),
             vec![1.0, 3.0, 2.0, 4.0, 5.0, 7.0, 6.0, 8.0],
@@ -112,11 +112,11 @@ fn pagefun_wgpu_mtimes_batches() {
 
     let view_lhs = HostTensorView {
         data: &lhs.materialize_f64(),
-        shape: &lhs.shape,
+        shape: lhs.shape(),
     };
     let view_rhs = HostTensorView {
         data: &rhs.materialize_f64(),
-        shape: &rhs.shape,
+        shape: rhs.shape(),
     };
 
     let lhs_handle = provider.upload(&view_lhs).expect("upload lhs");
@@ -150,12 +150,12 @@ fn pagefun_wgpu_mtimes_batches() {
         other => panic!("expected tensor result, got {other:?}"),
     };
 
-    assert_eq!(provider_tensor.shape, expected_tensor.shape);
+    assert_eq!(provider_tensor.shape(), expected_tensor.shape());
     assert_eq!(
         provider_tensor.materialize_f64(),
         expected_tensor.materialize_f64()
     );
-    assert_eq!(builtin_tensor.shape, expected_tensor.shape);
+    assert_eq!(builtin_tensor.shape(), expected_tensor.shape());
     assert_eq!(
         builtin_tensor.materialize_f64(),
         expected_tensor.materialize_f64()

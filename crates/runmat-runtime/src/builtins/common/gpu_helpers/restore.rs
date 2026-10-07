@@ -152,7 +152,7 @@ pub fn restore_class_preserving_value_with_operands(
             };
             let transfer = HostNumericTensorView {
                 data: tensor_numeric_view(tensor),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
                 storage: GpuTensorStorage::Real,
             };
             let output = match runmat_accelerate_api::upload_numeric_protecting(
@@ -177,7 +177,7 @@ pub fn restore_class_preserving_value_with_operands(
             };
             (
                 output,
-                tensor.shape.clone(),
+                tensor.shape(),
                 GpuTensorStorage::Real,
                 expected_precision,
                 expected_integer,
@@ -205,7 +205,7 @@ pub fn restore_class_preserving_value_with_operands(
             let integer = runmat_accelerate_api::handle_integer_type(&output);
             (
                 output,
-                array.shape.clone(),
+                array.shape.as_slice(),
                 GpuTensorStorage::Real,
                 precision,
                 integer,
@@ -230,7 +230,7 @@ pub fn restore_class_preserving_value_with_operands(
             })?;
             let transfer = HostNumericTensorView {
                 data: data.as_view(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
                 storage: GpuTensorStorage::ComplexInterleaved,
             };
             let output = match runmat_accelerate_api::upload_numeric_protecting(
@@ -255,7 +255,7 @@ pub fn restore_class_preserving_value_with_operands(
             };
             (
                 output,
-                tensor.shape.clone(),
+                tensor.shape(),
                 GpuTensorStorage::ComplexInterleaved,
                 expected_precision,
                 expected_integer,

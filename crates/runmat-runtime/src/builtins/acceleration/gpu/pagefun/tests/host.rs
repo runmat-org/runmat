@@ -12,11 +12,39 @@ fn pagefun_mtimes_single_page() {
     let result = block_on(result).expect("pagefun");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![19.0, 43.0, 22.0, 50.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
     }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn pagefun_preserves_rank_zero_and_rank_one_canonical_matrix_shapes() {
+    let scalar = block_on(pagefun_impl(
+        Value::FunctionHandle("mtimes".into()),
+        Value::Tensor(Tensor::new(vec![2.0], Vec::new()).unwrap()),
+        vec![Value::Num(3.0)],
+    ))
+    .expect("rank-zero matrix product");
+    let Value::Tensor(scalar) = scalar else {
+        panic!("expected real tensor result");
+    };
+    assert_eq!(scalar.shape(), &[1, 1]);
+    assert_eq!(scalar.materialize_f64(), vec![6.0]);
+
+    let vector = block_on(pagefun_impl(
+        Value::FunctionHandle("mtimes".into()),
+        Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![2]).unwrap()),
+        vec![Value::Num(2.0)],
+    ))
+    .expect("rank-one complex matrix product");
+    let Value::ComplexTensor(vector) = vector else {
+        panic!("expected complex tensor result");
+    };
+    assert_eq!(vector.shape(), &[1, 2]);
+    assert_eq!(vector.materialize_f64(), vec![(2.0, 4.0), (6.0, 8.0)]);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -32,7 +60,7 @@ fn pagefun_mtimes_multiple_pages() {
     let result = block_on(result).expect("pagefun");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2, 2]);
+            assert_eq!(t.shape(), &[2, 2, 2]);
             assert_eq!(
                 t.materialize_f64(),
                 vec![19.0, 43.0, 22.0, 50.0, 2.0, 1.0, 4.0, 5.0]
@@ -55,7 +83,7 @@ fn pagefun_mtimes_broadcast_rhs() {
     let result = block_on(result).expect("pagefun");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2, 2]);
+            assert_eq!(t.shape(), &[2, 2, 2]);
             assert_eq!(
                 t.materialize_f64(),
                 vec![1.0, 3.0, 2.0, 4.0, 5.0, 7.0, 6.0, 8.0],
@@ -79,7 +107,7 @@ fn pagefun_mtimes_empty_pages() {
     let result = block_on(result).expect("pagefun");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2, 0]);
+            assert_eq!(t.shape(), &[2, 2, 0]);
             assert!(t.materialize_f64().is_empty());
         }
         other => panic!("expected tensor result, got {other:?}"),

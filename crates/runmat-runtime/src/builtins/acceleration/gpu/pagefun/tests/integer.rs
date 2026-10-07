@@ -18,6 +18,7 @@ fn pagefun_preserves_wide_integer_pages_without_float_materialization() {
     let Value::Tensor(result) = result else {
         panic!("expected tensor result");
     };
+    assert_eq!(result.shape(), &[1, 2]);
     assert_eq!(
         result.integer_storage(),
         Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))

@@ -217,7 +217,7 @@ impl SequenceInput {
                         ));
                     }
                 }
-                (t.clone(), t.shape.clone())
+                (t.clone(), t.shape().to_vec())
             }
             other => {
                 return Err(deep_learning_error(

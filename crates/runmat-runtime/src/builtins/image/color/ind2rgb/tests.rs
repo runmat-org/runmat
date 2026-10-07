@@ -20,12 +20,28 @@ fn values(tensor: &Tensor) -> Vec<f64> {
     tensor.materialize_f64()
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn indexed_image_requires_matrix_rank_even_for_singleton_payloads() {
+    for shape in [Vec::new(), vec![1], vec![2]] {
+        let len = shape.iter().product();
+        let indexed = Tensor::new(vec![1.0; len], shape).unwrap();
+        let map = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap();
+        let error = call(indexed, map).expect_err("indexed tensor must be a matrix");
+        assert_eq!(error.identifier(), IND2RGB_ERROR_INVALID_INPUT.identifier);
+        assert_eq!(
+            error.message(),
+            "ind2rgb: indexed image must be an MxN matrix"
+        );
+    }
+}
+
 #[test]
 fn converts_one_based_double_indices() {
     let indexed = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
     let map = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap();
     let out = call(indexed, map).unwrap();
-    assert_eq!(out.shape, vec![1, 2, 3]);
+    assert_eq!(out.shape(), &[1, 2, 3]);
     assert_eq!(out.numeric_dtype(), NumericDType::F64);
     assert_eq!(values(&out), vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
 }
@@ -43,7 +59,7 @@ fn empty_index_image_retains_empty_rgb_geometry() {
     let indexed = Tensor::new_integer(IntegerStorage::U8(vec![]), vec![0, 2]).unwrap();
     let map = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap();
     let out = call(indexed, map).unwrap();
-    assert_eq!(out.shape, vec![0, 2, 3]);
+    assert_eq!(out.shape(), &[0, 2, 3]);
     assert!(out.is_empty());
 }
 
@@ -52,7 +68,7 @@ fn accepts_single_indices_and_returns_double() {
     let indexed = Tensor::new_with_dtype(vec![1.0, 2.0], vec![2, 1], NumericDType::F32).unwrap();
     let map = Tensor::new(vec![1.0, 0.0, 0.0, 0.5, 0.0, 1.0], vec![2, 3]).unwrap();
     let out = call(indexed, map).unwrap();
-    assert_eq!(out.shape, vec![2, 1, 3]);
+    assert_eq!(out.shape(), &[2, 1, 3]);
     assert_eq!(out.numeric_dtype(), NumericDType::F64);
     assert_eq!(values(&out), vec![1.0, 0.0, 0.0, 0.5, 0.0, 1.0]);
 }
@@ -64,7 +80,7 @@ fn ind2rgb_reads_typed_integer_indices_exactly() {
 
     let out = call(indexed, map).unwrap();
 
-    assert_eq!(out.shape, vec![2, 1, 3]);
+    assert_eq!(out.shape(), &[2, 1, 3]);
     assert_eq!(out.numeric_dtype(), NumericDType::F64);
     assert_eq!(values(&out), vec![1.0, 0.0, 0.0, 0.5, 0.0, 1.0]);
 }

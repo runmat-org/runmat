@@ -44,7 +44,7 @@ impl PageInput {
     }
 
     pub(super) fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
-        let shape = canonical_matrix_shape(&tensor.shape);
+        let shape = canonical_matrix_shape(tensor.shape());
         let data = tensor
             .into_numeric_storage()
             .map_err(|error| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, error))?;
@@ -70,7 +70,7 @@ impl PageInput {
     }
 
     pub(super) fn from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Self> {
-        let shape = canonical_matrix_shape(&tensor.shape);
+        let shape = canonical_matrix_shape(tensor.shape());
         if tensor.len() != checked_volume(&shape)? {
             return Err(pagefun_error_with_detail(
                 &PAGEFUN_ERROR_INTERNAL,

@@ -8,22 +8,23 @@ use std::sync::{
 };
 
 #[derive(Clone, Copy)]
-enum NumericFailure {
+enum NumericUpload {
+    Success,
     Unsupported,
     Execution,
 }
 struct Provider {
     owner: TestAllocationOwner,
-    failure: NumericFailure,
+    numeric_upload: NumericUpload,
     logical_uploads: AtomicUsize,
     unavailable_upload: AtomicBool,
     output_probe: Mutex<Option<runmat_accelerate_api::test_support::RetirementProbe>>,
 }
 impl Provider {
-    fn new(failure: NumericFailure) -> &'static Self {
+    fn new(numeric_upload: NumericUpload) -> &'static Self {
         Box::leak(Box::new(Self {
             owner: TestAllocationOwner::new(),
-            failure,
+            numeric_upload,
             logical_uploads: AtomicUsize::new(0),
             unavailable_upload: AtomicBool::new(false),
             output_probe: Mutex::new(None),
@@ -44,21 +45,26 @@ impl AccelProvider for Provider {
         Box::pin(async { panic!("restoration must not download") })
     }
     fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
-        if self.unavailable_upload.load(Ordering::SeqCst) {
+        if self.unavailable_upload.load(Ordering::SeqCst)
+            || matches!(self.numeric_upload, NumericUpload::Success)
+        {
             let allocation = self.owner.allocate_zeroed(
                 host.shape.to_vec(),
                 host.data.element_type(),
                 host.storage,
             )?;
-            allocation.probe.mark_unavailable();
+            if self.unavailable_upload.load(Ordering::SeqCst) {
+                allocation.probe.mark_unavailable();
+            }
             *self.output_probe.lock().unwrap() = Some(allocation.probe);
             return Ok(allocation.handle);
         }
-        Err(match self.failure {
-            NumericFailure::Unsupported => {
+        Err(match self.numeric_upload {
+            NumericUpload::Success => unreachable!("successful upload returned above"),
+            NumericUpload::Unsupported => {
                 runmat_accelerate_api::unsupported_provider_operation("fixture unsupported")
             }
-            NumericFailure::Execution => anyhow::anyhow!("fixture execution failed"),
+            NumericUpload::Execution => anyhow::anyhow!("fixture execution failed"),
         })
     }
     fn upload_logical_raw(&self, view: &HostLogicalTensorView) -> anyhow::Result<GpuTensorHandle> {
@@ -71,9 +77,59 @@ impl AccelProvider for Provider {
 }
 
 #[test]
+fn numeric_restoration_preserves_rank_owner_class_and_allocation_independence() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    let provider = Provider::new(NumericUpload::Success);
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let source = provider
+        .owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+
+    for (value, expected_shape, expected_storage) in [
+        (
+            Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap()),
+            Vec::new(),
+            GpuTensorStorage::Real,
+        ),
+        (
+            Value::ComplexTensor(
+                ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![2]).unwrap(),
+            ),
+            vec![2],
+            GpuTensorStorage::ComplexInterleaved,
+        ),
+    ] {
+        let Value::GpuTensor(output) =
+            restore_class_preserving_value(&source.handle, value, "restore-test").unwrap()
+        else {
+            panic!("successful restoration must remain resident");
+        };
+        assert_eq!(output.shape(), expected_shape.as_slice());
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&output),
+            expected_storage
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&output),
+            Some(ProviderPrecision::F64)
+        );
+        assert_eq!(output.device_id(), source.handle.device_id());
+        assert!(!output.shares_allocation_with(&source.handle));
+        let output_lease = output.allocation_lease().downgrade();
+        drop(output);
+        assert!(output_lease.acquire().is_none());
+        assert_eq!(source.probe.retirements(), 0);
+    }
+
+    drop(source.handle);
+    assert_eq!(source.probe.retirements(), 1);
+}
+
+#[test]
 fn unavailable_uploaded_result_is_terminal_and_retains_acquisition_cause() {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
-    let provider = Provider::new(NumericFailure::Execution);
+    let provider = Provider::new(NumericUpload::Execution);
     provider.unavailable_upload.store(true, Ordering::SeqCst);
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let source = provider
@@ -112,8 +168,8 @@ fn unavailable_uploaded_result_is_terminal_and_retains_acquisition_cause() {
 #[test]
 fn automatic_restoration_falls_back_only_for_typed_unsupported() {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
-    for failure in [NumericFailure::Unsupported, NumericFailure::Execution] {
-        let provider = Provider::new(failure);
+    for behavior in [NumericUpload::Unsupported, NumericUpload::Execution] {
+        let provider = Provider::new(behavior);
         let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
         let source = provider
             .owner
@@ -121,9 +177,10 @@ fn automatic_restoration_falls_back_only_for_typed_unsupported() {
             .unwrap();
         let value = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
         let result = restore_class_preserving_value(&source.handle, value.clone(), "restore-test");
-        match provider.failure {
-            NumericFailure::Unsupported => assert_eq!(result.unwrap(), value),
-            NumericFailure::Execution => {
+        match provider.numeric_upload {
+            NumericUpload::Success => unreachable!("loop covers failure behaviors only"),
+            NumericUpload::Unsupported => assert_eq!(result.unwrap(), value),
+            NumericUpload::Execution => {
                 let error = result.unwrap_err();
                 assert!(error.message().contains("fixture execution failed"));
                 assert!(std::error::Error::source(&error).is_some());
@@ -138,7 +195,7 @@ fn automatic_restoration_falls_back_only_for_typed_unsupported() {
 #[test]
 fn logical_restoration_uses_owner_admitted_byte_upload_not_numeric_relabel() {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
-    let provider = Provider::new(NumericFailure::Execution);
+    let provider = Provider::new(NumericUpload::Execution);
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let source = provider
         .owner
