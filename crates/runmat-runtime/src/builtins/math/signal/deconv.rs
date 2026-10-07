@@ -341,9 +341,11 @@ async fn evaluate_requested(
 
 fn deconv_operand_len(value: &Value) -> Option<usize> {
     match value {
-        Value::Tensor(tensor) => super::common::convolution::checked_vector_elements(&tensor.shape),
+        Value::Tensor(tensor) => {
+            super::common::convolution::checked_vector_elements(tensor.shape())
+        }
         Value::ComplexTensor(tensor) => {
-            super::common::convolution::checked_vector_elements(&tensor.shape)
+            super::common::convolution::checked_vector_elements(tensor.shape())
         }
         Value::LogicalArray(array) => {
             super::common::convolution::checked_vector_elements(&array.shape)
@@ -468,8 +470,8 @@ fn admit_deconv_operand(value: &Value) -> BuiltinResult<()> {
         })?;
     }
     let shape = match value {
-        Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
-        Value::ComplexTensor(tensor) => Some(tensor.shape.as_slice()),
+        Value::Tensor(tensor) => Some(tensor.shape()),
+        Value::ComplexTensor(tensor) => Some(tensor.shape()),
         Value::LogicalArray(array) => Some(array.shape.as_slice()),
         Value::GpuTensor(handle) => Some(handle.shape()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => None,
@@ -587,9 +589,12 @@ async fn convert_host_value(
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<PolyInput> {
     let hint = match &value {
-        Value::Tensor(tensor) => classify_orientation(tensor.rows, tensor.cols, tensor.len()),
+        Value::Tensor(tensor) => {
+            let (rows, cols) = dense_deconv_dimensions(tensor.shape());
+            classify_orientation(rows, cols, tensor.len())
+        }
         Value::ComplexTensor(tensor) => {
-            classify_orientation(tensor.rows, tensor.cols, tensor.len())
+            classify_orientation(tensor.rows(), tensor.cols(), tensor.len())
         }
         Value::LogicalArray(array) => classify_orientation(
             array.shape.first().copied().unwrap_or(0),
@@ -617,6 +622,17 @@ async fn convert_host_value(
     )
     .await?;
     Ok(PolyInput { data, hint })
+}
+
+/// Preserve deconv's coefficient-orientation policy for dense tensors: an
+/// explicit rank-one shape is a row vector, while rank zero has no matrix
+/// orientation and is rejected by the vector admission below.
+fn dense_deconv_dimensions(shape: &[usize]) -> (usize, usize) {
+    match shape {
+        [] => (0, 0),
+        [cols] => (1, *cols),
+        [rows, cols, ..] => (*rows, *cols),
+    }
 }
 
 fn ensure_vector(hint: OrientationHint) -> BuiltinResult<()> {
@@ -985,7 +1001,7 @@ pub(crate) mod tests {
             deconv_builtin(Value::Tensor(numerator), Value::Tensor(denominator)).expect("deconv");
         match value {
             Value::Tensor(q) => {
-                assert_eq!(q.shape, vec![1, 3]);
+                assert_eq!(q.shape(), [1, 3]);
                 assert_eq!(q.materialize_f64(), vec![1.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor quotient, got {other:?}"),
@@ -1054,7 +1070,7 @@ pub(crate) mod tests {
         match eval.remainder() {
             Value::Tensor(output) => {
                 assert_eq!(output.numeric_dtype(), NumericDType::F32);
-                assert_eq!(output.shape, vec![1, 3]);
+                assert_eq!(output.shape(), [1, 3]);
             }
             other => panic!("expected single remainder, got {other:?}"),
         }
@@ -1217,6 +1233,25 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn deconv_preserves_dense_rank_zero_and_rank_one_orientation_policy() {
+        let scalar = Tensor::new(vec![2.0], Vec::new()).expect("rank-zero tensor");
+        let error = evaluate(Value::Tensor(scalar), Value::Num(1.0))
+            .expect_err("rank-zero dense coefficients have no vector orientation");
+        assert_eq!(error.identifier(), DECONV_ERROR_VECTOR_REQUIRED.identifier);
+
+        let row = Tensor::new(vec![2.0, 4.0], vec![2]).expect("rank-one tensor");
+        let quotient = evaluate(Value::Tensor(row), Value::Num(1.0))
+            .expect("rank-one dense coefficients remain a row vector")
+            .quotient();
+        let Value::Tensor(quotient) = quotient else {
+            panic!("expected dense quotient")
+        };
+        assert_eq!(quotient.shape(), [1, 2]);
+        assert_eq!(quotient.materialize_f64(), vec![2.0, 4.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deconv_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1224,11 +1259,11 @@ pub(crate) mod tests {
             let denominator = Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap();
             let n_view = HostTensorView {
                 data: &numerator.materialize_f64(),
-                shape: &numerator.shape,
+                shape: numerator.shape(),
             };
             let d_view = HostTensorView {
                 data: &denominator.materialize_f64(),
-                shape: &denominator.shape,
+                shape: denominator.shape(),
             };
             let n_handle = provider.upload(&n_view).expect("upload numerator");
             let d_handle = provider.upload(&d_view).expect("upload denominator");
@@ -1429,13 +1464,13 @@ pub(crate) mod tests {
         let num_handle = provider
             .upload(&HostTensorView {
                 data: &numerator.materialize_f64(),
-                shape: &numerator.shape,
+                shape: numerator.shape(),
             })
             .expect("upload numerator");
         let den_handle = provider
             .upload(&HostTensorView {
                 data: &denominator.materialize_f64(),
-                shape: &denominator.shape,
+                shape: denominator.shape(),
             })
             .expect("upload denominator");
 

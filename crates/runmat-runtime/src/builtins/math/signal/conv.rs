@@ -179,8 +179,8 @@ async fn conv_builtin(
 fn host_output_shape(a: &Value, b: &Value, mode: ConvMode) -> Option<Vec<usize>> {
     fn shape(value: &Value) -> Option<&[usize]> {
         match value {
-            Value::Tensor(tensor) => Some(&tensor.shape),
-            Value::ComplexTensor(tensor) => Some(&tensor.shape),
+            Value::Tensor(tensor) => Some(tensor.shape()),
+            Value::ComplexTensor(tensor) => Some(tensor.shape()),
             Value::LogicalArray(array) => Some(&array.shape),
             Value::GpuTensor(handle) => Some(handle.shape()),
             Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Some(&[1, 1]),
@@ -225,8 +225,8 @@ fn host_scratch_bound(a: &Value, b: &Value) -> runmat_execution::ResourceByteBou
     let bound = (|| {
         let len = |value: &Value| -> Option<u64> {
             let shape = match value {
-                Value::Tensor(tensor) => &tensor.shape,
-                Value::ComplexTensor(tensor) => &tensor.shape,
+                Value::Tensor(tensor) => tensor.shape(),
+                Value::ComplexTensor(tensor) => tensor.shape(),
                 Value::LogicalArray(array) => &array.shape,
                 Value::GpuTensor(handle) => {
                     return u64::try_from(super::common::convolution::checked_vector_elements(
@@ -277,8 +277,8 @@ fn admit_conv_operand(value: &Value) -> BuiltinResult<()> {
         })?;
     }
     let shape = match value {
-        Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
-        Value::ComplexTensor(tensor) => Some(tensor.shape.as_slice()),
+        Value::Tensor(tensor) => Some(tensor.shape()),
+        Value::ComplexTensor(tensor) => Some(tensor.shape()),
         Value::LogicalArray(array) => Some(array.shape.as_slice()),
         Value::GpuTensor(handle) => Some(handle.shape()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => None,
@@ -589,13 +589,13 @@ async fn normalize_host_input(
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<ConvInput> {
     let (len, hint) = match &value {
-        Value::Tensor(tensor) => (
-            tensor.len(),
-            classify_orientation(tensor.rows, tensor.cols, tensor.len()),
-        ),
+        Value::Tensor(tensor) => {
+            let (rows, cols) = shape_rows_cols(tensor.shape());
+            (tensor.len(), classify_orientation(rows, cols, tensor.len()))
+        }
         Value::ComplexTensor(tensor) => (
             tensor.len(),
-            classify_orientation(tensor.rows, tensor.cols, tensor.len()),
+            classify_orientation(tensor.rows(), tensor.cols(), tensor.len()),
         ),
         Value::LogicalArray(array) => {
             let (rows, cols) = shape_rows_cols(&array.shape);
@@ -907,7 +907,7 @@ pub(crate) mod tests {
         let result = conv_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).expect("conv");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), [1, 5]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 6.0, 5.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -924,7 +924,7 @@ pub(crate) mod tests {
 
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), [1, 5]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 6.0, 5.0, 3.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -968,13 +968,40 @@ pub(crate) mod tests {
         else {
             panic!("tensor")
         };
-        assert_eq!(mixed.shape, vec![1, 3]);
+        assert_eq!(mixed.shape(), [1, 3]);
         let Value::Tensor(columns) =
             conv_builtin(Value::Tensor(col.clone()), Value::Tensor(col), Vec::new()).unwrap()
         else {
             panic!("tensor")
         };
-        assert_eq!(columns.shape, vec![3, 1]);
+        assert_eq!(columns.shape(), [3, 1]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn conv_preserves_rank_zero_and_rank_one_dense_orientation() {
+        let kernel = || Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap());
+        let Value::Tensor(empty) = conv_builtin(
+            Value::Tensor(Tensor::new(vec![2.0], vec![]).unwrap()),
+            kernel(),
+            vec![Value::from("valid")],
+        )
+        .expect("rank-zero input is admitted") else {
+            panic!("expected empty tensor");
+        };
+        assert_eq!(empty.shape(), [0, 1]);
+        assert!(empty.materialize_f64().is_empty());
+
+        let Value::Tensor(row) = conv_builtin(
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap()),
+            kernel(),
+            vec![Value::from("same")],
+        )
+        .expect("rank-one input is admitted") else {
+            panic!("expected row tensor");
+        };
+        assert_eq!(row.shape(), [1, 2]);
+        assert_eq!(row.materialize_f64(), vec![3.0, 2.0]);
     }
 
     #[test]
@@ -1219,7 +1246,7 @@ pub(crate) mod tests {
         .expect("conv");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), [1, 5]);
                 assert_eq!(t.materialize_f64(), vec![4.0, 2.0, 2.0, 2.0, -6.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1233,7 +1260,7 @@ pub(crate) mod tests {
         .expect("conv");
         match result_column {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![5, 1]);
+                assert_eq!(t.shape(), [5, 1]);
                 assert_eq!(t.materialize_f64(), vec![4.0, 2.0, 2.0, 2.0, -6.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1253,7 +1280,7 @@ pub(crate) mod tests {
         let Value::Tensor(result) = result else {
             panic!("expected tensor result");
         };
-        assert_eq!(result.shape, vec![1, 5]);
+        assert_eq!(result.shape(), [1, 5]);
         assert_eq!(result.materialize_f64(), vec![10.0, 20.0, 30.0, 34.0, 31.0]);
     }
 
@@ -1299,7 +1326,7 @@ pub(crate) mod tests {
         .unwrap();
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 0]);
+                assert_eq!(t.shape(), [1, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1318,7 +1345,7 @@ pub(crate) mod tests {
         .unwrap() else {
             panic!("tensor")
         };
-        assert_eq!(output.shape, vec![3, 1]);
+        assert_eq!(output.shape(), [3, 1]);
         assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
         assert_eq!(output.materialize_f64(), vec![0.0, 0.0, 0.0]);
     }
@@ -1346,7 +1373,7 @@ pub(crate) mod tests {
         let result = conv_builtin(scalar, Value::Tensor(vec), Vec::new()).expect("conv");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), [1, 3]);
                 assert_eq!(t.materialize_f64(), vec![8.0, 10.0, 12.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1362,7 +1389,7 @@ pub(crate) mod tests {
             conv_builtin(Value::Tensor(empty_row), Value::Tensor(kernel), Vec::new()).unwrap();
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 0]);
+                assert_eq!(t.shape(), [1, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
@@ -1378,7 +1405,7 @@ pub(crate) mod tests {
             conv_builtin(Value::Tensor(empty_col), Value::Tensor(kernel), Vec::new()).unwrap();
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 1]);
+                assert_eq!(t.shape(), [0, 1]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
@@ -1398,7 +1425,7 @@ pub(crate) mod tests {
         .expect("conv");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), [1, 4]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 1.0, 1.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1410,7 +1437,7 @@ pub(crate) mod tests {
             .expect("conv");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), [1, 4]);
                 assert_eq!(t.materialize_f64(), vec![2.0, 2.0, 2.0, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1457,11 +1484,11 @@ pub(crate) mod tests {
 
             let sig_view = HostTensorView {
                 data: &signal.materialize_f64(),
-                shape: &signal.shape,
+                shape: signal.shape(),
             };
             let ker_view = HostTensorView {
                 data: &kernel.materialize_f64(),
-                shape: &kernel.shape,
+                shape: kernel.shape(),
             };
             let sig_handle = provider.upload(&sig_view).expect("upload signal");
             let ker_handle = provider.upload(&ker_view).expect("upload kernel");
@@ -1474,7 +1501,7 @@ pub(crate) mod tests {
 
             let gathered = test_support::gather(gpu_result).expect("gather gpu");
             let expected = test_support::gather(host_expected).expect("gather host");
-            assert_eq!(gathered.shape, expected.shape);
+            assert_eq!(gathered.shape(), expected.shape());
             assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
         });
     }
@@ -1490,11 +1517,11 @@ pub(crate) mod tests {
 
         let sig_view = HostTensorView {
             data: &signal.materialize_f64(),
-            shape: &signal.shape,
+            shape: signal.shape(),
         };
         let ker_view = HostTensorView {
             data: &kernel.materialize_f64(),
-            shape: &kernel.shape,
+            shape: kernel.shape(),
         };
         let sig_handle = provider.upload(&sig_view).expect("upload signal");
         let ker_handle = provider.upload(&ker_view).expect("upload kernel");
@@ -1507,7 +1534,7 @@ pub(crate) mod tests {
         .expect("gpu conv");
 
         let gathered_gpu = test_support::gather(gpu_value).expect("gather gpu");
-        assert_eq!(gathered_gpu.shape, vec![1, 5]);
+        assert_eq!(gathered_gpu.shape(), [1, 5]);
         assert_eq!(
             gathered_gpu.materialize_f64(),
             vec![10.0, 20.0, 30.0, 34.0, 31.0]

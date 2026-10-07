@@ -72,7 +72,7 @@ pub(crate) async fn map_real_waveform(
         .completed(0)
         .await
         .map_err(WaveformMapError::from)?;
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(WaveformMapError::Storage)?;
