@@ -4,7 +4,9 @@ use std::cmp::Ordering;
 
 use runmat_value::{CellArray, Tensor, Value};
 
-use super::super::pairwise_metric::{row_distance, row_value, MetricCaller};
+use super::super::pairwise_metric::{
+    observation_matrix_dimensions, row_distance, row_value, MetricCaller,
+};
 use super::{internal_error, DistanceMetric, KnnOptions, Selection, KNNSEARCH_NAME, PDIST2_NAME};
 use crate::BuiltinResult;
 
@@ -30,9 +32,10 @@ fn select_distances(distances: &Tensor, selection: Selection) -> BuiltinResult<(
     let requested = match selection {
         Selection::Smallest(k) | Selection::Largest(k) => k,
     };
-    let k = requested.min(distances.rows);
+    let (rows, cols) = observation_matrix_dimensions(distances);
+    let k = requested.min(rows);
     let len = k
-        .checked_mul(distances.cols)
+        .checked_mul(cols)
         .ok_or_else(|| internal_error(PDIST2_NAME, "pdist2: selected output size overflow"))?;
     let mut out = Vec::new();
     let mut indices = Vec::new();
@@ -41,8 +44,8 @@ fn select_distances(distances: &Tensor, selection: Selection) -> BuiltinResult<(
     indices
         .try_reserve(len)
         .map_err(|_| internal_error(PDIST2_NAME, "pdist2: selected index allocation failed"))?;
-    for col in 0..distances.cols {
-        let mut values = (0..distances.rows)
+    for col in 0..cols {
+        let mut values = (0..rows)
             .map(|row| (row_value(distances, row, col), row + 1))
             .collect::<Vec<_>>();
         match selection {
@@ -58,9 +61,9 @@ fn select_distances(distances: &Tensor, selection: Selection) -> BuiltinResult<(
             indices.push(*index as f64);
         }
     }
-    let distance_tensor = Tensor::new(out, vec![k, distances.cols])
+    let distance_tensor = Tensor::new(out, vec![k, cols])
         .map_err(|err| internal_error(PDIST2_NAME, format!("pdist2: {err}")))?;
-    let index_tensor = Tensor::new(indices, vec![k, distances.cols])
+    let index_tensor = Tensor::new(indices, vec![k, cols])
         .map_err(|err| internal_error(PDIST2_NAME, format!("pdist2: {err}")))?;
     Ok((distance_tensor, index_tensor))
 }
@@ -73,7 +76,7 @@ pub(super) fn knnsearch_outputs(
 ) -> BuiltinResult<Value> {
     let requested = crate::output_count::current_output_count();
     if requested == Some(0) {
-        for query in 0..y.rows {
+        for query in 0..observation_matrix_dimensions(y).0 {
             sorted_neighbors(x, y, metric, query)?;
         }
         return Ok(Value::OutputList(Vec::new()));
@@ -114,8 +117,8 @@ fn knnsearch_numeric_outputs(
     k: usize,
     include_distances: bool,
 ) -> BuiltinResult<(Tensor, Option<Tensor>)> {
-    let len = y
-        .rows
+    let query_rows = observation_matrix_dimensions(y).0;
+    let len = query_rows
         .checked_mul(k)
         .ok_or_else(|| internal_error(KNNSEARCH_NAME, "knnsearch: output size overflow"))?;
     let mut indices = Vec::new();
@@ -130,20 +133,20 @@ fn knnsearch_numeric_outputs(
         distances.resize(len, 0.0);
     }
     indices.resize(len, 0.0);
-    for query in 0..y.rows {
+    for query in 0..query_rows {
         let values = sorted_neighbors(x, y, metric, query)?;
         for (rank, (distance, index)) in values.iter().take(k).enumerate() {
-            let pos = rank * y.rows + query;
+            let pos = rank * query_rows + query;
             indices[pos] = *index as f64;
             if let Some(distances) = &mut distances {
                 distances[pos] = *distance;
             }
         }
     }
-    let index_tensor = Tensor::new(indices, vec![y.rows, k])
+    let index_tensor = Tensor::new(indices, vec![query_rows, k])
         .map_err(|err| internal_error(KNNSEARCH_NAME, format!("knnsearch: {err}")))?;
     let distance_tensor = distances
-        .map(|distances| Tensor::new(distances, vec![y.rows, k]))
+        .map(|distances| Tensor::new(distances, vec![query_rows, k]))
         .transpose()
         .map_err(|err| internal_error(KNNSEARCH_NAME, format!("knnsearch: {err}")))?;
     Ok((index_tensor, distance_tensor))
@@ -156,17 +159,18 @@ fn knnsearch_tie_cells(
     k: usize,
     include_distances: bool,
 ) -> BuiltinResult<(CellArray, Option<CellArray>)> {
+    let query_rows = observation_matrix_dimensions(y).0;
     let mut index_cells = Vec::new();
     let mut distance_cells = include_distances.then(Vec::new);
     index_cells
-        .try_reserve(y.rows)
+        .try_reserve(query_rows)
         .map_err(|_| internal_error(KNNSEARCH_NAME, "knnsearch: cell allocation failed"))?;
     if let Some(distance_cells) = &mut distance_cells {
         distance_cells
-            .try_reserve(y.rows)
+            .try_reserve(query_rows)
             .map_err(|_| internal_error(KNNSEARCH_NAME, "knnsearch: cell allocation failed"))?;
     }
-    for query in 0..y.rows {
+    for query in 0..query_rows {
         let values = sorted_neighbors(x, y, metric, query)?;
         let cutoff = values[k - 1].0;
         let mut selected = Vec::new();
@@ -199,10 +203,10 @@ fn knnsearch_tie_cells(
             distance_cells.push(Value::Tensor(dist_tensor));
         }
     }
-    let indices = CellArray::new(index_cells, y.rows, 1)
+    let indices = CellArray::new(index_cells, query_rows, 1)
         .map_err(|err| internal_error(KNNSEARCH_NAME, format!("knnsearch: {err}")))?;
     let distances = distance_cells
-        .map(|cells| CellArray::new(cells, y.rows, 1))
+        .map(|cells| CellArray::new(cells, query_rows, 1))
         .transpose()
         .map_err(|err| internal_error(KNNSEARCH_NAME, format!("knnsearch: {err}")))?;
     Ok((indices, distances))
@@ -214,11 +218,12 @@ fn sorted_neighbors(
     metric: &DistanceMetric,
     query: usize,
 ) -> BuiltinResult<Vec<(f64, usize)>> {
+    let observation_rows = observation_matrix_dimensions(x).0;
     let mut values = Vec::new();
     values
-        .try_reserve(x.rows)
+        .try_reserve(observation_rows)
         .map_err(|_| internal_error(KNNSEARCH_NAME, "knnsearch: neighbor allocation failed"))?;
-    for row in 0..x.rows {
+    for row in 0..observation_rows {
         values.push((
             row_distance(MetricCaller::Knnsearch, x, row, y, query, metric)?,
             row + 1,
@@ -259,5 +264,30 @@ fn distance_order_descending(
             .partial_cmp(&left_distance)
             .unwrap_or(Ordering::Equal)
             .then_with(|| left_index.cmp(&right_index)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn selection_preserves_rank_zero_and_rank_one_observation_geometry() {
+        let scalar = Tensor::new(vec![7.0], vec![]).expect("valid scalar tensor");
+        let (distances, indices) = select_distances(&scalar, Selection::Smallest(1))
+            .expect("rank-zero distance selection");
+        assert_eq!(distances.shape(), &[0, 0]);
+        assert_eq!(indices.shape(), &[0, 0]);
+        assert!(distances.materialize_f64().is_empty());
+        assert!(indices.materialize_f64().is_empty());
+
+        let row = Tensor::new(vec![3.0, 1.0, 2.0], vec![3]).expect("valid rank-one tensor");
+        let (distances, indices) =
+            select_distances(&row, Selection::Smallest(1)).expect("rank-one distance selection");
+        assert_eq!(distances.shape(), &[1, 3]);
+        assert_eq!(indices.shape(), &[1, 3]);
+        assert_eq!(distances.materialize_f64(), vec![3.0, 1.0, 2.0]);
+        assert_eq!(indices.materialize_f64(), vec![1.0, 1.0, 1.0]);
     }
 }

@@ -41,7 +41,7 @@ mod admission;
 mod options;
 mod prediction;
 mod projection;
-use admission::{build_fit_spec, is_table_value};
+use admission::{build_fit_spec, classification_matrix_dimensions, is_table_value};
 use options::{
     class_priors, decode_fit_option, parse_fit_options, parse_formula, FitclinearAction,
 };
@@ -453,7 +453,7 @@ fn normalize_prediction_matrix(
     x: Tensor,
     observations_in: ObservationsIn,
 ) -> BuiltinResult<Tensor> {
-    if x.shape.len() > 2 {
+    if x.shape().len() > 2 {
         return Err(predict_invalid("predict: X must be a 2-D numeric matrix"));
     }
     match observations_in {
@@ -465,13 +465,14 @@ fn normalize_prediction_matrix(
 }
 
 fn transpose_tensor(x: &Tensor) -> Result<Tensor, String> {
-    let mut data = vec![0.0; x.rows * x.cols];
-    for row in 0..x.rows {
-        for col in 0..x.cols {
-            data[col + row * x.cols] = x_value(x, row, col);
+    let (rows, columns) = classification_matrix_dimensions(x);
+    let mut data = vec![0.0; rows * columns];
+    for row in 0..rows {
+        for col in 0..columns {
+            data[col + row * columns] = x_value(x, row, col);
         }
     }
-    Tensor::new(data, vec![x.cols, x.rows])
+    Tensor::new(data, vec![columns, rows])
 }
 
 #[cfg(test)]

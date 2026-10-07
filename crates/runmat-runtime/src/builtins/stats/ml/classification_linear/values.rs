@@ -66,7 +66,8 @@ pub(super) fn vector_values(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f6
 }
 
 pub(super) fn vector_values_predict(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f64>> {
-    if tensor.shape.len() > 2 || (tensor.rows != 1 && tensor.cols != 1) {
+    let (rows, columns) = classification_matrix_dimensions(tensor);
+    if tensor.shape().len() > 2 || (rows != 1 && columns != 1) {
         return Err(predict_invalid(format!("predict: {name} must be a vector")));
     }
     Ok(tensor::tensor_values_f64(tensor))
@@ -229,7 +230,8 @@ pub(super) fn row_tensor(values: Vec<f64>) -> BuiltinResult<Value> {
 }
 
 pub(super) fn x_value(x: &Tensor, row: usize, col: usize) -> f64 {
-    tensor::tensor_value_f64(x, row + col * x.rows)
+    let rows = classification_matrix_dimensions(x).0;
+    tensor::tensor_value_f64(x, row + col * rows)
 }
 
 pub(super) fn dot_row(x: &Tensor, row: usize, beta: &[f64]) -> f64 {

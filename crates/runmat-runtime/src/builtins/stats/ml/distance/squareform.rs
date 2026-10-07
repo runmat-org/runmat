@@ -30,7 +30,8 @@ pub(super) fn squareform_compute(
     tensor: Tensor,
     force: SquareformDirection,
 ) -> BuiltinResult<Tensor> {
-    let is_vector = tensor.rows == 1 || tensor.cols == 1;
+    let (rows, cols) = observation_matrix_dimensions(&tensor);
+    let is_vector = rows == 1 || cols == 1;
     match force {
         SquareformDirection::ToMatrix => vector_to_square(tensor),
         SquareformDirection::ToVector => square_to_vector(tensor),
@@ -139,7 +140,8 @@ fn logical_square_to_vector(
 }
 
 fn vector_to_square(tensor: Tensor) -> BuiltinResult<Tensor> {
-    if !(tensor.rows == 1 || tensor.cols == 1) {
+    let (rows, cols) = observation_matrix_dimensions(&tensor);
+    if !(rows == 1 || cols == 1) {
         return Err(distance_error(
             SQUAREFORM_NAME,
             "squareform: vector input is required for 'tomatrix'",
@@ -177,13 +179,14 @@ fn vector_to_square(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn square_to_vector(tensor: Tensor) -> BuiltinResult<Tensor> {
-    if tensor.rows != tensor.cols {
+    let (rows, cols) = observation_matrix_dimensions(&tensor);
+    if rows != cols {
         return Err(distance_error(
             SQUAREFORM_NAME,
             "squareform: matrix input must be square",
         ));
     }
-    let size = tensor.rows;
+    let size = rows;
     let storage = tensor
         .into_numeric_storage()
         .map_err(|err| internal_error(SQUAREFORM_NAME, format!("squareform: {err}")))?;
@@ -271,4 +274,28 @@ fn zero_storage(dtype: NumericDType, len: usize) -> BuiltinResult<NumericStorage
         NumericDType::U32 => NumericStorage::U32(allocated(len)?),
         NumericDType::U64 => NumericStorage::U64(allocated(len)?),
     })
+}
+
+#[cfg(test)]
+mod shape_privacy_tests {
+    use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn squareform_uses_dense_rank_zero_and_rank_one_matrix_geometry() {
+        let scalar = Tensor::new(vec![0.0], vec![]).expect("valid scalar tensor");
+        let vector = squareform_compute(scalar, SquareformDirection::Auto)
+            .expect("rank-zero tensor follows square-to-vector path");
+        assert_eq!(vector.shape(), &[1, 0]);
+        assert!(vector.materialize_f64().is_empty());
+
+        let row = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).expect("valid rank-one tensor");
+        let matrix = squareform_compute(row, SquareformDirection::Auto)
+            .expect("rank-one tensor follows vector-to-square path");
+        assert_eq!(matrix.shape(), &[3, 3]);
+        assert_eq!(
+            matrix.materialize_f64(),
+            vec![0.0, 1.0, 2.0, 1.0, 0.0, 3.0, 2.0, 3.0, 0.0]
+        );
+    }
 }

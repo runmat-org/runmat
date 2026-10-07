@@ -10,7 +10,8 @@ pub(super) fn fit_models(spec: &FitSpec) -> BuiltinResult<FitResult> {
     for lambda in lambdas {
         models.push(train_for_lambda(spec, *lambda)?);
     }
-    let beta_value = beta_value(&models, spec.x.cols)?;
+    let (observations, predictors) = classification_matrix_dimensions(&spec.x);
+    let beta_value = beta_value(&models, predictors)?;
     let bias_value = row_tensor(models.iter().map(|model| model.bias).collect())?;
     let mut object = ObjectInstance::new(runmat_types::standard::CLASSIFICATION_LINEAR.to_string());
     object
@@ -63,11 +64,11 @@ pub(super) fn fit_models(spec: &FitSpec) -> BuiltinResult<FitResult> {
         .insert("Prior".to_string(), row_tensor(spec.priors.clone())?);
     object.properties.insert(
         "NumObservations".to_string(),
-        Value::Num(spec.x.rows as f64),
+        Value::Num(observations as f64),
     );
     object
         .properties
-        .insert("NumPredictors".to_string(), Value::Num(spec.x.cols as f64));
+        .insert("NumPredictors".to_string(), Value::Num(predictors as f64));
     object.properties.insert(
         "__RunMatLinearClassKind".to_string(),
         Value::String(label_kind_name(spec.class_kind).to_string()),
@@ -102,7 +103,7 @@ pub(super) fn fit_models(spec: &FitSpec) -> BuiltinResult<FitResult> {
 }
 
 fn train_for_lambda(spec: &FitSpec, lambda: f64) -> BuiltinResult<TrainedModel> {
-    let predictors = spec.x.cols;
+    let (observations, predictors) = classification_matrix_dimensions(&spec.x);
     let mut beta = spec
         .options
         .beta0
@@ -125,7 +126,7 @@ fn train_for_lambda(spec: &FitSpec, lambda: f64) -> BuiltinResult<TrainedModel> 
     for iter in 0..spec.options.iteration_limit.max(1) {
         let mut grad_beta = vec![0.0; predictors];
         let mut grad_bias = 0.0;
-        for row in 0..spec.x.rows {
+        for row in 0..observations {
             let y = if spec.class_indices[row] == 1 {
                 1.0
             } else {
@@ -197,7 +198,8 @@ fn train_for_lambda(spec: &FitSpec, lambda: f64) -> BuiltinResult<TrainedModel> 
 fn objective(spec: &FitSpec, beta: &[f64], bias: f64, lambda: f64) -> f64 {
     let total_weight = spec.weights.iter().sum::<f64>().max(EPS);
     let mut loss = 0.0;
-    for row in 0..spec.x.rows {
+    let observations = classification_matrix_dimensions(&spec.x).0;
+    for row in 0..observations {
         let y = if spec.class_indices[row] == 1 {
             1.0
         } else {

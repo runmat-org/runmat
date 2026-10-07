@@ -3,6 +3,7 @@
 use runmat_builtins::DistanceMetricKind;
 use runmat_value::{Tensor, Value};
 
+use super::compute::observation_matrix_dimensions;
 use super::geometry::{covariance_matrix, invert_spd_matrix, variance_scale};
 use super::{distance_error, DistanceMetric, MetricCaller};
 use crate::builtins::common::{random_args::keyword_of, tensor};
@@ -59,10 +60,11 @@ pub(in crate::builtins::stats::ml) async fn parse_metric_kind(
             Ok(DistanceMetric::Minkowski(p))
         }
         DistanceMetricKind::Seuclidean => {
+            let columns = observation_matrix_dimensions(x).1;
             let scale = if parameters.is_empty() {
                 variance_scale(caller, x)?
             } else {
-                vector_parameter(caller, parameters[0].clone(), x.cols, "seuclidean scale")
+                vector_parameter(caller, parameters[0].clone(), columns, "seuclidean scale")
                     .await?
                     .into_iter()
                     .map(|value| value * value)
@@ -81,13 +83,14 @@ pub(in crate::builtins::stats::ml) async fn parse_metric_kind(
             Ok(DistanceMetric::Seuclidean(scale))
         }
         DistanceMetricKind::Mahalanobis => {
+            let columns = observation_matrix_dimensions(x).1;
             let covariance = if parameters.is_empty() {
                 covariance_matrix(caller, x)?
             } else {
                 matrix_parameter(
                     caller,
                     parameters[0].clone(),
-                    x.cols,
+                    columns,
                     "mahalanobis covariance",
                 )
                 .await?
@@ -101,7 +104,7 @@ pub(in crate::builtins::stats::ml) async fn parse_metric_kind(
             Ok(DistanceMetric::Mahalanobis(invert_spd_matrix(
                 caller,
                 &covariance,
-                x.cols,
+                columns,
                 "mahalanobis covariance",
             )?))
         }
@@ -183,7 +186,8 @@ async fn matrix_parameter(
     label: &str,
 ) -> BuiltinResult<Vec<f64>> {
     let tensor = parameter_matrix(caller, value).await?;
-    if tensor.rows != expected_size || tensor.cols != expected_size {
+    let (rows, columns) = observation_matrix_dimensions(&tensor);
+    if rows != expected_size || columns != expected_size {
         return Err(distance_error(
             caller,
             format!("{caller}: {label} must be a square matrix matching the number of columns"),
@@ -196,7 +200,7 @@ async fn parameter_matrix(caller: MetricCaller, value: Value) -> BuiltinResult<T
     let gathered = gather_parameter(caller, value).await?;
     let tensor = tensor::value_into_tensor_for(caller.name(), gathered)
         .map_err(|error| distance_error(caller, format!("{caller}: {error}")))?;
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(distance_error(
             caller,
             format!("{caller}: input must be a numeric vector or 2-D matrix"),

@@ -32,8 +32,8 @@ mod squareform;
 mod tests;
 
 use super::pairwise_metric::{
-    condensed_distances, distance_matrix, parse_metric_kind, parse_metric_name, scalar_parameter,
-    DistanceMetric, MetricCaller,
+    condensed_distances, distance_matrix, observation_matrix_dimensions, parse_metric_kind,
+    parse_metric_name, scalar_parameter, DistanceMetric, MetricCaller,
 };
 use options::{
     parse_knnsearch_options, preflight_knn_metric_parameter, split_pdist2_options,
@@ -153,7 +153,7 @@ async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<V
     }
     let x = value_to_matrix(PDIST2_NAME, x).await?;
     let y = value_to_matrix(PDIST2_NAME, y).await?;
-    if x.cols != y.cols {
+    if observation_matrix_dimensions(&x).1 != observation_matrix_dimensions(&y).1 {
         return Err(distance_error(
             PDIST2_NAME,
             "pdist2: X and Y must have the same number of columns",
@@ -294,13 +294,13 @@ async fn knnsearch_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResul
     validate_numeric_cache_sizes(parsed.numeric_cache_sizes).await?;
     let x = value_to_matrix(KNNSEARCH_NAME, x).await?;
     let y = value_to_matrix(KNNSEARCH_NAME, y).await?;
-    if x.cols != y.cols {
+    if observation_matrix_dimensions(&x).1 != observation_matrix_dimensions(&y).1 {
         return Err(distance_error(
             KNNSEARCH_NAME,
             "knnsearch: X and Y must have the same number of columns",
         ));
     }
-    if parsed.options.k > x.rows {
+    if parsed.options.k > observation_matrix_dimensions(&x).0 {
         return Err(distance_error(
             KNNSEARCH_NAME,
             "knnsearch: K must be <= size(X,1)",
@@ -337,7 +337,7 @@ fn preflight_knnsearch_geometry(x: &Value, y: &Value, k: usize) -> BuiltinResult
 
 fn preflight_observation_shape(value: &Value) -> BuiltinResult<(usize, usize)> {
     let shape = match value {
-        Value::Tensor(tensor) => tensor.shape.as_slice(),
+        Value::Tensor(tensor) => tensor.shape(),
         Value::LogicalArray(array) => array.shape.as_slice(),
         Value::GpuTensor(handle) => {
             if handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real {
@@ -635,7 +635,7 @@ async fn value_to_matrix(name: &'static str, value: Value) -> BuiltinResult<Tens
 fn host_value_to_matrix(name: &'static str, gathered: Value) -> BuiltinResult<Tensor> {
     let tensor = tensor::value_into_tensor_for(name, gathered)
         .map_err(|err| distance_error(name, format!("{name}: {err}")))?;
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(distance_error(
             name,
             format!("{name}: input must be a numeric vector or 2-D matrix"),

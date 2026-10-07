@@ -7,7 +7,8 @@ pub(super) fn label_vector(value: Value, name: &str) -> BuiltinResult<LabelVecto
 pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<LabelVector> {
     match value {
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
-            if tensor.shape.len() > 2 || (tensor.rows != 1 && tensor.cols != 1) {
+            let (rows, columns) = classification_matrix_dimensions(&tensor);
+            if tensor.shape().len() > 2 || (rows != 1 && columns != 1) {
                 return Err(predict_invalid(format!("predict: {name} must be a vector")));
             }
             let storage = tensor.integer_storage().expect("checked above");

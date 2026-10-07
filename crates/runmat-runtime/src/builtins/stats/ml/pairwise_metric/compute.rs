@@ -14,7 +14,9 @@ use crate::BuiltinResult;
 /// A rank-one value is one observation with N variables, while a rank-zero
 /// value has no observation extent. This is intentionally distinct from the
 /// general-purpose `Tensor::rows`/`Tensor::cols` projection.
-pub(super) fn observation_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+pub(in crate::builtins::stats::ml) fn observation_matrix_dimensions(
+    tensor: &Tensor,
+) -> (usize, usize) {
     match tensor.shape() {
         [] => (0, 0),
         [columns] => (1, *columns),
