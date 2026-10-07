@@ -456,7 +456,7 @@ async fn value_to_signal_columns(value: Value) -> BuiltinResult<SignalColumns> {
 }
 
 fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalColumns> {
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(periodogram_error_with_detail(
             &PERIODOGRAM_ERROR_INVALID_SIGNAL,
             "x must be a vector or 2-D matrix",
@@ -498,14 +498,14 @@ fn tensor_to_signal_columns(tensor: Tensor) -> BuiltinResult<SignalColumns> {
 fn complex_tensor_to_signal_columns(
     tensor: runmat_value::ComplexTensor,
 ) -> BuiltinResult<SignalColumns> {
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(periodogram_error_with_detail(
             &PERIODOGRAM_ERROR_INVALID_SIGNAL,
             "x must be a vector or 2-D matrix",
         ));
     }
-    let rows = tensor.rows;
-    let cols = tensor.cols;
+    let rows = tensor.rows();
+    let cols = tensor.cols();
     let is_complex = true;
     if rows == 1 || cols == 1 {
         return Ok(SignalColumns {
@@ -989,7 +989,7 @@ mod tests {
         };
         (
             pxx.materialize_f64().clone(),
-            pxx.shape.clone(),
+            pxx.shape().to_vec(),
             f.materialize_f64().clone(),
         )
     }
@@ -1258,7 +1258,7 @@ mod tests {
         let pxx =
             crate::builtins::common::test_support::gather(values[0].clone()).expect("gather pxx");
         let f = crate::builtins::common::test_support::gather(values[1].clone()).expect("gather f");
-        assert_eq!(pxx.shape, vec![17, 1]);
+        assert_eq!(pxx.shape(), [17, 1]);
         assert_eq!(f.materialize_f64()[4], 4.0);
         let peak = pxx
             .materialize_f64()

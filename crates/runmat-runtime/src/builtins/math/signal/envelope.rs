@@ -602,7 +602,7 @@ fn scalar_signal_input(value: f64) -> BuiltinResult<SignalInput> {
 
 fn tensor_to_signal_input(tensor: Tensor) -> BuiltinResult<SignalInput> {
     let len = tensor.len();
-    let shape_meta = tensor.shape.clone();
+    let shape_meta = tensor.shape().to_vec();
     let (shape, rows, cols) = signal_geometry(&shape_meta, len)?;
     let single_output = tensor.numeric_dtype() == NumericDType::F32;
     let data = tensor::tensor_into_values_f64(tensor);
@@ -1249,7 +1249,7 @@ mod tests {
         let Value::Tensor(upper) = outputs[0].clone() else {
             panic!("expected tensor");
         };
-        assert_eq!(upper.shape, vec![4, 2]);
+        assert_eq!(upper.shape(), [4, 2]);
         assert!(upper.materialize_f64()[..4]
             .iter()
             .all(|value| (*value - 1.0).abs() < 1.0e-12));
@@ -1271,7 +1271,7 @@ mod tests {
         let Value::Tensor(upper) = outputs[0].clone() else {
             panic!("expected tensor");
         };
-        assert_eq!(upper.shape, vec![4, 2]);
+        assert_eq!(upper.shape(), [4, 2]);
         assert!(upper.materialize_f64()[..4]
             .iter()
             .all(|value| (*value - 1.0).abs() < 1.0e-12));
@@ -1437,8 +1437,8 @@ mod tests {
         let lower = test_support::gather(Value::GpuTensor(lower_handle.clone())).expect("lower");
         let expected_upper = tensor_data(expected[0].clone());
         let expected_lower = tensor_data(expected[1].clone());
-        assert_eq!(upper.shape, shape);
-        assert_eq!(lower.shape, shape);
+        assert_eq!(upper.shape(), shape);
+        assert_eq!(lower.shape(), shape);
         for (actual, expected) in upper.materialize_f64().iter().zip(expected_upper.iter()) {
             assert!((actual - expected).abs() < 1.0e-5, "{actual} != {expected}");
         }

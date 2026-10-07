@@ -7,7 +7,7 @@ use super::*;
 pub(super) fn preflight_signal_metadata(value: &Value) -> BuiltinResult<()> {
     match value {
         Value::Tensor(tensor) => {
-            signal_geometry(&tensor.shape, tensor.len())?;
+            signal_geometry(tensor.shape(), tensor.len())?;
         }
         Value::LogicalArray(array) => {
             signal_geometry(&array.shape, array.data.len())?;

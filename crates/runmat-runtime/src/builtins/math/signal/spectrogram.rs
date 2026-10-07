@@ -1107,8 +1107,8 @@ mod tests {
         let Value::Tensor(ps) = &values[3] else {
             panic!("expected ps");
         };
-        assert_eq!(s.shape, vec![17, 3]);
-        assert_eq!(ps.shape, vec![17, 3]);
+        assert_eq!(s.shape(), [17, 3]);
+        assert_eq!(ps.shape(), [17, 3]);
         assert_eq!(f.materialize_f64()[4], 4.0);
         assert_eq!(t.materialize_f64(), vec![0.5, 1.0, 1.5]);
         let first_column_peak = ps.materialize_f64()[..17]
@@ -1164,7 +1164,7 @@ mod tests {
         }
         let ps =
             crate::builtins::common::test_support::gather(values[3].clone()).expect("gather ps");
-        assert_eq!(ps.shape, vec![17, 3]);
+        assert_eq!(ps.shape(), [17, 3]);
         let peak = ps.materialize_f64()[..17]
             .iter()
             .enumerate()
@@ -1187,8 +1187,8 @@ mod tests {
             panic!("expected t");
         };
         assert_eq!(default_window(1024).len(), 227);
-        assert_eq!(s.shape[0], 129);
-        assert_eq!(s.shape[1], t.materialize_f64().len());
+        assert_eq!(s.shape()[0], 129);
+        assert_eq!(s.shape()[1], t.materialize_f64().len());
     }
 
     #[test]
@@ -1205,7 +1205,7 @@ mod tests {
         let Value::ComplexTensor(s) = &values[0] else {
             panic!("expected stft");
         };
-        assert_eq!(s.shape[0], 8);
+        assert_eq!(s.shape()[0], 8);
 
         let err = call(
             Value::ComplexTensor(x),
@@ -1238,7 +1238,7 @@ mod tests {
         let Value::Tensor(f) = &values[1] else {
             panic!("expected f");
         };
-        assert_eq!(s.shape, vec![2, 3]);
+        assert_eq!(s.shape(), [2, 3]);
         assert_eq!(f.materialize_f64(), vec![0.0, std::f64::consts::PI]);
     }
 
