@@ -16,6 +16,23 @@ pub fn build_accel_graph(instructions: &[Instr], var_types: &[Type]) -> AccelGra
     GraphBuilder::new(instructions, var_types).build()
 }
 
+/// Execution-order store transcript from the same bytecode walk that creates
+/// graph value IDs. A value may be stored more than once, so the graph's
+/// `ValueId -> VarBinding` map is not an ordered publication authority.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AccelStore {
+    pub pc: usize,
+    pub value_id: ValueId,
+    pub binding: VarBinding,
+}
+
+pub(crate) fn build_accel_graph_with_stores(
+    instructions: &[Instr],
+    var_types: &[Type],
+) -> (AccelGraph, Vec<AccelStore>) {
+    GraphBuilder::new(instructions, var_types).build_with_stores()
+}
+
 struct GraphBuilder<'a> {
     instructions: &'a [Instr],
     var_types: &'a [Type],
@@ -27,6 +44,7 @@ struct GraphBuilder<'a> {
     builtin_cache: HashMap<String, BuiltinInfo>,
     var_bindings: HashMap<ValueId, VarBinding>,
     node_bindings: HashMap<NodeId, VarBinding>,
+    stores: Option<Vec<AccelStore>>,
 }
 
 #[derive(Clone)]
@@ -104,6 +122,7 @@ impl<'a> GraphBuilder<'a> {
             builtin_cache,
             var_bindings: HashMap::new(),
             node_bindings: HashMap::new(),
+            stores: None,
         }
     }
 
@@ -111,6 +130,19 @@ impl<'a> GraphBuilder<'a> {
         for (pc, instr) in self.instructions.iter().enumerate() {
             self.process_instr(pc, instr);
         }
+        self.finish_graph()
+    }
+
+    fn build_with_stores(mut self) -> (AccelGraph, Vec<AccelStore>) {
+        self.stores = Some(Vec::new());
+        for (pc, instr) in self.instructions.iter().enumerate() {
+            self.process_instr(pc, instr);
+        }
+        let stores = self.stores.take().expect("store recording selected");
+        (self.finish_graph(), stores)
+    }
+
+    fn finish_graph(self) -> AccelGraph {
         AccelGraph {
             nodes: self.nodes,
             values: self.values,
@@ -136,9 +168,9 @@ impl<'a> GraphBuilder<'a> {
             Instr::LoadVar(idx)
             | Instr::LoadVarForIndexAssignment(idx)
             | Instr::LoadVarForStructAssignment(idx) => self.handle_load_var(*idx),
-            Instr::StoreVar(idx) => self.handle_store_var(*idx),
+            Instr::StoreVar(idx) => self.handle_store_var(pc, *idx),
             Instr::LoadLocal(idx) => self.handle_load_local(*idx),
-            Instr::StoreLocal(idx) => self.handle_store_local(*idx),
+            Instr::StoreLocal(idx) => self.handle_store_local(pc, *idx),
             Instr::Add => self.handle_binary_primitive(pc, PrimitiveOp::Add),
             Instr::Sub => self.handle_binary_primitive(pc, PrimitiveOp::Sub),
             Instr::Mul => self.handle_binary_primitive(pc, PrimitiveOp::Mul),
@@ -415,20 +447,25 @@ impl<'a> GraphBuilder<'a> {
         self.stack.push(id);
     }
 
-    fn handle_store_var(&mut self, idx: usize) {
+    fn handle_store_var(&mut self, pc: usize, idx: usize) {
         if let Some(value_id) = self.pop_value() {
+            let binding = VarBinding {
+                kind: VarKind::Global,
+                index: idx,
+            };
+            if let Some(stores) = &mut self.stores {
+                stores.push(AccelStore {
+                    pc,
+                    value_id,
+                    binding: binding.clone(),
+                });
+            }
             let key = VarKey::Global(idx);
             self.var_values.insert(key, value_id);
             if let Some(ty) = self.var_types.get(idx) {
                 self.apply_type(value_id, ty);
             }
-            self.var_bindings.insert(
-                value_id,
-                VarBinding {
-                    kind: VarKind::Global,
-                    index: idx,
-                },
-            );
+            self.var_bindings.insert(value_id, binding);
             self.record_node_binding(value_id, VarKind::Global, idx);
         } else {
             self.reset_stack();
@@ -454,8 +491,19 @@ impl<'a> GraphBuilder<'a> {
         self.stack.push(id);
     }
 
-    fn handle_store_local(&mut self, idx: usize) {
+    fn handle_store_local(&mut self, pc: usize, idx: usize) {
         if let Some(value_id) = self.pop_value() {
+            let binding = VarBinding {
+                kind: VarKind::Local,
+                index: idx,
+            };
+            if let Some(stores) = &mut self.stores {
+                stores.push(AccelStore {
+                    pc,
+                    value_id,
+                    binding: binding.clone(),
+                });
+            }
             let key = VarKey::Local(idx);
             self.var_values.insert(key, value_id);
             let ty = self
@@ -468,13 +516,7 @@ impl<'a> GraphBuilder<'a> {
                     .and_modify(|existing| *existing = existing.unify(&ty))
                     .or_insert(ty);
             }
-            self.var_bindings.insert(
-                value_id,
-                VarBinding {
-                    kind: VarKind::Local,
-                    index: idx,
-                },
-            );
+            self.var_bindings.insert(value_id, binding);
             self.record_node_binding(value_id, VarKind::Local, idx);
         } else {
             self.reset_stack();
@@ -1382,6 +1424,39 @@ mod tests {
             assert!(!node.tags.contains(&AccelGraphTag::UnaryScalarFold));
             assert!(graph.value(node.outputs[0]).unwrap().constant.is_none());
         }
+    }
+
+    #[test]
+    fn store_transcript_retains_repeated_and_aliased_publications_in_pc_order() {
+        let (graph, stores) = build_accel_graph_with_stores(
+            &[
+                Instr::LoadConst(7.0),
+                Instr::StoreVar(0),
+                Instr::LoadVar(0),
+                Instr::StoreLocal(1),
+                Instr::LoadConst(8.0),
+                Instr::StoreVar(0),
+            ],
+            &[],
+        );
+        assert_eq!(stores.len(), 3);
+        assert_eq!(
+            stores.iter().map(|store| store.pc).collect::<Vec<_>>(),
+            [1, 3, 5]
+        );
+        assert_eq!(stores[0].value_id, stores[1].value_id);
+        assert_ne!(stores[1].value_id, stores[2].value_id);
+        assert_eq!(stores[0].binding.kind, VarKind::Global);
+        assert_eq!(stores[1].binding.kind, VarKind::Local);
+        assert_eq!(stores[2].binding.kind, VarKind::Global);
+        assert_eq!(stores[0].binding.index, 0);
+        assert_eq!(stores[1].binding.index, 1);
+        assert_eq!(stores[2].binding.index, 0);
+        // The historical map remains a last-binding graph hint, not a store log.
+        assert_eq!(
+            graph.var_binding(stores[0].value_id),
+            Some(&stores[1].binding)
+        );
     }
 
     #[test]

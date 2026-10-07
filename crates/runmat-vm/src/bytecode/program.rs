@@ -20,6 +20,7 @@ use super::{
     parallel::{BytecodeParforRegion, BytecodeSpmdRegion},
     region::BytecodeRegion,
     source_ref::BytecodeSourceRef,
+    statement_pc::{project_statement_pcs, StatementPcProjectionError, StatementPcRange},
 };
 
 #[path = "program/definition_dependencies.rs"]
@@ -33,6 +34,8 @@ mod semantic_fingerprint;
 #[path = "program/source_facts.rs"]
 mod source_facts;
 
+#[cfg(feature = "native-accel")]
+pub(crate) use semantic_fingerprint::fusion_stage_source_fingerprint;
 pub use semantic_fingerprint::semantic_definition_fingerprint;
 
 #[derive(Debug, Clone)]
@@ -97,6 +100,9 @@ pub struct FunctionBytecode {
     /// callees, captured by MIR analysis before bytecode serialization.
     #[serde(default)]
     pub capabilities: runmat_types::CapabilitySet,
+    #[cfg(feature = "native-accel")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fusion_stage_projection: Option<std::sync::Arc<crate::bytecode::FusionStageProjection>>,
     pub instructions: Vec<Instr>,
     /// Innermost lexical catch at each instruction, derived from MIR.
     pub catch_scopes: Vec<Option<runmat_mir::CatchScopeId>>,
@@ -152,6 +158,8 @@ impl Default for FunctionBytecode {
             portable_function: runmat_types::ProgramFunctionId(0),
             binding_origin: None,
             capabilities: Default::default(),
+            #[cfg(feature = "native-accel")]
+            fusion_stage_projection: None,
             instructions: Vec::new(),
             catch_scopes: Vec::new(),
             instr_spans: Vec::new(),
@@ -179,6 +187,14 @@ impl Default for FunctionBytecode {
 }
 
 impl FunctionBytecode {
+    /// Preserve the point owner's own identity domain: closed-unit and
+    /// session rebinding may intentionally assign different FunctionId and
+    /// ProgramFunctionId values. The later MIR bridge must match its selected
+    /// body against `StatementPcRange::statement.function` explicitly.
+    pub fn statement_pc_ranges(&self) -> Result<Vec<StatementPcRange>, StatementPcProjectionError> {
+        project_statement_pcs(&self.resume_points, self.instructions.len())
+    }
+
     pub(crate) fn validate_catch_scope_metadata(&self) -> Result<(), String> {
         validate_catch_scope_metadata(&self.instructions, &self.catch_scopes)
     }
@@ -192,6 +208,11 @@ impl FunctionBytecode {
         bytecode.instr_spans = self.instr_spans.clone();
         bytecode.call_arg_spans = self.call_arg_spans.clone();
         bytecode.coverage_sites = self.coverage_sites.clone();
+        bytecode.resume_points = self.resume_points.clone();
+        #[cfg(feature = "native-accel")]
+        {
+            bytecode.fusion_metadata.stage_projection = self.fusion_stage_projection.clone();
+        }
         bytecode.source_id = self.source_id;
         bytecode.active_function = Some(self.function);
         bytecode.active_class_method_owner = self.class_method_owner.clone();
@@ -217,6 +238,9 @@ impl FunctionBytecode {
         function: FunctionId,
         program_function: runmat_types::ProgramFunctionId,
     ) {
+        #[cfg(feature = "native-accel")]
+        let prior_stage_valid = self.fusion_stage_projection.is_some()
+            && self.validate_fusion_stage_projection().is_ok();
         self.function = function;
         self.resume_points = std::mem::take(&mut self.resume_points)
             .into_iter()
@@ -252,6 +276,31 @@ impl FunctionBytecode {
                     region.0.function = program_function;
                 }
                 _ => {}
+            }
+        }
+        #[cfg(feature = "native-accel")]
+        {
+            if prior_stage_valid {
+                let valid_after_rebind =
+                    self.fusion_stage_projection
+                        .as_mut()
+                        .is_some_and(|projection| {
+                            std::sync::Arc::make_mut(projection).rebind_owner(
+                                program_function,
+                                crate::bytecode::fusion_stage::FusionStageStream {
+                                    instructions: &self.instructions,
+                                    catch_scopes: &self.catch_scopes,
+                                    resume_points: &self.resume_points,
+                                    source_id: self.source_id,
+                                    var_count: self.var_count,
+                                },
+                            )
+                        });
+                if !valid_after_rebind {
+                    self.fusion_stage_projection = None;
+                }
+            } else {
+                self.fusion_stage_projection = None;
             }
         }
     }
@@ -1233,6 +1282,11 @@ pub struct Bytecode {
     pub call_arg_spans: Vec<Option<Vec<runmat_hir::Span>>>,
     #[serde(default)]
     pub coverage_sites: Vec<Vec<u64>>,
+    /// The compiler's function-local MIR statement boundaries. This is the
+    /// same authority serialized by `FunctionBytecode`, not a second mapping
+    /// inferred from source spans or runtime graph nodes.
+    #[serde(default, with = "crate::layout::resume_point_map_serde")]
+    pub resume_points: std::collections::BTreeMap<runmat_types::ProgramPointId, usize>,
     #[serde(default)]
     pub source_id: Option<BytecodeSourceRef>,
     pub var_count: usize,
@@ -1326,6 +1380,8 @@ pub struct FusionMetadata {
     pub instruction_window_count: usize,
     #[serde(default)]
     pub instruction_windows: Vec<FusionInstructionWindow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage_projection: Option<std::sync::Arc<crate::bytecode::FusionStageProjection>>,
 }
 
 #[cfg(feature = "native-accel")]
@@ -1374,6 +1430,13 @@ impl RuntimeAccelGraphSource {
 }
 
 impl Bytecode {
+    /// Exact, half-open statement instruction ranges derived from the
+    /// compiler's canonical resume points. Empty-emission statements remain
+    /// visible; no fusion execution decision is made here.
+    pub fn statement_pc_ranges(&self) -> Result<Vec<StatementPcRange>, StatementPcProjectionError> {
+        project_statement_pcs(&self.resume_points, self.instructions.len())
+    }
+
     pub fn validate_selected_source_owners(
         &self,
         runtime: &runmat_runtime::context::RuntimeContext,
@@ -1416,6 +1479,7 @@ impl Bytecode {
             instr_spans: Vec::new(),
             call_arg_spans: Vec::new(),
             coverage_sites: Vec::new(),
+            resume_points: std::collections::BTreeMap::new(),
             source_id: None,
             var_count: 0,
             bound_functions: HashMap::new(),
@@ -1687,6 +1751,8 @@ mod function_registry_tests {
             portable_function: runmat_types::ProgramFunctionId(0),
             binding_origin: None,
             capabilities: Default::default(),
+            #[cfg(feature = "native-accel")]
+            fusion_stage_projection: None,
             instructions: vec![Instr::Return],
             catch_scopes: vec![None],
             instr_spans: Vec::new(),

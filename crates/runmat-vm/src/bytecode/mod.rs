@@ -1,4 +1,8 @@
 mod artifact;
+#[cfg(feature = "native-accel")]
+mod multi_store;
+#[cfg(feature = "native-accel")]
+mod fusion_stage;
 pub mod compile;
 pub mod instr;
 mod parallel;
@@ -6,10 +10,11 @@ pub mod program;
 mod region;
 mod sequence_register;
 mod source_ref;
+mod statement_pc;
 mod subscript;
 
 /// Portable schema for serialized [`Bytecode`] payloads.
-pub const BYTECODE_SCHEMA_VERSION: u16 = 14;
+pub const BYTECODE_SCHEMA_VERSION: u16 = 15;
 /// Portable schema for serialized [`FunctionRegistry`] payloads.
 pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 10;
 
@@ -22,10 +27,16 @@ pub use compile::{
     compile, compile_semantic_function_registry, compile_semantic_function_registry_with_analysis,
     compile_with_analysis,
 };
+#[cfg(feature = "native-accel")]
+pub use fusion_stage::{CompiledFusionStageStatement, FusionStageProjection};
 pub use instr::{
     AggregateElementSpec, BytecodeCodistributedOverload, BytecodeCollectiveOp,
     BytecodeDistributedBuildValidation, BytecodeDistributedOp, BytecodeSpmdHeader, EmitLabel,
     Instr, StackEffect,
+};
+#[cfg(feature = "native-accel")]
+pub use multi_store::{
+    ProspectiveMultiStoreRegion, ProspectiveSemanticMultiStoreRegion, ProspectiveStore,
 };
 pub use parallel::{BytecodeParallelVariable, BytecodeParforRegion, BytecodeSpmdRegion};
 pub use program::{
@@ -39,6 +50,7 @@ pub use program::{
 pub use region::{BytecodeRegion, BytecodeRegionBoundary};
 pub use sequence_register::validate_sequence_register_flow;
 pub use source_ref::BytecodeSourceRef;
+pub use statement_pc::{StatementPcProjectionError, StatementPcRange};
 pub use subscript::{
     BytecodeDottedInvokeArgument, BytecodeSubscriptSelector, BytecodeSubscriptStep,
 };

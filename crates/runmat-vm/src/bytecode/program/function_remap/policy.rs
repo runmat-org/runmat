@@ -30,9 +30,17 @@ fn remap_function_with_policy(
     if let Some(destination) = remap.get(&function.function).copied() {
         function.rebind_identity(destination, function.portable_function);
     }
+    #[cfg(feature = "native-accel")]
+    let selected_stage_valid = function.validate_fusion_stage_projection().is_ok();
     let context = RemapContext { ids: remap, policy };
     for instruction in &mut function.instructions {
         remap_instruction_with_policy(instruction, &context);
+    }
+    #[cfg(feature = "native-accel")]
+    if selected_stage_valid {
+        function.reseal_fusion_stage_after_owned_remap();
+    } else {
+        function.fusion_stage_projection = None;
     }
 }
 

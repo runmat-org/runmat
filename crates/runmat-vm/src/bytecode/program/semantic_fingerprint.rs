@@ -3,6 +3,42 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(feature = "native-accel")]
+pub(crate) fn fusion_stage_source_fingerprint(
+    revision: &runmat_mir::analysis::AnalysisRevision,
+    portable_origin: runmat_types::ProgramFunctionId,
+    owner: runmat_types::ProgramFunctionId,
+    mir_local_count: usize,
+    statements: &[crate::bytecode::fusion_stage::CompiledFusionStageStatement],
+    stream: &crate::bytecode::fusion_stage::FusionStageStream<'_>,
+) -> Result<String, serde_json::Error> {
+    let mut payload = Vec::new();
+    macro_rules! append {
+        ($value:expr) => {{
+            let bytes = serde_json::to_vec($value)?;
+            payload.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+            payload.extend_from_slice(&bytes);
+        }};
+    }
+    append!("selected-mir-fusion-stage-stream-v1");
+    append!(revision);
+    append!(&portable_origin);
+    append!(&owner);
+    append!(&mir_local_count);
+    append!(statements);
+    append!(stream.instructions);
+    append!(stream.catch_scopes);
+    append!(&stream.resume_points.iter().collect::<Vec<_>>());
+    append!(&stream.var_count);
+    append!(&stream.source_id.map(|source| match source {
+        super::BytecodeSourceRef::Program(id) => SemanticSourceRevision::Program(id),
+        super::BytecodeSourceRef::Runtime(reference) => {
+            SemanticSourceRevision::Runtime(reference.semantic_content_revision())
+        }
+    }));
+    Ok(runmat_execution::Digest::sha256(&payload).to_string())
+}
+
 #[derive(serde::Serialize)]
 enum SemanticSourceRevision {
     Program(runmat_types::ProgramSourceId),
@@ -27,6 +63,8 @@ pub fn semantic_definition_fingerprint(
         portable_function: _,
         binding_origin: _,
         capabilities,
+        #[cfg(feature = "native-accel")]
+        fusion_stage_projection,
         instructions,
         catch_scopes,
         instr_spans,
@@ -73,6 +111,10 @@ pub fn semantic_definition_fingerprint(
     }));
     append!(source_role);
     append!(capabilities);
+    #[cfg(feature = "native-accel")]
+    append!(&fusion_stage_projection
+        .as_ref()
+        .map(|projection| projection.portable_definition_identity()));
     append!(instructions);
     append!(catch_scopes);
     append!(instr_spans);

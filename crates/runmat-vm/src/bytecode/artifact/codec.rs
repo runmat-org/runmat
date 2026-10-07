@@ -17,6 +17,13 @@ pub fn encode_interpreter_script_v2(
     bytecode
         .validate_catch_scope_metadata()
         .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
+    bytecode
+        .statement_pc_ranges()
+        .map_err(|error| invalid(InterpreterPayloadForm::ScriptV2, error.to_string()))?;
+    #[cfg(feature = "native-accel")]
+    bytecode
+        .validate_fusion_stage_projection()
+        .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
     encode_payload(
         InterpreterPayloadForm::ScriptV2,
         SCRIPT_V2_PREAMBLE,
@@ -43,6 +50,13 @@ pub fn decode_interpreter_script_v2(bytes: &[u8]) -> Result<Bytecode, Interprete
     bytecode
         .validate_catch_scope_metadata()
         .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
+    bytecode
+        .statement_pc_ranges()
+        .map_err(|error| invalid(InterpreterPayloadForm::ScriptV2, error.to_string()))?;
+    #[cfg(feature = "native-accel")]
+    bytecode
+        .validate_fusion_stage_projection()
+        .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
     Ok(bytecode)
 }
 
@@ -55,6 +69,13 @@ pub fn encode_interpreter_program_v2(
     for function in registry.functions.values() {
         function
             .validate_catch_scope_metadata()
+            .map_err(|message| invalid(InterpreterPayloadForm::ProgramV2, message))?;
+        function
+            .statement_pc_ranges()
+            .map_err(|error| invalid(InterpreterPayloadForm::ProgramV2, error.to_string()))?;
+        #[cfg(feature = "native-accel")]
+        function
+            .validate_fusion_stage_projection()
             .map_err(|message| invalid(InterpreterPayloadForm::ProgramV2, message))?;
     }
     encode_payload(
@@ -96,6 +117,13 @@ pub fn decode_interpreter_program_v2(
     for function in registry.functions.values() {
         function
             .validate_catch_scope_metadata()
+            .map_err(|message| invalid(InterpreterPayloadForm::ProgramV2, message))?;
+        function
+            .statement_pc_ranges()
+            .map_err(|error| invalid(InterpreterPayloadForm::ProgramV2, error.to_string()))?;
+        #[cfg(feature = "native-accel")]
+        function
+            .validate_fusion_stage_projection()
             .map_err(|message| invalid(InterpreterPayloadForm::ProgramV2, message))?;
     }
     Ok(registry)

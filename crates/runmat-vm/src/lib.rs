@@ -30,11 +30,13 @@ pub use bytecode::{
     BytecodeParforRegion, BytecodeRegion, BytecodeRegionBoundary, BytecodeSourceRef,
     BytecodeSpmdHeader, BytecodeSpmdRegion, BytecodeSubscriptSelector, BytecodeSubscriptStep,
     EmitLabel, FunctionBytecode, FunctionRegistry, Instr, SpawnSite, StackEffect,
-    BYTECODE_SCHEMA_VERSION, FUNCTION_REGISTRY_SCHEMA_VERSION,
+    StatementPcProjectionError, StatementPcRange, BYTECODE_SCHEMA_VERSION,
+    FUNCTION_REGISTRY_SCHEMA_VERSION,
 };
 #[cfg(feature = "native-accel")]
 pub use bytecode::{
     FusionCandidateGroup, FusionInstructionKind, FusionInstructionWindow, FusionMetadata,
+    ProspectiveMultiStoreRegion, ProspectiveSemanticMultiStoreRegion, ProspectiveStore,
 };
 pub use call::builtins::{
     evaluate_session_source_in_context, push_dynamic_eval_options, set_dynamic_eval_options,
