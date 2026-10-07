@@ -40,8 +40,11 @@ pub use multi_store::{
 };
 pub use parallel::{BytecodeParallelVariable, BytecodeParforRegion, BytecodeSpmdRegion};
 pub use program::{
+    rebind_session_source, remap_session_entrypoint, remap_session_function, SessionCallableBinding,
+};
+pub use program::{
     semantic_definition_fingerprint, AsyncMetadata, AwaitSite, Bytecode, FunctionBytecode,
-    FunctionRegistry, SpawnSite,
+    FunctionRegistry, FunctionSourceProjectionError, SpawnSite,
 };
 #[cfg(feature = "native-accel")]
 pub use program::{

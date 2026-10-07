@@ -38,7 +38,7 @@ pub(in crate::session) fn finalize_current_definitions(
             // invocation owner. Session publication must retain the durable
             // source authority prepared by the session source pool instead of
             // capturing that invocation-local lease.
-            replacement.source_id = published.source_id;
+            runmat_vm::rebind_session_source(&mut replacement, published.source_id)?;
             Ok(replacement)
         })
         .collect::<Result<Vec<_>, String>>()?;

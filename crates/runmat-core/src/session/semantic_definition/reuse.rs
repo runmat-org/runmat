@@ -64,14 +64,15 @@ pub(in crate::session) fn unchanged_unit_remap(
     for (local, function) in &incoming.functions {
         let target = *remap.get(local)?;
         let mut normalized = function.clone();
-        normalized.rebind_identity(
+        let source = normalized.source_id.or(bytecode.source_id);
+        runmat_vm::remap_session_function(
+            &mut normalized,
             target,
             runmat_types::ProgramFunctionId(u32::try_from(target.0).ok()?),
-        );
-        normalized.source_id = normalized.source_id.or(bytecode.source_id);
-        for instruction in &mut normalized.instructions {
-            super::remap_semantic_function_instr(instruction, &remap);
-        }
+            source,
+            &remap,
+        )
+        .ok()?;
         if super::fingerprint(&normalized).ok()?
             != super::fingerprint(published.get(target)?).ok()?
         {

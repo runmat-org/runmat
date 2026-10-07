@@ -151,6 +151,11 @@ impl FusionStageProjection {
         owner: ProgramFunctionId,
         stream: FusionStageStream<'_>,
     ) -> bool {
+        self.rebind_owner_unsealed(owner);
+        self.reseal_owned_remap(stream)
+    }
+
+    pub(crate) fn rebind_owner_unsealed(&mut self, owner: ProgramFunctionId) {
         self.owner = owner;
         for statement in &mut self.statements {
             statement.contract.point.function = owner;
@@ -165,14 +170,6 @@ impl FusionStageProjection {
                 value.function = owner;
             }
         }
-        if !self.structurally_valid(&stream) {
-            return false;
-        }
-        let Ok(fingerprint) = self.fingerprint(&stream) else {
-            return false;
-        };
-        self.source_fingerprint = fingerprint;
-        true
     }
 
     pub(crate) fn reseal_owned_remap(&mut self, stream: FusionStageStream<'_>) -> bool {
@@ -277,6 +274,25 @@ fn valid_values(values: &[RegionValueId], owner: ProgramFunctionId, count: usize
 }
 
 impl super::Bytecode {
+    pub(crate) fn reseal_fusion_stage_after_owned_remap(&mut self) {
+        let valid = self
+            .fusion_metadata
+            .stage_projection
+            .as_mut()
+            .is_none_or(|projection| {
+                Arc::make_mut(projection).reseal_owned_remap(FusionStageStream {
+                    instructions: &self.instructions,
+                    catch_scopes: &self.catch_scopes,
+                    resume_points: &self.resume_points,
+                    source_id: self.source_id,
+                    var_count: self.var_count,
+                })
+            });
+        if !valid {
+            self.fusion_metadata.stage_projection = None;
+        }
+    }
+
     pub(crate) fn validate_fusion_stage_projection(&self) -> Result<(), String> {
         let Some(projection) = self.fusion_metadata.stage_projection.as_ref() else {
             return Ok(());

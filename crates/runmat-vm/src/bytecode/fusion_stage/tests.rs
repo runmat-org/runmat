@@ -160,3 +160,105 @@ fn selected_function_stage_owner_tracks_session_and_closed_unit_rebinding() {
             .portable_definition_identity()
     );
 }
+
+#[test]
+fn session_remap_seals_local_helper_callback_and_source_only_after_owned_transform() {
+    let mut bytecode = compile_source(
+        "y=outer(1); function y=outer(x); f=@inner; q=f(x); mu=q+1; sigma=mu.*2; y=sigma-3; end; function z=inner(x); z=x+4; end",
+    );
+    let registry = bytecode.function_registry();
+    let outer_id = registry.resolve_name("outer").expect("outer function");
+    let inner_id = registry.resolve_name("inner").expect("local helper");
+    let remap = std::collections::HashMap::from([
+        (outer_id, runmat_hir::FunctionId(701)),
+        (inner_id, runmat_hir::FunctionId(702)),
+    ]);
+    let mut outer = registry.get(outer_id).expect("outer body").clone();
+    assert!(outer.fusion_stage_projection.is_some());
+    assert!(outer.validate_fusion_stage_projection().is_ok());
+    let portable_origin = outer.portable_function;
+    let source = outer.source_id.or(bytecode.source_id);
+    crate::bytecode::program::remap_session_function(
+        &mut outer,
+        remap[&outer_id],
+        ProgramFunctionId(901),
+        source,
+        &remap,
+    )
+    .expect("exact session remap");
+    assert_eq!(outer.function, runmat_hir::FunctionId(701));
+    assert_eq!(outer.portable_function, portable_origin);
+    assert!(outer.validate_fusion_stage_projection().is_ok());
+    assert!(outer.instructions.iter().any(|instruction| {
+        matches!(
+            instruction,
+            Instr::CreateBoundFunctionHandle(runmat_hir::FunctionId(702), ..)
+        )
+    }));
+
+    let prior_fingerprint = outer
+        .fusion_stage_projection
+        .as_ref()
+        .unwrap()
+        .source_fingerprint
+        .clone();
+    crate::bytecode::program::rebind_session_source(
+        &mut outer,
+        Some(crate::bytecode::BytecodeSourceRef::Program(
+            runmat_types::ProgramSourceId(42),
+        )),
+    )
+    .expect("owned source rebind");
+    assert!(outer.validate_fusion_stage_projection().is_ok());
+    assert_ne!(
+        outer
+            .fusion_stage_projection
+            .as_ref()
+            .unwrap()
+            .source_fingerprint,
+        prior_fingerprint
+    );
+
+    crate::bytecode::program::remap_session_entrypoint(&mut bytecode, &remap, &[])
+        .expect("entrypoint call remap");
+    assert!(bytecode.validate_fusion_stage_projection().is_ok());
+    assert!(bytecode.instructions.iter().any(|instruction| {
+        matches!(
+            instruction,
+            Instr::CallSemanticFunctionMulti(runmat_hir::FunctionId(701), ..)
+        )
+    }));
+}
+
+#[test]
+fn malformed_selected_projection_cannot_be_resealed_by_session_remap() {
+    let bytecode =
+        compile_source("y=helper(1); function y=helper(x); mu=x+1; sigma=mu.*2; y=sigma-3; end");
+    let mut function = bytecode
+        .bound_functions
+        .values()
+        .find(|function| function.fusion_stage_projection.is_some())
+        .expect("selected helper")
+        .clone();
+    let original_id = function.function;
+    std::sync::Arc::make_mut(function.fusion_stage_projection.as_mut().unwrap())
+        .source_fingerprint = "forged".into();
+    let source = function.source_id;
+    assert!(crate::bytecode::program::remap_session_function(
+        &mut function,
+        runmat_hir::FunctionId(701),
+        ProgramFunctionId(901),
+        source,
+        &std::collections::HashMap::from([(original_id, runmat_hir::FunctionId(701))]),
+    )
+    .is_err());
+    assert_eq!(function.function, original_id);
+    assert_eq!(
+        function
+            .fusion_stage_projection
+            .as_ref()
+            .unwrap()
+            .source_fingerprint,
+        "forged"
+    );
+}

@@ -27,12 +27,18 @@ use super::{
 mod definition_dependencies;
 #[path = "program/function_remap.rs"]
 pub(crate) mod function_remap;
+pub use function_remap::{
+    rebind_session_source, remap_session_entrypoint, remap_session_function, SessionCallableBinding,
+};
 #[path = "program/retained_artifacts.rs"]
 pub(crate) mod retained_artifacts;
 #[path = "program/semantic_fingerprint.rs"]
 mod semantic_fingerprint;
 #[path = "program/source_facts.rs"]
 mod source_facts;
+#[path = "program/source_projection.rs"]
+mod source_projection;
+pub use source_projection::FunctionSourceProjectionError;
 
 #[cfg(feature = "native-accel")]
 pub(crate) use semantic_fingerprint::fusion_stage_source_fingerprint;
@@ -238,6 +244,25 @@ impl FunctionBytecode {
         function: FunctionId,
         program_function: runmat_types::ProgramFunctionId,
     ) {
+        self.rebind_identity_inner(function, program_function, true);
+    }
+
+    pub(crate) fn rebind_identity_unsealed(
+        &mut self,
+        function: FunctionId,
+        program_function: runmat_types::ProgramFunctionId,
+    ) {
+        self.rebind_identity_inner(function, program_function, false);
+    }
+
+    fn rebind_identity_inner(
+        &mut self,
+        function: FunctionId,
+        program_function: runmat_types::ProgramFunctionId,
+        reseal_stage: bool,
+    ) {
+        #[cfg(not(feature = "native-accel"))]
+        let _ = reseal_stage;
         #[cfg(feature = "native-accel")]
         let prior_stage_valid = self.fusion_stage_projection.is_some()
             && self.validate_fusion_stage_projection().is_ok();
@@ -285,16 +310,22 @@ impl FunctionBytecode {
                     self.fusion_stage_projection
                         .as_mut()
                         .is_some_and(|projection| {
-                            std::sync::Arc::make_mut(projection).rebind_owner(
-                                program_function,
-                                crate::bytecode::fusion_stage::FusionStageStream {
-                                    instructions: &self.instructions,
-                                    catch_scopes: &self.catch_scopes,
-                                    resume_points: &self.resume_points,
-                                    source_id: self.source_id,
-                                    var_count: self.var_count,
-                                },
-                            )
+                            let projection = std::sync::Arc::make_mut(projection);
+                            if reseal_stage {
+                                projection.rebind_owner(
+                                    program_function,
+                                    crate::bytecode::fusion_stage::FusionStageStream {
+                                        instructions: &self.instructions,
+                                        catch_scopes: &self.catch_scopes,
+                                        resume_points: &self.resume_points,
+                                        source_id: self.source_id,
+                                        var_count: self.var_count,
+                                    },
+                                )
+                            } else {
+                                projection.rebind_owner_unsealed(program_function);
+                                true
+                            }
                         });
                 if !valid_after_rebind {
                     self.fusion_stage_projection = None;
@@ -417,44 +448,6 @@ impl FunctionRegistry {
                 .is_some_and(|source| !matches!(source, BytecodeSourceRef::Program(_)))
         }) {
             return Err("portable function registry contains a session source identity");
-        }
-        Ok(())
-    }
-
-    /// Project current definitions into a different source-ID domain without
-    /// changing names, definition owners, or retained old bodies. Validation
-    /// completes before any mutation, so a missing mapping leaves the registry
-    /// and its source index untouched.
-    pub fn project_current_source_ids(
-        &mut self,
-        mut project: impl FnMut(BytecodeSourceRef) -> Option<BytecodeSourceRef>,
-    ) -> Result<(), BytecodeSourceRef> {
-        let projected = self
-            .functions
-            .iter()
-            .map(|(function, body)| {
-                body.source_id
-                    .map(|source| project(source).ok_or(source))
-                    .transpose()
-                    .map(|source| (*function, source))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let data = &mut **self;
-        for (function, source) in projected {
-            if let Some(body) = data.functions.get_mut(&function) {
-                body.source_id = source;
-            }
-        }
-        data.source_functions.clear();
-        let mut functions = data.functions.keys().copied().collect::<Vec<_>>();
-        functions.sort_by_key(|function| function.0);
-        for function in functions {
-            if let Some(source) = data.functions[&function].source_id {
-                data.source_functions
-                    .entry(source)
-                    .or_default()
-                    .push(function);
-            }
         }
         Ok(())
     }

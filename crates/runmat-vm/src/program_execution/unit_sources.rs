@@ -40,19 +40,12 @@ pub(super) fn bind_unit_sources(
             .and_then(|ordinal| runtime.program_source_ref(ordinal))
             .map(BytecodeSourceRef::Runtime)
     };
-    if let Some(source) = bytecode.source_id {
-        bytecode.source_id = Some(project(source).ok_or_else(|| {
-            format!(
-                "worker cannot project entrypoint source ordinal {}",
-                source.program().map_or(0, |ordinal| ordinal.0)
-            )
-        })?);
-    }
-    registry
-        .project_current_source_ids(project)
-        .map_err(|source| format!("worker cannot project source {source:?}"))?;
-    bytecode.bound_functions = registry.functions.clone();
-    bytecode.function_registry = registry.clone();
+    let mut projected = bytecode.clone();
+    projected.function_registry = registry.clone();
+    projected.bound_functions = registry.functions.clone();
+    projected.project_source_ids(project)?;
+    *registry = projected.function_registry.clone();
+    *bytecode = projected;
     Ok(runtime)
 }
 

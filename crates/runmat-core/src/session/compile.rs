@@ -1325,7 +1325,16 @@ impl RunMatSession {
         if current_registry.functions.is_empty() {
             bytecode.function_registry = execution_registry;
             bytecode.bound_functions = bytecode.function_registry.functions.clone();
-            bind_semantic_function_references(bytecode);
+            let bindings = semantic_function_bindings(bytecode);
+            runmat_vm::remap_session_entrypoint(bytecode, &HashMap::new(), &bindings).map_err(
+                |error| {
+                    RunError::Runtime(
+                        build_runtime_error(format!("session entrypoint binding: {error}"))
+                            .with_identifier("RunMat:SelectedFusionStageProjection")
+                            .build(),
+                    )
+                },
+            )?;
             return Ok((session_registry, next_semantic_function_id, HashMap::new()));
         }
 
@@ -1347,9 +1356,6 @@ impl RunMatSession {
             }
         }
 
-        for instr in &mut bytecode.instructions {
-            super::semantic_definition::remap_semantic_function_instr(instr, &remap);
-        }
         let name_remaps: Vec<(String, runmat_hir::FunctionId)> = current_registry
             .names
             .iter()
@@ -1389,11 +1395,21 @@ impl RunMatSession {
             let program_function = runmat_types::ProgramFunctionId(
                 u32::try_from(new_id.0).expect("session function identity exceeds portable schema"),
             );
-            function.rebind_identity(new_id, program_function);
-            function.source_id = function.source_id.or(bytecode.source_id);
-            for instr in &mut function.instructions {
-                super::semantic_definition::remap_semantic_function_instr(instr, &remap);
-            }
+            let source = function.source_id.or(bytecode.source_id);
+            runmat_vm::remap_session_function(
+                &mut function,
+                new_id,
+                program_function,
+                source,
+                &remap,
+            )
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(format!("session function remap: {error}"))
+                        .with_identifier("RunMat:SelectedFusionStageProjection")
+                        .build(),
+                )
+            })?;
             let persist_function =
                 !private_companion_function_names.contains(&function.display_name);
             execution_registry.insert_replacing_name(function.clone());
@@ -1407,7 +1423,17 @@ impl RunMatSession {
                                     .build(),
                             )
                         })?;
-                        function.source_id = Some(runtime);
+                        runmat_vm::rebind_session_source(&mut function, Some(runtime)).map_err(
+                            |error| {
+                                RunError::Runtime(
+                                    build_runtime_error(format!(
+                                        "session function source rebind: {error}"
+                                    ))
+                                    .with_identifier("RunMat:SelectedFusionStageProjection")
+                                    .build(),
+                                )
+                            },
+                        )?;
                     }
                 }
                 session_registry.insert_replacing_name(function);
@@ -1425,7 +1451,14 @@ impl RunMatSession {
 
         bytecode.function_registry = execution_registry;
         bytecode.bound_functions = bytecode.function_registry.functions.clone();
-        bind_semantic_function_references(bytecode);
+        let bindings = semantic_function_bindings(bytecode);
+        runmat_vm::remap_session_entrypoint(bytecode, &remap, &bindings).map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(format!("session entrypoint remap: {error}"))
+                    .with_identifier("RunMat:SelectedFusionStageProjection")
+                    .build(),
+            )
+        })?;
         Ok((session_registry, next_semantic_function_id, remap))
     }
 
@@ -1535,27 +1568,29 @@ impl RunMatSession {
     }
 }
 
-fn bind_semantic_function_references(bytecode: &mut runmat_vm::Bytecode) {
-    let registry = bytecode.function_registry.clone();
-    bind_semantic_callback_literals(bytecode, &registry);
-    for instr in &mut bytecode.instructions {
+fn semantic_function_bindings(
+    bytecode: &runmat_vm::Bytecode,
+) -> Vec<runmat_vm::SessionCallableBinding> {
+    let registry = &bytecode.function_registry;
+    let mut bindings = semantic_callback_literal_bindings(bytecode, registry);
+    for (pc, instr) in bytecode.instructions.iter().enumerate() {
         if let runmat_vm::Instr::CreateFunctionHandle(name) = instr {
             if let Some(function) = registry.resolve_name(name) {
-                let role = registry
-                    .get(function)
-                    .map_or(runmat_types::FunctionSourceRole::Unknown, |definition| {
-                        definition.source_role
-                    });
-                *instr = runmat_vm::Instr::CreateBoundFunctionHandle(function, name.clone(), role);
+                bindings.push(runmat_vm::SessionCallableBinding {
+                    pc,
+                    function,
+                    display_name: name.clone(),
+                });
             }
         }
     }
+    bindings
 }
 
-fn bind_semantic_callback_literals(
-    bytecode: &mut runmat_vm::Bytecode,
+fn semantic_callback_literal_bindings(
+    bytecode: &runmat_vm::Bytecode,
     registry: &runmat_vm::FunctionRegistry,
-) {
+) -> Vec<runmat_vm::SessionCallableBinding> {
     let mut stack: Vec<usize> = Vec::new();
     let mut replacements = Vec::new();
 
@@ -1638,15 +1673,16 @@ fn bind_semantic_callback_literals(
         }
     }
 
-    for (producer, function, display_name) in replacements {
-        let role = registry
-            .get(function)
-            .map_or(runmat_types::FunctionSourceRole::Unknown, |definition| {
-                definition.source_role
-            });
-        bytecode.instructions[producer] =
-            runmat_vm::Instr::CreateBoundFunctionHandle(function, display_name, role);
-    }
+    replacements
+        .into_iter()
+        .map(
+            |(pc, function, display_name)| runmat_vm::SessionCallableBinding {
+                pc,
+                function,
+                display_name,
+            },
+        )
+        .collect()
 }
 
 fn callback_literal(
@@ -1845,3 +1881,6 @@ roots = ["src"]
 #[cfg(test)]
 #[path = "compile/portable_source_tests.rs"]
 mod portable_source_tests;
+#[cfg(test)]
+#[path = "compile/stage_remap_tests.rs"]
+mod stage_remap_tests;

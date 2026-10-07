@@ -24,13 +24,16 @@ pub use bytecode::{
     InterpreterRevisionField,
 };
 pub use bytecode::{
+    rebind_session_source, remap_session_entrypoint, remap_session_function, SessionCallableBinding,
+};
+pub use bytecode::{
     semantic_definition_fingerprint, AsyncMetadata, AwaitSite, Bytecode,
     BytecodeCodistributedOverload, BytecodeCollectiveOp, BytecodeDistributedBuildValidation,
     BytecodeDistributedOp, BytecodeDottedInvokeArgument, BytecodeParallelVariable,
     BytecodeParforRegion, BytecodeRegion, BytecodeRegionBoundary, BytecodeSourceRef,
     BytecodeSpmdHeader, BytecodeSpmdRegion, BytecodeSubscriptSelector, BytecodeSubscriptStep,
-    EmitLabel, FunctionBytecode, FunctionRegistry, Instr, SpawnSite, StackEffect,
-    StatementPcProjectionError, StatementPcRange, BYTECODE_SCHEMA_VERSION,
+    EmitLabel, FunctionBytecode, FunctionRegistry, FunctionSourceProjectionError, Instr, SpawnSite,
+    StackEffect, StatementPcProjectionError, StatementPcRange, BYTECODE_SCHEMA_VERSION,
     FUNCTION_REGISTRY_SCHEMA_VERSION,
 };
 #[cfg(feature = "native-accel")]

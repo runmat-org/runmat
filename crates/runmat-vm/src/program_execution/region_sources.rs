@@ -30,25 +30,7 @@ pub(super) fn capture(bytecode: &Bytecode, runtime: &RuntimeContext) -> Result<V
         _ => None,
     };
     let mut portable = bytecode.clone();
-    portable.source_id = portable
-        .source_id
-        .map(|source| {
-            project(source).ok_or_else(|| format!("region source {source:?} is not portable"))
-        })
-        .transpose()?;
-    for body in portable.bound_functions.values_mut() {
-        body.source_id = body
-            .source_id
-            .map(|source| {
-                project(source)
-                    .ok_or_else(|| format!("bound region source {source:?} is not portable"))
-            })
-            .transpose()?;
-    }
-    portable
-        .function_registry
-        .project_current_source_ids(project)
-        .map_err(|source| format!("region function source {source:?} is not portable"))?;
+    portable.project_source_ids(project)?;
     for body in portable
         .bound_functions
         .values_mut()
@@ -155,25 +137,7 @@ pub(super) fn bind(
             .and_then(|ordinal| runtime.program_source_ref(ordinal))
             .map(BytecodeSourceRef::Runtime)
     };
-    bytecode.source_id = bytecode
-        .source_id
-        .map(|source| {
-            project(source).ok_or_else(|| format!("worker cannot project region source {source:?}"))
-        })
-        .transpose()?;
-    for body in bytecode.bound_functions.values_mut() {
-        body.source_id = body
-            .source_id
-            .map(|source| {
-                project(source)
-                    .ok_or_else(|| format!("worker cannot project bound region source {source:?}"))
-            })
-            .transpose()?;
-    }
-    bytecode
-        .function_registry
-        .project_current_source_ids(project)
-        .map_err(|source| format!("worker cannot project region source {source:?}"))?;
+    bytecode.project_source_ids(project)?;
     Ok((bytecode, runtime))
 }
 
@@ -304,8 +268,10 @@ mod tests {
         )
         .unwrap();
         bytecode.source_id = Some(BytecodeSourceRef::Runtime(lease.source_ref()));
-        assert!(capture(&bytecode, &captured)
-            .unwrap_err()
-            .contains("not portable"));
+        let error = capture(&bytecode, &captured).unwrap_err();
+        assert!(
+            error.contains("entrypoint source") && error.contains("is absent"),
+            "foreign source must fail projection before worker effects: {error}"
+        );
     }
 }

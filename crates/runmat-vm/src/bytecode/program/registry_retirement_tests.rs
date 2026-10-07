@@ -1,4 +1,5 @@
 use super::{BytecodeSourceRef, FunctionBytecode, FunctionRegistry};
+use crate::FunctionSourceProjectionError;
 use runmat_hir::{FunctionId, SourceId};
 use std::collections::HashMap;
 
@@ -277,7 +278,7 @@ fn source_projection_preserves_aliases_and_rebuilds_current_membership_atomicall
         registry.project_current_source_ids(|source| {
             (source == runtime_ref(5)).then_some(runtime_ref(1))
         }),
-        Err(runtime_ref(6))
+        Err(FunctionSourceProjectionError::Missing(runtime_ref(6)))
     );
     assert_eq!(registry.source_functions, unchanged.source_functions);
     assert_eq!(registry.names, unchanged.names);
@@ -324,7 +325,9 @@ fn mixed_retained_runtime_and_program_sources_project_without_losing_old_owner()
             BytecodeSourceRef::Program(_) => None,
             runtime => Some(runtime),
         }),
-        Err(BytecodeSourceRef::Program(runmat_types::ProgramSourceId(0)))
+        Err(FunctionSourceProjectionError::Missing(
+            BytecodeSourceRef::Program(runmat_types::ProgramSourceId(0))
+        ))
     );
     assert_eq!(registry.source_functions, before);
     registry

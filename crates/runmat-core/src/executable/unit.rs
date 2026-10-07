@@ -68,23 +68,7 @@ impl ExecutableUnit {
         runtime: &runmat_runtime::context::RuntimeContext,
     ) -> Result<runmat_vm::Bytecode, String> {
         let mut bytecode = self.bytecode().clone();
-        bytecode.source_id = bytecode
-            .source_id
-            .map(|source| {
-                Self::runtime_source_id(runtime, source)
-                    .ok_or_else(|| format!("entrypoint source {source:?} is absent"))
-            })
-            .transpose()?;
-        bytecode.function_registry = self.runtime_functions(runtime)?;
-        for body in bytecode.bound_functions.values_mut() {
-            body.source_id = body
-                .source_id
-                .map(|source| {
-                    Self::runtime_source_id(runtime, source)
-                        .ok_or_else(|| format!("bound source {source:?} is absent"))
-                })
-                .transpose()?;
-        }
+        bytecode.project_source_ids(|source| Self::runtime_source_id(runtime, source))?;
         Ok(bytecode)
     }
 
