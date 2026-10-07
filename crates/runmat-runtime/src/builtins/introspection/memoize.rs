@@ -1802,9 +1802,13 @@ mod tests {
     #[test]
     fn cancelled_memoized_feval_restores_output_scope_without_publishing() {
         use std::future::Future;
-        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 42);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
         let counter = Arc::new(Mutex::new(0usize));
         let observed = Arc::clone(&counter);
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
@@ -1817,15 +1821,24 @@ mod tests {
                 })
             },
         )));
-        let (f, _bound) = memoized();
+        let f = block_on(memoize_builtin(
+            crate::user_functions::test_support::exact_local_value("step", binding),
+        ))
+        .expect("memoized function");
         let _caller = crate::output_count::push_output_count(Some(7));
         let args = [Value::Num(2.0)];
-        let mut future = Box::pin(crate::call_feval_async_with_outputs(f.clone(), &args, 2));
+        let mut future = Box::pin(
+            runtime
+                .scope(async { crate::call_feval_async_with_outputs(f.clone(), &args, 2).await }),
+        );
         let waker = futures::task::noop_waker();
-        assert!(future
+        let first_poll = future
             .as_mut()
-            .poll(&mut std::task::Context::from_waker(&waker))
-            .is_pending());
+            .poll(&mut std::task::Context::from_waker(&waker));
+        assert!(
+            first_poll.is_pending(),
+            "public feval returned {first_poll:?}"
+        );
         assert_eq!(*counter.lock().unwrap(), 1);
         drop(future);
         assert_eq!(crate::output_count::current_output_count(), Some(7));

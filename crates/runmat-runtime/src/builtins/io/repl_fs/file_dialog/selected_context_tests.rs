@@ -41,11 +41,19 @@ fn selected_context_without_host_returns_cancellation_without_ambient_fallback()
         let selected =
             RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()));
         let _ambient = ambient.enter();
+        let requested_outputs = 1;
         let result = block_on(crate::call_builtin_async_with_outputs_in_context(
-            &selected, case.name, &case.args, 1,
+            &selected,
+            case.name,
+            &case.args,
+            requested_outputs,
         ))
         .expect("headless dialog cancellation");
-        assert_eq!(result, Value::Num(0.0), "{} cancellation", case.name);
+        let Value::OutputList(outputs) = result else {
+            panic!("{} must return its requested output list", case.name)
+        };
+        assert_eq!(outputs.len(), requested_outputs, "{} arity", case.name);
+        assert_eq!(outputs[0], Value::Num(0.0), "{} cancellation", case.name);
         assert_eq!(ambient_host.started.get(), 0, "{} ambient host", case.name);
         assert!(ambient_host.request.borrow().is_none());
     }
