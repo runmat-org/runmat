@@ -374,7 +374,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
@@ -413,7 +413,7 @@ pub(crate) mod tests {
         .expect("cpu compose");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("gpu upload");
@@ -458,7 +458,7 @@ pub(crate) mod tests {
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
                     data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 })
                 .expect("upload");
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);

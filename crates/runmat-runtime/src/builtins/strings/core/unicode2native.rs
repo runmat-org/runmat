@@ -484,7 +484,7 @@ pub(crate) mod tests {
                     other => panic!("expected native uint8 storage, got {other:?}"),
                 };
                 let dtype = tensor.numeric_dtype();
-                (bytes, tensor.shape, dtype)
+                (bytes, tensor.shape().to_vec(), dtype)
             }
             other => panic!("expected uint8 tensor, got {other:?}"),
         }

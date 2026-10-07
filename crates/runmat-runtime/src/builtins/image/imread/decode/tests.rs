@@ -75,13 +75,13 @@ fn valid_interleaved_alpha_keeps_native_class_and_column_major_order() {
     ))
     .unwrap();
     assert_eq!(image.numeric_dtype(), NumericDType::U8);
-    assert_eq!(image.shape, vec![1, 2, 3]);
+    assert_eq!(image.shape(), &[1, 2, 3]);
     assert_eq!(
         image.materialize_f64(),
         vec![10.0, 50.0, 20.0, 60.0, 30.0, 70.0]
     );
     assert_eq!(alpha.numeric_dtype(), NumericDType::U8);
-    assert_eq!(alpha.shape, vec![1, 2]);
+    assert_eq!(alpha.shape(), &[1, 2]);
     assert_eq!(alpha.materialize_f64(), vec![40.0, 80.0]);
 }
 
@@ -111,7 +111,7 @@ fn nonsquare_rgba_preserves_column_major_order_and_native_classes() {
         ))
         .unwrap();
         assert_eq!(image.numeric_dtype(), T::DTYPE);
-        assert_eq!(image.shape, vec![2, 3, 3]);
+        assert_eq!(image.shape(), &[2, 3, 3]);
         assert_eq!(
             image.materialize_f64(),
             vec![
@@ -120,7 +120,7 @@ fn nonsquare_rgba_preserves_column_major_order_and_native_classes() {
             ]
         );
         assert_eq!(alpha.numeric_dtype(), T::DTYPE);
-        assert_eq!(alpha.shape, vec![2, 3]);
+        assert_eq!(alpha.shape(), &[2, 3]);
         assert_eq!(
             alpha.materialize_f64(),
             vec![4.0, 16.0, 8.0, 20.0, 12.0, 24.0]
@@ -157,7 +157,7 @@ fn native_decode_yields_and_cancellation_prevents_partial_publication() {
         &mut cooperation,
     ))
     .unwrap();
-    assert_eq!(tensor.shape, vec![64, 64, 3]);
+    assert_eq!(tensor.shape(), &[64, 64, 3]);
     assert!(
         turns.get() >= 3,
         "fill and conversion both charge real work"

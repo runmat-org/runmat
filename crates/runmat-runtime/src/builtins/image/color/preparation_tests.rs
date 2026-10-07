@@ -231,7 +231,7 @@ fn indexed_color_two_operand_form_observes_once_and_invalid_host_index_does_not_
     let Value::Tensor(output) = output else {
         panic!("RGB output tensor");
     };
-    assert_eq!(output.shape, vec![1, 1, 3]);
+    assert_eq!(output.shape(), &[1, 1, 3]);
     assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
     events.borrow_mut().clear();
     let invalid = Value::Tensor(Tensor::new(vec![f64::NAN], vec![1, 1]).unwrap());
@@ -357,7 +357,7 @@ fn lab_output_type_is_parsed_before_preparation_and_controls_native_class() {
         panic!("uint8 RGB tensor");
     };
     assert_eq!(result.numeric_dtype(), NumericDType::U8);
-    assert_eq!(result.shape, vec![1, 1, 3]);
+    assert_eq!(result.shape(), &[1, 1, 3]);
     assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
 }
 
@@ -431,7 +431,7 @@ fn extension_gate_and_empty_rgb_inputs_precede_service() {
     let Value::Tensor(output) = output else {
         panic!("empty RGB remains a tensor");
     };
-    assert_eq!(output.shape, vec![0, 2, 3]);
+    assert_eq!(output.shape(), &[0, 2, 3]);
     assert!(output.is_empty());
     assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
 }

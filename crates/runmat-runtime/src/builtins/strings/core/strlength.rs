@@ -175,7 +175,7 @@ pub(crate) mod tests {
         let result = strlength_builtin(Value::StringArray(array)).expect("strlength");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![2, 1]);
+                assert_eq!(tensor.shape(), &[2, 1]);
                 assert_eq!(tensor.materialize_f64().len(), 2);
                 assert_eq!(tensor.materialize_f64()[0], 5.0);
                 assert!(tensor.materialize_f64()[1].is_nan());
@@ -192,7 +192,7 @@ pub(crate) mod tests {
         let result = strlength_builtin(Value::CharArray(array)).expect("strlength");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![2, 1]);
+                assert_eq!(tensor.shape(), &[2, 1]);
                 assert_eq!(tensor.materialize_f64(), vec![3.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -223,7 +223,7 @@ pub(crate) mod tests {
         let result = strlength_builtin(Value::Cell(cell)).expect("strlength");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_eq!(tensor.shape(), &[1, 2]);
                 assert_eq!(tensor.materialize_f64(), vec![3.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -246,7 +246,7 @@ pub(crate) mod tests {
         let result = strlength_builtin(Value::Cell(cell)).expect("strlength");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_eq!(tensor.shape(), &[1, 3]);
                 assert_eq!(tensor.materialize_f64().len(), 3);
                 assert_eq!(tensor.materialize_f64()[0], 5.0);
                 assert_eq!(tensor.materialize_f64()[1], 4.0);
@@ -267,7 +267,7 @@ pub(crate) mod tests {
         let result = strlength_builtin(Value::StringArray(array)).expect("strlength");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![2, 2]);
+                assert_eq!(tensor.shape(), &[2, 2]);
                 assert_eq!(tensor.materialize_f64(), vec![2.0, 1.0, 3.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -282,7 +282,7 @@ pub(crate) mod tests {
         let result = strlength_builtin(Value::CharArray(array)).expect("strlength");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![2, 1]);
+                assert_eq!(tensor.shape(), &[2, 1]);
                 assert_eq!(tensor.materialize_f64(), vec![3.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),

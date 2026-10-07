@@ -345,7 +345,7 @@ mod tests {
         )
         .unwrap();
         let out = call(hsv).unwrap();
-        assert_eq!(out.shape, vec![3, 3]);
+        assert_eq!(out.shape(), &[3, 3]);
         let expected = vec![0.0, 1.0, 0.25, 1.0, 0.0, 0.25, 0.0, 1.0, 0.25];
         for (actual, expected) in values(&out).iter().zip(expected) {
             assert_close(*actual, expected);

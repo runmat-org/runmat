@@ -213,7 +213,7 @@ pub(crate) mod tests {
         let result = str2double_builtin(Value::StringArray(array)).expect("str2double");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![3, 1]);
+                assert_eq!(tensor.shape(), &[3, 1]);
                 assert_eq!(tensor.materialize_f64()[0], 1.0);
                 assert_eq!(tensor.materialize_f64()[1], 2.5);
                 assert!(tensor.materialize_f64()[2].is_nan());
@@ -231,7 +231,7 @@ pub(crate) mod tests {
         let result = str2double_builtin(Value::CharArray(array)).expect("str2double");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![2, 1]);
+                assert_eq!(tensor.shape(), &[2, 1]);
                 assert_eq!(tensor.materialize_f64()[0], 42.0);
                 assert_eq!(tensor.materialize_f64()[1], 100.0);
             }
@@ -246,7 +246,7 @@ pub(crate) mod tests {
         let result = str2double_builtin(Value::CharArray(array)).expect("str2double");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![0, 1]);
+                assert_eq!(tensor.shape(), &[0, 1]);
                 assert_eq!(tensor.materialize_f64().len(), 0);
             }
             other => panic!("expected empty tensor, got {other:?}"),
@@ -273,7 +273,7 @@ pub(crate) mod tests {
         let result = str2double_builtin(Value::Cell(cell)).expect("str2double");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_eq!(tensor.shape(), &[1, 3]);
                 assert_eq!(tensor.materialize_f64()[0], 3.14);
                 assert!(tensor.materialize_f64()[1].is_nan());
                 assert_eq!(tensor.materialize_f64()[2], f64::NEG_INFINITY);

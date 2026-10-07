@@ -214,7 +214,7 @@ mod tests {
     fn converts_red_to_hsv() {
         let rgb = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 1, 3]).unwrap();
         let out = call(rgb).unwrap();
-        assert_eq!(out.shape, vec![1, 1, 3]);
+        assert_eq!(out.shape(), &[1, 1, 3]);
         let values = values(&out);
         assert_close(values[0], 0.0);
         assert_close(values[1], 1.0);
@@ -229,7 +229,7 @@ mod tests {
         )
         .unwrap();
         let out = call(rgb).unwrap();
-        assert_eq!(out.shape, vec![4, 3]);
+        assert_eq!(out.shape(), &[4, 3]);
         let expected = vec![
             0.5,
             5.0 / 6.0,

@@ -56,7 +56,7 @@ fn imread_decodes_rgb_png_as_column_major_truecolor_uint8() {
     let Value::Tensor(tensor) = result else {
         panic!("expected tensor, got {result:?}");
     };
-    assert_eq!(tensor.shape, vec![2, 2, 3]);
+    assert_eq!(tensor.shape(), &[2, 2, 3]);
     assert_eq!(tensor.numeric_dtype(), NumericDType::U8);
     assert_eq!(
         tensor.integer_storage(),
@@ -84,7 +84,7 @@ fn imread_returns_alpha_as_third_output_for_rgba_png() {
     assert_eq!(outputs.len(), 3);
     match &outputs[0] {
         Value::Tensor(rgb) => {
-            assert_eq!(rgb.shape, vec![1, 2, 3]);
+            assert_eq!(rgb.shape(), &[1, 2, 3]);
             assert_eq!(rgb.numeric_dtype(), NumericDType::U8);
             assert_eq!(
                 rgb.integer_storage(),
@@ -94,12 +94,12 @@ fn imread_returns_alpha_as_third_output_for_rgba_png() {
         other => panic!("expected rgb tensor, got {other:?}"),
     }
     match &outputs[1] {
-        Value::Tensor(map) => assert_eq!(map.shape, vec![0, 0]),
+        Value::Tensor(map) => assert_eq!(map.shape(), &[0, 0]),
         other => panic!("expected empty map tensor, got {other:?}"),
     }
     match &outputs[2] {
         Value::Tensor(alpha) => {
-            assert_eq!(alpha.shape, vec![1, 2]);
+            assert_eq!(alpha.shape(), &[1, 2]);
             assert_eq!(alpha.numeric_dtype(), NumericDType::U8);
             assert_eq!(
                 alpha.integer_storage(),
@@ -280,7 +280,7 @@ fn imread_materializes_multi_outputs_with_empty_colormap() {
     assert_eq!(outputs.len(), 2);
     assert!(matches!(&outputs[0], Value::Tensor(_)));
     match &outputs[1] {
-        Value::Tensor(map) => assert_eq!(map.shape, vec![0, 0]),
+        Value::Tensor(map) => assert_eq!(map.shape(), &[0, 0]),
         other => panic!("expected map tensor, got {other:?}"),
     }
 }
@@ -302,7 +302,7 @@ fn imread_decodes_16_bit_grayscale() {
     let Value::Tensor(tensor) = result else {
         panic!("expected tensor, got {result:?}");
     };
-    assert_eq!(tensor.shape, vec![2, 2]);
+    assert_eq!(tensor.shape(), &[2, 2]);
     assert_eq!(tensor.numeric_dtype(), NumericDType::U16);
     assert_eq!(
         tensor.integer_storage(),
@@ -334,7 +334,7 @@ fn imread_fetches_http_url() {
     let Value::Tensor(tensor) = result else {
         panic!("expected tensor, got {result:?}");
     };
-    assert_eq!(tensor.shape, vec![2, 2, 3]);
+    assert_eq!(tensor.shape(), &[2, 2, 3]);
     assert_eq!(tensor.numeric_dtype(), NumericDType::U8);
 }
 

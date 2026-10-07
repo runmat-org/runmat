@@ -452,7 +452,7 @@ pub(crate) mod tests {
         .expect("strfind");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 1]);
+                assert_eq!(tensor.shape(), &[1, 1]);
                 assert_eq!(tensor.materialize_f64(), vec![1.0]);
             }
             other => panic!("expected 1x1 tensor result, got {other:?}"),
@@ -470,7 +470,7 @@ pub(crate) mod tests {
         .expect("strfind");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_eq!(tensor.shape(), &[1, 2]);
                 assert_eq!(tensor.materialize_f64(), vec![1.0, 8.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -488,7 +488,7 @@ pub(crate) mod tests {
         .expect("strfind");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_eq!(tensor.shape(), &[1, 3]);
                 assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -506,7 +506,7 @@ pub(crate) mod tests {
         .expect("strfind");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 0]);
+                assert_eq!(tensor.shape(), &[1, 0]);
                 assert!(tensor.materialize_f64().is_empty());
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -669,7 +669,7 @@ pub(crate) mod tests {
         .expect("strfind");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_eq!(tensor.shape(), &[1, 2]);
                 assert_eq!(tensor.materialize_f64(), vec![3.0, 4.0]);
             }
             other => panic!("expected numeric tensor result, got {other:?}"),
@@ -768,7 +768,7 @@ pub(crate) mod tests {
         .expect("strfind");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 0]);
+                assert_eq!(tensor.shape(), &[1, 0]);
                 assert!(tensor.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),
@@ -788,7 +788,7 @@ pub(crate) mod tests {
         .expect("strfind");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 0]);
+                assert_eq!(tensor.shape(), &[1, 0]);
                 assert!(tensor.materialize_f64().is_empty());
             }
             other => panic!("expected empty tensor, got {other:?}"),

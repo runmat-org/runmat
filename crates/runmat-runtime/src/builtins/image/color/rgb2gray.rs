@@ -294,7 +294,7 @@ mod tests {
         let Value::Tensor(out) = call(Value::Tensor(rgb)) else {
             panic!("expected tensor");
         };
-        assert_eq!(out.shape, vec![2, 2]);
+        assert_eq!(out.shape(), &[2, 2]);
         assert!(out
             .as_f64_slice()
             .expect("double output")
@@ -314,7 +314,7 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(out.numeric_dtype(), NumericDType::U16);
-        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.shape(), &[2, 1]);
         assert_eq!(
             out.integer_storage(),
             Some(&IntegerStorage::U16(vec![19591, 38472]))
@@ -327,7 +327,7 @@ mod tests {
         let Value::Tensor(out) = call(Value::Tensor(map)) else {
             panic!("expected colormap tensor");
         };
-        assert_eq!(out.shape, vec![2, 3]);
+        assert_eq!(out.shape(), &[2, 3]);
         let values = out.as_f64_slice().expect("double colormap");
         for channel in 0..3 {
             assert!((values[channel * 2] - 0.298_936_021_293_775).abs() < 1e-15);

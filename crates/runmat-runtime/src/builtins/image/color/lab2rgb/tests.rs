@@ -43,7 +43,7 @@ fn converts_lab_colormap_references_to_rgb() {
     )
     .unwrap();
     let out = call(lab).unwrap();
-    assert_eq!(out.shape, vec![4, 3]);
+    assert_eq!(out.shape(), &[4, 3]);
     let expected = vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
     for (actual, expected) in values(&out).iter().zip(expected) {
         assert_close(*actual, expected, 1e-3);

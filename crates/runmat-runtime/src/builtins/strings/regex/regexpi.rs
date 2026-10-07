@@ -235,7 +235,7 @@ pub(crate) mod tests {
                         assert_eq!(matches.data.len(), 1);
                         match &matches.data[0] {
                             Value::Tensor(extents) => {
-                                assert_eq!(extents.shape, vec![2, 2]);
+                                assert_eq!(extents.shape(), &[2, 2]);
                                 assert_eq!(extents.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
                             }
                             other => panic!("expected token extents, got {other:?}"),
@@ -335,7 +335,7 @@ pub(crate) mod tests {
                 let matrix = &ca.data[0];
                 match matrix {
                     Value::Tensor(t) => {
-                        assert_eq!(t.shape, vec![2, 2]);
+                        assert_eq!(t.shape(), &[2, 2]);
                         assert_eq!(t.materialize_f64(), vec![4.0, 6.0, 5.0, 7.0]);
                     }
                     other => panic!("expected tensor for token extents, got {other:?}"),
