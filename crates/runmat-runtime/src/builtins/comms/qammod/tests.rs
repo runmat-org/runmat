@@ -79,7 +79,7 @@ fn assert_complex_close(actual: &[(f64, f64)], expected: &[(f64, f64)]) {
 #[test]
 fn qammod_4_gray_mapping() {
     let out = qammod(tensor(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]), 4, vec![]);
-    assert_eq!(out.shape, vec![1, 4]);
+    assert_eq!(out.shape(), [1, 4]);
     assert_complex_close(
         &out.materialize_f64(),
         &[(-1.0, 1.0), (-1.0, -1.0), (1.0, 1.0), (1.0, -1.0)],
@@ -93,11 +93,35 @@ fn qammod_reads_typed_integer_symbol_storage_exactly() {
         4,
         vec![],
     );
-    assert_eq!(out.shape, vec![1, 4]);
+    assert_eq!(out.shape(), [1, 4]);
     assert_complex_close(
         &out.materialize_f64(),
         &[(-1.0, 1.0), (-1.0, -1.0), (1.0, 1.0), (1.0, -1.0)],
     );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn qammod_preserves_integer_rank_and_bit_grouping_geometry() {
+    let rank_zero = qammod(tensor(vec![0.0], Vec::new()), 4, Vec::new());
+    assert!(rank_zero.shape().is_empty());
+
+    let rank_one = qammod(tensor(vec![0.0, 1.0], vec![2]), 4, Vec::new());
+    assert_eq!(rank_one.shape(), [2]);
+
+    let rank_zero_bit = qammod(
+        tensor(vec![0.0], Vec::new()),
+        2,
+        vec![Value::from("InputType"), Value::from("bit")],
+    );
+    assert_eq!(rank_zero_bit.shape(), [1, 1]);
+
+    let rank_one_bits = qammod(
+        tensor(vec![0.0, 1.0], vec![2]),
+        4,
+        vec![Value::from("InputType"), Value::from("bit")],
+    );
+    assert_eq!(rank_one_bits.shape(), [1]);
 }
 
 #[test]
@@ -204,7 +228,7 @@ fn qammod_bit_input_groups_rows_by_channel() {
         16,
         vec![Value::from("InputType"), Value::from("bit")],
     );
-    assert_eq!(out.shape, vec![1, 2]);
+    assert_eq!(out.shape(), [1, 2]);
     assert_complex_close(&out.materialize_f64(), &[(-3.0, 3.0), (1.0, -1.0)]);
 }
 
@@ -221,7 +245,7 @@ fn qammod_reads_typed_integer_bit_storage_exactly() {
         16,
         vec![Value::from("InputType"), Value::from("bit")],
     );
-    assert_eq!(out.shape, vec![1, 2]);
+    assert_eq!(out.shape(), [1, 2]);
     assert_complex_close(&out.materialize_f64(), &[(-3.0, 3.0), (1.0, -1.0)]);
 }
 
@@ -236,7 +260,7 @@ fn qammod_bit_input_honors_binary_mapping() {
             Value::from("bit"),
         ],
     );
-    assert_eq!(out.shape, vec![1, 1]);
+    assert_eq!(out.shape(), [1, 1]);
     assert_complex_close(&out.materialize_f64(), &[(-3.0, -3.0)]);
 }
 
@@ -248,7 +272,7 @@ fn qammod_logical_bit_input_preserves_channels() {
         4,
         vec![Value::from("InputType"), Value::from("bit")],
     );
-    assert_eq!(out.shape, vec![1, 2]);
+    assert_eq!(out.shape(), [1, 2]);
     assert_complex_close(&out.materialize_f64(), &[(-1.0, 1.0), (1.0, -1.0)]);
 }
 
@@ -289,7 +313,7 @@ fn qammod_inprocess_gpu_bit_input_returns_complex_resident_output() {
         let Value::ComplexTensor(actual) = gathered else {
             panic!("expected gathered complex tensor");
         };
-        assert_eq!(actual.shape, expected.shape);
+        assert_eq!(actual.shape(), expected.shape());
         assert_complex_close(&actual.materialize_f64(), &expected.materialize_f64());
         drop(input_handle);
         drop(output_handle);
@@ -490,7 +514,7 @@ fn qammod_wgpu_input_returns_complex_resident_output() {
             let Value::ComplexTensor(actual) = gathered else {
                 panic!("expected gathered complex tensor");
             };
-            assert_eq!(actual.shape, expected.shape);
+            assert_eq!(actual.shape(), expected.shape());
             assert_complex_close(&actual.materialize_f64(), &expected.materialize_f64());
             drop(input_handle);
             drop(output_handle);
@@ -542,7 +566,7 @@ fn qammod_wgpu_bit_input_returns_complex_resident_output() {
             let Value::ComplexTensor(actual) = gathered else {
                 panic!("expected gathered complex tensor");
             };
-            assert_eq!(actual.shape, expected.shape);
+            assert_eq!(actual.shape(), expected.shape());
             assert_complex_close(&actual.materialize_f64(), &expected.materialize_f64());
             drop(input_handle);
             drop(output_handle);

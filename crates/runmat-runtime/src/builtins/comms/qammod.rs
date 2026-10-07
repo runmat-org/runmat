@@ -361,7 +361,7 @@ impl SymbolInput {
     }
 
     fn from_tensor(tensor: Tensor, order: usize, input_type: InputType) -> BuiltinResult<Self> {
-        let shape = tensor.shape.clone();
+        let shape = tensor.shape().to_vec();
         if let Some(storage) = tensor.integer_storage() {
             validate_symbol_storage_class(storage)?;
             let symbols = integer_storage_to_symbols(storage, "X")?;
@@ -379,17 +379,14 @@ impl SymbolInput {
                     .iter()
                     .map(|&value| number_to_symbol(value))
                     .collect::<BuiltinResult<Vec<_>>>()?;
-                Ok(Self {
-                    data,
-                    shape: tensor.shape,
-                })
+                Ok(Self { data, shape })
             }
             InputType::Bit => {
                 let bits = tensor_utils::tensor_values_f64_cow(&tensor)
                     .iter()
                     .map(|&value| number_to_bit(value, "X"))
                     .collect::<BuiltinResult<Vec<_>>>()?;
-                bits_to_symbols(bits, tensor.shape, order)
+                bits_to_symbols(bits, shape, order)
             }
         }
     }
@@ -693,9 +690,8 @@ fn invert_mapping(mapping: &[usize], order: usize) -> BuiltinResult<Vec<usize>> 
 fn vector_to_symbols(value: &Value, name: &str) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Tensor(tensor) => {
-            if tensor.shape.len() > 2
-                || (tensor.shape.len() == 2 && tensor.shape[0] > 1 && tensor.shape[1] > 1)
-            {
+            let shape = tensor.shape();
+            if shape.len() > 2 || (shape.len() == 2 && shape[0] > 1 && shape[1] > 1) {
                 return Err(qammod_error(format!("qammod: {name} must be a vector")));
             }
             if let Some(storage) = tensor.integer_storage() {

@@ -242,7 +242,7 @@ fn scalar_shape(value: &Value, name: &str) -> BuiltinResult<()> {
 fn numeric_shape(value: &Value, name: &str, scalar: bool) -> BuiltinResult<()> {
     let shape = match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => return Ok(()),
-        Value::Tensor(tensor) => tensor.shape.as_slice(),
+        Value::Tensor(tensor) => tensor.shape(),
         Value::GpuTensor(handle)
             if handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real =>
         {

@@ -260,7 +260,7 @@ async fn gather(value: Value) -> BuiltinResult<Value> {
 
 fn preflight_observations(value: &Value) -> BuiltinResult<()> {
     let shape = match value {
-        Value::Tensor(tensor) => tensor.shape.as_slice(),
+        Value::Tensor(tensor) => tensor.shape(),
         Value::LogicalArray(array) => array.shape.as_slice(),
         Value::GpuTensor(handle) => {
             if handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real {

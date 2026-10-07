@@ -12,7 +12,7 @@ pub(super) fn power_complex_complex(
     lhs: &ComplexTensor,
     rhs: &ComplexTensor,
 ) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())
         .map_err(|err| power_error_with_detail(&POWER_ERROR_SIZE_MISMATCH, &err))?;
     let output = match (lhs.complex_storage(), rhs.complex_storage()) {
         (ComplexStorage::F64(lhs), ComplexStorage::F64(rhs)) => {
@@ -65,7 +65,7 @@ pub(super) fn power_complex_complex(
 }
 
 pub(super) fn power_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())
         .map_err(|err| power_error_with_detail(&POWER_ERROR_SIZE_MISMATCH, &err))?;
     let rhs = rhs
         .clone()
@@ -78,7 +78,7 @@ pub(super) fn power_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinRe
 }
 
 pub(super) fn power_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())
         .map_err(|err| power_error_with_detail(&POWER_ERROR_SIZE_MISMATCH, &err))?;
     let lhs = lhs
         .clone()

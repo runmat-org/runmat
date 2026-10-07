@@ -1,6 +1,6 @@
 use super::geometry::{
     apply_pca_if_requested, guard_dense_feature_work, needs_pca, prepare_data_cooperative,
-    standardize_rows,
+    standardize_rows, tsne_matrix_dimensions,
 };
 use super::metric::pairwise_squared_distances_cooperative;
 use super::{
@@ -16,7 +16,7 @@ pub(super) async fn compute_tsne_cooperative(
     options: Options,
     cooperation: &mut super::cooperation::TsneCooperation,
 ) -> BuiltinResult<EmbeddingResult> {
-    if x.shape.len() > 2 {
+    if x.shape().len() > 2 {
         return Err(invalid("tsne: X must be a 2-D numeric matrix"));
     }
     let PreparedData {
@@ -226,7 +226,8 @@ async fn initial_embedding(
 ) -> BuiltinResult<Vec<f64>> {
     let dims = options.num_dimensions;
     if let Some(initial) = &options.initial_y {
-        if initial.shape.len() > 2 || initial.cols != dims {
+        let (initial_rows, initial_cols) = tsne_matrix_dimensions(initial);
+        if initial.shape().len() > 2 || initial_cols != dims {
             return Err(invalid(format!(
                 "tsne: InitialY must have {} columns",
                 dims
@@ -239,10 +240,10 @@ async fn initial_embedding(
         data.try_reserve_exact(count).map_err(|source| {
             super::internal_with_source("tsne: embedding exceeds available memory", source)
         })?;
-        if initial.rows == original_rows {
+        if initial_rows == original_rows {
             for col in 0..dims {
                 for &row in good_rows {
-                    let value = tensor::tensor_value_f64(initial, row + col * initial.rows);
+                    let value = tensor::tensor_value_f64(initial, row + col * initial_rows);
                     if !value.is_finite() {
                         return Err(invalid("tsne: InitialY values must be finite"));
                     }
@@ -250,10 +251,10 @@ async fn initial_embedding(
                     cooperation.completed(1).await?;
                 }
             }
-        } else if initial.rows == rows {
+        } else if initial_rows == rows {
             for col in 0..dims {
                 for row in 0..rows {
-                    let value = tensor::tensor_value_f64(initial, row + col * initial.rows);
+                    let value = tensor::tensor_value_f64(initial, row + col * initial_rows);
                     if !value.is_finite() {
                         return Err(invalid("tsne: InitialY values must be finite"));
                     }

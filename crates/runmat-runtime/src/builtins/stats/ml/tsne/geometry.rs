@@ -5,26 +5,35 @@ use nalgebra::{DMatrix, SymmetricEigen};
 use runmat_value::Tensor;
 use std::cmp::Ordering;
 
+pub(super) fn tsne_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 pub(super) async fn prepare_data_cooperative(
     x: &Tensor,
     cooperation: &mut super::cooperation::TsneCooperation,
 ) -> BuiltinResult<PreparedData> {
+    let (x_rows, x_cols) = tsne_matrix_dimensions(x);
     let mut rows = Vec::new();
     let mut good_rows = Vec::new();
-    rows.try_reserve_exact(x.rows).map_err(|source| {
+    rows.try_reserve_exact(x_rows).map_err(|source| {
         super::internal_with_source("tsne: observations exceed available memory", source)
     })?;
-    good_rows.try_reserve_exact(x.rows).map_err(|source| {
+    good_rows.try_reserve_exact(x_rows).map_err(|source| {
         super::internal_with_source("tsne: row indices exceed available memory", source)
     })?;
-    for row in 0..x.rows {
+    for row in 0..x_rows {
         let mut out = Vec::new();
-        out.try_reserve_exact(x.cols).map_err(|source| {
+        out.try_reserve_exact(x_cols).map_err(|source| {
             super::internal_with_source("tsne: features exceed available memory", source)
         })?;
         let mut complete = true;
-        for col in 0..x.cols {
-            let value = tensor::tensor_value_f64(x, row + col * x.rows);
+        for col in 0..x_cols {
+            let value = tensor::tensor_value_f64(x, row + col * x_rows);
             cooperation.completed(1).await?;
             if value.is_infinite() {
                 return Err(invalid("tsne: X must not contain Inf values"));
@@ -44,7 +53,7 @@ pub(super) async fn prepare_data_cooperative(
     Ok(PreparedData {
         rows,
         good_rows,
-        original_rows: x.rows,
+        original_rows: x_rows,
     })
 }
 

@@ -1,4 +1,30 @@
 use super::super::*;
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn power_preserves_rank_one_shape_across_complex_operand_routes() {
+    let real_base = || Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![2]).unwrap());
+    let complex_base =
+        || Value::ComplexTensor(ComplexTensor::new(vec![(2.0, 0.0), (3.0, 0.0)], vec![2]).unwrap());
+    let real_exponent = || Value::Tensor(Tensor::new(vec![2.0], Vec::new()).unwrap());
+    let complex_exponent =
+        || Value::ComplexTensor(ComplexTensor::new(vec![(2.0, 0.0)], Vec::new()).unwrap());
+    for (base, exponent) in [
+        (complex_base(), complex_exponent()),
+        (complex_base(), real_exponent()),
+        (real_base(), complex_exponent()),
+    ] {
+        let result = power_builtin(base, exponent, Vec::new()).unwrap();
+        let Value::ComplexTensor(result) = result else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(result.shape(), [2]);
+        for ((real, imag), expected) in result.materialize_f64().into_iter().zip([4.0, 9.0]) {
+            assert!((real - expected).abs() < 1.0e-12);
+            assert!(imag.abs() < 1.0e-12);
+        }
+    }
+}
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn power_complex_scalar() {
@@ -102,7 +128,7 @@ fn power_preserves_empty_complex_single_class() {
     let Value::ComplexTensor(result) = result else {
         panic!("expected complex single tensor");
     };
-    assert_eq!(result.shape, vec![0, 2]);
+    assert_eq!(result.shape(), [0, 2]);
     assert_eq!(result.as_f32_slice(), Some(&[][..]));
 }
 

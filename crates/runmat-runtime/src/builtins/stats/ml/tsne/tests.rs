@@ -252,6 +252,37 @@ fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
     Value::Tensor(Tensor::new(data, shape).unwrap())
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+async fn tsne_preserves_rank_zero_and_rank_one_observation_geometry() {
+    let error = tsne_builtin(tensor(vec![7.0], Vec::new()), Vec::new())
+        .await
+        .expect_err("rank-zero input has no cached observation rows");
+    assert!(error
+        .message()
+        .contains("at least one complete observation is required"));
+
+    let Value::Tensor(embedding) = tsne_builtin(tensor(vec![1.0, 2.0, 3.0], vec![3]), Vec::new())
+        .await
+        .expect("rank-one input is one observation with three features")
+    else {
+        panic!("expected embedding tensor");
+    };
+    assert_eq!(embedding.shape(), [1, 2]);
+    assert_eq!(embedding.materialize_f64(), vec![0.0, 0.0]);
+
+    let error = tsne_builtin(
+        tensor(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]),
+        vec![
+            Value::String("InitialY".into()),
+            tensor(vec![4.0, 5.0], vec![2]),
+        ],
+    )
+    .await
+    .expect_err("rank-one InitialY has one cached row, not two");
+    assert!(error.message().contains("InitialY row count"));
+}
+
 fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
     let tensor = Tensor::new_integer(storage, shape).unwrap();
     Value::Tensor(tensor)
@@ -293,7 +324,7 @@ async fn tsne_embeds_rows_and_returns_loss() {
         Value::OutputList(outputs) => {
             match &outputs[0] {
                 Value::Tensor(y) => {
-                    assert_eq!(y.shape, vec![4, 2]);
+                    assert_eq!(y.shape(), [4, 2]);
                     assert!(y.materialize_f64().iter().all(|value| value.is_finite()));
                 }
                 other => panic!("expected tensor, got {other:?}"),
@@ -337,7 +368,7 @@ async fn tsne_removes_nan_rows_and_honors_num_dimensions() {
     .await
     .unwrap();
     match value {
-        Value::Tensor(y) => assert_eq!(y.shape, vec![3, 3]),
+        Value::Tensor(y) => assert_eq!(y.shape(), [3, 3]),
         other => panic!("expected tensor, got {other:?}"),
     }
 }
@@ -368,7 +399,7 @@ async fn tsne_supports_standardize_pca_and_cosine_distance() {
     .await
     .unwrap();
     match value {
-        Value::Tensor(y) => assert_eq!(y.shape, vec![4, 2]),
+        Value::Tensor(y) => assert_eq!(y.shape(), [4, 2]),
         other => panic!("expected tensor, got {other:?}"),
     }
 }
@@ -407,7 +438,7 @@ async fn tsne_reads_typed_integer_data_initial_y_and_options_exactly() {
     .await
     .unwrap();
     match value {
-        Value::Tensor(y) => assert_eq!(y.shape, vec![4, 2]),
+        Value::Tensor(y) => assert_eq!(y.shape(), [4, 2]),
         other => panic!("expected tensor, got {other:?}"),
     }
 }

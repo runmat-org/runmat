@@ -1,4 +1,17 @@
 use super::super::*;
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn power_broadcasts_rank_zero_exponent_over_rank_one_base() {
+    let base = Tensor::new(vec![2.0, 3.0], vec![2]).unwrap();
+    let exponent = Tensor::new(vec![2.0], Vec::new()).unwrap();
+    let result = power_builtin(Value::Tensor(base), Value::Tensor(exponent), Vec::new()).unwrap();
+    let Value::Tensor(result) = result else {
+        panic!("expected real tensor");
+    };
+    assert_eq!(result.shape(), [2]);
+    assert_eq!(result.materialize_f64(), vec![4.0, 9.0]);
+}
 use runmat_value::{CharArray, NumericStorage};
 #[test]
 fn power_float_arrays_preserve_native_single_class() {
@@ -40,7 +53,7 @@ fn power_like_complex_conversion_reads_typed_integer_storage_exactly() {
 
     match result {
         Value::ComplexTensor(out) => {
-            assert_eq!(out.shape, vec![1, 2]);
+            assert_eq!(out.shape(), [1, 2]);
             assert_eq!(out.materialize_f64(), vec![(-4.0, 0.0), (5.0, 0.0)]);
         }
         other => panic!("expected complex tensor, got {other:?}"),
@@ -55,7 +68,7 @@ fn power_matrix_broadcast() {
     let result = power_builtin(Value::Tensor(base), Value::Tensor(exp), Vec::new()).expect("power");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![3, 3]);
+            assert_eq!(t.shape(), [3, 3]);
             let expected = [1.0, 2.0, 3.0, 1.0, 4.0, 9.0, 1.0, 8.0, 27.0];
             for (got, exp) in t
                 .as_f64_slice()
@@ -78,7 +91,7 @@ fn power_char_array() {
         power_builtin(Value::CharArray(chars), Value::Num(2.0), Vec::new()).expect("power");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), [1, 2]);
             let expected = [4225.0, 8100.0];
             for (got, exp) in t
                 .as_f64_slice()

@@ -28,7 +28,7 @@ impl<T> RealPowerOutput<T> {
 }
 
 pub(super) fn power_real_real(lhs: Tensor, rhs: Tensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())
         .map_err(|err| power_error_with_detail(&POWER_ERROR_SIZE_MISMATCH, &err))?;
     let output_shape = plan.output_shape().to_vec();
     let lhs = lhs
