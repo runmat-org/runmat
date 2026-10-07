@@ -195,20 +195,20 @@ fn cosd_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
             .iter()
             .map(|&v| cosd_scalar(f64::from(v)) as f32)
             .collect();
-        return Tensor::from_f32(data, tensor.shape.clone())
+        return Tensor::from_f32(data, tensor.shape().to_vec())
             .map_err(|e| cosd_error_with_detail(&COSD_ERROR_INTERNAL, e));
     }
     let data = tensor::tensor_values_f64_cow(&tensor)
         .iter()
         .map(|&value| cosd_scalar(value))
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
+    Tensor::new(data, tensor.shape().to_vec())
         .map_err(|err| cosd_error_with_detail(&COSD_ERROR_INTERNAL, err))
 }
 
 fn cosd_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
-    let converted = match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let converted = match storage {
         ComplexStorage::F32(values) => ComplexTensor::from_f32(
             values
                 .into_iter()
@@ -308,7 +308,7 @@ pub(crate) mod tests {
         else {
             panic!("expected character result tensor")
         };
-        assert_eq!(chars.shape, vec![1, 2]);
+        assert_eq!(chars.shape(), &[1, 2]);
         assert_eq!(chars.materialize_f64()[1], 0.0);
     }
 
@@ -375,7 +375,7 @@ pub(crate) mod tests {
         let result = cosd_builtin(Value::Tensor(tensor)).expect("cosd");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 0.0, -1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -393,7 +393,7 @@ pub(crate) mod tests {
 
         match cosd_builtin(Value::Tensor(tensor)).expect("cosd") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 let expected = [1.0, 0.5, -1.0];
                 for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
@@ -411,7 +411,7 @@ pub(crate) mod tests {
         let result = cosd_builtin(Value::LogicalArray(logical)).expect("cosd");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 assert_eq!(t.materialize_f64()[0], 1.0);
                 let expected = (1.0_f64 * DEG_TO_RAD).cos();
                 assert!((t.materialize_f64()[1] - expected).abs() < 1e-12);
@@ -475,7 +475,7 @@ pub(crate) mod tests {
             let handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
                     data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 })
                 .expect("upload");
             let Value::GpuTensor(out_handle) = cosd_builtin(Value::GpuTensor(handle)).unwrap()

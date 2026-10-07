@@ -137,20 +137,20 @@ fn sind_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
             .iter()
             .map(|&value| sind_scalar(f64::from(value)) as f32)
             .collect();
-        return Tensor::from_f32(data, tensor.shape.clone())
+        return Tensor::from_f32(data, tensor.shape().to_vec())
             .map_err(|err| sind_error_with_detail(&SIND_ERROR_INTERNAL, err));
     }
     let data = tensor::tensor_values_f64_cow(&tensor)
         .iter()
         .map(|&value| sind_scalar(value))
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
+    Tensor::new(data, tensor.shape().to_vec())
         .map_err(|err| sind_error_with_detail(&SIND_ERROR_INTERNAL, err))
 }
 
 fn sind_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
-    let converted = match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let converted = match storage {
         ComplexStorage::F32(values) => ComplexTensor::from_f32(
             values
                 .into_iter()
@@ -274,13 +274,29 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn sind_preserves_rank_zero_scalarization_and_rank_one_shape() {
+        let scalar = sind_builtin(Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap()))
+            .expect("rank-zero sind");
+        assert_eq!(scalar, Value::Num(0.0));
+
+        let vector = sind_builtin(Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![2]).unwrap()))
+            .expect("rank-one sind");
+        let Value::Tensor(vector) = vector else {
+            panic!("expected rank-one tensor")
+        };
+        assert_eq!(vector.shape(), &[2]);
+        assert_eq!(vector.materialize_f64(), vec![0.0, 0.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sind_tensor_preserves_shape() {
         let tensor = Tensor::new(vec![0.0, 30.0, 90.0, 180.0], vec![2, 2]).unwrap();
         let result = sind_builtin(Value::Tensor(tensor)).expect("sind");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert_eq!(t.materialize_f64(), vec![0.0, 0.5, 1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -319,7 +335,7 @@ pub(crate) mod tests {
 
         match sind_builtin(Value::Tensor(tensor)).expect("sind") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 let expected = [0.0, 0.5, 1.0];
                 for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
@@ -338,7 +354,7 @@ pub(crate) mod tests {
         let result = sind_builtin(Value::LogicalArray(logical)).expect("sind");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 assert_eq!(t.materialize_f64()[0], 0.0);
                 let expected = (1.0_f64 * DEG_TO_RAD).sin();
                 assert!((t.materialize_f64()[1] - expected).abs() < 1e-12);

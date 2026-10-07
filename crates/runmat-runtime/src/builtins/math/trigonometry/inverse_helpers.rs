@@ -86,7 +86,7 @@ where
     F64: Fn(f64) -> f64,
     F32: Fn(f32) -> f32,
 {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor.into_numeric_storage().map_err(|error| {
         build_runtime_error(format!("{builtin}: {error}"))
             .with_builtin(builtin)
@@ -126,8 +126,8 @@ where
     F64: Fn((f64, f64)) -> (f64, f64),
     F32: Fn((f32, f32)) -> (f32, f32),
 {
-    let shape = tensor.shape.clone();
-    let storage = match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(values) => {
             ComplexStorage::F64(values.into_iter().map(map_f64).collect())
         }
@@ -159,7 +159,7 @@ where
     F64: Fn(f64) -> (f64, f64),
     F32: Fn(f32) -> (f32, f32),
 {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor.into_numeric_storage().map_err(|error| {
         build_runtime_error(format!("{builtin}: {error}"))
             .with_builtin(builtin)
@@ -263,6 +263,80 @@ mod tests {
     use super::*;
     use runmat_value::{IntegerStorage, NumericDType};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn unary_mapping_keeps_low_rank_shape_and_native_precision() {
+        for (shape, values) in [(Vec::new(), vec![1.0]), (vec![2], vec![1.0, 2.0])] {
+            for single in [false, true] {
+                let real = if single {
+                    Tensor::from_f32(
+                        values.iter().map(|value| *value as f32).collect(),
+                        shape.clone(),
+                    )
+                    .unwrap()
+                } else {
+                    Tensor::new(values.clone(), shape.clone()).unwrap()
+                };
+                let dtype = real.numeric_dtype();
+                let output =
+                    map_real_tensor(real, "mapping-test", |value| value, |value| value).unwrap();
+                assert_eq!(output.shape(), shape.as_slice());
+                assert_eq!(output.numeric_dtype(), dtype);
+                assert_eq!(output.materialize_f64(), values);
+
+                let complex_values = values.iter().map(|value| (*value, 1.0)).collect::<Vec<_>>();
+                let complex = if single {
+                    ComplexTensor::from_f32(
+                        complex_values
+                            .iter()
+                            .map(|(real, imaginary)| (*real as f32, *imaginary as f32))
+                            .collect(),
+                        shape.clone(),
+                    )
+                    .unwrap()
+                } else {
+                    ComplexTensor::new(complex_values.clone(), shape.clone()).unwrap()
+                };
+                let output =
+                    map_complex_tensor(complex, "mapping-test", |value| value, |value| value)
+                        .unwrap();
+                assert_eq!(output.shape(), shape.as_slice());
+                assert_eq!(output.numeric_dtype(), dtype);
+                assert_eq!(output.materialize_f64(), complex_values);
+            }
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn promoting_mapping_preserves_rank_one_real_and_complex_classes() {
+        for imaginary in [0.0, 1.0] {
+            let input = Tensor::from_f32(vec![1.0, 2.0], vec![2]).unwrap();
+            let output = map_real_tensor_promoting(
+                input,
+                "mapping-test",
+                |value| (value, imaginary),
+                |value| (value, imaginary as f32),
+            )
+            .unwrap();
+            match output {
+                Value::Tensor(output) => {
+                    assert_eq!(imaginary, 0.0);
+                    assert_eq!(output.shape(), &[2]);
+                    assert_eq!(output.numeric_dtype(), NumericDType::F32);
+                    assert_eq!(output.as_f32_slice(), Some([1.0, 2.0].as_slice()));
+                }
+                Value::ComplexTensor(output) => {
+                    assert_eq!(imaginary, 1.0);
+                    assert_eq!(output.shape(), &[2]);
+                    assert_eq!(output.numeric_dtype(), NumericDType::F32);
+                    assert_eq!(output.materialize_f64(), vec![(1.0, 1.0), (2.0, 1.0)]);
+                }
+                other => panic!("expected mapped array, got {other:?}"),
+            }
+        }
+    }
+
     #[test]
     fn real_boundary_promotes_all_eight_integer_classes_to_double() {
         let inputs = [
@@ -281,7 +355,7 @@ mod tests {
             let output = map_real_tensor(tensor, "inverse-test", |value| value, |value| value)
                 .expect("integer-to-double boundary");
             assert_eq!(output.numeric_dtype(), NumericDType::F64);
-            assert_eq!(output.shape, vec![2, 1]);
+            assert_eq!(output.shape(), &[2, 1]);
         }
     }
 }

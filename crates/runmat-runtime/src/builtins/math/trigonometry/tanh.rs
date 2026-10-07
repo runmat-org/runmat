@@ -175,20 +175,20 @@ fn tanh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
             .iter()
             .map(|&v| v.tanh())
             .collect();
-        return Tensor::from_f32(data, tensor.shape.clone())
+        return Tensor::from_f32(data, tensor.shape().to_vec())
             .map_err(|e| tanh_error_with_detail(&TANH_ERROR_INTERNAL, e));
     }
     let data = tensor::tensor_values_f64_cow(&tensor)
         .iter()
         .map(|&v| v.tanh())
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone())
+    Tensor::new(data, tensor.shape().to_vec())
         .map_err(|e| tanh_error_with_detail(&TANH_ERROR_INTERNAL, e))
 }
 
 fn tanh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = ct.shape.clone();
-    let tensor = match ct.into_complex_storage() {
+    let (storage, shape) = ct.into_complex_storage_and_shape();
+    let tensor = match storage {
         ComplexStorage::F32(values) => ComplexTensor::from_f32(
             values
                 .into_iter()
@@ -348,7 +348,7 @@ pub(crate) mod tests {
         let result = tanh_builtin(Value::Tensor(tensor)).expect("tanh");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 for (value, expected) in out
                     .materialize_f64()
                     .iter()
@@ -373,7 +373,7 @@ pub(crate) mod tests {
 
         match tanh_builtin(Value::Tensor(tensor)).expect("tanh") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 let expected = [-1.0f64.tanh(), 0.0, 1.0f64.tanh()];
                 for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
@@ -431,7 +431,7 @@ pub(crate) mod tests {
         let result = tanh_builtin(Value::CharArray(chars)).expect("tanh");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 let expected: Vec<f64> = "Az".chars().map(|c| (c as u32 as f64).tanh()).collect();
                 for (value, expect) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((*value - *expect).abs() < 1e-12);
@@ -456,12 +456,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 0.5, 1.0, 1.5], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = tanh_builtin(Value::GpuTensor(handle)).expect("tanh");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), &[4, 1]);
             for (value, expect) in gathered
                 .materialize_f64()
                 .iter()
@@ -514,7 +514,7 @@ pub(crate) mod tests {
             assert_eq!(handle.device_id(), source_device);
             let gathered = test_support::gather(result).expect("gather result");
             assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
-            assert_eq!(gathered.shape, vec![3, 1]);
+            assert_eq!(gathered.shape(), &[3, 1]);
         });
     }
 
@@ -533,13 +533,13 @@ pub(crate) mod tests {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_value = block_on(tanh_gpu(handle)).expect("gpu tanh");
         let gpu_tensor = test_support::gather(gpu_value).expect("gather gpu");
 
-        assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
+        assert_eq!(gpu_tensor.shape(), cpu_tensor.shape());
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

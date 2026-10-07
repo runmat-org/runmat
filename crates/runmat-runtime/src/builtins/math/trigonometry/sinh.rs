@@ -289,13 +289,29 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn sinh_preserves_rank_zero_scalarization_and_rank_one_shape() {
+        let scalar = sinh_builtin(Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap()))
+            .expect("rank-zero sinh");
+        assert_eq!(scalar, Value::Num(0.0));
+
+        let vector = sinh_builtin(Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![2]).unwrap()))
+            .expect("rank-one sinh");
+        let Value::Tensor(vector) = vector else {
+            panic!("expected rank-one tensor")
+        };
+        assert_eq!(vector.shape(), &[2]);
+        assert_eq!(vector.materialize_f64(), vec![0.0, 0.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sinh_tensor_elements() {
         let tensor = Tensor::new(vec![-1.0, 0.0, 1.0], vec![3, 1]).unwrap();
         let result = sinh_builtin(Value::Tensor(tensor)).expect("sinh");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), &[3, 1]);
                 let expected = [-1.0f64.sinh(), 0.0, 1.0f64.sinh()];
                 for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((got - exp).abs() < 1e-12);
@@ -317,7 +333,7 @@ pub(crate) mod tests {
 
         match sinh_builtin(Value::Tensor(tensor)).expect("sinh") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 let expected = [-1.0f64.sinh(), 0.0, 1.0f64.sinh()];
                 for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
@@ -388,7 +404,7 @@ pub(crate) mod tests {
         let result = sinh_builtin(Value::CharArray(chars)).expect("sinh");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), &[1, 3]);
                 for (idx, ch) in ['a', 'b', 'c'].into_iter().enumerate() {
                     let expected = (ch as u32 as f64).sinh();
                     assert!((t.materialize_f64()[idx] - expected).abs() < 1e-12);
@@ -405,13 +421,13 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 0.5, 1.0, 1.5], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = sinh_builtin(Value::GpuTensor(handle)).expect("sinh");
             let gathered = test_support::gather(result).expect("gather");
             let expected: Vec<f64> = tensor.materialize_f64().iter().map(|&v| v.sinh()).collect();
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), &[4, 1]);
             assert_eq!(gathered.materialize_f64(), expected);
         });
     }
@@ -459,14 +475,14 @@ pub(crate) mod tests {
         let cpu = sinh_real(Value::Tensor(t.clone())).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &t.materialize_f64(),
-            shape: &t.shape,
+            shape: t.shape(),
         };
         let h = provider.upload(&view).unwrap();
         let gpu = block_on(sinh_gpu(h)).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
-                assert_eq!(gt.shape, ct.shape);
+                assert_eq!(gt.shape(), ct.shape());
                 let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

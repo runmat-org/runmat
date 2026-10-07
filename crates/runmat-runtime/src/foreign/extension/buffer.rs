@@ -37,7 +37,7 @@ impl BufferLease {
             ),
             Value::Tensor(value) => (
                 LeasePayload::Numeric(value.host_buffer().clone()),
-                value.shape.clone(),
+                value.shape().to_vec(),
             ),
             Value::LogicalArray(value) => (
                 LeasePayload::Logical(value.data.clone()),
@@ -46,11 +46,11 @@ impl BufferLease {
             Value::ComplexTensor(value) => match value.complex_storage() {
                 ComplexStorage::F64(values) => (
                     LeasePayload::ComplexF64(values.clone()),
-                    value.shape.clone(),
+                    value.shape().to_vec(),
                 ),
                 ComplexStorage::F32(values) => (
                     LeasePayload::ComplexF32(values.clone()),
-                    value.shape.clone(),
+                    value.shape().to_vec(),
                 ),
                 ComplexStorage::Integer(_) => {
                     return Err(());

@@ -290,7 +290,38 @@ impl LeaseState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_extension_abi::{RunMatBufferLease, RunMatStatusCode, RunMatValueKind};
+    use runmat_extension_abi::{
+        RunMatBufferLease, RunMatElementType, RunMatStatusCode, RunMatValueKind,
+        RUNMAT_BUFFER_COLUMN_MAJOR, RUNMAT_BUFFER_INTERLEAVED_COMPLEX, RUNMAT_BUFFER_READ_ONLY,
+    };
+    use runmat_value::{ComplexElement, ComplexStorage, ComplexTensor, Tensor};
+
+    fn empty_buffer_lease() -> RunMatBufferLease {
+        RunMatBufferLease {
+            view: runmat_extension_abi::RunMatBufferView {
+                data: std::ptr::null(),
+                byte_length: 0,
+                shape: std::ptr::null(),
+                rank: 0,
+                element_type: RunMatElementType::Unknown,
+                flags: 0,
+            },
+            handle: RunMatBufferLeaseHandle::INVALID,
+        }
+    }
+
+    fn borrow_value_buffer(
+        host: Pin<&ExtensionHost>,
+        value: Value,
+    ) -> (RunMatValueHandle, RunMatBufferLease) {
+        let handle = host.register_value(value);
+        let table = host.host_vtable();
+        let mut lease = empty_buffer_lease();
+        let status =
+            unsafe { table.borrow_buffer_lease.unwrap()(table.context, handle, &mut lease) };
+        assert_eq!(status, RunMatStatusCode::Ok);
+        (handle, lease)
+    }
 
     #[test]
     fn buffer_lease_retains_the_canonical_allocation_independently() {
@@ -312,17 +343,7 @@ mod tests {
         assert_eq!(status, RunMatStatusCode::Ok);
         assert_eq!(kind, RunMatValueKind::Dense);
 
-        let mut lease = RunMatBufferLease {
-            view: runmat_extension_abi::RunMatBufferView {
-                data: std::ptr::null(),
-                byte_length: 0,
-                shape: std::ptr::null(),
-                rank: 0,
-                element_type: runmat_extension_abi::RunMatElementType::Unknown,
-                flags: 0,
-            },
-            handle: RunMatBufferLeaseHandle::INVALID,
-        };
+        let mut lease = empty_buffer_lease();
         let status =
             unsafe { table.borrow_buffer_lease.unwrap()(table.context, handle, &mut lease) };
         assert_eq!(status, RunMatStatusCode::Ok);
@@ -355,6 +376,175 @@ mod tests {
             unsafe { table.release_buffer.unwrap()(table.context, lease.handle) },
             RunMatStatusCode::StaleHandle
         );
+    }
+
+    #[test]
+    fn real_buffer_leases_preserve_rank_and_shared_allocations() {
+        let host = ExtensionHost::new();
+        let table = host.as_ref().host_vtable();
+
+        let scalar = Tensor::new(vec![7.0], Vec::new()).unwrap();
+        // SAFETY: the address is observed only while the Tensor or lease owns it.
+        let scalar_pointer = unsafe { scalar.host_buffer().foreign_data_pointer() }
+            .cast::<u8>()
+            .cast_const();
+        let (scalar_handle, scalar_lease) =
+            borrow_value_buffer(host.as_ref(), Value::Tensor(scalar));
+        assert_eq!(scalar_lease.view.data, scalar_pointer);
+        assert_eq!(scalar_lease.view.rank, 0);
+        assert_eq!(scalar_lease.view.byte_length, std::mem::size_of::<f64>());
+        assert_eq!(scalar_lease.view.element_type, RunMatElementType::F64);
+        assert_eq!(
+            scalar_lease.view.flags,
+            RUNMAT_BUFFER_READ_ONLY | RUNMAT_BUFFER_COLUMN_MAJOR
+        );
+        assert_eq!(
+            unsafe { table.release_value.unwrap()(table.context, scalar_handle) },
+            RunMatStatusCode::Ok
+        );
+        // SAFETY: the independent lease still owns this one-element allocation.
+        assert_eq!(unsafe { *scalar_lease.view.data.cast::<f64>() }, 7.0);
+
+        let vector = Tensor::new(vec![3.0, 4.0], vec![2]).unwrap();
+        // SAFETY: the address is observed only while the Tensor or lease owns it.
+        let vector_pointer = unsafe { vector.host_buffer().foreign_data_pointer() }
+            .cast::<u8>()
+            .cast_const();
+        let (vector_handle, vector_lease) =
+            borrow_value_buffer(host.as_ref(), Value::Tensor(vector));
+        assert_eq!(vector_lease.view.data, vector_pointer);
+        assert_eq!(vector_lease.view.rank, 1);
+        // SAFETY: the lease owns one shape element until it is released.
+        assert_eq!(unsafe { *vector_lease.view.shape }, 2);
+        assert_eq!(
+            vector_lease.view.byte_length,
+            2 * std::mem::size_of::<f64>()
+        );
+        assert_eq!(vector_lease.view.element_type, RunMatElementType::F64);
+        assert_eq!(
+            vector_lease.view.flags,
+            RUNMAT_BUFFER_READ_ONLY | RUNMAT_BUFFER_COLUMN_MAJOR
+        );
+        assert_eq!(
+            unsafe { table.release_value.unwrap()(table.context, vector_handle) },
+            RunMatStatusCode::Ok
+        );
+        // SAFETY: releasing the Value leaves the lease's shared allocation live.
+        assert_eq!(
+            unsafe { std::slice::from_raw_parts(vector_lease.view.data.cast::<f64>(), 2) },
+            &[3.0, 4.0]
+        );
+
+        for lease in [scalar_lease, vector_lease] {
+            assert_eq!(
+                unsafe { table.release_buffer.unwrap()(table.context, lease.handle) },
+                RunMatStatusCode::Ok
+            );
+            assert_eq!(
+                unsafe { table.release_buffer.unwrap()(table.context, lease.handle) },
+                RunMatStatusCode::StaleHandle
+            );
+        }
+    }
+
+    #[test]
+    fn complex_buffer_leases_preserve_precision_and_shared_allocations() {
+        let host = ExtensionHost::new();
+        let table = host.as_ref().host_vtable();
+
+        let complex_f32 = ComplexTensor::from_f32(vec![(1.0, 2.0), (3.0, 4.0)], vec![2])
+            .expect("complex single vector");
+        let ComplexStorage::F32(complex_f32_storage) = complex_f32.complex_storage() else {
+            panic!("single complex storage");
+        };
+        // SAFETY: the address is observed only while the tensor or lease owns it.
+        let complex_f32_pointer = unsafe { complex_f32_storage.foreign_data_pointer() }
+            .cast::<u8>()
+            .cast_const();
+        let (complex_f32_handle, complex_f32_lease) =
+            borrow_value_buffer(host.as_ref(), Value::ComplexTensor(complex_f32));
+        assert_eq!(complex_f32_lease.view.data, complex_f32_pointer);
+        assert_eq!(complex_f32_lease.view.rank, 1);
+        // SAFETY: the lease owns one shape element until it is released.
+        assert_eq!(unsafe { *complex_f32_lease.view.shape }, 2);
+        assert_eq!(
+            complex_f32_lease.view.element_type,
+            RunMatElementType::ComplexF32
+        );
+        assert_eq!(
+            complex_f32_lease.view.byte_length,
+            2 * std::mem::size_of::<ComplexElement<f32>>()
+        );
+        assert_eq!(
+            complex_f32_lease.view.flags,
+            RUNMAT_BUFFER_READ_ONLY
+                | RUNMAT_BUFFER_COLUMN_MAJOR
+                | RUNMAT_BUFFER_INTERLEAVED_COMPLEX
+        );
+        assert_eq!(
+            unsafe { table.release_value.unwrap()(table.context, complex_f32_handle) },
+            RunMatStatusCode::Ok
+        );
+        // SAFETY: the independent lease retains both interleaved complex elements.
+        assert_eq!(
+            unsafe {
+                std::slice::from_raw_parts(
+                    complex_f32_lease.view.data.cast::<ComplexElement<f32>>(),
+                    2,
+                )
+            },
+            &[ComplexElement(1.0, 2.0), ComplexElement(3.0, 4.0)]
+        );
+
+        let complex_f64 =
+            ComplexTensor::new(vec![(5.0, 6.0)], vec![1]).expect("complex double vector");
+        let ComplexStorage::F64(complex_f64_storage) = complex_f64.complex_storage() else {
+            panic!("double complex storage");
+        };
+        // SAFETY: the address is observed only while the tensor or lease owns it.
+        let complex_f64_pointer = unsafe { complex_f64_storage.foreign_data_pointer() }
+            .cast::<u8>()
+            .cast_const();
+        let (complex_f64_handle, complex_f64_lease) =
+            borrow_value_buffer(host.as_ref(), Value::ComplexTensor(complex_f64));
+        assert_eq!(complex_f64_lease.view.data, complex_f64_pointer);
+        assert_eq!(complex_f64_lease.view.rank, 1);
+        // SAFETY: the lease owns one shape element until it is released.
+        assert_eq!(unsafe { *complex_f64_lease.view.shape }, 1);
+        assert_eq!(
+            complex_f64_lease.view.element_type,
+            RunMatElementType::ComplexF64
+        );
+        assert_eq!(
+            complex_f64_lease.view.byte_length,
+            std::mem::size_of::<ComplexElement<f64>>()
+        );
+        assert_eq!(
+            complex_f64_lease.view.flags,
+            RUNMAT_BUFFER_READ_ONLY
+                | RUNMAT_BUFFER_COLUMN_MAJOR
+                | RUNMAT_BUFFER_INTERLEAVED_COMPLEX
+        );
+        assert_eq!(
+            unsafe { table.release_value.unwrap()(table.context, complex_f64_handle) },
+            RunMatStatusCode::Ok
+        );
+        // SAFETY: the independent lease retains the interleaved complex element.
+        assert_eq!(
+            unsafe { *complex_f64_lease.view.data.cast::<ComplexElement<f64>>() },
+            ComplexElement(5.0, 6.0)
+        );
+
+        for lease in [complex_f32_lease, complex_f64_lease] {
+            assert_eq!(
+                unsafe { table.release_buffer.unwrap()(table.context, lease.handle) },
+                RunMatStatusCode::Ok
+            );
+            assert_eq!(
+                unsafe { table.release_buffer.unwrap()(table.context, lease.handle) },
+                RunMatStatusCode::StaleHandle
+            );
+        }
     }
 
     #[test]

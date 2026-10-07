@@ -86,13 +86,29 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn deg2rad_preserves_rank_zero_scalarization_and_rank_one_shape() {
+        let scalar = deg2rad_builtin(Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap()))
+            .expect("rank-zero deg2rad");
+        assert_eq!(scalar, Value::Num(0.0));
+
+        let vector = deg2rad_builtin(Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![2]).unwrap()))
+            .expect("rank-one deg2rad");
+        let Value::Tensor(vector) = vector else {
+            panic!("expected rank-one tensor")
+        };
+        assert_eq!(vector.shape(), &[2]);
+        assert_eq!(vector.materialize_f64(), vec![0.0, 0.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn deg2rad_tensor_preserves_shape() {
         let tensor = Tensor::new(vec![0.0, 30.0, 45.0, 60.0, 90.0], vec![1, 5]).unwrap();
         let result = deg2rad_builtin(Value::Tensor(tensor)).expect("deg2rad");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 5]);
+                assert_eq!(tensor.shape(), &[1, 5]);
                 let expected = [
                     0.0,
                     std::f64::consts::PI / 6.0,
@@ -120,7 +136,7 @@ pub(crate) mod tests {
 
         match deg2rad_builtin(Value::Tensor(tensor)).expect("deg2rad") {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 let expected = [0.0, std::f64::consts::FRAC_PI_2, std::f64::consts::PI];
                 for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
@@ -177,7 +193,7 @@ pub(crate) mod tests {
         let result = deg2rad_builtin(Value::LogicalArray(logical)).expect("deg2rad");
         match result {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 2]);
+                assert_eq!(tensor.shape(), &[1, 2]);
                 assert_eq!(tensor.materialize_f64()[0], 0.0);
                 assert!((tensor.materialize_f64()[1] - DEG_TO_RAD).abs() < 1e-12);
             }

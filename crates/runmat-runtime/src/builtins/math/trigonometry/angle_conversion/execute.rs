@@ -107,7 +107,7 @@ fn apply_real(conversion: &AngleConversion, value: Value) -> BuiltinResult<Value
 }
 
 fn apply_tensor(conversion: &AngleConversion, tensor: Tensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let result = if tensor.numeric_dtype() == NumericDType::F32 {
         let storage = tensor
             .into_numeric_storage()
@@ -146,8 +146,9 @@ fn apply_complex_tensor(
         .iter()
         .map(|&(re, im)| (re * conversion.scale_f64, im * conversion.scale_f64))
         .collect();
-    let converted = ComplexTensor::from_f64_values_with_dtype(values, tensor.shape.clone(), dtype)
-        .map_err(|detail| error_with_detail(conversion, conversion.internal_error, detail))?;
+    let converted =
+        ComplexTensor::from_f64_values_with_dtype(values, tensor.shape().to_vec(), dtype)
+            .map_err(|detail| error_with_detail(conversion, conversion.internal_error, detail))?;
     Ok(complex_tensor_into_value(converted))
 }
 
