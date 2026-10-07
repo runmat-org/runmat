@@ -172,7 +172,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("tensor");
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let value = Value::GpuTensor(handle);

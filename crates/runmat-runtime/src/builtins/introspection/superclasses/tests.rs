@@ -149,7 +149,7 @@ fn superclasses_handles_known_runtime_leaf_classes_without_registry_metadata() {
             let tensor = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             provider.upload(&view).expect("upload")
         }

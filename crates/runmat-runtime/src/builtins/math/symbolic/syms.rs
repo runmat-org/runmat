@@ -225,7 +225,7 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("empty double placeholder")
         };
-        assert_eq!(tensor.shape, vec![0, 0]);
+        assert_eq!(tensor.shape(), &[0, 0]);
     }
 
     #[test]
