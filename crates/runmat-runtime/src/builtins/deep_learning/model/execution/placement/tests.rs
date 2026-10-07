@@ -109,7 +109,7 @@ fn assert_half_score(value: &Value) {
     let Value::Tensor(score) = value else {
         panic!("a host numerical prediction is required")
     };
-    assert_eq!(score.shape, [1, 1]);
+    assert_eq!(score.shape(), &[1, 1]);
     assert_eq!(score.numeric_dtype(), NumericDType::F64);
     assert_eq!(score.materialize_f64(), vec![0.5]);
 }

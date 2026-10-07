@@ -114,7 +114,7 @@ fn raw_unsupported_route_respects_explicit_and_automatic_input_intent() {
         };
         assert!(provider.telemetry_snapshot().download_bytes > 0);
         assert_eq!(actual.numeric_dtype(), expected.numeric_dtype());
-        assert_eq!(actual.shape, expected.shape);
+        assert_eq!(actual.shape(), expected.shape());
         assert_eq!(actual.materialize_f64(), expected.materialize_f64());
         let original =
             crate::builtins::common::test_support::gather(Value::GpuTensor(handle)).unwrap();

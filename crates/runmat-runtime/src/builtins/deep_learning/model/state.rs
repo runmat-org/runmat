@@ -390,7 +390,7 @@ mod tests {
         let Value::Tensor(default_data) = default_data else {
             panic!("default tensor expected")
         };
-        assert_eq!(default_data.shape, [3, 1]);
+        assert_eq!(default_data.shape(), &[3, 1]);
         assert_eq!(default_data.as_f64_slice(), Some(&[0., 0., 0.][..]));
         // Learnables are still unfilled, so filling State must not claim the
         // entire network has been initialized.

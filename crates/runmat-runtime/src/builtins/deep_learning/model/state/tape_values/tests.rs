@@ -79,7 +79,7 @@ fn returned_state_mapping_uses_typed_canonical_keys_and_preserves_payloads() {
             data(before.value).numeric_dtype(),
             runmat_value::NumericDType::F32
         );
-        assert_eq!(data(after).shape, vec![3, 1]);
+        assert_eq!(data(after).shape(), &[3, 1]);
         assert!(data(before.value)
             .host_buffer()
             .shares_allocation_with(data(after).host_buffer()));

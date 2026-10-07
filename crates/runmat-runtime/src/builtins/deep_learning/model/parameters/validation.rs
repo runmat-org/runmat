@@ -179,7 +179,9 @@ mod tests {
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn parameter_admission_retains_low_rank_geometry_and_checks_empty_storage_class() {
         let scalar = Value::Tensor(Tensor::from_f32(vec![1.0], vec![]).unwrap());
-        assert_eq!(numeric_payload_shape(&scalar, "Bias", "test").unwrap(), &[]);
+        assert!(numeric_payload_shape(&scalar, "Bias", "test")
+            .unwrap()
+            .is_empty());
         assert_eq!(floating_precision(&scalar), Some(NumericDType::F32));
         validate_parameter(
             &scalar,

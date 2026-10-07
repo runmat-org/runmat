@@ -180,10 +180,9 @@ mod tests {
             tensor_property_shape(&layer, "Weights", "forward").unwrap(),
             &[2]
         );
-        assert_eq!(
-            tensor_property_shape(&layer, "Bias", "forward").unwrap(),
-            &[]
-        );
+        assert!(tensor_property_shape(&layer, "Bias", "forward")
+            .unwrap()
+            .is_empty());
         assert_eq!(
             fully_connected_output_width(&layer, 2, "forward").unwrap(),
             1

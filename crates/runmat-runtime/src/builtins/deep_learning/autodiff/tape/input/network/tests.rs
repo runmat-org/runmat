@@ -191,7 +191,7 @@ fn canonical_learnables_and_recurrent_state_are_annotated_without_changing_metad
             };
             let after = data(annotated);
             assert_eq!(after.numeric_dtype(), NumericDType::F32);
-            assert_eq!(after.shape, before.shape);
+            assert_eq!(after.shape(), before.shape());
             assert!(after
                 .host_buffer()
                 .shares_allocation_with(before.host_buffer()));
@@ -205,7 +205,7 @@ fn canonical_learnables_and_recurrent_state_are_annotated_without_changing_metad
             let before = data(&original);
             let after = data(row.value);
             assert_eq!(after.numeric_dtype(), NumericDType::F32);
-            assert_eq!(after.shape, before.shape);
+            assert_eq!(after.shape(), before.shape());
             assert!(after
                 .host_buffer()
                 .shares_allocation_with(before.host_buffer()));

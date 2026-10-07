@@ -57,7 +57,7 @@ fn two_step_hand_computed_gate_order_and_state() {
     let w = tensor(vec![0.0; 4], &[4, 1]);
     let r = tensor(vec![0.0; 4], &[4, 1]);
     let b = tensor(vec![0.0, 0.0, 0.2_f64.atanh(), 0.0], &[4, 1]);
-    let axes = axis("CBT", &x.shape);
+    let axes = axis("CBT", x.shape());
     let result = run(
         &x,
         &w,
@@ -85,7 +85,7 @@ fn bidirectional_terminal_states_are_not_the_same_as_y_at_last_time() {
     let w = tensor(weights, &[8, 1]);
     let r = tensor(vec![0.0; 8], &[8, 1]);
     let b = tensor(vec![0.0; 8], &[8, 1]);
-    let axes = axis("CBT", &x.shape);
+    let axes = axis("CBT", x.shape());
     let sequence = run(
         &x,
         &w,
@@ -114,7 +114,7 @@ fn bidirectional_terminal_states_are_not_the_same_as_y_at_last_time() {
     close(terminal[1], full[1], 1e-12); // Backward t=first.
     assert!((terminal[1] - full[5]).abs() > 1e-4);
     assert_eq!(last.axes.layout().labels(), "CB");
-    assert_eq!(last.hidden_state.shape, [2, 1]);
+    assert_eq!(last.hidden_state.shape(), &[2, 1]);
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn explicit_tbc_and_cbt_with_nonsquare_geometry_agree() {
         &b,
         None,
         None,
-        &axis("CBT", &x_cbt.shape),
+        &axis("CBT", x_cbt.shape()),
         options(false, OutputMode::Sequence),
         true,
     );
@@ -153,12 +153,12 @@ fn explicit_tbc_and_cbt_with_nonsquare_geometry_agree() {
         &b,
         None,
         None,
-        &axis("TBC", &x_tbc.shape),
+        &axis("TBC", x_tbc.shape()),
         options(false, OutputMode::Sequence),
         true,
     );
     assert_eq!(first.tensor.as_f64_slice(), second.tensor.as_f64_slice());
-    assert_eq!(first.tensor.shape, [1, 3, 4]);
+    assert_eq!(first.tensor.shape(), &[1, 3, 4]);
     let dy = tensor(vec![0.7; 12], &[1, 3, 4]);
     let first_grad = backward(
         &x_cbt,
@@ -167,7 +167,7 @@ fn explicit_tbc_and_cbt_with_nonsquare_geometry_agree() {
         &b,
         None,
         None,
-        &axis("CBT", &x_cbt.shape),
+        &axis("CBT", x_cbt.shape()),
         options(false, OutputMode::Sequence),
         first.cache.as_ref().unwrap(),
         &dy,
@@ -182,7 +182,7 @@ fn explicit_tbc_and_cbt_with_nonsquare_geometry_agree() {
         &b,
         None,
         None,
-        &axis("TBC", &x_tbc.shape),
+        &axis("TBC", x_tbc.shape()),
         options(false, OutputMode::Sequence),
         second.cache.as_ref().unwrap(),
         &dy,
@@ -216,7 +216,7 @@ fn backward_matches_independent_finite_differences_for_input_weights_and_state()
     let h0 = tensor(vec![0.13], &[1, 1]);
     let c0 = tensor(vec![-0.17], &[1, 1]);
     let dy = tensor(vec![0.7, -0.2], &[1, 1, 2]);
-    let axes = axis("CBT", &x.shape);
+    let axes = axis("CBT", x.shape());
     let opts = options(false, OutputMode::Sequence);
     let output = run(&x, &w, &r, &b, Some(&h0), Some(&c0), &axes, opts, true);
     let grads = backward(
@@ -251,8 +251,8 @@ fn backward_matches_independent_finite_differences_for_input_weights_and_state()
         let mut minus = plus.clone();
         plus[index] += epsilon;
         minus[index] -= epsilon;
-        let plus = tensor(plus, &base.shape);
-        let minus = tensor(minus, &base.shape);
+        let plus = tensor(plus, base.shape());
+        let minus = tensor(minus, base.shape());
         (rebuild(plus) - rebuild(minus)) / (2.0 * epsilon)
     };
     for index in 0..2 {
@@ -302,7 +302,7 @@ fn single_precision_and_malformed_state_rejection() {
     let w = Tensor::from_numeric_storage(NumericStorage::F32(vec![0.0; 4]), vec![4, 1]).unwrap();
     let r = Tensor::from_numeric_storage(NumericStorage::F32(vec![0.0; 4]), vec![4, 1]).unwrap();
     let b = Tensor::from_numeric_storage(NumericStorage::F32(vec![0.0; 4]), vec![4, 1]).unwrap();
-    let axes = axis("CBT", &x.shape);
+    let axes = axis("CBT", x.shape());
     let result = run(
         &x,
         &w,
@@ -351,11 +351,11 @@ fn spatial_channels_flatten_by_coordinate_without_relabeling_input() {
         &b,
         None,
         None,
-        &axis("SCBT", &x.shape),
+        &axis("SCBT", x.shape()),
         options(false, OutputMode::Sequence),
         true,
     );
-    assert_eq!(result.tensor.shape, [1, 2, 2]);
+    assert_eq!(result.tensor.shape(), &[1, 2, 2]);
     assert_eq!(result.axes.layout().labels(), "CBT");
     let output = result.tensor.as_f64_slice().unwrap();
     assert!(output[0] > 0.0);
@@ -368,7 +368,7 @@ fn spatial_channels_flatten_by_coordinate_without_relabeling_input() {
         &b,
         None,
         None,
-        &axis("SCBT", &x.shape),
+        &axis("SCBT", x.shape()),
         options(false, OutputMode::Sequence),
         result.cache.as_ref().unwrap(),
         &dy,
@@ -390,7 +390,7 @@ fn broadcast_initial_state_accumulates_gradients_across_batches() {
     let h0 = tensor(vec![0.3], &[1, 1]);
     let c0 = tensor(vec![0.1], &[1, 1]);
     let dy = tensor(vec![1.0, 1.0], &[1, 2, 1]);
-    let axes = axis("CBT", &x.shape);
+    let axes = axis("CBT", x.shape());
     let opts = options(false, OutputMode::Sequence);
     let output = run(&x, &w, &r, &b, Some(&h0), Some(&c0), &axes, opts, true);
     let grads = backward(
@@ -412,8 +412,8 @@ fn broadcast_initial_state_accumulates_gradients_across_batches() {
     let dc = grads.initial_cell.as_f64_slice().unwrap()[0];
     assert!(dh.abs() > 0.0);
     assert!(dc.abs() > 0.0);
-    assert_eq!(grads.initial_hidden.shape, [1, 1]);
-    assert_eq!(grads.initial_cell.shape, [1, 1]);
+    assert_eq!(grads.initial_hidden.shape(), &[1, 1]);
+    assert_eq!(grads.initial_cell.shape(), &[1, 1]);
 }
 
 #[test]
@@ -422,7 +422,7 @@ fn admitted_alternative_activations_have_checked_backward_rule() {
     let w = tensor(vec![0.2, -0.3, 0.7, 0.1], &[4, 1]);
     let r = tensor(vec![0.0; 4], &[4, 1]);
     let b = tensor(vec![0.1, -0.2, 0.3, 0.4], &[4, 1]);
-    let axes = axis("CBT", &x.shape);
+    let axes = axis("CBT", x.shape());
     let mut opts = options(false, OutputMode::Last);
     opts.state_activation = Activation::Softsign;
     opts.gate_activation = GateActivation::HardSigmoid;
@@ -449,8 +449,8 @@ fn admitted_alternative_activations_have_checked_backward_rule() {
         let mut minus = plus.clone();
         plus[index] += epsilon;
         minus[index] -= epsilon;
-        let plus = tensor(plus, &x.shape);
-        let minus = tensor(minus, &x.shape);
+        let plus = tensor(plus, x.shape());
+        let minus = tensor(minus, x.shape());
         let y_plus = run(&plus, &w, &r, &b, None, None, &axes, opts, false);
         let y_minus = run(&minus, &w, &r, &b, None, None, &axes, opts, false);
         let finite = (y_plus.tensor.as_f64_slice().unwrap()[0]
@@ -466,7 +466,7 @@ fn terminal_state_adjoint_works_without_output_adjoint() {
     let w = tensor(vec![0.1, 0.2, -0.3, 0.4], &[4, 1]);
     let r = tensor(vec![0.05, -0.06, 0.07, 0.08], &[4, 1]);
     let b = tensor(vec![0.0; 4], &[4, 1]);
-    let axes = axis("CBT", &x.shape);
+    let axes = axis("CBT", x.shape());
     let opts = options(false, OutputMode::Sequence);
     let output = run(&x, &w, &r, &b, None, None, &axes, opts, true);
     let dy = tensor(vec![0.0, 0.0], &[1, 1, 2]);
@@ -493,7 +493,7 @@ fn terminal_state_adjoint_works_without_output_adjoint() {
     plus[0] += epsilon;
     minus[0] -= epsilon;
     let loss = |data: Vec<f64>| {
-        let x = tensor(data, &x.shape);
+        let x = tensor(data, x.shape());
         let output = run(&x, &w, &r, &b, None, None, &axes, opts, false);
         0.7 * output.hidden_state.as_f64_slice().unwrap()[0]
             - 0.2 * output.cell_state.as_f64_slice().unwrap()[0]
@@ -514,7 +514,7 @@ fn backward_direction_and_last_summary_have_their_own_adjoint() {
     let w = tensor(weights, &[8, 1]);
     let r = tensor(vec![0.0; 8], &[8, 1]);
     let b = tensor(vec![0.0; 8], &[8, 1]);
-    let axes = axis("CBT", &x.shape);
+    let axes = axis("CBT", x.shape());
     let opts = options(true, OutputMode::Last);
     let output = run(&x, &w, &r, &b, None, None, &axes, opts, true);
     let dy = tensor(vec![0.3, 0.7], &[2, 1]);
@@ -540,7 +540,7 @@ fn backward_direction_and_last_summary_have_their_own_adjoint() {
         plus[index] += epsilon;
         minus[index] -= epsilon;
         let loss = |values: Vec<f64>| {
-            let input = tensor(values, &x.shape);
+            let input = tensor(values, x.shape());
             let result = run(&input, &w, &r, &b, None, None, &axes, opts, false);
             let y = result.tensor.as_f64_slice().unwrap();
             0.3 * y[0] + 0.7 * y[1]
@@ -572,7 +572,7 @@ fn activation_limits_and_nan_are_not_silently_masked() {
     let w = tensor(vec![0.0; 4], &[4, 1]);
     let r = tensor(vec![0.0; 4], &[4, 1]);
     let b = tensor(vec![0.0, 0.0, f64::NAN, 0.0], &[4, 1]);
-    let axes = axis("CBT", &x.shape);
+    let axes = axis("CBT", x.shape());
     let mut opts = options(false, OutputMode::Sequence);
     opts.state_activation = Activation::Relu;
     let output = run(&x, &w, &r, &b, None, None, &axes, opts, true);
@@ -651,7 +651,7 @@ fn two_hidden_units_f32_backward_matches_finite_differences() {
         vec![2, 1, 2],
     )
     .unwrap();
-    let axes = axis("CBT", &x.shape);
+    let axes = axis("CBT", x.shape());
     let mut opts = options(false, OutputMode::Sequence);
     opts.hidden_size = 2;
     let output = run(&x, &w, &r, &b, Some(&h0), Some(&c0), &axes, opts, true);
@@ -692,9 +692,9 @@ fn two_hidden_units_f32_backward_matches_finite_differences() {
         plus[index] += eps;
         minus[index] -= eps;
         let plus =
-            Tensor::from_numeric_storage(NumericStorage::F32(plus), base.shape.clone()).unwrap();
-        let minus =
-            Tensor::from_numeric_storage(NumericStorage::F32(minus), base.shape.clone()).unwrap();
+            Tensor::from_numeric_storage(NumericStorage::F32(plus), base.shape().to_vec()).unwrap();
+        let minus = Tensor::from_numeric_storage(NumericStorage::F32(minus), base.shape().to_vec())
+            .unwrap();
         (evaluate(&plus) - evaluate(&minus)) / (2.0 * eps)
     };
     for index in [0, 3] {
@@ -713,7 +713,7 @@ fn rejects_malformed_trace_and_terminal_gradient_before_backward_allocation() {
     let w = tensor(vec![0.0; 4], &[4, 1]);
     let r = tensor(vec![0.0; 4], &[4, 1]);
     let b = tensor(vec![0.0; 4], &[4, 1]);
-    let axes = axis("CBT", &x.shape);
+    let axes = axis("CBT", x.shape());
     let opts = options(false, OutputMode::Sequence);
     let mut output = run(&x, &w, &r, &b, None, None, &axes, opts, true);
     let dy = tensor(vec![1.0], &[1, 1, 1]);
@@ -757,17 +757,17 @@ fn tape_cache_moves_separately_from_output_payload() {
     let w = tensor(vec![0.0; 4], &[4, 1]);
     let r = tensor(vec![0.0; 4], &[4, 1]);
     let b = tensor(vec![0.0; 4], &[4, 1]);
-    let axes = axis("CBT", &x.shape);
+    let axes = axis("CBT", x.shape());
     let opts = options(false, OutputMode::Sequence);
     let mut output = run(&x, &w, &r, &b, None, None, &axes, opts, true);
     let cache = output.cache.take().unwrap();
     let continued_value = output.tensor; // Move, never clone, the consumer value.
-    let dy = tensor(vec![1.0; 2], &continued_value.shape);
+    let dy = tensor(vec![1.0; 2], continued_value.shape());
     let gradients = backward(
         &x, &w, &r, &b, None, None, &axes, opts, &cache, &dy, None, None,
     )
     .unwrap();
-    assert_eq!(gradients.input.shape, x.shape);
+    assert_eq!(gradients.input.shape(), x.shape());
 }
 
 #[test]
@@ -790,7 +790,7 @@ fn bidirectional_last_two_batches_has_parameter_and_state_adjoints() {
     let dy = tensor(vec![0.3, 0.7, -0.2, 0.4], &[2, 2]);
     let dh = tensor(vec![0.1, -0.3, 0.2, 0.5], &[2, 2]);
     let dc = tensor(vec![-0.4, 0.1, 0.3, -0.2], &[2, 2]);
-    let axes = axis("CBT", &x.shape);
+    let axes = axis("CBT", x.shape());
     let opts = options(true, OutputMode::Last);
     let output = run(&x, &w, &r, &b, Some(&h0), Some(&c0), &axes, opts, true);
     let grads = backward(
@@ -826,7 +826,7 @@ fn bidirectional_last_two_batches_has_parameter_and_state_adjoints() {
         let mut minus = plus.clone();
         plus[index] += eps;
         minus[index] -= eps;
-        (eval(&tensor(plus, &base.shape)) - eval(&tensor(minus, &base.shape))) / (2.0 * eps)
+        (eval(&tensor(plus, base.shape())) - eval(&tensor(minus, base.shape()))) / (2.0 * eps)
     };
     let checks = [
         (

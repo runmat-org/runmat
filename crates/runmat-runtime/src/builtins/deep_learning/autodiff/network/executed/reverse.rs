@@ -160,7 +160,7 @@ mod tests {
         let mut result = Vec::new();
         append(&mut result, Some(&parent), gradient.clone()).unwrap();
         assert_eq!(result[0].0, 7);
-        assert_eq!(result[0].1.shape, [1, 2]);
+        assert_eq!(result[0].1.shape(), &[1, 2]);
         assert_eq!(result[0].1.as_f32_slice().unwrap(), &[1.25, -2.5]);
         assert!(gradient
             .host_buffer()
@@ -182,7 +182,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result[0].1.as_f64_slice().unwrap(), &[1.25, -2.5]);
-        assert_eq!(result[0].1.shape, [2, 1]);
+        assert_eq!(result[0].1.shape(), &[2, 1]);
     }
 
     #[test]

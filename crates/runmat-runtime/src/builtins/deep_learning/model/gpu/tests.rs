@@ -316,7 +316,7 @@ fn singleton_axis_transpose_accepts_a_valid_resident_view() {
         let output = super::validate_layout_transpose(view, &input, provider, "forward").unwrap();
         let gathered =
             crate::builtins::common::test_support::gather(Value::GpuTensor(output)).unwrap();
-        assert_eq!(gathered.shape, vec![1, 3]);
+        assert_eq!(gathered.shape(), &[1, 3]);
         assert_eq!(gathered.materialize_f64(), source);
     });
 }
