@@ -1,13 +1,22 @@
 use super::*;
 
+pub(super) fn covariance_matrix_extents(shape: &[usize]) -> (usize, usize) {
+    match shape {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 pub(super) fn validate_covariance_matrix(name: &'static str, tensor: &Tensor) -> BuiltinResult<()> {
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(conversion_error(
             name,
             format!("{name}: covariance matrix must be two-dimensional"),
         ));
     }
-    if tensor.rows != tensor.cols {
+    let (rows, cols) = covariance_matrix_extents(tensor.shape());
+    if rows != cols {
         return Err(conversion_error(
             name,
             format!("{name}: covariance matrix must be square"),
@@ -22,8 +31,8 @@ pub(super) fn validate_covariance_matrix(name: &'static str, tensor: &Tensor) ->
             ));
         }
     }
-    for idx in 0..tensor.rows {
-        let variance = values[idx + idx * tensor.rows];
+    for idx in 0..rows {
+        let variance = values[idx + idx * rows];
         if variance < 0.0 {
             return Err(conversion_error(
                 name,
@@ -31,10 +40,10 @@ pub(super) fn validate_covariance_matrix(name: &'static str, tensor: &Tensor) ->
             ));
         }
     }
-    for col in 0..tensor.cols {
+    for col in 0..cols {
         for row in 0..col {
-            let a = values[row + col * tensor.rows];
-            let b = values[col + row * tensor.rows];
+            let a = values[row + col * rows];
+            let b = values[col + row * rows];
             let tol = 1.0e-10 * a.abs().max(b.abs()).max(1.0);
             if (a - b).abs() > tol {
                 return Err(conversion_error(
@@ -42,8 +51,8 @@ pub(super) fn validate_covariance_matrix(name: &'static str, tensor: &Tensor) ->
                     format!("{name}: covariance matrix must be symmetric"),
                 ));
             }
-            let variance_row = values[row + row * tensor.rows];
-            let variance_col = values[col + col * tensor.rows];
+            let variance_row = values[row + row * rows];
+            let variance_col = values[col + col * rows];
             let max_covariance = (variance_row * variance_col).sqrt();
             let bound_tol = 1.0e-10 * max_covariance.max(a.abs()).max(1.0);
             if a.abs() > max_covariance + bound_tol {
@@ -54,7 +63,7 @@ pub(super) fn validate_covariance_matrix(name: &'static str, tensor: &Tensor) ->
             }
         }
     }
-    validate_positive_semidefinite(name, tensor.rows, &values)?;
+    validate_positive_semidefinite(name, rows, &values)?;
     Ok(())
 }
 

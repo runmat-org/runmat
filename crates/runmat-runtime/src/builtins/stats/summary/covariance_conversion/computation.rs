@@ -5,7 +5,7 @@ pub(super) fn covariance_to_correlation(
     covariance: Tensor,
 ) -> BuiltinResult<(Value, Value)> {
     validate_covariance_matrix(name, &covariance)?;
-    let n = covariance.rows;
+    let (n, _) = super::matrix_validation::covariance_matrix_extents(covariance.shape());
     let covariance_values = tensor::tensor_values_f64_cow(&covariance);
     let mut sigma = Vec::with_capacity(n);
     for idx in 0..n {

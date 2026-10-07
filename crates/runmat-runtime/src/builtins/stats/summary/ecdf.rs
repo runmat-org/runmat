@@ -273,7 +273,7 @@ fn ensure_exact_ecdf_integer_boundary(value: &Value, role: &str) -> BuiltinResul
 
 fn preflight_ecdf_sample(value: &Value) -> BuiltinResult<()> {
     let shape = match value {
-        Value::Tensor(tensor) => &tensor.shape,
+        Value::Tensor(tensor) => tensor.shape(),
         Value::GpuTensor(handle) => {
             if runmat_accelerate_api::handle_storage(handle)
                 != runmat_accelerate_api::GpuTensorStorage::Real
@@ -514,7 +514,7 @@ fn ensure_cdfplot_extensions_enabled(value: &Value) -> BuiltinResult<()> {
 fn cdfplot_numeric_vector(value: &Value) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
-            ensure_cdfplot_vector_shape(&tensor.shape)?;
+            ensure_cdfplot_vector_shape(tensor.shape())?;
             Ok(tensor::tensor_values_f64(tensor))
         }
         Value::Int(value) => Ok(vec![value.to_f64()]),
@@ -545,7 +545,7 @@ fn preflight_cdfplot_sample(value: &Value) -> BuiltinResult<()> {
             }
             ensure_cdfplot_vector_shape(handle.shape())
         }
-        Value::Tensor(tensor) => ensure_cdfplot_vector_shape(&tensor.shape),
+        Value::Tensor(tensor) => ensure_cdfplot_vector_shape(tensor.shape()),
         Value::LogicalArray(array) => ensure_cdfplot_vector_shape(&array.shape),
         _ => Ok(()),
     }

@@ -20,7 +20,7 @@ pub(super) fn numeric_vector(value: &Value, builtin: EmpiricalBuiltin) -> Builti
 pub(super) fn tensor_from_value(value: Value, builtin: EmpiricalBuiltin) -> BuiltinResult<Tensor> {
     match value {
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
-            Tensor::new(tensor_values_f64(&tensor), tensor.shape.clone())
+            Tensor::new(tensor_values_f64(&tensor), tensor.shape().to_vec())
                 .map_err(|err| internal_error(builtin, format!("{builtin}: {err}")))
         }
         Value::Tensor(tensor) => Ok(tensor),

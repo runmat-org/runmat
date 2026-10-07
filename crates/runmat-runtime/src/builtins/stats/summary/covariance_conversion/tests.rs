@@ -101,6 +101,31 @@ fn assert_tensor_values(tensor: &Tensor, expected: &[f64]) {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn covariance_matrix_extents_preserve_rank_zero_and_vector_projection() {
+    assert_eq!(matrix_validation::covariance_matrix_extents(&[]), (0, 0));
+    assert_eq!(matrix_validation::covariance_matrix_extents(&[4]), (1, 4));
+    assert_eq!(
+        matrix_validation::covariance_matrix_extents(&[2, 3]),
+        (2, 3)
+    );
+
+    let rank_zero = Value::Tensor(Tensor::new(vec![4.0], vec![]).expect("rank-zero tensor"));
+    let Value::Tensor(result) =
+        block_on(corrcov::corrcov_builtin(rank_zero, Vec::new())).expect("rank-zero covariance")
+    else {
+        panic!("expected tensor result")
+    };
+    assert_eq!(result.shape(), [0, 0]);
+
+    let rank_one =
+        Value::Tensor(Tensor::new(vec![4.0, 2.0, 2.0, 9.0], vec![4]).expect("rank-one tensor"));
+    let error = block_on(corrcov::corrcov_builtin(rank_one, Vec::new()))
+        .expect_err("rank-one covariance must retain row-vector geometry");
+    assert!(error.message().contains("must be square"));
+}
+
 #[test]
 fn corrcov_converts_covariance_and_returns_sigma() {
     let c = Value::Tensor(Tensor::new(vec![4.0, 2.0, 2.0, 9.0], vec![2, 2]).expect("tensor"));
@@ -111,14 +136,14 @@ fn corrcov_converts_covariance_and_returns_sigma() {
             assert_eq!(values.len(), 2);
             match &values[0] {
                 Value::Tensor(tensor) => {
-                    assert_eq!(tensor.shape, vec![2, 2]);
+                    assert_eq!(tensor.shape(), [2, 2]);
                     assert_tensor_values(tensor, &[1.0, 1.0 / 3.0, 1.0 / 3.0, 1.0]);
                 }
                 other => panic!("expected correlation tensor, got {other:?}"),
             }
             match &values[1] {
                 Value::Tensor(tensor) => {
-                    assert_eq!(tensor.shape, vec![2, 1]);
+                    assert_eq!(tensor.shape(), [2, 1]);
                     assert_tensor_values(tensor, &[2.0, 3.0]);
                 }
                 other => panic!("expected sigma tensor, got {other:?}"),
@@ -178,8 +203,8 @@ fn corrcov_gpu_input_returns_resident_outputs() {
 
         let correlation = test_support::gather(values[0].clone()).expect("correlation");
         let sigma = test_support::gather(values[1].clone()).expect("sigma");
-        assert_eq!(correlation.shape, vec![2, 2]);
-        assert_eq!(sigma.shape, vec![2, 1]);
+        assert_eq!(correlation.shape(), [2, 2]);
+        assert_eq!(sigma.shape(), [2, 1]);
         assert_tensor_values(&correlation, &[1.0, 1.0 / 3.0, 1.0 / 3.0, 1.0]);
         assert_tensor_values(&sigma, &[2.0, 3.0]);
     });
@@ -227,9 +252,9 @@ fn cov2corr_gpu_extension_returns_finance_output_order() {
         };
         let sigma = test_support::gather(outputs[0].clone()).expect("sigma");
         let correlation = test_support::gather(outputs[1].clone()).expect("correlation");
-        assert_eq!(sigma.shape, vec![1, 2]);
+        assert_eq!(sigma.shape(), [1, 2]);
         assert_tensor_values(&sigma, &[2.0, 3.0]);
-        assert_eq!(correlation.shape, vec![2, 2]);
+        assert_eq!(correlation.shape(), [2, 2]);
         assert_tensor_values(&correlation, &[1.0, 1.0 / 3.0, 1.0 / 3.0, 1.0]);
     });
 }
@@ -246,9 +271,9 @@ fn cov2corr_returns_finance_output_order_and_shapes() {
     let [Value::Tensor(sigma), Value::Tensor(correlation)] = outputs.as_slice() else {
         panic!("expected tensor outputs");
     };
-    assert_eq!(sigma.shape, vec![1, 2]);
+    assert_eq!(sigma.shape(), [1, 2]);
     assert_tensor_values(sigma, &[4.0, 5.0]);
-    assert_eq!(correlation.shape, vec![2, 2]);
+    assert_eq!(correlation.shape(), [2, 2]);
     assert_tensor_values(correlation, &[1.0, 0.2, 0.2, 1.0]);
 }
 
@@ -265,8 +290,8 @@ fn covariance_conversion_preserves_empty_shapes_and_cov2corr_default_output() {
         let [Value::Tensor(correlation), Value::Tensor(sigma)] = outputs.as_slice() else {
             panic!("expected tensor outputs");
         };
-        assert_eq!(correlation.shape, vec![0, 0]);
-        assert_eq!(sigma.shape, vec![0, 1]);
+        assert_eq!(correlation.shape(), [0, 0]);
+        assert_eq!(sigma.shape(), [0, 1]);
     }
     {
         let _outputs = crate::output_count::push_output_count(Some(2));
@@ -278,8 +303,8 @@ fn covariance_conversion_preserves_empty_shapes_and_cov2corr_default_output() {
         let [Value::Tensor(sigma), Value::Tensor(correlation)] = outputs.as_slice() else {
             panic!("expected tensor outputs");
         };
-        assert_eq!(sigma.shape, vec![1, 0]);
-        assert_eq!(correlation.shape, vec![0, 0]);
+        assert_eq!(sigma.shape(), [1, 0]);
+        assert_eq!(correlation.shape(), [0, 0]);
     }
 
     let covariance =
@@ -289,7 +314,7 @@ fn covariance_conversion_preserves_empty_shapes_and_cov2corr_default_output() {
     else {
         panic!("expected default sigma output");
     };
-    assert_eq!(sigma.shape, vec![1, 2]);
+    assert_eq!(sigma.shape(), [1, 2]);
     assert_tensor_values(&sigma, &[4.0, 5.0]);
 }
 
@@ -365,7 +390,7 @@ fn corrcov_accepts_typed_integer_tensors_and_scalar_logical_extensions() {
                 match &values[0] {
                     Value::Tensor(tensor) => {
                         assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
-                        assert_eq!(tensor.shape, vec![2, 2]);
+                        assert_eq!(tensor.shape(), [2, 2]);
                         assert_tensor_values(tensor, &[1.0, 1.0 / 3.0, 1.0 / 3.0, 1.0]);
                     }
                     other => panic!("expected correlation tensor, got {other:?}"),
@@ -373,7 +398,7 @@ fn corrcov_accepts_typed_integer_tensors_and_scalar_logical_extensions() {
                 match &values[1] {
                     Value::Tensor(tensor) => {
                         assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
-                        assert_eq!(tensor.shape, vec![2, 1]);
+                        assert_eq!(tensor.shape(), [2, 1]);
                         assert_tensor_values(tensor, &[2.0, 3.0]);
                     }
                     other => panic!("expected sigma tensor, got {other:?}"),
@@ -396,7 +421,7 @@ fn corrcov_accepts_typed_integer_tensors_and_scalar_logical_extensions() {
     match out {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
-            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.shape(), [2, 2]);
         }
         other => panic!("expected tensor, got {other:?}"),
     }
@@ -468,7 +493,7 @@ fn covariance_conversion_supports_all_integer_classes_in_runmat_mode() {
             panic!("expected sigma tensor");
         };
         assert_eq!(sigma.numeric_dtype(), NumericDType::F64);
-        assert_eq!(sigma.shape, vec![1, 2]);
+        assert_eq!(sigma.shape(), [1, 2]);
         assert_tensor_values(&sigma, &[2.0, 3.0]);
     }
 }
@@ -486,7 +511,7 @@ fn covariance_conversion_checks_wide_integer_symmetry_exactly() {
     else {
         panic!("expected tensor");
     };
-    assert_eq!(result.shape, vec![2, 2]);
+    assert_eq!(result.shape(), [2, 2]);
 
     let asymmetric = int_tensor(
         IntegerStorage::U64(vec![base, base - 1, base - 2, base]),

@@ -344,8 +344,8 @@ fn ecdf_logical_vector_preserves_shape_and_numeric_steps() {
     let outputs = output_tensors(block_on(ecdf_builtin(vec![sample])).expect("logical ecdf"));
     assert_eq!(outputs[0].materialize_f64(), vec![0.0, 0.5, 1.0]);
     assert_eq!(outputs[1].materialize_f64(), vec![0.0, 0.0, 1.0]);
-    assert_eq!(outputs[0].shape, vec![3, 1]);
-    assert_eq!(outputs[1].shape, vec![3, 1]);
+    assert_eq!(outputs[0].shape(), [3, 1]);
+    assert_eq!(outputs[1].shape(), [3, 1]);
 }
 
 #[test]
@@ -374,8 +374,8 @@ fn ecdf_supports_frequency_survivor_and_bounds_outputs() {
     let outputs = output_tensors(value);
     assert_eq!(outputs[0].materialize_f64(), vec![1.0, 0.5, 0.25, 0.0]);
     assert_eq!(outputs[1].materialize_f64(), vec![1.0, 1.0, 2.0, 3.0]);
-    assert_eq!(outputs[2].shape, vec![4, 1]);
-    assert_eq!(outputs[3].shape, vec![4, 1]);
+    assert_eq!(outputs[2].shape(), [4, 1]);
+    assert_eq!(outputs[3].shape(), [4, 1]);
 }
 
 #[test]

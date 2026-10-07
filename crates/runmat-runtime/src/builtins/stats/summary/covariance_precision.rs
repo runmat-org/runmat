@@ -66,14 +66,18 @@ impl CovariancePrecision {
         };
         match value {
             Value::Tensor(tensor) if tensor.numeric_dtype() != self.dtype() => {
-                Tensor::new_with_dtype(tensor.materialize_f64(), tensor.shape.clone(), self.dtype())
-                    .map(Value::Tensor)
-                    .map_err(error)
+                Tensor::new_with_dtype(
+                    tensor.materialize_f64(),
+                    tensor.shape().to_vec(),
+                    self.dtype(),
+                )
+                .map(Value::Tensor)
+                .map_err(error)
             }
             Value::ComplexTensor(tensor) if tensor.numeric_dtype() != self.dtype() => {
                 ComplexTensor::from_f64_values_with_dtype(
                     tensor.materialize_f64(),
-                    tensor.shape.clone(),
+                    tensor.shape().to_vec(),
                     self.dtype(),
                 )
                 .map(Value::ComplexTensor)
@@ -220,10 +224,7 @@ mod tests {
                 panic!("expected tensor");
             };
             assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
-            assert_eq!(
-                tensor.shape,
-                if index == 0 { vec![1, 1] } else { vec![2, 1] }
-            );
+            assert_eq!(tensor.shape(), if index == 0 { &[1, 1] } else { &[2, 1] });
         }
     }
 }
