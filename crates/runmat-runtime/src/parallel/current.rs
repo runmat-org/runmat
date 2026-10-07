@@ -111,7 +111,7 @@ mod tests {
         let runtime = runtime();
         for value in [task(&runtime), worker(&runtime), job(&runtime)] {
             assert!(
-                matches!(value, runmat_value::Value::Tensor(tensor) if tensor.shape == vec![0, 0] && tensor.is_empty())
+                matches!(value, runmat_value::Value::Tensor(tensor) if tensor.shape() == [0, 0] && tensor.is_empty())
             );
         }
     }

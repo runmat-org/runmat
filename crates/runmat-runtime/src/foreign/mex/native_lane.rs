@@ -1467,7 +1467,7 @@ public:
             panic!("native lane must preserve the tensor output");
         };
         assert_eq!(output.as_f64_slice(), Some(&[2.0, 4.0, 8.0][..]));
-        assert_eq!(output.shape, vec![3, 1]);
+        assert_eq!(output.shape(), &[3, 1]);
     }
 
     #[test]
