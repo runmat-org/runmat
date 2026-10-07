@@ -72,7 +72,7 @@ fn onehotencode_uses_feature_dimension_and_class_names() {
     .unwrap() else {
         panic!("logical");
     };
-    assert_eq!(out.shape(), &[3, 2]);
+    assert_eq!(out.shape, vec![3, 2]);
     assert_eq!(out.data, vec![0, 1, 0, 1, 0, 1]);
 }
 
