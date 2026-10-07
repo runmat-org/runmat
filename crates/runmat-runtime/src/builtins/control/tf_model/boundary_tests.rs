@@ -1,5 +1,33 @@
 use super::*;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn state_matrix_properties_preserve_dense_rank_boundaries() {
+    let mut object = ObjectInstance::new(SS_CLASS.to_string());
+    object.properties.insert(
+        "A".into(),
+        Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap()),
+    );
+    let empty = ss_state_matrix_property(&object, "A", "pole").unwrap();
+    assert_eq!(empty.shape(), (0, 0));
+
+    object.properties.insert(
+        "A".into(),
+        Value::Tensor(Tensor::new(vec![7.0], vec![1]).unwrap()),
+    );
+    let scalar = ss_state_matrix_property(&object, "A", "pole").unwrap();
+    assert_eq!(scalar.shape(), (1, 1));
+    assert_eq!(scalar[(0, 0)], Complex64::new(7.0, 0.0));
+
+    object.properties.insert(
+        "A".into(),
+        Value::Tensor(Tensor::new(vec![7.0, 8.0], vec![2]).unwrap()),
+    );
+    let error = ss_state_matrix_property(&object, "A", "pole")
+        .expect_err("rank-one A is one row, not a square two-state matrix");
+    assert!(error.message().contains("must be square"));
+}
+
 fn assign_public_property(model: Value, name: &str, value: Value) -> Value {
     futures::executor::block_on(crate::object::resolve::store_member(
         model,

@@ -13,7 +13,17 @@ use runmat_builtins::{
     BuiltinExtensionDescriptor, INTEGER_COEFFICIENT_EXTENSION, INTEGER_SAMPLE_TIME_EXTENSION,
     LOGICAL_COEFFICIENT_EXTENSION, SS_INTEGER_MATRIX_EXTENSION, SS_INTEGER_SAMPLE_TIME_EXTENSION,
 };
-use runmat_value::{ObjectInstance, Value};
+use runmat_value::{ObjectInstance, Tensor, Value};
+
+/// Host state matrices retain the model domain's row-by-column projection.
+/// Rank-zero tensors have no matrix extent; rank-one tensors form one row.
+pub(super) fn state_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
 
 pub(super) fn preflight_host_model_properties(
     object: &ObjectInstance,
@@ -215,18 +225,20 @@ fn admit_ss_integer_property(
 fn preflight_ss_state_matrix(value: &Value, builtin: &'static str) -> BuiltinResult<()> {
     preflight_ss_matrix_value(value, "A", builtin)?;
     match value {
-        Value::Tensor(tensor) if tensor.rows != tensor.cols => {
+        Value::Tensor(tensor)
+            if state_matrix_dimensions(tensor).0 != state_matrix_dimensions(tensor).1 =>
+        {
             return Err(control_error(
                 builtin,
                 invalid_model_identifier(builtin),
-                format!("{builtin}: ss A must be square, got {:?}", tensor.shape),
+                format!("{builtin}: ss A must be square, got {:?}", tensor.shape()),
             ));
         }
-        Value::ComplexTensor(tensor) if tensor.rows != tensor.cols => {
+        Value::ComplexTensor(tensor) if tensor.rows() != tensor.cols() => {
             return Err(control_error(
                 builtin,
                 invalid_model_identifier(builtin),
-                format!("{builtin}: ss A must be square, got {:?}", tensor.shape),
+                format!("{builtin}: ss A must be square, got {:?}", tensor.shape()),
             ));
         }
         Value::LogicalArray(logical)
@@ -291,16 +303,16 @@ fn preflight_ss_matrix_value(
     };
     let finite = match value {
         Value::Tensor(tensor) => {
-            if tensor.shape.len() > 2 {
-                return Err(invalid_shape(&tensor.shape));
+            if tensor.shape().len() > 2 {
+                return Err(invalid_shape(tensor.shape()));
             }
             tensor::tensor_values_f64_cow(tensor)
                 .iter()
                 .all(|value| value.is_finite())
         }
         Value::ComplexTensor(tensor) => {
-            if tensor.shape.len() > 2 {
-                return Err(invalid_shape(&tensor.shape));
+            if tensor.shape().len() > 2 {
+                return Err(invalid_shape(tensor.shape()));
             }
             tensor::complex_tensor_values_complex64(tensor)
                 .iter()

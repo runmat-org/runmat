@@ -7,7 +7,7 @@ mod boundary_tests;
 pub use admission::preflight_ss_host_properties;
 use admission::{
     admit_coefficient_property, admit_delay_property, admit_sample_time_property,
-    preflight_host_model_properties,
+    preflight_host_model_properties, state_matrix_dimensions,
 };
 use numerics::{finite_complex_ratio, finite_complex_ratio_direction};
 use runmat_types::MemberAccess;
@@ -686,14 +686,14 @@ pub async fn parse_coefficients(
     let gathered = dispatcher::gather_if_needed_async(&value).await?;
     let coeffs = match gathered {
         Value::Tensor(tensor) => {
-            ensure_vector_shape(label, &tensor.shape, builtin)?;
+            ensure_vector_shape(label, tensor.shape(), builtin)?;
             tensor::tensor_values_f64(&tensor)
                 .into_iter()
                 .map(|re| Complex64::new(re, 0.0))
                 .collect()
         }
         Value::ComplexTensor(tensor) => {
-            ensure_vector_shape(label, &tensor.shape, builtin)?;
+            ensure_vector_shape(label, tensor.shape(), builtin)?;
             tensor::complex_tensor_into_values_complex64(tensor)
         }
         Value::LogicalArray(logical) => {
@@ -704,7 +704,7 @@ pub async fn parse_coefficients(
                     format!("{builtin}: failed to convert logical array: {err}"),
                 )
             })?;
-            ensure_vector_shape(label, &tensor.shape, builtin)?;
+            ensure_vector_shape(label, tensor.shape(), builtin)?;
             tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(|re| Complex64::new(re, 0.0))
@@ -1099,13 +1099,14 @@ fn ss_state_matrix_property(
             ));
         }
     };
-    if tensor.shape.len() > 2 || tensor.rows != tensor.cols {
+    let (rows, cols) = state_matrix_dimensions(&tensor);
+    if tensor.shape().len() > 2 || rows != cols {
         return Err(control_error(
             builtin,
             invalid_model_identifier(builtin),
             format!(
                 "{builtin}: ss {name} must be square, got {:?}",
-                tensor.shape
+                tensor.shape()
             ),
         ));
     }
@@ -1117,10 +1118,10 @@ fn ss_state_matrix_property(
             format!("{builtin}: ss {name} must contain only finite real values"),
         ));
     }
-    let mut matrix = DMatrix::<Complex64>::zeros(tensor.rows, tensor.cols);
-    for col in 0..tensor.cols {
-        for row in 0..tensor.rows {
-            matrix[(row, col)] = Complex64::new(values[row + col * tensor.rows], 0.0);
+    let mut matrix = DMatrix::<Complex64>::zeros(rows, cols);
+    for col in 0..cols {
+        for row in 0..rows {
+            matrix[(row, col)] = Complex64::new(values[row + col * rows], 0.0);
         }
     }
     Ok(matrix)
@@ -1240,14 +1241,14 @@ fn coefficients_from_property(
     })?;
     match value {
         Value::Tensor(tensor) => {
-            ensure_vector_shape(name, &tensor.shape, builtin)?;
+            ensure_vector_shape(name, tensor.shape(), builtin)?;
             Ok(tensor::tensor_values_f64(tensor)
                 .into_iter()
                 .map(|value| Complex64::new(value, 0.0))
                 .collect())
         }
         Value::ComplexTensor(tensor) => {
-            ensure_vector_shape(name, &tensor.shape, builtin)?;
+            ensure_vector_shape(name, tensor.shape(), builtin)?;
             Ok(tensor::complex_tensor_values_complex64(tensor))
         }
         Value::Num(n) => Ok(vec![Complex64::new(*n, 0.0)]),
@@ -1576,7 +1577,7 @@ mod tests {
         let Value::ComplexTensor(numerator) = object.properties.get("Numerator").unwrap() else {
             panic!("complex numerator")
         };
-        assert_eq!(numerator.shape, vec![1, 2]);
+        assert_eq!(numerator.shape(), [1, 2]);
         assert_eq!(
             tensor::complex_tensor_value_complex64(numerator, 0).im,
             tiny
