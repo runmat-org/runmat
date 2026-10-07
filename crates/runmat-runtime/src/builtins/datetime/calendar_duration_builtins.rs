@@ -63,7 +63,7 @@ pub(super) async fn calendar_duration_builtin(args: Vec<Value>) -> crate::Builti
     let positional = match args.len() {
         1 => {
             let components = component_tensor(args[0].clone(), "calendarDuration")?;
-            let shape = components.shape.clone();
+            let shape = components.shape().to_vec();
             if shape.len() == 2 && matches!(shape[1], 3 | 6) {
                 let rows = shape[0];
                 let columns = shape[1];
@@ -234,8 +234,8 @@ mod tests {
             for result in results {
                 let (months, days) =
                     calendar_duration_tensors_from_value(&result.unwrap()).unwrap();
-                assert_eq!(months.shape, vec![1, 2]);
-                assert_eq!(days.shape, vec![1, 2]);
+                assert_eq!(months.shape(), [1, 2]);
+                assert_eq!(days.shape(), [1, 2]);
                 assert_eq!(
                     (months.materialize_f64()[1], days.materialize_f64()[1]),
                     (0.0, 0.0)
@@ -292,7 +292,7 @@ mod tests {
             futures::executor::block_on(calendar_duration_builtin(vec![Value::Tensor(matrix)]))
                 .unwrap();
         let (months, days) = calendar_duration_tensors_from_value(&value).unwrap();
-        assert_eq!(months.shape, vec![2, 1]);
+        assert_eq!(months.shape(), [2, 1]);
         assert_eq!(months.materialize_f64(), vec![14.0, 4.0]);
         assert_eq!(days.materialize_f64(), vec![3.0, 5.0]);
         assert_eq!(
@@ -325,18 +325,18 @@ mod tests {
             futures::executor::block_on(calendar_duration_builtin(vec![empty_matrix.clone()]))
                 .unwrap();
         let (months, days) = calendar_duration_tensors_from_value(&constructed).unwrap();
-        assert_eq!(months.shape, vec![0, 1]);
-        assert_eq!(days.shape, vec![0, 1]);
+        assert_eq!(months.shape(), [0, 1]);
+        assert_eq!(days.shape(), [0, 1]);
 
         let unit = futures::executor::block_on(caldays_builtin(empty_matrix)).unwrap();
         let (months, days) = calendar_duration_tensors_from_value(&unit).unwrap();
-        assert_eq!(months.shape, vec![0, 3]);
-        assert_eq!(days.shape, vec![0, 3]);
+        assert_eq!(months.shape(), [0, 3]);
+        assert_eq!(days.shape(), [0, 3]);
         let Value::Tensor(extracted) = futures::executor::block_on(caldays_builtin(unit)).unwrap()
         else {
             panic!("expected empty numeric tensor")
         };
-        assert_eq!(extracted.shape, vec![0, 3]);
+        assert_eq!(extracted.shape(), [0, 3]);
 
         let empty_component = Value::Tensor(Tensor::new(vec![], vec![0, 2]).unwrap());
         let value = futures::executor::block_on(calendar_duration_builtin(vec![
@@ -349,8 +349,8 @@ mod tests {
             calendar_duration_tensors_from_value(&value)
                 .unwrap()
                 .0
-                .shape,
-            vec![0, 2]
+                .shape(),
+            [0, 2]
         );
         assert!(futures::executor::block_on(calendar_duration_builtin(vec![
             empty_component,

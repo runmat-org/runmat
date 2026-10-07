@@ -148,7 +148,7 @@ pub(super) async fn datetime_builtin(
             }
             _ => {
                 let numeric = tensor_from_numeric(positional[0].clone(), "date vector")?;
-                if numeric.shape.len() == 2 && matches!(numeric.shape[1], 3 | 6) {
+                if numeric.shape().len() == 2 && matches!(numeric.shape()[1], 3 | 6) {
                     build_from_date_vectors(positional[0].clone(), options.format)
                 } else {
                     crate::compatibility::ensure_builtin_extension_enabled(

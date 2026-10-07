@@ -294,9 +294,9 @@ pub(super) fn combine_calendar_durations(
     let (left_months, right_months, shape) =
         tensor::binary_numeric_tensors(&lhs_months, &rhs_months, context, BUILTIN_NAME)?;
     let lhs_days_shape =
-        tensor::default_shape_for(&lhs_days.shape, tensor::tensor_element_len(&lhs_days));
+        tensor::default_shape_for(lhs_days.shape(), tensor::tensor_element_len(&lhs_days));
     let rhs_days_shape =
-        tensor::default_shape_for(&rhs_days.shape, tensor::tensor_element_len(&rhs_days));
+        tensor::default_shape_for(rhs_days.shape(), tensor::tensor_element_len(&rhs_days));
     let lhs_day_tensor = Tensor::new(tensor::tensor_into_values_f64(lhs_days), lhs_days_shape)
         .map_err(|err| datetime_error(format!("{context}: {err}")))?;
     let rhs_day_tensor = Tensor::new(tensor::tensor_into_values_f64(rhs_days), rhs_days_shape)
@@ -384,7 +384,7 @@ pub(super) async fn calendar_duration_ne(lhs: Value, rhs: Value) -> crate::Built
     match eq {
         Value::Num(value) => Ok(Value::Num(if value == 0.0 { 1.0 } else { 0.0 })),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let values = tensor::tensor_into_values_f64(tensor);
             Ok(Value::Tensor(
                 Tensor::new(

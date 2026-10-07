@@ -79,12 +79,12 @@ pub(super) fn calendar_duration_unit_value(
     if is_calendar_duration_object(&value) {
         let (months, days) = calendar_duration_tensors_from_value(&value)?;
         if months.is_empty() || days.is_empty() {
-            if !months.is_empty() || !days.is_empty() || months.shape != days.shape {
+            if !months.is_empty() || !days.is_empty() || months.shape() != days.shape() {
                 return Err(datetime_error(format!(
                     "{unit_name}: calendarDuration components must have matching sizes"
                 )));
             }
-            return tensor_or_scalar(Vec::new(), months.shape);
+            return tensor_or_scalar(Vec::new(), months.shape().to_vec());
         }
         let (month_data, day_data, shape) =
             tensor::binary_numeric_tensors(&months, &days, unit_name, BUILTIN_NAME)?;
@@ -110,7 +110,7 @@ pub(super) fn calendar_duration_unit_value(
         component_tensor(value, unit_name)?
     };
     let values = tensor::tensor_values_f64_cow(&numeric);
-    let shape = numeric.shape.clone();
+    let shape = numeric.shape().to_vec();
     let mut months = Vec::with_capacity(values.len());
     let mut days = Vec::with_capacity(values.len());
     for value in values.iter().copied() {
@@ -306,7 +306,7 @@ pub fn datetime_string_array(value: &Value) -> BuiltinResult<Option<StringArray>
     for serial in values.iter().copied() {
         strings.push(format_serial(serial, &format)?);
     }
-    let shape = tensor::default_shape_for(&serials.shape, values.len());
+    let shape = tensor::default_shape_for(serials.shape(), values.len());
     let array = StringArray::new(strings, shape)
         .map_err(|err| datetime_error(format!("datetime: {err}")))?;
     Ok(Some(array))

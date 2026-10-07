@@ -14,7 +14,7 @@ pub fn datetime_summary(value: &Value) -> BuiltinResult<Option<String>> {
     if tensor::tensor_element_len(&serials) == 1 {
         return datetime_display_text(value);
     }
-    let shape = tensor::default_shape_for(&serials.shape, tensor::tensor_element_len(&serials));
+    let shape = tensor::default_shape_for(serials.shape(), tensor::tensor_element_len(&serials));
     Ok(Some(format!(
         "[{} datetime]",
         shape
@@ -40,7 +40,7 @@ pub(super) fn component_tensor_from_datetime(
     if out.len() == 1 {
         Ok(Value::Num(out[0]))
     } else {
-        let shape = tensor::default_shape_for(&serials.shape, values.len());
+        let shape = tensor::default_shape_for(serials.shape(), values.len());
         let tensor =
             Tensor::new(out, shape).map_err(|err| datetime_error(format!("{label}: {err}")))?;
         Ok(Value::Tensor(tensor))
@@ -61,7 +61,7 @@ pub(super) fn component_tensor_from_serials(
             f64::NAN
         });
     }
-    let shape = tensor::default_shape_for(&serials.shape, values.len());
+    let shape = tensor::default_shape_for(serials.shape(), values.len());
     tensor_or_scalar(out, shape)
         .map_err(|err| datetime_error(format!("{label}: {}", err.message())))
 }
@@ -170,7 +170,7 @@ pub(super) fn month_name(month: u32, short: bool) -> &'static str {
 pub(super) fn month_names_from_datetime(value: &Value, short: bool) -> BuiltinResult<Value> {
     let serials = serials_from_datetime_value(value)?;
     let values = tensor::tensor_values_f64_cow(&serials);
-    let shape = tensor::default_shape_for(&serials.shape, values.len());
+    let shape = tensor::default_shape_for(serials.shape(), values.len());
     let mut out = Vec::with_capacity(values.len());
     for serial in values.iter().copied() {
         let text = if serial.is_finite() {

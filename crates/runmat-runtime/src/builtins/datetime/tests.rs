@@ -115,7 +115,7 @@ fn hour_supports_datetime_legacy_serial_and_formatted_text_shapes() {
     let Value::Tensor(result) = result else {
         panic!("expected shaped hour result");
     };
-    assert_eq!(result.shape, vec![1, 2]);
+    assert_eq!(result.shape(), [1, 2]);
     assert_eq!(result.materialize_f64(), vec![3.0, 17.0]);
 
     let formatted = futures::executor::block_on(hour_builtin(
@@ -318,7 +318,7 @@ fn datetime_builds_arrays_from_component_vectors() {
     let value = run_datetime(vec![years, months, days]);
     let object = as_datetime(value.clone());
     let serials = serial_tensor_for_object(&object).expect("serials");
-    assert_eq!(serials.shape, vec![1, 2]);
+    assert_eq!(serials.shape(), [1, 2]);
     let rendered = datetime_display_text(&value)
         .expect("display")
         .expect("datetime text");
@@ -488,7 +488,7 @@ fn datetime_parses_cell_array_of_character_vectors_with_its_shape() {
     ]))
     .expect("cellstr datetime");
     let object = as_datetime(result);
-    assert_eq!(serial_tensor_for_object(&object).unwrap().shape, vec![2, 2]);
+    assert_eq!(serial_tensor_for_object(&object).unwrap().shape(), [2, 2]);
     let serials = serial_tensor_for_object(&object).unwrap().materialize_f64();
     assert_eq!(serials[0], serial_for_date(2024, 4, 9));
     assert_eq!(serials[3], serial_for_date(2024, 4, 12));
@@ -504,7 +504,7 @@ fn datetime_preserves_empty_cellstr_geometry() {
         let result = futures::executor::block_on(datetime_builtin(vec![input]))
             .expect("empty cellstr datetime");
         let object = as_datetime(result);
-        assert_eq!(serial_tensor_for_object(&object).unwrap().shape, shape);
+        assert_eq!(serial_tensor_for_object(&object).unwrap().shape(), shape);
     }
 }
 
@@ -1031,7 +1031,7 @@ fn legacy_date_conversion_and_query_helpers_work() {
     let Value::Tensor(date_vector) = date_vector else {
         panic!("expected datevec tensor");
     };
-    assert_eq!(date_vector.shape, vec![1, 6]);
+    assert_eq!(date_vector.shape(), [1, 6]);
     assert_eq!(&date_vector.materialize_f64()[..3], &[2024.0, 3.0, 14.0]);
 
     let round_trip =
@@ -1102,7 +1102,7 @@ fn legacy_datevec_single_output_is_a_six_column_matrix() {
     let Value::Tensor(matrix) = value else {
         panic!("single output must be the full date-vector matrix");
     };
-    assert_eq!(matrix.shape, vec![1, 6]);
+    assert_eq!(matrix.shape(), [1, 6]);
     assert_eq!(&matrix.materialize_f64()[..3], &[2024.0, 3.0, 14.0]);
 }
 
@@ -1115,11 +1115,28 @@ fn two_by_three_date_vectors_keep_both_rows() {
     let Value::Tensor(serials) = serials else {
         panic!("two input rows must yield two serial dates");
     };
-    assert_eq!(serials.shape, vec![2, 1]);
+    assert_eq!(serials.shape(), [2, 1]);
     assert_eq!(
         serials.materialize_f64(),
         vec![serial_for_date(2024, 3, 14), serial_for_date(2024, 3, 15)]
     );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn datevec_tensor_preserves_dense_rank_one_row_and_rank_zero_empty_columns() {
+    let row = Tensor::new(vec![2024.0, 3.0, 14.0, 0.0, 0.0, 0.0], vec![6]).unwrap();
+    let serial = datenum_from_datevec_tensor(&row, "datenum")
+        .expect("rank-one six-component date vector is one row");
+    assert_eq!(serial.shape(), [1, 1]);
+    assert_eq!(serial.materialize_f64(), vec![serial_for_date(2024, 3, 14)]);
+
+    let scalar = Tensor::new(vec![2024.0], Vec::new()).unwrap();
+    let error = datenum_from_datevec_tensor(&scalar, "datenum")
+        .expect_err("rank-zero date vector has no six-column matrix geometry");
+    assert!(error
+        .message()
+        .contains("date vectors must have six columns"));
 }
 
 #[test]
@@ -1311,7 +1328,7 @@ fn datenum_typed_integer_serials_read_exact_storage() {
     let Value::Tensor(vector_out) = vector_out else {
         panic!("expected datenum vector tensor");
     };
-    assert_eq!(vector_out.shape, vec![1, 2]);
+    assert_eq!(vector_out.shape(), [1, 2]);
     assert_eq!(
         vector_out.materialize_f64(),
         vec![f64::from(serial), f64::from(serial + 1)]
@@ -1421,7 +1438,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
     let Value::Tensor(monthly) = monthly else {
         panic!("expected monthly serial dates");
     };
-    assert_eq!(monthly.shape, vec![3, 1]);
+    assert_eq!(monthly.shape(), [3, 1]);
     assert_eq!(
         monthly.materialize_f64(),
         vec![

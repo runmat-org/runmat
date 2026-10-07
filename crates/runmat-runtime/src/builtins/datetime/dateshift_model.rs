@@ -217,7 +217,7 @@ pub(super) fn exact_integer_values(
                 ))
             }),
         Value::Tensor(array) => {
-            let shape = tensor::default_shape_for(&array.shape, tensor::tensor_element_len(array));
+            let shape = tensor::default_shape_for(array.shape(), tensor::tensor_element_len(array));
             if let Some(storage) = array.integer_storage() {
                 let mut out = Vec::with_capacity(storage.len());
                 for value in storage.exact_values() {

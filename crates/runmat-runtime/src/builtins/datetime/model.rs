@@ -271,10 +271,10 @@ pub(super) fn serial_tensor_from_value(value: Value, context: &str) -> BuiltinRe
         .map_err(|err| datetime_error(format!("datetime: {err}")))?;
     // Keep explicit empty and N-D numeric geometry; collapsing every empty
     // input to 0-by-1 would change the shape of date-array comparisons.
-    let shape = if tensor.shape.is_empty() {
+    let shape = if tensor.shape().is_empty() {
         vec![1, 1]
     } else {
-        tensor.shape.clone()
+        tensor.shape().to_vec()
     };
     let values = tensor::tensor_into_values_f64(tensor);
     Tensor::new(values, shape).map_err(|err| datetime_error(format!("datetime: {err}")))

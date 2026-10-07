@@ -116,10 +116,10 @@ pub(super) fn normalize_component_tensor(tensor: Tensor, context: &str) -> Built
 }
 
 fn component_shape(tensor: &Tensor) -> Vec<usize> {
-    if tensor.shape.is_empty() {
+    if tensor.shape().is_empty() {
         vec![1, 1]
     } else {
-        tensor.shape.clone()
+        tensor.shape().to_vec()
     }
 }
 
@@ -269,7 +269,7 @@ pub(super) fn build_from_date_vectors(
 ) -> BuiltinResult<Value> {
     let tensor = tensor_from_numeric(value, "date vector")?;
     validate_authoritative_integer_storage(&tensor, "date vector")?;
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape();
     if shape.len() != 2 || !matches!(shape[1], 3 | 6) {
         return Err(datetime_error(
             "datetime: a numeric one-input date vector must be an m-by-3 or m-by-6 matrix",

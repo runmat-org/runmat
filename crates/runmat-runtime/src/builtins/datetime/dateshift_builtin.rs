@@ -91,7 +91,7 @@ pub(super) async fn dateshift_builtin(
             "dateshift: datetime, weekday, and rule arrays must have matching sizes or be scalar",
         ));
     }
-    let serial_shape = tensor::default_shape_for(&serials.shape, serial_values.len());
+    let serial_shape = tensor::default_shape_for(serials.shape(), serial_values.len());
     let mut non_scalar_shapes = Vec::new();
     if serial_values.len() > 1 {
         non_scalar_shapes.push(&serial_shape);

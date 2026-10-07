@@ -117,16 +117,17 @@ pub(super) async fn datevec_builtin(value: Value) -> crate::BuiltinResult<Value>
         }
         let mut outputs = Vec::with_capacity(out_count.min(6));
         let matrix_values = tensor::tensor_values_f64_cow(&matrix);
+        let (matrix_rows, _) = datevec_matrix_dimensions(&matrix);
         for col in 0..6.min(out_count) {
-            let mut data = Vec::with_capacity(matrix.rows);
-            for row in 0..matrix.rows {
-                data.push(matrix_values[col * matrix.rows + row]);
+            let mut data = Vec::with_capacity(matrix_rows);
+            for row in 0..matrix_rows {
+                data.push(matrix_values[col * matrix_rows + row]);
             }
             outputs.push(if data.len() == 1 {
                 Value::Num(data[0])
             } else {
                 Value::Tensor(
-                    Tensor::new(data, vec![matrix.rows, 1])
+                    Tensor::new(data, vec![matrix_rows, 1])
                         .map_err(|err| datetime_error(format!("datevec: {err}")))?,
                 )
             });
@@ -246,7 +247,7 @@ pub(super) async fn weekday_builtin(value: Value, rest: Vec<Value>) -> crate::Bu
             );
         }
     }
-    let shape = tensor::default_shape_for(&serials.shape, serial_values.len());
+    let shape = tensor::default_shape_for(serials.shape(), serial_values.len());
     let num_value = tensor_or_scalar(nums, shape.clone())?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count < 2 {

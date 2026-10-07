@@ -33,10 +33,10 @@ pub(crate) fn timer_firing_serials(
             ) {
                 return timer_text_serials(&value, reference_local);
             }
-            if matches!(&value, Value::Tensor(tensor) if tensor.shape.len() == 2 && matches!(tensor.shape[1], 3 | 6))
+            if matches!(&value, Value::Tensor(tensor) if tensor.shape().len() == 2 && matches!(tensor.shape()[1], 3 | 6))
             {
                 let datevec = tensor_from_datevec_like(value, "startat")?;
-                let rows = datevec.rows;
+                let (rows, _) = datevec_matrix_dimensions(&datevec);
                 let values = datevec.materialize_f64();
                 let mut serials = Vec::with_capacity(rows);
                 for row in 0..rows {
@@ -59,7 +59,7 @@ pub(crate) fn timer_firing_serials(
             let mut args = args;
             let month =
                 component_tensor(std::mem::replace(&mut args[1], Value::Num(0.0)), "month")?;
-            let shape = month.shape.clone();
+            let shape = month.shape().to_vec();
             let values = month
                 .materialize_f64()
                 .into_iter()

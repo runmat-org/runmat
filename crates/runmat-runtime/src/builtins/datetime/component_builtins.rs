@@ -148,7 +148,7 @@ pub(super) async fn day_builtin(value: Value, rest: Vec<Value>) -> crate::Builti
         }
         _ => serial_tensor_from_value(value, "day legacy serial input")?,
     };
-    let shape = tensor::default_shape_for(&serials.shape, tensor::tensor_element_len(&serials));
+    let shape = tensor::default_shape_for(serials.shape(), tensor::tensor_element_len(&serials));
     let values = tensor::tensor_values_f64_cow(&serials);
     if matches!(mode.as_str(), "name" | "shortname") {
         let short = mode == "shortname";

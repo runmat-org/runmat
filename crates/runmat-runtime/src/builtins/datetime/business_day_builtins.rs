@@ -195,7 +195,7 @@ pub(super) async fn isbusday_builtin(
     } else {
         runmat_value::LogicalArray::new(
             out,
-            tensor::default_shape_for(&serials.shape, serial_values.len()),
+            tensor::default_shape_for(serials.shape(), serial_values.len()),
         )
         .map(Value::LogicalArray)
         .map_err(|err| datetime_error(format!("isbusday: {err}")))

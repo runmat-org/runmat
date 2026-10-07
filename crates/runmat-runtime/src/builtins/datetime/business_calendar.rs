@@ -1,10 +1,19 @@
 use super::capabilities::MAX_HOLIDAY_YEAR_SPAN;
 use super::*;
 
+/// Date-vector matrix geometry uses the dense row projection for rank one.
+pub(super) fn datevec_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 pub(super) fn tensor_from_datevec_like(value: Value, context: &str) -> BuiltinResult<Tensor> {
     let tensor = tensor::integer_tensor_to_f64(tensor_from_numeric(value, context)?)
         .map_err(|err| datetime_error(format!("{context}: {err}")))?;
-    let shape = tensor::default_shape_for(&tensor.shape, tensor::tensor_element_len(&tensor));
+    let shape = tensor::default_shape_for(tensor.shape(), tensor::tensor_element_len(&tensor));
     let values = tensor::tensor_into_values_f64(tensor);
     let normalize = |rows: usize, cols: usize, data: Vec<f64>| -> BuiltinResult<Tensor> {
         if cols == 6 {
@@ -35,8 +44,7 @@ pub(super) fn tensor_from_datevec_like(value: Value, context: &str) -> BuiltinRe
 }
 
 pub(super) fn datenum_from_datevec_tensor(tensor: &Tensor, context: &str) -> BuiltinResult<Tensor> {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
+    let (rows, cols) = datevec_matrix_dimensions(tensor);
     if cols != 6 {
         return Err(datetime_error(format!(
             "{context}: date vectors must have six columns"
@@ -88,7 +96,7 @@ pub(super) fn broadcast_three_numeric_tensors(
         if len == 1 {
             continue;
         }
-        let shape = tensor::default_shape_for(&operand.shape, len);
+        let shape = tensor::default_shape_for(operand.shape(), len);
         if output_shape.is_empty() {
             output_len = len;
             output_shape = shape;
@@ -127,10 +135,10 @@ pub(super) fn implicit_broadcast_three_numeric_tensors(
     use crate::builtins::common::broadcast;
 
     let shape_for = |operand: &Tensor| {
-        if operand.shape.is_empty() {
+        if operand.shape().is_empty() {
             vec![1, 1]
         } else {
-            operand.shape.clone()
+            operand.shape().to_vec()
         }
     };
     let a_shape = shape_for(a);

@@ -156,7 +156,9 @@ fn public_datetime_cellstr_parse_turn_cancels_or_drops_without_publication() {
             ))
             .expect("subsequent invocation remains usable");
         assert_eq!(
-            serial_tensor_for_object(&as_datetime(fresh)).unwrap().shape,
+            serial_tensor_for_object(&as_datetime(fresh))
+                .unwrap()
+                .shape(),
             [1, 1]
         );
     }
@@ -254,7 +256,7 @@ fn one_large_cellstr_character_vector_suspends_during_bounded_decode() {
     ))
     .expect("cooperative whitespace scanning preserves the original date grammar");
     let object = as_datetime(result);
-    assert_eq!(serial_tensor_for_object(&object).unwrap().shape, [1, 1]);
+    assert_eq!(serial_tensor_for_object(&object).unwrap().shape(), [1, 1]);
     assert_eq!(
         serial_tensor_for_object(&object).unwrap().materialize_f64(),
         vec![serial_for_date(2024, 4, 9)]
