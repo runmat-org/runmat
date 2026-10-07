@@ -529,7 +529,7 @@ pub(crate) mod tests {
             .expect("surfc ZData");
 
         assert!(
-            matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.integer_storage() == Some(&expected))
+            matches!(value, Value::Tensor(tensor) if tensor.shape() == [2, 2] && tensor.integer_storage() == Some(&expected))
         );
     }
 

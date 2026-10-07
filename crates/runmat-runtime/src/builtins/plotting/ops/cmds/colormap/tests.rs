@@ -8,8 +8,8 @@ fn map_length(value: Value) -> usize {
     let Value::Tensor(map) = value else {
         panic!("RGB matrix");
     };
-    assert_eq!(map.shape[1], 3);
-    map.shape[0]
+    assert_eq!(map.shape()[1], 3);
+    map.shape()[0]
 }
 
 #[test]

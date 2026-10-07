@@ -701,8 +701,8 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.rows, rows);
-        assert_eq!(tensor.cols, cols);
+        assert_eq!(tensor.rows(), rows);
+        assert_eq!(tensor.cols(), cols);
     }
 
     fn first_tensor_value(value: &Value) -> f64 {

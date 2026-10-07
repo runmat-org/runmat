@@ -68,7 +68,7 @@ mod tests {
             panic!("expected host tensor")
         };
         assert_eq!(tensor.materialize_f64(), vec![2.5]);
-        assert_eq!(tensor.shape, vec![1]);
+        assert_eq!(tensor.shape(), [1]);
     }
 
     #[test]

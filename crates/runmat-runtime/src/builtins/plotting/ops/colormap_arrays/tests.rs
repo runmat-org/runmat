@@ -42,7 +42,7 @@ fn named_colormaps_return_m_by_3_rgb_arrays() {
             panic!("expected tensor");
         };
         assert_eq!(
-            (cmap.rows, cmap.cols, cmap.materialize_f64().len()),
+            (cmap.rows(), cmap.cols(), cmap.materialize_f64().len()),
             (6, 3, 18)
         );
         assert!(
@@ -83,7 +83,11 @@ fn every_named_palette_preserves_zero_rows_double_class_and_typed_errors() {
         let Value::Tensor(empty) = builtin(vec![Value::Num(0.0)]).expect(name) else {
             panic!("{name} must return a numeric tensor");
         };
-        assert_eq!((empty.rows, empty.cols, empty.len()), (0, 3, 0), "{name}");
+        assert_eq!(
+            (empty.rows(), empty.cols(), empty.len()),
+            (0, 3, 0),
+            "{name}"
+        );
         assert_eq!(empty.numeric_dtype(), runmat_value::NumericDType::F64);
         for bad in [
             vec![Value::Num(f64::INFINITY)],
@@ -111,7 +115,7 @@ fn default_length_tracks_current_colormap_length() {
     let Value::Tensor(cmap) = parula_builtin(vec![]).expect("parula default") else {
         panic!("expected tensor");
     };
-    assert_eq!((cmap.rows, cmap.cols), (17, 3));
+    assert_eq!((cmap.rows(), cmap.cols()), (17, 3));
 }
 
 #[test]
@@ -167,7 +171,7 @@ fn colorcube_accepts_all_integer_length_classes_and_returns_double() {
         else {
             panic!("expected colormap tensor");
         };
-        assert_eq!((cmap.rows, cmap.cols), (6, 3));
+        assert_eq!((cmap.rows(), cmap.cols()), (6, 3));
         assert_eq!(cmap.numeric_dtype(), runmat_value::NumericDType::F64);
     }
 }
@@ -191,7 +195,7 @@ fn parula_accepts_all_integer_length_classes_and_returns_double() {
         else {
             panic!("expected colormap tensor");
         };
-        assert_eq!((cmap.rows, cmap.cols), (6, 3));
+        assert_eq!((cmap.rows(), cmap.cols()), (6, 3));
         assert_eq!(cmap.numeric_dtype(), runmat_value::NumericDType::F64);
     }
 }

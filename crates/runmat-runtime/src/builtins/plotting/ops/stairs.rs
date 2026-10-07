@@ -707,8 +707,8 @@ pub(crate) mod tests {
             Some(&IntegerStorage::U64(vec![wide, wide + 2]))
         );
         assert_eq!(y.integer_storage(), Some(&IntegerStorage::I16(vec![-3, 4])));
-        assert_eq!(x.shape, vec![1, 2]);
-        assert_eq!(y.shape, vec![2, 1]);
+        assert_eq!(x.shape(), [1, 2]);
+        assert_eq!(y.shape(), [2, 1]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

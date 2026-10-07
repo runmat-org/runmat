@@ -542,7 +542,7 @@ pub(crate) mod tests {
                 .expect("meshc ZData");
 
             assert!(
-                matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.integer_storage() == Some(&expected))
+                matches!(value, Value::Tensor(tensor) if tensor.shape() == [2, 2] && tensor.integer_storage() == Some(&expected))
             );
         });
     }

@@ -323,7 +323,7 @@ mod tests {
         let Value::Tensor(x_data) = x_data else {
             panic!("expected typed XData tensor");
         };
-        assert_eq!(x_data.shape, vec![1, 3]);
+        assert_eq!(x_data.shape(), [1, 3]);
         assert_eq!(
             x_data.integer_storage(),
             Some(&IntegerStorage::U64(vec![wide, 1, 0]))
@@ -390,7 +390,7 @@ mod tests {
                 else {
                     panic!("expected typed {property}");
                 };
-                assert_eq!(data.shape, vec![3, 1]);
+                assert_eq!(data.shape(), [3, 1]);
                 assert_eq!(data.integer_storage(), Some(&expected));
             }
         }
@@ -418,7 +418,7 @@ mod tests {
             else {
                 panic!("expected typed {property}");
             };
-            assert_eq!(data.shape, shape);
+            assert_eq!(data.shape(), shape);
             assert_eq!(data.integer_storage(), Some(&expected));
         }
     }
@@ -453,7 +453,7 @@ mod tests {
             else {
                 panic!("expected XData");
             };
-            assert_eq!(x_data.shape, vec![1, 3]);
+            assert_eq!(x_data.shape(), [1, 3]);
             assert_eq!(
                 x_data.integer_storage(),
                 Some(&IntegerStorage::U64(vec![wide, 2, 3]))
@@ -463,7 +463,7 @@ mod tests {
             else {
                 panic!("expected YData");
             };
-            assert_eq!(y_data.shape, vec![3, 1]);
+            assert_eq!(y_data.shape(), [3, 1]);
             assert_eq!(y_data.integer_storage(), Some(&expected_y));
         }
     }

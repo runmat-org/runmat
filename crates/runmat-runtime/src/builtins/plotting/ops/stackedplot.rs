@@ -1584,7 +1584,7 @@ mod tests {
             y.integer_storage(),
             Some(&runmat_value::IntegerStorage::I16(vec![-3, 4, 5, 6]))
         );
-        assert_eq!(y.shape, vec![2, 2]);
+        assert_eq!(y.shape(), [2, 2]);
     }
 
     #[test]

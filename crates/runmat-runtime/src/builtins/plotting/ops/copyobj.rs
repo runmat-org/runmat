@@ -730,7 +730,7 @@ mod tests {
         let Value::Tensor(copied) = copied else {
             panic!("expected tensor result");
         };
-        assert_eq!(copied.shape, vec![1, 2]);
+        assert_eq!(copied.shape(), [1, 2]);
         assert_eq!(copied.materialize_f64().len(), 2);
         assert!(copied
             .materialize_f64()
@@ -764,7 +764,7 @@ mod tests {
             panic!("expected tensor result");
         };
 
-        assert_eq!(copied.shape, vec![1, 2]);
+        assert_eq!(copied.shape(), [1, 2]);
         assert_eq!(
             value_num(
                 get_builtin(vec![
