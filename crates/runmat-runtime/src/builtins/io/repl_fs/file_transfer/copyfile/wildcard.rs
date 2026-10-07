@@ -5,7 +5,7 @@ use super::super::outcome::TransferOutcome;
 use super::plan::{CopyPlanEntry, TargetKind};
 
 pub(super) async fn copy(
-    fs: &super::CopyFilesystem,
+    fs: &super::TransferFilesystem,
     pattern: &str,
     destination: &str,
     force: bool,
@@ -40,7 +40,7 @@ pub(super) async fn copy(
 }
 
 async fn plan(
-    fs: &super::CopyFilesystem,
+    fs: &super::TransferFilesystem,
     sources: Vec<PathBuf>,
     destination: &std::path::Path,
     force: bool,
@@ -53,7 +53,7 @@ async fn plan(
 }
 
 async fn plan_entry(
-    fs: &super::CopyFilesystem,
+    fs: &super::TransferFilesystem,
     source: PathBuf,
     destination: &std::path::Path,
     force: bool,

@@ -1,4 +1,4 @@
-use super::CopyFilesystem;
+use super::TransferFilesystem;
 use crate::execution::ExecutionServiceError;
 use async_trait::async_trait;
 use runmat_filesystem::{self as vfs, FsMetadata};
@@ -15,8 +15,8 @@ enum CopyCheckpointError {
 }
 
 struct OwnerCheckpoint<'a> {
-    owner: &'a CopyFilesystem,
-    cooperation: RefMut<'a, super::super::cooperation::CopyCooperation>,
+    owner: &'a TransferFilesystem,
+    cooperation: RefMut<'a, super::super::cooperation::TransferCooperation>,
 }
 
 #[async_trait(?Send)]
@@ -31,10 +31,40 @@ impl vfs::FsCopyCheckpoint for OwnerCheckpoint<'_> {
     }
 }
 
-impl CopyFilesystem {
+impl TransferFilesystem {
     pub(in super::super) async fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
         self.check()?;
         let result = self.provider.metadata(&self.path(path)).await;
+        if result.is_ok() {
+            self.check()?;
+        }
+        result
+    }
+
+    pub(in super::super) async fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+        self.check()?;
+        let result = self.provider.symlink_metadata(&self.path(path)).await;
+        if result.is_ok() {
+            self.check()?;
+        }
+        result
+    }
+
+    pub(in super::super) async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        self.check()?;
+        let result = self.provider.rename(&self.path(from), &self.path(to)).await;
+        if result.is_ok() {
+            self.check()?;
+        }
+        result
+    }
+
+    pub(in super::super) async fn rename_replace(&self, from: &Path, to: &Path) -> io::Result<()> {
+        self.check()?;
+        let result = self
+            .provider
+            .rename_replace(&self.path(from), &self.path(to))
+            .await;
         if result.is_ok() {
             self.check()?;
         }

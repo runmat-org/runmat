@@ -2,7 +2,7 @@ use std::io;
 use std::path::Path;
 
 pub(super) async fn copy(
-    fs: &super::CopyFilesystem,
+    fs: &super::TransferFilesystem,
     source: &Path,
     destination: &Path,
     directory: bool,
@@ -16,7 +16,7 @@ pub(super) async fn copy(
 
 #[async_recursion::async_recursion(?Send)]
 async fn copy_directory(
-    fs: &super::CopyFilesystem,
+    fs: &super::TransferFilesystem,
     source: &Path,
     destination: &Path,
 ) -> io::Result<()> {
@@ -49,7 +49,7 @@ async fn copy_directory(
 }
 
 async fn copy_file(
-    fs: &super::CopyFilesystem,
+    fs: &super::TransferFilesystem,
     source: &Path,
     destination: &Path,
 ) -> io::Result<()> {
@@ -59,7 +59,7 @@ async fn copy_file(
     Ok(())
 }
 
-async fn require_existing_parent(fs: &super::CopyFilesystem, path: &Path) -> io::Result<()> {
+async fn require_existing_parent(fs: &super::TransferFilesystem, path: &Path) -> io::Result<()> {
     let Some(parent) = path.parent() else {
         return Ok(());
     };
@@ -76,7 +76,7 @@ async fn require_existing_parent(fs: &super::CopyFilesystem, path: &Path) -> io:
     }
 }
 
-async fn preserve_readonly(fs: &super::CopyFilesystem, source: &Path, destination: &Path) {
+async fn preserve_readonly(fs: &super::TransferFilesystem, source: &Path, destination: &Path) {
     if let Ok(metadata) = fs.metadata(source).await {
         let _ = fs.set_readonly(destination, metadata.is_readonly()).await;
     }

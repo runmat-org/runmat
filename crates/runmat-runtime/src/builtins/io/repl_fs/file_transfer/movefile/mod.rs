@@ -13,10 +13,14 @@ use runmat_value::Value;
 #[runtime_builtin(
     name = "movefile",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::repl_fs::file_transfer::movefile"
 )]
-async fn movefile_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let outcome = execute::evaluate(&args).await?;
+pub(in crate::builtins::io::repl_fs::file_transfer) async fn movefile_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let outcome = execute::evaluate(&args, context.as_ref()).await?;
     if let Some(count) = crate::output_count::current_output_count() {
         if count == 0 {
             return outcome.without_outputs("movefile");

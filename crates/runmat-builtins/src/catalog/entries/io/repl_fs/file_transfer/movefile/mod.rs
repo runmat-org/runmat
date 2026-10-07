@@ -3,7 +3,7 @@ mod documentation;
 pub(super) mod inference;
 
 use crate::*;
-use runmat_types::{EffectKind, ExecutionStackRequirement};
+use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
 
 pub use contract::*;
 
@@ -35,7 +35,7 @@ pub const MOVEFILE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: EFFECTS,
-        capabilities: &[],
+        capabilities: &[CapabilityRequirement::Filesystem],
     },
     placement: BuiltinPlacementContract {
         preparation: crate::BuiltinOperandPreparation::RuntimeOwned,

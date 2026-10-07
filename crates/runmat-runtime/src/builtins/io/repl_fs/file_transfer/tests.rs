@@ -24,10 +24,10 @@ fn copy_and_move_use_the_portable_filesystem_provider() {
         .expect("copy through memory provider");
         assert_eq!(copied.status(), 1.0, "{copied:?}");
 
-        let moved = futures::executor::block_on(super::movefile::execute::evaluate(&[
-            Value::from("copy.bin"),
-            Value::from("moved.bin"),
-        ]))
+        let moved = futures::executor::block_on(super::movefile::execute::evaluate(
+            &[Value::from("copy.bin"), Value::from("moved.bin")],
+            None,
+        ))
         .expect("move through memory provider");
         assert_eq!(moved.status(), 1.0, "{moved:?}");
     });

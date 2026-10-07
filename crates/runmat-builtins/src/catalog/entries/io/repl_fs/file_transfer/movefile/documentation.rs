@@ -14,6 +14,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
             "`status` is a double scalar: 1 after success and 0 after an operational failure. `msg` and `msgID` are empty character rows after success and describe a failure otherwise. Without outputs, an operational failure raises an error. Invalid argument types and malformed flags raise an error before filesystem access.",
             "Paths accept character rows and scalar strings. Relative paths use the current folder and a leading `~` expands through the active environment. The operation runs through the host or browser filesystem service. Numeric and provider-resident path values reject without a device transfer; no accelerator kernel is used.",
             "The active filesystem provider defines cross-volume behavior and metadata preservation. If its rename operation cannot move between two storage volumes, movefile returns status 0 with the provider error and leaves recovery to the caller.",
+            "Cancellation is checked before filesystem mutation and between wildcard entries. Wildcard moves are sequential and nontransactional: files completed before an error or cancellation remain moved.",
         ],
     },
 ];

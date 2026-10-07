@@ -16,7 +16,10 @@ pub(in crate::builtins::io::repl_fs::file_transfer) async fn evaluate(
     args: &[Value],
     runtime: Option<&RuntimeContext>,
 ) -> BuiltinResult<TransferOutcome> {
-    let mut cooperation = super::cooperation::CopyCooperation::new(runtime);
+    let mut cooperation = super::super::cooperation::TransferCooperation::new(
+        super::super::authority::TransferOperation::Copy,
+        runtime,
+    );
     if args.len() < 2 {
         return Err(super::super::input::descriptor_error(
             &COPYFILE_ERROR_NOT_ENOUGH_INPUTS,
@@ -72,7 +75,10 @@ async fn transfer(
     }
     let source = expand_user_path(&source, BUILTIN).map_err(runtime_error)?;
     let destination = expand_user_path(&destination, BUILTIN).map_err(runtime_error)?;
-    let filesystem = super::CopyFilesystem::capture(runtime)?;
+    let filesystem = super::TransferFilesystem::capture(
+        super::super::authority::TransferOperation::Copy,
+        runtime,
+    )?;
     if contains_wildcards(&source) {
         Ok(super::wildcard::copy(&filesystem, &source, &destination, force).await)
     } else {

@@ -1,8 +1,8 @@
-use super::CopyFilesystem;
+use super::TransferFilesystem;
 use std::io;
 use std::path::{Path, PathBuf};
 
-impl CopyFilesystem {
+impl TransferFilesystem {
     pub(in super::super) async fn same_path(&self, left: &Path, right: &Path) -> bool {
         if self.path(left) == self.path(right) {
             return true;

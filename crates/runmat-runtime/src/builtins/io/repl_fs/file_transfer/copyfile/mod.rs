@@ -1,13 +1,11 @@
 pub(super) mod execute;
-mod authority;
-mod cooperation;
 mod filesystem;
 mod plan;
 mod result;
 mod single;
 mod wildcard;
 
-use authority::CopyFilesystem;
+use super::authority::TransferFilesystem;
 
 #[cfg(test)]
 mod tests;

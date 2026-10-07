@@ -1,61 +1,71 @@
-use runmat_filesystem as vfs;
 use std::io;
 use std::path::PathBuf;
 
 use super::super::outcome::TransferOutcome;
 use super::plan::{DestinationPolicy, MovePlanEntry};
 
-pub(super) async fn move_matches(pattern: &str, destination: &str, force: bool) -> TransferOutcome {
-    let matches = match super::super::target::wildcard_matches(pattern).await {
-        Ok(matches) if matches.is_empty() => return super::result::source_not_found(pattern),
+pub(super) async fn move_matches(
+    fs: &super::super::authority::TransferFilesystem,
+    pattern: &str,
+    destination: &str,
+    force: bool,
+) -> crate::BuiltinResult<TransferOutcome> {
+    let matches = match fs.wildcard_matches(pattern).await {
+        Ok(matches) if matches.is_empty() => return Ok(super::result::source_not_found(pattern)),
         Ok(matches) => matches,
         Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
-            return super::result::invalid_pattern(pattern, &error.to_string());
+            return Ok(super::result::invalid_pattern(pattern, &error.to_string()));
         }
-        Err(error) => return super::result::filesystem(pattern, destination, &error),
+        Err(error) => return Ok(super::result::filesystem(pattern, destination, &error)),
     };
     let destination_path = PathBuf::from(destination);
-    match vfs::metadata_async(&destination_path).await {
+    match fs.metadata(&destination_path).await {
         Ok(metadata) if !metadata.is_dir() => {
-            return super::result::destination_not_directory(destination);
+            return Ok(super::result::destination_not_directory(destination));
         }
         Ok(_) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return super::result::destination_missing(destination)
+            return Ok(super::result::destination_missing(destination))
         }
-        Err(error) => return super::result::filesystem(pattern, destination, &error),
+        Err(error) => return Ok(super::result::filesystem(pattern, destination, &error)),
     }
-    let entries = match plan(matches, &destination_path, force).await {
+    let entries = match plan(fs, matches, &destination_path, force).await? {
         Ok(entries) => entries,
-        Err(outcome) => return outcome,
+        Err(outcome) => return Ok(outcome),
     };
-    match super::plan::execute(&entries).await {
+    Ok(match super::plan::execute(fs, &entries).await? {
         Ok(()) => super::result::success(),
         Err(failure) => super::result::filesystem(&failure.source, &failure.target, &failure.error),
-    }
+    })
 }
 
 async fn plan(
+    fs: &super::super::authority::TransferFilesystem,
     sources: Vec<PathBuf>,
     destination: &std::path::Path,
     force: bool,
-) -> Result<Vec<MovePlanEntry>, TransferOutcome> {
+) -> crate::BuiltinResult<Result<Vec<MovePlanEntry>, TransferOutcome>> {
     let mut entries = Vec::with_capacity(sources.len());
     for source in sources {
-        if let Some(entry) = plan_entry(source, destination, force).await? {
+        fs.checkpoint().await?;
+        if let Some(entry) = match plan_entry(fs, source, destination, force).await {
+            Ok(entry) => entry,
+            Err(outcome) => return Ok(Err(outcome)),
+        } {
             entries.push(entry);
         }
     }
-    Ok(entries)
+    Ok(Ok(entries))
 }
 
 async fn plan_entry(
+    fs: &super::super::authority::TransferFilesystem,
     source: PathBuf,
     destination: &std::path::Path,
     force: bool,
 ) -> Result<Option<MovePlanEntry>, TransferOutcome> {
     let source_display = super::super::target::display(&source);
-    match vfs::symlink_metadata_async(&source).await {
+    match fs.symlink_metadata(&source).await {
         Ok(_) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return Err(super::result::source_not_found(&source_display))
@@ -76,11 +86,11 @@ async fn plan_entry(
         )
     })?;
     let target = destination.join(name);
-    if super::super::target::same_path(&target, &source).await {
+    if fs.same_path(&target, &source).await {
         return Ok(None);
     }
     let target_display = super::super::target::display(&target);
-    let destination_policy = match vfs::symlink_metadata_async(&target).await {
+    let destination_policy = match fs.symlink_metadata(&target).await {
         Ok(_) if !force => return Err(super::result::destination_exists(&target_display)),
         Ok(_) => DestinationPolicy::ReplaceCompatible,
         Err(error) if error.kind() == io::ErrorKind::NotFound => DestinationPolicy::New,

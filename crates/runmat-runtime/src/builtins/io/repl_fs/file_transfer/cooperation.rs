@@ -1,27 +1,48 @@
-//! Invocation-owned cancellation across copyfile's provider awaits.
+//! Invocation-owned cooperation and cancellation across file-transfer awaits.
 
 use crate::context::RuntimeContext;
 use crate::execution::{CpuCooperationBudget, ExecutionServiceError};
 use crate::{build_runtime_error, BuiltinResult};
 use std::future::Future;
 
-pub(super) struct CopyCooperation {
+use super::authority::TransferOperation;
+
+pub(super) struct TransferCooperation {
+    operation: TransferOperation,
     budget: Option<CpuCooperationBudget>,
 }
 
-impl CopyCooperation {
-    pub(super) fn new(runtime: Option<&RuntimeContext>) -> Self {
+impl TransferCooperation {
+    pub(super) fn new(operation: TransferOperation, runtime: Option<&RuntimeContext>) -> Self {
         Self {
+            operation,
             budget: runtime.map(RuntimeContext::cpu_cooperation),
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn with_test_budget(
+        operation: TransferOperation,
+        budget: CpuCooperationBudget,
+    ) -> Self {
+        Self {
+            operation,
+            budget: Some(budget),
+        }
+    }
+
     pub(super) async fn checkpoint(&mut self) -> BuiltinResult<()> {
-        self.completed_bytes(0).await
+        let completed_work = match self.operation {
+            TransferOperation::Copy => 0,
+            TransferOperation::Move => 1,
+        };
+        self.completed_bytes(completed_work).await
     }
 
     async fn completed_bytes(&mut self, bytes: u64) -> BuiltinResult<()> {
-        self.raw_checkpoint(bytes).await.map_err(runtime_error)?;
+        self.raw_checkpoint(bytes)
+            .await
+            .map_err(|error| runtime_error(self.operation, error))?;
         Ok(())
     }
 
@@ -41,7 +62,7 @@ impl CopyCooperation {
             budget
                 .await_cancellable(future)
                 .await
-                .map_err(runtime_error)?
+                .map_err(|error| runtime_error(self.operation, error))?
         } else {
             future.await
         };
@@ -52,12 +73,15 @@ impl CopyCooperation {
     }
 }
 
-fn runtime_error(error: ExecutionServiceError) -> crate::RuntimeError {
+fn runtime_error(
+    operation: TransferOperation,
+    error: ExecutionServiceError,
+) -> crate::RuntimeError {
     match error {
         cancelled @ ExecutionServiceError::Cancelled => {
-            build_runtime_error("copyfile: operation was cancelled")
+            build_runtime_error(format!("{}: operation was cancelled", operation.name()))
                 .with_identifier("RunMat:Cancelled")
-                .with_builtin("copyfile")
+                .with_builtin(operation.name())
                 .with_source(cancelled)
                 .build()
         }

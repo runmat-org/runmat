@@ -1,3 +1,5 @@
+mod authority;
+mod cooperation;
 mod input;
 mod outcome;
 mod target;
