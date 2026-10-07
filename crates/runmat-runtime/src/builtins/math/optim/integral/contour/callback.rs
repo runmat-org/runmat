@@ -44,8 +44,8 @@ pub(super) fn shape(value: &Value) -> BuiltinResult<&[usize]> {
     use runmat_accelerate_api::{handle_storage, GpuTensorStorage};
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(&[1, 1]),
-        Value::Tensor(array) => Ok(&array.shape),
-        Value::ComplexTensor(array) => Ok(&array.shape),
+        Value::Tensor(array) => Ok(array.shape()),
+        Value::ComplexTensor(array) => Ok(array.shape()),
         Value::LogicalArray(array) => Ok(&array.shape),
         Value::GpuTensor(handle) => {
             handle

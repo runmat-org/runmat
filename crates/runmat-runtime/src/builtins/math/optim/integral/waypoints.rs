@@ -59,8 +59,8 @@ fn reserve(len: usize) -> BuiltinResult<Vec<Complex<f64>>> {
 pub(super) fn admit_shape(value: &Value) -> BuiltinResult<()> {
     let shape = match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => return Ok(()),
-        Value::Tensor(tensor) => tensor.shape.as_slice(),
-        Value::ComplexTensor(tensor) => tensor.shape.as_slice(),
+        Value::Tensor(tensor) => tensor.shape(),
+        Value::ComplexTensor(tensor) => tensor.shape(),
         Value::LogicalArray(array) => array.shape.as_slice(),
         Value::GpuTensor(handle) => handle.shape(),
         _ => {

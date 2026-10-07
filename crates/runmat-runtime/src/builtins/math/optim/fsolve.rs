@@ -572,7 +572,7 @@ impl LeastSquaresEvaluator for FsolveEvaluator<'_> {
             .await?;
             let (shape, scalar) = match &value {
                 Value::Num(_) | Value::Int(_) | Value::Bool(_) => (vec![1, 1], true),
-                Value::Tensor(tensor) => (tensor.shape.clone(), false),
+                Value::Tensor(tensor) => (tensor.shape().to_vec(), false),
                 Value::LogicalArray(array) => (array.shape.clone(), false),
                 _ => (vec![1, 1], false),
             };
@@ -687,7 +687,7 @@ mod tests {
         assert!(matches!(outputs[1], Value::Num(_)));
         assert!(matches!(outputs[2], Value::Num(_)));
         assert!(matches!(outputs[3], Value::Struct(_)));
-        assert!(matches!(&outputs[4], Value::Tensor(tensor) if tensor.shape == vec![1, 1]));
+        assert!(matches!(&outputs[4], Value::Tensor(tensor) if tensor.shape() == [1, 1]));
     }
 
     #[test]
@@ -777,7 +777,7 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |_function, args, _requested_outputs| {
                 let (x, shape) = match &args[0] {
-                    Value::Tensor(t) => (t.materialize_f64().clone(), t.shape.clone()),
+                    Value::Tensor(t) => (t.materialize_f64().clone(), t.shape().to_vec()),
                     other => panic!("expected tensor input, got {other:?}"),
                 };
                 assert_eq!(shape, vec![1, 2]);
@@ -798,7 +798,7 @@ mod tests {
         .unwrap();
         match root {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), &[1, 2]);
                 assert!((t.materialize_f64()[0] - 3.0).abs() < 1.0e-5);
                 assert!((t.materialize_f64()[1] - 4.0).abs() < 1.0e-5);
             }
@@ -818,7 +818,7 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |_function, args, _requested_outputs| {
                 let (x, shape) = match &args[0] {
-                    Value::Tensor(t) => (t.materialize_f64().clone(), t.shape.clone()),
+                    Value::Tensor(t) => (t.materialize_f64().clone(), t.shape().to_vec()),
                     other => panic!("expected tensor input, got {other:?}"),
                 };
                 assert_eq!(shape, vec![2, 2]);
@@ -840,7 +840,7 @@ mod tests {
         .unwrap();
         match root {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert!((t.materialize_f64()[0] - 1.0).abs() < 1.0e-5);
                 assert!((t.materialize_f64()[1] - 2.0).abs() < 1.0e-5);
                 assert!((t.materialize_f64()[2] - 3.0).abs() < 1.0e-5);

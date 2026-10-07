@@ -96,7 +96,8 @@ impl Request {
         if self.owner.is_none() {
             return Ok(None);
         }
-        let native = self.native_tensor(tensor::tensor_values_f64(tensor), tensor.shape.clone())?;
+        let native =
+            self.native_tensor(tensor::tensor_values_f64(tensor), tensor.shape().to_vec())?;
         self.upload(&native, &[])?
             .map(|output| self.adopt(output))
             .transpose()

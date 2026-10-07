@@ -543,12 +543,12 @@ fn fits_platform_usize(value: f64) -> bool {
 async fn real_vector(context: &str, label: &str, value: Value) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
-            ensure_vector_shape(context, label, &tensor.shape)?;
+            ensure_vector_shape(context, label, tensor.shape())?;
             Ok(tensor::tensor_values_f64(&tensor))
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(polyfit_error)?;
-            ensure_vector_shape(context, label, &tensor.shape)?;
+            ensure_vector_shape(context, label, tensor.shape())?;
             Ok(tensor::tensor_values_f64(&tensor))
         }
         Value::Num(n) => Ok(vec![n]),
@@ -576,7 +576,7 @@ async fn complex_vector(
 ) -> BuiltinResult<(Vec<Complex64>, bool)> {
     match value {
         Value::Tensor(tensor) => {
-            ensure_vector_shape(context, label, &tensor.shape)?;
+            ensure_vector_shape(context, label, tensor.shape())?;
             let all_real = true;
             let data = tensor::tensor_values_f64(&tensor)
                 .into_iter()
@@ -585,7 +585,7 @@ async fn complex_vector(
             Ok((data, all_real))
         }
         Value::ComplexTensor(tensor) => {
-            ensure_vector_shape(context, label, &tensor.shape)?;
+            ensure_vector_shape(context, label, tensor.shape())?;
             let values = tensor.materialize_f64();
             let is_complex = values.iter().any(|&(_, im)| im != 0.0);
             let data = values
@@ -596,7 +596,7 @@ async fn complex_vector(
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(polyfit_error)?;
-            ensure_vector_shape(context, label, &tensor.shape)?;
+            ensure_vector_shape(context, label, tensor.shape())?;
             Ok((
                 tensor::tensor_values_f64(&tensor)
                     .iter()

@@ -448,7 +448,7 @@ async fn convert_coefficients(value: Value) -> BuiltinResult<(Vec<Complex64>, bo
             convert_coefficients(gathered).await
         }
         Value::Tensor(tensor) => {
-            ensure_vector_shape("polyval", &tensor.shape)?;
+            ensure_vector_shape("polyval", tensor.shape())?;
             let data = tensor::tensor_values_f64(&tensor)
                 .into_iter()
                 .map(|re| Complex64::new(re, 0.0))
@@ -456,7 +456,7 @@ async fn convert_coefficients(value: Value) -> BuiltinResult<(Vec<Complex64>, bo
             Ok((data, true))
         }
         Value::ComplexTensor(mut tensor) => {
-            ensure_vector_shape("polyval", &tensor.shape)?;
+            ensure_vector_shape("polyval", tensor.shape())?;
             let all_real = complex_tensor_values_are_real(&tensor);
             let data = complex_tensor_values(&mut tensor);
             Ok((data, all_real))
@@ -500,7 +500,7 @@ async fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
                     .into_iter()
                     .map(|re| Complex64::new(re, 0.0))
                     .collect(),
-                shape: tensor.shape.clone(),
+                shape: tensor.shape().to_vec(),
                 all_real: true,
             },
             false,
@@ -508,7 +508,7 @@ async fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
         Value::ComplexTensor(tensor) => Ok((
             NumericArray {
                 data: complex_tensor_values_ref(&tensor),
-                shape: tensor.shape.clone(),
+                shape: tensor.shape().to_vec(),
                 all_real: complex_tensor_values_are_real(&tensor),
             },
             false,
@@ -669,6 +669,14 @@ async fn parse_stats(value: Value, coeff_len: usize) -> BuiltinResult<Option<Pol
     }))
 }
 
+fn coefficient_matrix_dimensions(shape: &[usize]) -> (usize, usize) {
+    match shape {
+        [] => (0, 0),
+        [cols] => (1, *cols),
+        [rows, cols, ..] => (*rows, *cols),
+    }
+}
+
 #[async_recursion::async_recursion(?Send)]
 async fn convert_matrix(value: Value, coeff_len: usize) -> BuiltinResult<(Matrix, bool)> {
     match value {
@@ -677,8 +685,7 @@ async fn convert_matrix(value: Value, coeff_len: usize) -> BuiltinResult<(Matrix
             convert_matrix(Value::Tensor(tensor), coeff_len).await
         }
         Value::Tensor(tensor) => {
-            let rows = tensor.rows;
-            let cols = tensor.cols;
+            let (rows, cols) = coefficient_matrix_dimensions(tensor.shape());
             if rows != coeff_len || cols != coeff_len {
                 return Err(polyval_error("polyval: size of S.R must match the coefficient vector"));
             }
@@ -689,8 +696,8 @@ async fn convert_matrix(value: Value, coeff_len: usize) -> BuiltinResult<(Matrix
             Ok((Matrix { rows, cols, data }, true))
         }
         Value::ComplexTensor(mut tensor) => {
-            let rows = tensor.rows;
-            let cols = tensor.cols;
+            let rows = tensor.rows();
+            let cols = tensor.cols();
             if rows != coeff_len || cols != coeff_len {
                 return Err(polyval_error("polyval: size of S.R must match the coefficient vector"));
             }
@@ -1075,7 +1082,7 @@ pub(crate) mod tests {
         .expect("polyval");
         match value {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, points.shape);
+                assert_eq!(tensor.shape(), points.shape());
                 let expected = vec![-3.0, 2.0, 1.0, 0.0, 5.0];
                 assert_eq!(tensor.materialize_f64(), expected);
             }
@@ -1098,7 +1105,7 @@ pub(crate) mod tests {
         .expect("polyval");
         match value {
             Value::ComplexTensor(tensor) => {
-                assert_eq!(tensor.shape, points.shape);
+                assert_eq!(tensor.shape(), points.shape());
                 assert_eq!(tensor.materialize_f64().len(), 3);
             }
             other => panic!("expected complex tensor, got {other:?}"),
@@ -1168,7 +1175,7 @@ pub(crate) mod tests {
         .expect("polyval");
         match value {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_eq!(tensor.shape(), [1, 3]);
                 assert_eq!(tensor.materialize_f64(), vec![0.25, 0.0, 0.25]);
                 assert!(tensor.integer_storage().is_none());
             }
@@ -1233,7 +1240,7 @@ pub(crate) mod tests {
         let (_, delta) = eval.into_pair().expect("delta available");
         match delta {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_eq!(tensor.shape(), [1, 3]);
                 assert!(tensor
                     .materialize_f64()
                     .iter()
@@ -1268,7 +1275,7 @@ pub(crate) mod tests {
         let (_, delta) = eval.into_pair().expect("delta available");
         match delta {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![1, 3]);
+                assert_eq!(tensor.shape(), [1, 3]);
                 assert_eq!(tensor.materialize_f64().len(), 3);
             }
             other => panic!("expected tensor delta, got {other:?}"),
@@ -1353,6 +1360,35 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn polyval_stat_matrix_preserves_rank_zero_and_rank_one_geometry() {
+        let statistics = |shape| {
+            let mut fields = StructValue::new();
+            fields.fields.insert(
+                "R".to_string(),
+                Value::Tensor(Tensor::new(vec![1.0], shape).expect("R tensor")),
+            );
+            fields.fields.insert("df".to_string(), Value::Num(1.0));
+            fields.fields.insert("normr".to_string(), Value::Num(0.0));
+            Value::Struct(fields)
+        };
+        let coefficients = || Value::Tensor(Tensor::new(vec![2.0], vec![1, 1]).unwrap());
+
+        let rank_zero_error =
+            polyval_builtin(coefficients(), Value::Num(3.0), vec![statistics(vec![])])
+                .expect_err("rank-zero R has zero matrix rows and columns");
+        assert_error_contains(rank_zero_error, "size of S.R must match");
+
+        let rank_one_value =
+            polyval_builtin(coefficients(), Value::Num(3.0), vec![statistics(vec![1])])
+                .expect("rank-one R is a 1-by-1 coefficient matrix");
+        match rank_one_value {
+            Value::Num(value) => assert_eq!(value, 2.0),
+            other => panic!("expected scalar polynomial result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn polyval_gpu_roundtrip() {
         test_support::with_test_provider(|provider| {
@@ -1361,13 +1397,13 @@ pub(crate) mod tests {
             let coeff_handle = provider
                 .upload(&HostTensorView {
                     data: &coeffs.materialize_f64(),
-                    shape: &coeffs.shape,
+                    shape: coeffs.shape(),
                 })
                 .expect("upload coeff");
             let point_handle = provider
                 .upload(&HostTensorView {
                     data: &points.materialize_f64(),
-                    shape: &points.shape,
+                    shape: points.shape(),
                 })
                 .expect("upload points");
             let value = polyval_builtin(
@@ -1400,13 +1436,13 @@ pub(crate) mod tests {
         let coeff_handle = provider
             .upload(&HostTensorView {
                 data: &coeffs.materialize_f64(),
-                shape: &coeffs.shape,
+                shape: coeffs.shape(),
             })
             .expect("upload coeffs");
         let point_handle = provider
             .upload(&HostTensorView {
                 data: &points.materialize_f64(),
-                shape: &points.shape,
+                shape: points.shape(),
             })
             .expect("upload points");
 
@@ -1434,7 +1470,7 @@ pub(crate) mod tests {
         let expected_vals = evaluate_polynomial(&coeff_complex, &point_complex);
         let expected: Vec<f64> = expected_vals.iter().map(|c| c.re).collect();
 
-        assert_eq!(gathered.shape, vec![4, 1]);
+        assert_eq!(gathered.shape(), [4, 1]);
         assert_eq!(gathered.materialize_f64(), expected);
     }
 
