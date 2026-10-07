@@ -20,7 +20,7 @@ pub(super) fn numeric_inputs(
     for value in values {
         let current = match value {
             Value::Num(_) | Value::Int(_) | Value::Bool(_) => &[1, 1][..],
-            Value::Tensor(tensor) => tensor.shape.as_slice(),
+            Value::Tensor(tensor) => tensor.shape(),
             Value::LogicalArray(array) => array.shape.as_slice(),
             Value::GpuTensor(handle)
                 if handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real =>

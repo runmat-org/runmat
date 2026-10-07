@@ -67,7 +67,7 @@ impl IcdfAdmission {
                     .into_iter()
                     .map(|value| value as f32)
                     .collect(),
-                tensor.shape,
+                tensor.shape().to_vec(),
             )
             .map_err(|error| super::normal_error("icdf", format!("icdf: {error}")))?,
         };

@@ -74,15 +74,15 @@ pub(super) async fn duration_indexing(
         }
     }
     let selectors =
-        crate::indexing::selectors::build_component_selectors(components, &days.shape, false)
+        crate::indexing::selectors::build_component_selectors(components, days.shape(), false)
             .await
             .map_err(|err| {
                 duration_error_from(DurationErrorKind::InvalidIndex, "duration.subsref: ", err)
             })?;
-    let plan = crate::indexing::plan::build_index_plan(&selectors, components.len(), &days.shape)
+    let plan = crate::indexing::plan::build_index_plan(&selectors, components.len(), days.shape())
         .map_err(|err| {
-        duration_error_from(DurationErrorKind::InvalidIndex, "duration.subsref: ", err)
-    })?;
+            duration_error_from(DurationErrorKind::InvalidIndex, "duration.subsref: ", err)
+        })?;
     let indexed =
         crate::indexing::value::read_with_plan(Value::Tensor(days), &plan).map_err(|err| {
             duration_error_from(DurationErrorKind::InvalidIndex, "duration.subsref: ", err)
@@ -112,7 +112,7 @@ pub(super) async fn duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
         let mut component_shape: Option<&[usize]> = None;
         for value in raw_positional {
             let shape = match value {
-                Value::Tensor(tensor) => tensor.shape.as_slice(),
+                Value::Tensor(tensor) => tensor.shape(),
                 Value::LogicalArray(array) => array.shape.as_slice(),
                 Value::GpuTensor(handle) => handle.shape(),
                 _ => continue,

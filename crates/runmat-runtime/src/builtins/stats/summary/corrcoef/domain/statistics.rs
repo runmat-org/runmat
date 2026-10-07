@@ -15,7 +15,7 @@ pub(super) fn p_values(r: &Tensor, counts: &[usize]) -> BuiltinResult<Tensor> {
             };
         }
     }
-    Tensor::new(values, r.shape.clone()).map_err(corrcoef_internal_error)
+    Tensor::new(values, r.shape().to_vec()).map_err(corrcoef_internal_error)
 }
 
 fn correlation_p_value(coefficient: f64, count: usize) -> f64 {
@@ -65,8 +65,8 @@ pub(super) fn confidence_bounds(
         }
     }
     Ok((
-        Tensor::new(lower, r.shape.clone()).map_err(corrcoef_internal_error)?,
-        Tensor::new(upper, r.shape.clone()).map_err(corrcoef_internal_error)?,
+        Tensor::new(lower, r.shape().to_vec()).map_err(corrcoef_internal_error)?,
+        Tensor::new(upper, r.shape().to_vec()).map_err(corrcoef_internal_error)?,
     ))
 }
 

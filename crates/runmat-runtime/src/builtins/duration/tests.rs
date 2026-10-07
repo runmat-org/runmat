@@ -25,6 +25,50 @@ fn integer_tensor(storage: runmat_value::IntegerStorage, shape: Vec<usize>) -> V
     Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn duration_low_rank_components_and_indexing_preserve_admitted_geometry() {
+    let scalar = run_duration(vec![
+        Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap()),
+        Value::Num(0.0),
+        Value::Num(0.0),
+    ]);
+    let scalar_days = duration_tensor_from_duration_value(&scalar).unwrap();
+    assert_eq!(scalar_days.shape(), &[1, 1]);
+    assert_eq!(scalar_days.materialize_f64(), vec![1.0 / 24.0]);
+
+    let hours = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap());
+    let vector = run_duration(vec![hours.clone(), Value::Num(0.0), Value::Num(0.0)]);
+    let days = duration_tensor_from_duration_value(&vector).unwrap();
+    assert_eq!(days.shape(), &[2]);
+    let selectors = Value::Cell(
+        runmat_value::CellArray::new(
+            vec![integer_tensor(
+                runmat_value::IntegerStorage::U64(vec![2, 1]),
+                vec![2],
+            )],
+            1,
+            1,
+        )
+        .unwrap(),
+    );
+    let selected = futures::executor::block_on(duration_subsref(vector, "()".into(), selectors))
+        .expect("rank-one duration selection");
+    let selected = duration_tensor_from_duration_value(&selected).unwrap();
+    assert_eq!(selected.shape(), &[2]);
+    let values = days.materialize_f64();
+    assert_eq!(selected.materialize_f64(), vec![values[1], values[0]]);
+
+    let mismatch = Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap());
+    let error =
+        futures::executor::block_on(duration_builtin(vec![hours, mismatch, Value::Num(0.0)]))
+            .expect_err("non-scalar components require exact shape, not equal cardinality");
+    assert_eq!(
+        error.identifier(),
+        Some(DurationErrorKind::ShapeMismatch.identifier())
+    );
+}
+
 #[test]
 fn duration_descriptor_signatures_cover_constructor_and_methods() {
     let labels: Vec<&str> = DURATION_DESCRIPTOR
@@ -172,7 +216,7 @@ fn duration_integer_matrix_form_supports_all_classes_and_returns_column() {
     for storage in storages {
         let value = run_duration(vec![integer_tensor(storage, vec![2, 3])]);
         let days = duration_tensor_from_duration_value(&value).expect("duration days");
-        assert_eq!(days.shape, vec![2, 1]);
+        assert_eq!(days.shape(), &[2, 1]);
         let rendered = duration_display_text(&value)
             .expect("display")
             .expect("duration text");
@@ -190,7 +234,7 @@ fn duration_four_component_form_adds_milliseconds() {
         Value::Int(runmat_value::IntValue::U16(250)),
     ]);
     let days = duration_tensor_from_duration_value(&value).expect("duration days");
-    assert_eq!(days.shape, vec![1, 2]);
+    assert_eq!(days.shape(), &[1, 2]);
     let seconds: Vec<f64> = days
         .materialize_f64()
         .into_iter()
@@ -523,7 +567,7 @@ fn duration_arithmetic_and_comparison_broadcast_dimensions() {
         futures::executor::block_on(super::builtins::duration_plus(column, Value::Num(1.0)))
             .expect("numeric days addition");
     let days = duration_tensor_from_duration_value(&shifted).expect("duration days");
-    assert_eq!(days.shape, vec![2, 1]);
+    assert_eq!(days.shape(), &[2, 1]);
     assert_eq!(days.materialize_f64(), vec![2.0, 3.0]);
 }
 
@@ -532,12 +576,12 @@ fn duration_empty_component_and_unit_shapes_are_retained() {
     let empty = Value::Tensor(Tensor::new(vec![], vec![0, 2]).expect("empty tensor"));
     let value = run_duration(vec![empty, Value::Num(0.0), Value::Num(0.0)]);
     let days = duration_tensor_from_duration_value(&value).expect("duration days");
-    assert_eq!(days.shape, vec![0, 2]);
+    assert_eq!(days.shape(), &[0, 2]);
     let hours = futures::executor::block_on(hours_builtin(value)).expect("hours");
     let Value::Tensor(hours) = hours else {
         panic!("empty unit counts remain an array")
     };
-    assert_eq!(hours.shape, vec![0, 2]);
+    assert_eq!(hours.shape(), &[0, 2]);
 }
 
 #[test]
@@ -547,8 +591,10 @@ fn duration_nd_and_empty_operator_shapes_are_retained() {
     let shifted =
         futures::executor::block_on(duration_plus(cube, Value::Num(1.0))).expect("N-D addition");
     assert_eq!(
-        duration_tensor_from_duration_value(&shifted).unwrap().shape,
-        vec![2, 2, 2]
+        duration_tensor_from_duration_value(&shifted)
+            .unwrap()
+            .shape(),
+        &[2, 2, 2]
     );
 
     let empty = duration_object_from_days(vec![], vec![0, 2], DEFAULT_DURATION_FORMAT)

@@ -387,6 +387,28 @@ fn corrcoef_public_scalar_vector_and_paired_empty_geometry() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn corrcoef_low_rank_inputs_keep_statistics_outputs_canonical() {
+    for (values, shape) in [(vec![7.0], Vec::new()), (vec![1.0, 2.0, 4.0], vec![3])] {
+        let _outputs = crate::output_count::push_output_count(Some(4));
+        let Value::OutputList(outputs) = block_on(corrcoef_builtin(
+            Value::Tensor(Tensor::new(values, shape).unwrap()),
+            Vec::new(),
+        ))
+        .expect("low-rank four-output corrcoef") else {
+            panic!("expected output list")
+        };
+        assert_eq!(outputs.len(), 4);
+        for output in outputs {
+            let Value::Tensor(output) = output else {
+                panic!("statistics output must be a tensor")
+            };
+            assert_eq!(output.shape(), &[1, 1]);
+        }
+    }
+}
+
 #[test]
 fn corrcoef_supports_all_integer_classes_and_exact_wide_centering() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);

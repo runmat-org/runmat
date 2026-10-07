@@ -640,7 +640,7 @@ fn build_errorbar_host_plots(
         Some(&y_pos),
     ];
     for tensor in tensors.into_iter().flatten() {
-        if tensor.shape.len() > 2 && tensor.shape.iter().skip(2).any(|extent| *extent != 1) {
+        if tensor.shape().len() > 2 && tensor.shape().iter().skip(2).any(|extent| *extent != 1) {
             return Err(errorbar_invalid(
                 "inputs must be vectors or two-dimensional matrices",
             ));
@@ -1187,7 +1187,7 @@ mod tests {
             panic!("expected tensor axis");
         };
         assert_eq!(x.materialize_f64(), vec![1.0, 2.0, 3.0]);
-        assert_eq!(x.shape, vec![3]);
+        assert_eq!(x.shape(), &[3]);
     }
 
     #[test]

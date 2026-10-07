@@ -152,7 +152,7 @@ fn distribution_helpers_accept_typed_integer_tensors_at_f64_boundary() {
     .unwrap();
     match out {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), &[1, 2]);
             assert_close(tensor.materialize_f64()[0], 0.5, 1.0e-12);
             assert_close(tensor.materialize_f64()[1], 0.841_344_746_068_543, 1.0e-12);
         }
@@ -184,7 +184,7 @@ fn distribution_helpers_broadcast_and_return_nan_for_bad_parameters() {
     .unwrap();
     match out {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 3]);
+            assert_eq!(tensor.shape(), &[1, 3]);
             assert_close(tensor.materialize_f64()[2], 0.300_014_164_121_372, 1.0e-12);
         }
         other => panic!("expected tensor chi2cdf, got {other:?}"),

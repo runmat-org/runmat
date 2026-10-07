@@ -1,5 +1,35 @@
 use super::*;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn icdf_single_precision_preserves_canonical_scalar_broadcast_output_policy() {
+    for (probabilities, expected_shape) in [
+        (
+            Tensor::from_f32(vec![0.5], Vec::new()).expect("rank-zero probabilities"),
+            vec![1, 1],
+        ),
+        (
+            Tensor::from_f32(vec![0.5, 0.5], vec![2]).expect("rank-one probabilities"),
+            vec![1, 2],
+        ),
+    ] {
+        let Value::Tensor(output) = block_on(icdf::icdf_builtin(
+            Value::from("Normal"),
+            Value::Tensor(probabilities),
+            vec![Value::Num(0.0), Value::Num(1.0)],
+        ))
+        .expect("single-precision normal inverse") else {
+            panic!("single precision is carried by a tensor")
+        };
+        assert_eq!(output.shape(), expected_shape);
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert!(output
+            .materialize_f64()
+            .iter()
+            .all(|value| value.abs() <= f64::EPSILON));
+    }
+}
+
 #[test]
 fn canonical_icdf_binding_uses_invocation_cancellation() {
     use runmat_execution::{cancellation::CancellationSource, CancellationReason};
@@ -74,7 +104,7 @@ fn icdf_broadcasts_and_inverts_chisquare_and_binomial() {
     .unwrap();
     match normal {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), &[1, 2]);
             assert_close(tensor.materialize_f64()[0], 1.0, 1e-10);
             assert_close(tensor.materialize_f64()[1], 4.289_707_253_902_944, 1e-10);
         }
@@ -200,7 +230,7 @@ fn icdf_broadcasts_later_parameter_shapes() {
     .unwrap();
     match normal {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), &[1, 2]);
             assert_close(tensor.materialize_f64()[0], 0.0, 1e-10);
             assert_close(tensor.materialize_f64()[1], 0.0, 1e-10);
         }
@@ -218,7 +248,7 @@ fn icdf_broadcasts_later_parameter_shapes() {
     .unwrap();
     match uniform {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), &[1, 2]);
             assert_close(tensor.materialize_f64()[0], 0.5, 1e-12);
             assert_close(tensor.materialize_f64()[1], 1.0, 1e-12);
         }

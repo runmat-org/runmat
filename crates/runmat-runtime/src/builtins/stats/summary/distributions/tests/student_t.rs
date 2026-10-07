@@ -28,7 +28,7 @@ fn student_t_distribution_broadcasts_and_upper_tail() {
     let out = block_on(tcdf::tcdf_builtin(x, vec![nu])).unwrap();
     match out {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 3]);
+            assert_eq!(tensor.shape(), &[1, 3]);
             assert_close(tensor.materialize_f64()[0], 0.5, 1e-12);
             assert_close(tensor.materialize_f64()[1], 0.818_391_266, 1e-9);
             assert_close(tensor.materialize_f64()[2], 0.977_249_868, 1e-9);
