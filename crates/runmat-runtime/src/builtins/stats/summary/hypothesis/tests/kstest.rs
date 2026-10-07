@@ -111,6 +111,22 @@ fn kstest_rejects_rank_zero_and_rank_one_cdf_tables() {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn kstest_accepts_rank_zero_and_rank_one_sample_vectors() {
+    for sample in [
+        Tensor::new(vec![0.0], Vec::new()).unwrap(),
+        Tensor::new(vec![-0.5, 0.5], vec![2]).unwrap(),
+    ] {
+        let _outputs = crate::output_count::push_output_count(Some(1));
+        let outputs = output_list(
+            block_on(kstest_builtin(Value::Tensor(sample), Vec::new()))
+                .expect("low-rank sample remains a vector"),
+        );
+        assert!(matches!(outputs.as_slice(), [Value::Bool(_)]));
+    }
+}
+
 #[test]
 fn kstest_reads_typed_integer_sample_and_cdf_table_exactly() {
     let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);

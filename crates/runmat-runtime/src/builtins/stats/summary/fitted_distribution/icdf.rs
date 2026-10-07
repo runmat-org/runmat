@@ -18,7 +18,7 @@ pub(crate) async fn icdf_probability_distribution(
     check_fitted_cancellation(runtime, FittedOperation::Inverse)?;
     let fit = admitted.0;
     let x = value_to_tensor("icdf", p).await?;
-    let shape = x.shape.clone();
+    let shape = x.shape().to_vec();
     let data = tensor::tensor_into_values_f64(x)
         .into_iter()
         .map(|value| {

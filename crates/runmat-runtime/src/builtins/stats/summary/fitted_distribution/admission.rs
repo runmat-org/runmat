@@ -151,7 +151,7 @@ fn is_vector_shape(shape: &[usize]) -> bool {
 fn numeric_shape<'a>(builtin: &'static str, value: &'a Value) -> BuiltinResult<&'a [usize]> {
     let shape = match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => &[1, 1][..],
-        Value::Tensor(tensor) => tensor.shape.as_slice(),
+        Value::Tensor(tensor) => tensor.shape(),
         Value::LogicalArray(array) => array.shape.as_slice(),
         Value::GpuTensor(handle)
             if handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real =>

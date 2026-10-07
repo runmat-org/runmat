@@ -160,7 +160,7 @@ async fn extract_numeric_data(value: Value) -> BuiltinResult<NumericData> {
 }
 
 fn tensor_to_numeric_data(tensor: Tensor) -> BuiltinResult<NumericData> {
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(int2str_error_with_message(
             "int2str: input must be scalar, vector, or 2-D matrix",
             &INT2STR_ERROR_INVALID_INPUT,
@@ -410,6 +410,24 @@ pub(crate) mod tests {
         futures::executor::block_on(super::int2str_builtin(value, rest))
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn int2str_low_rank_inputs_keep_getter_based_column_geometry() {
+        let scalar = int2str_builtin(
+            Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap()),
+            Vec::new(),
+        )
+        .expect("rank-zero int2str");
+        assert_eq!(char_rows(scalar), vec!["7"]);
+
+        let vector = int2str_builtin(
+            Value::Tensor(Tensor::new(vec![7.0, 8.0], vec![2]).unwrap()),
+            Vec::new(),
+        )
+        .expect("rank-one int2str");
+        assert_eq!(char_rows(vector), vec!["7", "8"]);
+    }
+
     fn char_rows(value: Value) -> Vec<String> {
         match value {
             Value::CharArray(ca) => ca
@@ -525,7 +543,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![10.2, 20.8], vec![1, 2]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let out = int2str_builtin(Value::GpuTensor(handle), Vec::new()).expect("int2str");

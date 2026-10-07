@@ -13,7 +13,7 @@ pub(super) fn fill_outlier_tensor(
     // values for all fill rules without copying the array for every slice.
     let original = input_values.as_ref();
     let mut filled_mask = vec![0; data.len()];
-    let shape = tensor::default_shape_for(&input.shape, input_values.len());
+    let shape = tensor::default_shape_for(input.shape(), input_values.len());
     let dim = options.dim.unwrap_or_else(|| first_non_singleton(&shape));
     if dim == 0 {
         fill_slice(
@@ -62,7 +62,7 @@ pub(super) fn fill_outlier_tensor(
         NumericDType::F32 => NumericDType::F32,
         _ => NumericDType::F64,
     };
-    Tensor::new_with_dtype(data, input.shape.clone(), output_dtype)
+    Tensor::new_with_dtype(data, input.shape().to_vec(), output_dtype)
         .map(tensor::tensor_into_value)
         .map(|value| (value, filled_mask))
         .map_err(|err| internal_error(FILLOUTLIERS_NAME, format!("filloutliers: {err}")))

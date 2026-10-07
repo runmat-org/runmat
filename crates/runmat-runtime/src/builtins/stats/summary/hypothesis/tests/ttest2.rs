@@ -16,7 +16,7 @@ fn ttest2_equal_variance_vector_outputs_match_reference_values() {
     );
     match &outputs[2] {
         Value::Tensor(ci) => {
-            assert_eq!(ci.shape, vec![2, 1]);
+            assert_eq!(ci.shape(), &[2, 1]);
             assert_close(ci.materialize_f64()[0], -6.031_813, 1.0e-6);
             assert_close(ci.materialize_f64()[1], 1.031_813, 1.0e-6);
         }
@@ -81,7 +81,7 @@ fn ttest2_unequal_variance_tail_and_nan_omission() {
     match &outputs[3] {
         Value::Struct(stats) => match stats.fields.get("sd").unwrap() {
             Value::Tensor(sd) => {
-                assert_eq!(sd.shape, vec![2, 1]);
+                assert_eq!(sd.shape(), &[2, 1]);
                 assert_close(sd.materialize_f64()[0], 1.290_994, 1.0e-6);
                 assert_close(sd.materialize_f64()[1], 1.290_994, 1.0e-6);
             }
@@ -103,7 +103,7 @@ fn ttest2_matrix_dim_outputs_shape_and_invalid_samples() {
             other => panic!("expected h logical array, got {other:?}"),
         }
         match &outputs[1] {
-            Value::Tensor(p) => assert_eq!(p.shape, vec![1, 2]),
+            Value::Tensor(p) => assert_eq!(p.shape(), &[1, 2]),
             other => panic!("expected p tensor, got {other:?}"),
         }
     }
@@ -285,11 +285,11 @@ fn ttest2_empty_and_nd_outputs_preserve_shapes() {
         other => panic!("expected empty h logical array, got {other:?}"),
     }
     match &outputs[1] {
-        Value::Tensor(p) => assert_eq!(p.shape, vec![1, 0]),
+        Value::Tensor(p) => assert_eq!(p.shape(), &[1, 0]),
         other => panic!("expected empty p tensor, got {other:?}"),
     }
     match &outputs[2] {
-        Value::Tensor(ci) => assert_eq!(ci.shape, vec![2, 0]),
+        Value::Tensor(ci) => assert_eq!(ci.shape(), &[2, 0]),
         other => panic!("expected empty ci tensor, got {other:?}"),
     }
 
@@ -306,12 +306,12 @@ fn ttest2_empty_and_nd_outputs_preserve_shapes() {
     let _guard = crate::output_count::push_output_count(Some(4));
     let outputs = output_list(block_on(ttest2_builtin(x, y, Vec::new())).unwrap());
     match &outputs[2] {
-        Value::Tensor(ci) => assert_eq!(ci.shape, vec![2, 1, 4]),
+        Value::Tensor(ci) => assert_eq!(ci.shape(), &[2, 1, 4]),
         other => panic!("expected nd ci tensor, got {other:?}"),
     }
     match &outputs[3] {
         Value::Struct(stats) => match stats.fields.get("sd").unwrap() {
-            Value::Tensor(sd) => assert_eq!(sd.shape, vec![1, 1, 4]),
+            Value::Tensor(sd) => assert_eq!(sd.shape(), &[1, 1, 4]),
             other => panic!("expected nd sd tensor, got {other:?}"),
         },
         other => panic!("expected stats struct, got {other:?}"),

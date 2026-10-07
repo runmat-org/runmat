@@ -121,7 +121,7 @@ fn generic_pdf_cdf_random_name_overloads_execute() {
     let Value::Tensor(density) = density else {
         panic!("expected vector density");
     };
-    assert_eq!(density.shape, vec![2, 1]);
+    assert_eq!(density.shape(), &[2, 1]);
     assert!(
         (density.materialize_f64()[0] - distribution_math::standard_normal_pdf(0.0)).abs()
             < 1.0e-12
@@ -149,7 +149,59 @@ fn generic_pdf_cdf_random_name_overloads_execute() {
     ))
     .unwrap();
     match samples {
-        Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![2, 3]),
+        Value::Tensor(tensor) => assert_eq!(tensor.shape(), &[2, 3]),
         other => panic!("expected tensor, got {other:?}"),
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn fitted_evaluators_preserve_rank_zero_and_rank_one_input_geometry() {
+    let fitted = block_on(fitdist_builtin(
+        vec_tensor(&[-1.0, 0.0, 1.0]),
+        Value::from("Normal"),
+        Vec::new(),
+    ))
+    .expect("fitted normal distribution");
+
+    for (shape, points, probabilities) in [
+        (Vec::new(), vec![0.0], vec![0.5]),
+        (vec![2], vec![-0.5, 0.5], vec![0.25, 0.75]),
+    ] {
+        let results = [
+            block_on(pdf_builtin(
+                fitted.clone(),
+                Value::Tensor(Tensor::new(points.clone(), shape.clone()).unwrap()),
+                Vec::new(),
+            )),
+            block_on(cdf_builtin(
+                fitted.clone(),
+                Value::Tensor(Tensor::new(points, shape.clone()).unwrap()),
+                Vec::new(),
+            )),
+            block_on(
+                crate::builtins::stats::summary::distributions::icdf::icdf_builtin(
+                    fitted.clone(),
+                    Value::Tensor(Tensor::new(probabilities, shape.clone()).unwrap()),
+                    Vec::new(),
+                ),
+            ),
+        ];
+
+        for result in results {
+            let result = result.expect("fitted evaluator");
+            if shape.is_empty() {
+                assert!(matches!(result, Value::Num(value) if value.is_finite()));
+            } else {
+                let Value::Tensor(result) = result else {
+                    panic!("expected rank-one fitted result")
+                };
+                assert_eq!(result.shape(), shape.as_slice());
+                assert!(result
+                    .materialize_f64()
+                    .iter()
+                    .all(|value| value.is_finite()));
+            }
+        }
     }
 }

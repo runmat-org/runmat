@@ -74,7 +74,7 @@ pub(super) fn validate_kstest_alpha_role(value: &Value) -> BuiltinResult<()> {
 
 pub(super) fn preflight_kstest_sample_metadata(value: &Value) -> BuiltinResult<()> {
     let shape = match value {
-        Value::Tensor(tensor) => &tensor.shape,
+        Value::Tensor(tensor) => tensor.shape(),
         Value::GpuTensor(handle) => {
             if runmat_accelerate_api::handle_storage(handle)
                 != runmat_accelerate_api::GpuTensorStorage::Real

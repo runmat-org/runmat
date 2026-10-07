@@ -7,6 +7,47 @@ fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
     Value::Tensor(Tensor::new(data, shape).unwrap())
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn filloutliers_preserves_low_rank_numeric_mask_geometry() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    for (shape, data, mask, expected) in [
+        (Vec::new(), vec![9.0], vec![1.0], Value::Num(0.0)),
+        (
+            vec![2],
+            vec![1.0, 9.0],
+            vec![0.0, 1.0],
+            tensor(vec![1.0, 0.0], vec![2]),
+        ),
+    ] {
+        let output = block_on(filloutliers_builtin(
+            tensor(data, shape.clone()),
+            vec![
+                Value::Num(0.0),
+                Value::from("OutlierLocations"),
+                tensor(mask.clone(), shape.clone()),
+            ],
+        ))
+        .expect("fill with exact-shape numeric mask");
+        let Value::OutputList(output) = output else {
+            panic!("filled value and mask");
+        };
+        assert_eq!(output.len(), 2);
+        assert_eq!(output[0], expected);
+        let Value::LogicalArray(actual_mask) = &output[1] else {
+            panic!("logical mask");
+        };
+        assert_eq!(actual_mask.shape, shape);
+        assert_eq!(
+            actual_mask.data.as_slice(),
+            mask.iter()
+                .map(|value| u8::from(*value != 0.0))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
 fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
     let tensor = Tensor::new_integer(storage, shape).unwrap();
     Value::Tensor(tensor)
@@ -675,7 +716,7 @@ fn implicit_trailing_singleton_dimension_keeps_bounded_nd_geometry() {
         fill_outlier_tensor(&input, &result, &options, &FillMethod::Constant(0.0)).unwrap();
     assert_eq!(filled_mask, vec![0, 0, 0, 1, 0, 0, 0, 0]);
     assert!(
-        matches!(filled, Value::Tensor(tensor) if tensor.shape == vec![2, 2, 2]
+        matches!(filled, Value::Tensor(tensor) if tensor.shape() == [2, 2, 2]
         && tensor.materialize_f64() == vec![1.0, 2.0, 3.0, 0.0, 5.0, 6.0, 7.0, 8.0])
     );
 }

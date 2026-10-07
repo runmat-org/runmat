@@ -5,7 +5,7 @@ pub(super) fn evaluate_kstest(
     x: &Tensor,
     options: &KstestOptions,
 ) -> BuiltinResult<KstestEvaluation> {
-    if !is_kstest_vector_shape(&x.shape) {
+    if !is_kstest_vector_shape(x.shape()) {
         return Err(kstest_invalid_argument("kstest: x must be a vector"));
     }
     let mut sample = tensor::tensor_values_f64(x)

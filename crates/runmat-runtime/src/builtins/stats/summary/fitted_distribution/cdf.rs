@@ -38,7 +38,7 @@ pub(super) async fn evaluate_cdf(
             let residency = EvaluationResidency::capture(&[&input]);
             let x = cdf_value_to_tensor(input).await?;
             ensure_exact_cdf_integer_boundary(&x, "x")?;
-            let shape = x.shape.clone();
+            let shape = x.shape().to_vec();
             let data = tensor::tensor_into_values_f64(x)
                 .into_iter()
                 .map(|value| cdf_scalar_with_tail(&fit, value, tail))

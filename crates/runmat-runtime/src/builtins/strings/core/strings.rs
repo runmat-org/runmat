@@ -269,7 +269,7 @@ fn parse_size_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
     if len == 0 {
         return Ok(vec![0, 0]);
     }
-    if !is_vector_shape(&tensor.shape) {
+    if !is_vector_shape(tensor.shape()) {
         return Err(strings_error_with_message(
             format!("{FN_NAME}: size vector must be a row or column vector"),
             &STRINGS_ERROR_INVALID_SIZE,
@@ -374,6 +374,30 @@ pub(crate) mod tests {
     fn strings_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         futures::executor::block_on(super::strings_builtin(rest))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn strings_low_rank_size_tensors_keep_scalar_square_and_vector_dimensions() {
+        let square = strings_builtin(vec![Value::Tensor(
+            Tensor::new(vec![2.0], Vec::new()).unwrap(),
+        )])
+        .expect("rank-zero size");
+        let Value::StringArray(square) = square else {
+            panic!("string array expected")
+        };
+        assert_eq!(square.shape, vec![2, 2]);
+        assert_eq!(square.data.len(), 4);
+
+        let rectangle = strings_builtin(vec![Value::Tensor(
+            Tensor::new(vec![2.0, 3.0], vec![2]).unwrap(),
+        )])
+        .expect("rank-one size vector");
+        let Value::StringArray(rectangle) = rectangle else {
+            panic!("string array expected")
+        };
+        assert_eq!(rectangle.shape, vec![2, 3]);
+        assert_eq!(rectangle.data.len(), 6);
     }
 
     fn error_message(err: crate::RuntimeError) -> String {
@@ -660,7 +684,7 @@ pub(crate) mod tests {
         .expect("strings");
         match result {
             Value::StringArray(array) => {
-                assert_eq!(array.shape, tensor.shape);
+                assert_eq!(array.shape, tensor.shape());
                 assert_eq!(array.data.len(), tensor.materialize_f64().len());
             }
             other => panic!("expected string array, got {other:?}"),
@@ -716,7 +740,7 @@ pub(crate) mod tests {
             let dims = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
             let view = HostTensorView {
                 data: &dims.materialize_f64(),
-                shape: &dims.shape,
+                shape: dims.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = strings_builtin(vec![Value::GpuTensor(handle)]).expect("strings");
@@ -737,7 +761,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
@@ -762,7 +786,7 @@ pub(crate) mod tests {
         let dims = Tensor::new(vec![1.0, 4.0], vec![1, 2]).unwrap();
         let view = HostTensorView {
             data: &dims.materialize_f64(),
-            shape: &dims.shape,
+            shape: dims.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload");

@@ -77,7 +77,7 @@ fn fitdist_accepts_typed_integer_sample_and_eval_points() {
     .unwrap();
     match density {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 1]);
+            assert_eq!(tensor.shape(), &[2, 1]);
             assert!(tensor
                 .materialize_f64()
                 .iter()
@@ -370,7 +370,7 @@ fn fitdist_gamma_weibull_and_poisson_smoke() {
     .unwrap();
     let samples = block_on(random_builtin(poisson, vec![Value::Num(2.0)])).unwrap();
     match samples {
-        Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![2, 2]),
+        Value::Tensor(tensor) => assert_eq!(tensor.shape(), &[2, 2]),
         other => panic!("expected tensor, got {other:?}"),
     }
 }

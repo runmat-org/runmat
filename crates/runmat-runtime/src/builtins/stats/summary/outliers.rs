@@ -454,7 +454,7 @@ fn result_shape_for_mask(
     result: &DetectionResult,
 ) -> BuiltinResult<Vec<usize>> {
     if let Some(Value::Tensor(tensor)) = filled {
-        Ok(tensor.shape.clone())
+        Ok(tensor.shape().to_vec())
     } else {
         Ok(result.mask_shape.clone())
     }

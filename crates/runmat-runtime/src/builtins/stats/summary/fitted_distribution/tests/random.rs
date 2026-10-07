@@ -32,7 +32,7 @@ fn random_named_logical_parameter_follows_numeric_evaluator() {
     let Value::Tensor(samples) = samples else {
         panic!("expected two-by-two samples");
     };
-    assert_eq!(samples.shape, vec![2, 2]);
+    assert_eq!(samples.shape(), &[2, 2]);
     assert!(samples.materialize_f64().iter().all(|value| *value == 0.0));
 }
 
@@ -106,7 +106,7 @@ fn random_restores_parameter_residency_but_not_size_control_residency() {
         };
         assert!(runmat_accelerate_api::handle_is_explicit(output_handle));
         let gathered = test_support::gather(output).expect("gather random output");
-        assert_eq!(gathered.shape, vec![2, 2]);
+        assert_eq!(gathered.shape(), &[2, 2]);
         assert!(gathered
             .materialize_f64()
             .iter()
@@ -160,7 +160,7 @@ fn random_wgpu_parameter_residency_enforces_double_for_all_integer_classes() {
             Some(ProviderPrecision::F64)
         );
         let gathered = test_support::gather(output).expect("gather random output");
-        assert_eq!(gathered.shape, vec![2, 2]);
+        assert_eq!(gathered.shape(), &[2, 2]);
         assert!(gathered
             .materialize_f64()
             .iter()

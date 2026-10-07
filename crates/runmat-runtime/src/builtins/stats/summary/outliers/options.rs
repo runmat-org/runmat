@@ -390,7 +390,7 @@ pub(super) fn logical_mask(
                 .into_iter()
                 .map(|value| u8::from(value != 0.0 && !value.is_nan()))
                 .collect(),
-            tensor.shape.clone(),
+            tensor.shape().to_vec(),
         )),
         Value::Num(value) => Ok((vec![u8::from(*value != 0.0 && !value.is_nan())], vec![1, 1])),
         Value::Int(value) => Ok((vec![u8::from(!value.is_zero())], vec![1, 1])),

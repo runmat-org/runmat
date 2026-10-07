@@ -57,7 +57,7 @@ pub(super) async fn evaluate_pdf(
             let precision = cdf_output_precision(&[&input]);
             let residency = EvaluationResidency::capture(&[&input]);
             let x = value_to_tensor(PDF_NAME, input).await?;
-            let shape = x.shape.clone();
+            let shape = x.shape().to_vec();
             let data = tensor::tensor_into_values_f64(x)
                 .into_iter()
                 .map(|value| pdf_scalar(&fit, value))

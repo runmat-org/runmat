@@ -78,7 +78,7 @@ pub(crate) fn classify_text_or_numeric_value(
             fn_name,
         ),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let mut data = Vec::with_capacity(tensor_utils::tensor_element_len(&tensor));
             for index in 0..tensor_utils::tensor_element_len(&tensor) {
                 let value = tensor.numeric_value_at(index).ok_or_else(|| {

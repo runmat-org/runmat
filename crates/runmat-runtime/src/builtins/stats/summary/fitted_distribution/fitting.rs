@@ -1,7 +1,14 @@
 use super::*;
 
 pub(super) fn parse_sample(tensor: Tensor, options: FitOptions) -> BuiltinResult<WeightedSample> {
-    if tensor.shape.iter().copied().filter(|dim| *dim > 1).count() > 1 {
+    if tensor
+        .shape()
+        .iter()
+        .copied()
+        .filter(|dim| *dim > 1)
+        .count()
+        > 1
+    {
         return Err(invalid("fitdist: data must be a vector"));
     }
     let sample_len = tensor::tensor_element_len(&tensor);

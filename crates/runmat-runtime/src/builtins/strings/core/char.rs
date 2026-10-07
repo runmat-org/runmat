@@ -252,9 +252,9 @@ fn symbolic_array_rows(array: &SymbolicArray) -> BuiltinResult<Vec<Vec<char>>> {
 }
 
 fn tensor_rows(t: &Tensor) -> BuiltinResult<Vec<Vec<char>>> {
-    ensure_two_dimensional(&t.shape, "char")?;
+    ensure_two_dimensional(t.shape(), "char")?;
     let element_len = t.len();
-    let (rows, cols) = infer_rows_cols(&t.shape, element_len);
+    let (rows, cols) = infer_rows_cols(t.shape(), element_len);
     if rows == 0 {
         return Ok(Vec::new());
     }
@@ -432,12 +432,35 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::CHAR_EXTENSIONS;
-    use runmat_value::{IntegerStorage, NumericStorage, SymbolicArray, SymbolicExpr};
+    use runmat_value::{IntegerStorage, NumericStorage, StringArray, SymbolicArray, SymbolicExpr};
 
     fn char_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::char_builtin(rest))
     }
-    use runmat_value::StringArray;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn char_numeric_low_rank_inputs_keep_row_character_geometry() {
+        let scalar = char_builtin(vec![Value::Tensor(
+            Tensor::new(vec![65.0], Vec::new()).unwrap(),
+        )])
+        .expect("rank-zero character code");
+        let Value::CharArray(scalar) = scalar else {
+            panic!("character array expected")
+        };
+        assert_eq!((scalar.rows, scalar.cols), (1, 1));
+        assert_eq!(scalar.data, vec!['A']);
+
+        let vector = char_builtin(vec![Value::Tensor(
+            Tensor::new(vec![65.0, 66.0], vec![2]).unwrap(),
+        )])
+        .expect("rank-one character codes");
+        let Value::CharArray(vector) = vector else {
+            panic!("character array expected")
+        };
+        assert_eq!((vector.rows, vector.cols), (1, 2));
+        assert_eq!(vector.data, vec!['A', 'B']);
+    }
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
@@ -634,7 +657,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![82.0, 85.0, 78.0], vec![1, 3]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = char_builtin(vec![Value::GpuTensor(handle)]).expect("char");
@@ -849,7 +872,7 @@ pub(crate) mod tests {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = runmat_accelerate_api::provider()
             .expect("wgpu provider")

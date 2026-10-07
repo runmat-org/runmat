@@ -1129,7 +1129,7 @@ fn decode_bytes(bytes: &[u8], encoding: &str, shape: Vec<usize>) -> BuiltinResul
 
 fn byte_vector_shape(value: &Value, fn_name: &str) -> BuiltinResult<Vec<usize>> {
     let shape = match value {
-        Value::Tensor(tensor) => tensor.shape.clone(),
+        Value::Tensor(tensor) => tensor.shape().to_vec(),
         Value::Int(_) | Value::Num(_) => vec![1, 1],
         other => {
             return Err(compat_error(
@@ -1859,6 +1859,24 @@ mod tests {
         assert_eq!(result.materialize_f64(), vec![42.0, 7.5]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn native2unicode_numeric_low_rank_shapes_remain_scalar_and_row() {
+        let scalar = block(native2unicode_builtin(
+            Value::Tensor(Tensor::new(vec![104.0], Vec::new()).unwrap()),
+            Vec::new(),
+        ))
+        .expect("rank-zero byte");
+        assert_eq!(scalar, Value::CharArray(CharArray::new_row("h")));
+
+        let row = block(native2unicode_builtin(
+            Value::Tensor(Tensor::new(vec![104.0, 105.0], vec![2]).unwrap()),
+            Vec::new(),
+        ))
+        .expect("rank-one bytes");
+        assert_eq!(row, Value::CharArray(CharArray::new_row("hi")));
+    }
+
     #[test]
     fn native2unicode_reads_typed_integer_byte_storage_exactly() {
         let bytes = Tensor::new_integer(IntegerStorage::U8(vec![104, 105]), vec![1, 2]).unwrap();
@@ -2170,6 +2188,29 @@ mod tests {
                 if cell.shape == vec![1, 1]
                     && cell.data == vec![Value::Bool(true)]
         ));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn isstrprop_numeric_low_rank_classification_scalarizes_only_one_element() {
+        let scalar = block(isstrprop_builtin(
+            Value::Tensor(Tensor::new(vec![65.0], Vec::new()).unwrap()),
+            Value::String("alpha".into()),
+            Vec::new(),
+        ))
+        .expect("rank-zero character code");
+        assert_eq!(scalar, Value::Bool(true));
+
+        let vector = block(isstrprop_builtin(
+            Value::Tensor(Tensor::new(vec![65.0, 49.0], vec![2]).unwrap()),
+            Value::String("alpha".into()),
+            Vec::new(),
+        ))
+        .expect("rank-one character codes");
+        assert_eq!(
+            vector,
+            Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![2]).unwrap())
+        );
     }
 
     #[test]

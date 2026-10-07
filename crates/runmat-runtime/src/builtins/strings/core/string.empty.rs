@@ -177,8 +177,8 @@ fn prototype_dims(proto: &Value) -> Vec<usize> {
     match proto {
         Value::StringArray(sa) => sa.shape.clone(),
         Value::CharArray(ca) => ca.shape.clone(),
-        Value::Tensor(t) => t.shape.clone(),
-        Value::ComplexTensor(t) => t.shape.clone(),
+        Value::Tensor(t) => t.shape().to_vec(),
+        Value::ComplexTensor(t) => t.shape().to_vec(),
         Value::LogicalArray(l) => l.shape.clone(),
         Value::Cell(cell) => cell.shape.clone(),
         Value::GpuTensor(handle) => handle.shape().to_vec(),
@@ -193,10 +193,43 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_value::{IntValue, StringArray, Tensor, Value};
+    use runmat_value::{ComplexTensor, IntValue, StringArray, Tensor, Value};
 
     fn string_empty_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::string_empty_builtin(rest))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn like_low_rank_numeric_prototypes_preserve_empty_shape_projection() {
+        for (prototype, expected) in [
+            (
+                Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap()),
+                vec![0, 0],
+            ),
+            (
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap()),
+                vec![0, 2],
+            ),
+            (
+                Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 0.0)], Vec::new()).unwrap()),
+                vec![0, 0],
+            ),
+            (
+                Value::ComplexTensor(
+                    ComplexTensor::new(vec![(1.0, 0.0), (2.0, 0.0)], vec![2]).unwrap(),
+                ),
+                vec![0, 2],
+            ),
+        ] {
+            let output = string_empty_builtin(vec![Value::from("like"), prototype])
+                .expect("low-rank prototype");
+            let Value::StringArray(output) = output else {
+                panic!("empty string array expected")
+            };
+            assert_eq!(output.shape, expected);
+            assert!(output.data.is_empty());
+        }
     }
 
     fn error_message(err: crate::RuntimeError) -> String {
@@ -395,7 +428,7 @@ pub(crate) mod tests {
                 Tensor::new((1..=6).map(|v| v as f64).collect::<Vec<_>>(), vec![2, 3]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
@@ -419,7 +452,7 @@ pub(crate) mod tests {
             let dims = Tensor::new(vec![0.0, 5.0, 3.0], vec![1, 3]).unwrap();
             let view = HostTensorView {
                 data: &dims.materialize_f64(),
-                shape: &dims.shape,
+                shape: dims.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
