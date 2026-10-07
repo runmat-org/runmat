@@ -36,7 +36,7 @@ fn complex_like_keeps_all_integer_payloads_exact_including_scalar_and_empty() {
             let Value::ComplexTensor(tensor) = output else {
                 panic!("exact integer complex tensor")
             };
-            assert_eq!(tensor.shape, shape);
+            assert_eq!(tensor.shape(), shape);
             let ComplexStorage::Integer(actual) = tensor.complex_storage() else {
                 panic!("native integer complex storage")
             };

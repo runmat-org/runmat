@@ -50,7 +50,7 @@ fn bitcmp_sparse_double_materializes_when_complementing_implicit_zeros() {
     .expect("sparse bitcmp") else {
         panic!("bitcmp must materialize a complement of sparse implicit zeros");
     };
-    assert_eq!(output.shape, vec![2, 2]);
+    assert_eq!(output.shape(), vec![2, 2]);
     assert_eq!(
         output.as_f64_slice().expect("double bitcmp output"),
         &[250.0, 255.0, 255.0, 254.0]

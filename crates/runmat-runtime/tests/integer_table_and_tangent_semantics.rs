@@ -113,7 +113,7 @@ fn table_preallocation_decodes_every_integer_size_class_and_allocates_native_col
         let Value::Tensor(array) = call("table2array", vec![table]).expect("table2array") else {
             panic!("expected numeric array")
         };
-        assert_eq!(array.shape, vec![2, 1], "size class {size_dtype:?}");
+        assert_eq!(array.shape(), &[2, 1], "size class {size_dtype:?}");
         assert_eq!(array.numeric_dtype(), output_dtype, "{type_name}");
         assert!(array
             .integer_storage()

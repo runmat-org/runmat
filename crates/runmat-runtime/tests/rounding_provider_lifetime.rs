@@ -403,7 +403,7 @@ fn rounding_characters_retain_pages_and_semantic_element_order() {
         .unwrap() else {
             panic!("{name}: numeric character output")
         };
-        assert_eq!(output.shape, input.shape);
+        assert_eq!(output.shape(), input.shape);
         assert_eq!(
             output.as_f64_slice().unwrap(),
             input
@@ -471,7 +471,7 @@ fn remainder_character_pages_are_not_scalarized_or_reordered() {
             .unwrap() else {
                 panic!("{name}: pages")
             };
-            assert_eq!(output.shape, shape);
+            assert_eq!(output.shape(), shape);
             assert_eq!(
                 output.as_f64_slice().unwrap(),
                 input
@@ -525,7 +525,7 @@ fn finite_remainders_survive_overflowing_quotients() {
         .unwrap() else {
             panic!("single pages")
         };
-        assert_eq!(result.shape, vec![1, 1, 2]);
+        assert_eq!(result.shape(), &[1, 1, 2]);
         assert_eq!(result.as_f32_slice().unwrap(), &[0.0, 0.0]);
     }
     for (name, left, right, expected) in [

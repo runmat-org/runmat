@@ -16,7 +16,7 @@ fn call(value: Value) -> BuiltinResult<Tensor> {
 #[test]
 fn returns_double_row_and_empty_rows() {
     let output = call(Value::Num(25.0)).expect("primes");
-    assert_eq!(output.shape, vec![1, 9]);
+    assert_eq!(output.shape(), vec![1, 9]);
     assert_eq!(output.numeric_dtype(), NumericDType::F64);
     assert_eq!(
         output.materialize_f64(),
@@ -24,7 +24,7 @@ fn returns_double_row_and_empty_rows() {
     );
     for value in [Value::Num(1.0), Value::Num(0.0), Value::Num(-8.0)] {
         let output = call(value).expect("empty primes");
-        assert_eq!(output.shape, vec![1, 0]);
+        assert_eq!(output.shape(), vec![1, 0]);
     }
 }
 
@@ -70,7 +70,7 @@ fn preserves_floating_and_all_integer_classes() {
     ];
     for (input, expected_storage) in cases {
         let output = call(Value::Int(input)).expect("integer primes");
-        assert_eq!(output.shape, vec![1, 5]);
+        assert_eq!(output.shape(), vec![1, 5]);
         assert_eq!(output.integer_storage(), Some(&expected_storage));
     }
 }

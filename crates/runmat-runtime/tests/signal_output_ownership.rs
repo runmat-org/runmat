@@ -204,11 +204,11 @@ fn analytic_fallback_respects_typed_upload_failure_and_explicit_intent() {
                     match result.unwrap() {
                         Value::Tensor(tensor) if name == "envelope" => {
                             assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
-                            assert_eq!(tensor.shape, vec![4, 1]);
+                            assert_eq!(tensor.shape(), &[4, 1]);
                         }
                         Value::ComplexTensor(tensor) if name == "hilbert" => {
                             assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
-                            assert_eq!(tensor.shape, vec![4, 1]);
+                            assert_eq!(tensor.shape(), &[4, 1]);
                         }
                         value => panic!("{name}: incorrect host fallback {value:?}"),
                     }

@@ -58,7 +58,7 @@ fn preserves_low_rank_shapes_and_exact_integer_and_single_bits() {
     else {
         panic!("expected integer tensor");
     };
-    assert_eq!(integer.shape(), &[]);
+    assert!(integer.shape().is_empty());
     assert_eq!(
         integer.integer_storage(),
         Some(&IntegerStorage::U64(vec![0x0807_0605_0403_0201]))

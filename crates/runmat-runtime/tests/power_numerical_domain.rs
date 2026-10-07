@@ -97,7 +97,7 @@ fn classification_uses_paired_broadcast_positions_not_unrelated_extrema() {
     let Value::ComplexTensor(result) = power(base(), exponent) else {
         panic!("broadcast includes complex pair")
     };
-    assert_eq!(result.shape, vec![2, 2]);
+    assert_eq!(result.shape(), &[2, 2]);
     assert!((result.as_f64_slice().unwrap()[1].1 - 2.0).abs() < 1e-12);
 }
 

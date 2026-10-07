@@ -42,7 +42,7 @@ fn logical_trigonometry_uses_admitted_double_host_semantics_and_exact_owner() {
                 .unwrap() else {
                     panic!("Double tensor expected");
                 };
-                assert_eq!(host.shape, vec![2, 1]);
+                assert_eq!(host.shape(), vec![2, 1]);
                 let expected = match name {
                     "sin" => vec![0.0, 1.0f64.sin()],
                     "cos" => vec![1.0, 1.0f64.cos()],

@@ -160,7 +160,7 @@ fn unsupported_restoration_uses_original_owner_and_preserves_explicit_intent() {
                         let Value::Tensor(output) = result.unwrap() else {
                             panic!("automatic host fallback")
                         };
-                        assert_eq!(output.shape, [3, 2]);
+                        assert_eq!(output.shape(), &[3, 2]);
                         assert_eq!(output.materialize_f64(), [1., 3., 5., 2., 4., 6.]);
                     }
                     _ => {

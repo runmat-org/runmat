@@ -323,7 +323,7 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
             let Value::Tensor(copied) = copied else {
                 panic!("typed pointer copy must retain integer tensor storage");
             };
-            assert_eq!(copied.shape, vec![1, 1]);
+            assert_eq!(copied.shape(), &[1, 1]);
             assert_eq!(copied.numeric_value_at(0).unwrap().materialize_f64(), 17.0);
         }
     }

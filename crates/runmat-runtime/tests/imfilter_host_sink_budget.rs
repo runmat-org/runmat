@@ -60,7 +60,7 @@ fn resident_double_h_host_uint8_a_preserves_class_and_pre_effect_budget() {
         panic!("multi-element uint8 output must remain a host tensor")
     };
     assert_eq!(result.numeric_dtype(), NumericDType::U8);
-    assert_eq!(result.shape, vec![2, 2]);
+    assert_eq!(result.shape(), &[2, 2]);
     assert_eq!(result.materialize_f64(), vec![2.0, 4.0, 6.0, 8.0]);
     assert!(provider.telemetry_snapshot().download_bytes > 0);
     assert_eq!(

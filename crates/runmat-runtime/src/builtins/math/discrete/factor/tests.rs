@@ -45,7 +45,7 @@ fn preserves_all_numeric_classes() {
             panic!()
         };
         assert_eq!(out.numeric_dtype(), dtype);
-        assert_eq!(out.shape, vec![1, 3]);
+        assert_eq!(out.shape(), vec![1, 3]);
     }
 }
 

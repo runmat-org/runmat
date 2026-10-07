@@ -245,7 +245,7 @@ fn typed_unsupported_runs_existing_host_fft_without_replaying_provider() {
     let Value::ComplexTensor(result) = result else {
         panic!("existing precision-preserving restoration retains host result")
     };
-    assert_eq!(result.shape, vec![4, 1]);
+    assert_eq!(result.shape(), &[4, 1]);
     let runmat_value::ComplexStorage::F64(data) = result.complex_storage() else {
         panic!("FFT preserves native double output")
     };

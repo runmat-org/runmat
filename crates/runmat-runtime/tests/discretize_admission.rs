@@ -75,7 +75,7 @@ fn scalar_tensor_counts_and_extreme_edges_preserve_shape_and_values() {
         let Value::Tensor(edges) = &output[1] else {
             panic!("dense edges")
         };
-        assert_eq!(indices.shape, vec![1, 1, 3]);
+        assert_eq!(indices.shape(), &[1, 1, 3]);
         assert_eq!(indices.materialize_f64(), vec![1.0, 2.0, 2.0]);
         assert_eq!(edges.materialize_f64(), vec![-f64::MAX, 0.0, f64::MAX]);
         assert!(invoke(&args, 0).unwrap().is_empty());

@@ -64,7 +64,7 @@ fn same_values(actual: &[f64], expected: &[f64], dtype: NumericDType, label: &st
 fn same_result(actual: Value, expected: Value, label: &str) {
     match (host(actual), host(expected)) {
         (Value::Tensor(actual), Value::Tensor(expected)) => {
-            assert_eq!(actual.shape, expected.shape, "{label}");
+            assert_eq!(actual.shape(), expected.shape(), "{label}");
             assert_eq!(actual.numeric_dtype(), expected.numeric_dtype(), "{label}");
             if expected.integer_storage().is_some() {
                 assert_eq!(
@@ -82,7 +82,7 @@ fn same_result(actual: Value, expected: Value, label: &str) {
             }
         }
         (Value::ComplexTensor(actual), Value::ComplexTensor(expected)) => {
-            assert_eq!(actual.shape, expected.shape, "{label}");
+            assert_eq!(actual.shape(), expected.shape(), "{label}");
             assert_eq!(actual.numeric_dtype(), expected.numeric_dtype(), "{label}");
             let actual = actual
                 .materialize_f64()

@@ -284,7 +284,7 @@ fn documented_reordering_forms_preserve_all_integer_classes() {
                 9_007_199_254_740_994
             ]))
         );
-        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(output.shape(), &[2, 1]);
     }
 }
 
@@ -304,7 +304,7 @@ fn pdist2_typed_selection_count_remains_structural() {
     let Value::Tensor(output) = output else {
         panic!("expected selected distances");
     };
-    assert_eq!(output.shape, vec![2, 1]);
+    assert_eq!(output.shape(), &[2, 1]);
 
     let wide = 9_007_199_254_740_993_u64;
     let output = block_on(runmat_runtime::call_builtin_async(
@@ -320,7 +320,7 @@ fn pdist2_typed_selection_count_remains_structural() {
     let Value::Tensor(output) = output else {
         panic!("expected selected distances");
     };
-    assert_eq!(output.shape, vec![2, 1]);
+    assert_eq!(output.shape(), &[2, 1]);
 }
 
 #[test]

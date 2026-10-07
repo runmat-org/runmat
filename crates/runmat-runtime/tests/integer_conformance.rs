@@ -13,7 +13,7 @@ fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
 fn expect_integer(value: Value, shape: &[usize], storage: IntegerStorage) {
     match value {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, shape);
+            assert_eq!(tensor.shape(), shape);
             assert_eq!(tensor.integer_storage(), Some(&storage));
         }
         other => panic!("expected integer tensor, got {other:?}"),

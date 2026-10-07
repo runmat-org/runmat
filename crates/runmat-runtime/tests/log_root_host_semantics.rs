@@ -42,7 +42,7 @@ fn complex_roots_retain_small_components_and_finite_extremes() {
     let Value::ComplexTensor(output) = call("sqrt", Value::ComplexTensor(input)) else {
         panic!("single complex pages");
     };
-    assert_eq!(output.shape, vec![1, 1, 2]);
+    assert_eq!(output.shape(), &[1, 1, 2]);
     let ComplexStorage::F32(values) = output.into_complex_storage() else {
         panic!("single retained")
     };
@@ -217,7 +217,7 @@ fn character_pages_keep_shape_and_column_major_positions() {
         let Value::Tensor(output) = call(name, Value::CharArray(chars.clone())) else {
             panic!("{name}: dense character result");
         };
-        assert_eq!(output.shape, chars.shape, "{name}");
+        assert_eq!(output.shape(), chars.shape, "{name}");
         for (actual, character) in output
             .as_f64_slice()
             .unwrap()
@@ -241,8 +241,8 @@ fn character_pages_keep_shape_and_column_major_positions() {
     let [Value::Tensor(fractions), Value::Tensor(exponents)] = outputs.as_slice() else {
         panic!("dense dissection outputs");
     };
-    assert_eq!(fractions.shape, chars.shape);
-    assert_eq!(exponents.shape, chars.shape);
+    assert_eq!(fractions.shape(), chars.shape);
+    assert_eq!(exponents.shape(), chars.shape);
     for ((fraction, exponent), character) in fractions
         .as_f64_slice()
         .unwrap()

@@ -30,7 +30,7 @@ fn operators_preserve_typed_storage_and_broadcast() {
             result.integer_storage(),
             Some(&IntegerStorage::U16(expected))
         );
-        assert_eq!(result.shape, vec![1, 3]);
+        assert_eq!(result.shape(), vec![1, 3]);
     }
 }
 

@@ -13,7 +13,7 @@ fn fspecial_pure_generation_retains_values_shape_and_exact_error_contract() {
     native_error::<FspecialKernelError>();
     let spec = spec_from_request(&FspecialFilter::Average { rows: 2, cols: 3 });
     let tensor = spec.generate_tensor().unwrap();
-    assert_eq!(tensor.shape, [2, 3]);
+    assert_eq!(tensor.shape(), &[2, 3]);
     assert_eq!(tensor.as_f64_slice().unwrap(), &[1. / 6.; 6]);
     for (spec, message) in [
         (

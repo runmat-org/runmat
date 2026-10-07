@@ -55,7 +55,7 @@ fn mean_all_native_preserves_single_dtype_and_value() {
     let result = block_on(rt::call_builtin_async("mean", &args)).expect("mean");
     let scalar = expect_tensor(result);
     assert_eq!(
-        scalar.shape,
+        scalar.shape(),
         vec![1, 1],
         "mean('all') should produce scalar"
     );
@@ -97,7 +97,7 @@ fn nlms_style_column_reductions_match_reference() {
     let sum_xx = block_on(rt::call_builtin_async("sum", &sum_xx_args)).expect("sum");
     let sum_xx_tensor = expect_tensor(sum_xx);
     assert_eq!(
-        sum_xx_tensor.shape,
+        sum_xx_tensor.shape(),
         vec![1, cols],
         "sum along dim=1 should preserve column count"
     );
@@ -118,7 +118,7 @@ fn nlms_style_column_reductions_match_reference() {
     let sum_xw_args = [xw, Value::Num(1.0), Value::from("native")];
     let sum_xw = block_on(rt::call_builtin_async("sum", &sum_xw_args)).expect("sum");
     let sum_xw_tensor = expect_tensor(sum_xw);
-    assert_eq!(sum_xw_tensor.shape, vec![1, cols]);
+    assert_eq!(sum_xw_tensor.shape(), &[1, cols]);
     assert_eq!(sum_xw_tensor.numeric_dtype(), NumericDType::F32);
     let expected_xw = column_sum_of_products(&x_vals, &w_vals, rows, cols);
     assert_close(&sum_xw_tensor.materialize_f64(), &expected_xw, 1e-6);

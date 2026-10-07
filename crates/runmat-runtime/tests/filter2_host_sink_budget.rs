@@ -60,7 +60,7 @@ fn resident_h_host_image_is_one_admitted_readback_and_no_effect_below_budget() {
     let Value::Tensor(result) = result else {
         panic!("non-scalar host result must remain host tensor")
     };
-    assert_eq!(result.shape, vec![2, 2]);
+    assert_eq!(result.shape(), &[2, 2]);
     assert_eq!(result.materialize_f64(), vec![2.0, 4.0, 6.0, 8.0]);
     assert!(provider.telemetry_snapshot().download_bytes > 0);
     assert_eq!(

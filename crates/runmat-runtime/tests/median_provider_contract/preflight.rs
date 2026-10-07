@@ -224,7 +224,7 @@ fn empty_single_restoration_preserves_explicit_intent_and_terminal_failures() {
                 let Value::Tensor(host) = result.unwrap() else {
                     panic!("automatic unsupported restoration retains exact host carrier")
                 };
-                assert_eq!(host.shape, [1, 3]);
+                assert_eq!(host.shape(), &[1, 3]);
                 assert_eq!(host.numeric_dtype(), runmat_value::NumericDType::F64);
                 assert!(host.materialize_f64().iter().all(|value| value.is_nan()));
             } else {

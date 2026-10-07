@@ -324,9 +324,9 @@ fn documented_random_size_controls_accept_all_eight_integer_classes() {
                 panic!("{name}/{size:?}: expected tensor");
             };
             if name == "randperm" {
-                assert_eq!(tensor.shape, vec![1, 2], "{name}/{size:?}");
+                assert_eq!(tensor.shape(), &[1, 2], "{name}/{size:?}");
             } else {
-                assert_eq!(tensor.shape, vec![2, 2], "{name}/{size:?}");
+                assert_eq!(tensor.shape(), &[2, 2], "{name}/{size:?}");
             }
             assert_eq!(tensor.numeric_dtype(), NumericDType::F64, "{name}/{size:?}");
         }
@@ -352,7 +352,7 @@ fn randsample_preserves_exact_wide_integer_population_values() {
     else {
         panic!("expected integer tensor");
     };
-    assert_eq!(output.shape, vec![1, 2]);
+    assert_eq!(output.shape(), &[1, 2]);
     let IntegerStorage::U64(values) = output.integer_storage().expect("uint64 storage") else {
         panic!("expected uint64 storage");
     };

@@ -622,7 +622,7 @@ fn gray_host_sink_observes_completed_readback_and_replicated_host_result() {
     .expect("resident gray host sink") else {
         panic!("gray2rgb publishes host Tensor")
     };
-    assert_eq!(output.shape, vec![1, 2, 3]);
+    assert_eq!(output.shape(), &[1, 2, 3]);
     assert_eq!(
         output.materialize_f64(),
         vec![0.25, 0.5, 0.25, 0.5, 0.25, 0.5]

@@ -19,7 +19,7 @@ fn pure_filter_and_provider_retain_exact_validation_cause() {
     let image = Tensor::new(vec![1., 2., 3., 4.], vec![2, 2]).unwrap();
     let identity = Tensor::new(vec![1.], vec![1, 1]).unwrap();
     let result = apply_imfilter_tensor(&image, &identity, &options, "imfilter").unwrap();
-    assert_eq!(result.shape, image.shape);
+    assert_eq!(result.shape(), image.shape());
     assert_eq!(result.materialize_f64(), image.materialize_f64());
     let empty = Tensor::new(vec![], vec![0, 1]).unwrap();
     let error = apply_imfilter_tensor(&image, &empty, &options, "filter2").unwrap_err();

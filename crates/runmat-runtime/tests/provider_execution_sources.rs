@@ -339,7 +339,7 @@ fn public_extrema_dispatch_gathers_only_after_typed_unsupported() {
                 let Value::Tensor(output) = result else {
                     panic!("capability fallback returns host tensor")
                 };
-                assert_eq!(output.shape, vec![2, 1]);
+                assert_eq!(output.shape(), &[2, 1]);
                 assert_eq!(output.materialize_f64(), expected);
             }
             drop(args);

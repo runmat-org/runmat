@@ -172,7 +172,7 @@ fn sum_native_preserves_exact_integer_storage_while_default_is_double() {
     match runmat_runtime::call_builtin("sum", &[input]).expect("default sum") {
         Value::Tensor(tensor) => {
             assert!(tensor.integer_storage().is_none());
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), &[1, 2]);
         }
         other => panic!("expected double tensor, got {other:?}"),
     }
@@ -231,7 +231,7 @@ fn uint16_builtin_dispatches_and_casts_array() {
     let output = runmat_runtime::call_builtin("uint16", &[input]).expect("uint16 builtin");
     match output {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 3]);
+            assert_eq!(tensor.shape(), &[1, 3]);
             assert_eq!(tensor.materialize_f64(), vec![3.0, 0.0, u16::MAX as f64]);
         }
         other => panic!("expected tensor output, got {other:?}"),

@@ -78,13 +78,13 @@ fn components_and_construction_prepare_only_admitted_floating_arrays() {
                     let Value::ComplexTensor(value) = result else {
                         panic!("complex tensor")
                     };
-                    assert_eq!(value.shape, vec![1, 2]);
+                    assert_eq!(value.shape(), &[1, 2]);
                     assert_eq!(value.numeric_dtype(), expected_class);
                 } else {
                     let Value::Tensor(value) = result else {
                         panic!("real tensor")
                     };
-                    assert_eq!(value.shape, vec![1, 2]);
+                    assert_eq!(value.shape(), &[1, 2]);
                     assert_eq!(value.numeric_dtype(), expected_class);
                     if single {
                         assert_eq!(

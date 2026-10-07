@@ -69,8 +69,8 @@ fn complex_array_elementwise_add() {
     let b = Value::Num(2.0);
     let c = runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()]).unwrap();
     if let Value::ComplexTensor(t) = c {
-        assert_eq!(t.rows, 2);
-        assert_eq!(t.cols, 2);
+        assert_eq!(t.rows(), 2);
+        assert_eq!(t.cols(), 2);
         assert_eq!(
             t.as_f64_slice().expect("double complex")[0],
             runmat_value::ComplexElement(3.0, 0.0)
@@ -98,8 +98,8 @@ fn complex_matmul_and_transpose() {
     ))
     .unwrap();
     if let Value::ComplexTensor(m) = v {
-        assert_eq!(m.rows, 2);
-        assert_eq!(m.cols, 2);
+        assert_eq!(m.rows(), 2);
+        assert_eq!(m.cols(), 2);
     }
     // real * complex
     let r = Tensor::new_2d(vec![1.0, 2.0, 0.0, 1.0], 2, 2).unwrap();
@@ -109,14 +109,14 @@ fn complex_matmul_and_transpose() {
     ))
     .unwrap();
     if let Value::ComplexTensor(m) = v2 {
-        assert_eq!(m.rows, 2);
-        assert_eq!(m.cols, 2);
+        assert_eq!(m.rows(), 2);
+        assert_eq!(m.cols(), 2);
     }
     // transpose conjugate on complex matrix
     let t = runmat_runtime::call_builtin("transpose", &[Value::ComplexTensor(a)]).unwrap();
     if let Value::ComplexTensor(ct) = t {
-        assert_eq!(ct.rows, 2);
-        assert_eq!(ct.cols, 2);
+        assert_eq!(ct.rows(), 2);
+        assert_eq!(ct.cols(), 2);
     }
 }
 
@@ -180,8 +180,8 @@ fn complex_matrix_power_integer() {
     )
     .unwrap();
     if let Value::ComplexTensor(m2) = v {
-        assert_eq!(m2.rows, 2);
-        assert_eq!(m2.cols, 2);
+        assert_eq!(m2.rows(), 2);
+        assert_eq!(m2.cols(), 2);
     } else {
         panic!();
     }
@@ -194,8 +194,8 @@ fn complex_elementwise_power_tensor() {
     let ct = ComplexTensor::new_2d(vec![(1.0, 1.0), (0.0, 2.0)], 1, 2).unwrap();
     let out = runmat_runtime::elementwise_pow(&Value::ComplexTensor(ct), &Value::Num(2.0)).unwrap();
     if let Value::ComplexTensor(m) = out {
-        assert_eq!(m.rows, 1);
-        assert_eq!(m.cols, 2);
+        assert_eq!(m.rows(), 1);
+        assert_eq!(m.cols(), 2);
     } else {
         panic!();
     }

@@ -242,7 +242,7 @@ fn exponential_language_class_uses_typed_capability_not_preferred_precision() {
                             Value::Tensor(output) => {
                                 assert!(!supports_double && !explicit);
                                 assert_eq!(output.numeric_dtype(), NumericDType::F64);
-                                assert_eq!(output.shape, vec![1, 1, 1]);
+                                assert_eq!(output.shape(), &[1, 1, 1]);
                                 assert_eq!(output.materialize_f64(), vec![expected]);
                             }
                             other => panic!("unexpected output {other:?}"),

@@ -204,7 +204,7 @@ fn welch_nonzero_psd_and_typed_complex_fallback_match_host() {
                 panic!("host and restored native outputs")
             };
             assert_eq!(resident.shape(), &[rows, 1]);
-            assert_eq!(host.shape, resident.shape());
+            assert_eq!(host.shape(), resident.shape());
             let payload = provider
                 .produced
                 .lock()

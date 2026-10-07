@@ -17,7 +17,7 @@ fn pure_dot_and_actual_provider_keep_shape_diagnostic() {
     let b = Tensor::from_f32(vec![5., 6., 7., 8.], vec![2, 2]).unwrap();
     let result = dot_host_real_for_provider(&a, &b, Some(1)).unwrap();
     assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::F32);
-    assert_eq!(result.shape, [1, 2]);
+    assert_eq!(result.shape(), &[1, 2]);
     assert_eq!(result.materialize_f64(), [17., 53.]);
 
     let provider = Box::leak(Box::new(

@@ -41,7 +41,7 @@ fn host_complex_single_preserves_native_class_and_nd_singleton_shape() {
         };
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
         assert!(output.as_f32_slice().is_some());
-        assert_eq!(output.shape, shape);
+        assert_eq!(output.shape(), shape);
         assert_values(&output.materialize_f64(), singleton);
     }
 }

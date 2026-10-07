@@ -98,7 +98,7 @@ fn admitted_floating_remainder_validates_shape_and_outputs_before_preparation() 
                 let Value::Tensor(result) = result else {
                     panic!("floating matrix")
                 };
-                assert_eq!(result.shape, vec![2, 3]);
+                assert_eq!(result.shape(), &[2, 3]);
                 assert_eq!(result.as_f64_slice().unwrap(), expected);
             }
         }
@@ -168,7 +168,7 @@ fn admitted_rounding_plain_forms_follow_domain_validation() {
                 let Value::Tensor(output) = output else {
                     panic!("{name}: pages")
                 };
-                assert_eq!(output.shape, vec![1, 1, 2]);
+                assert_eq!(output.shape(), &[1, 1, 2]);
                 assert_eq!(output.as_f64_slice().unwrap(), expected);
             }
         }
@@ -219,7 +219,7 @@ fn admitted_rounding_plain_forms_follow_domain_validation() {
             panic!("round pages")
         };
         assert_eq!(output.as_f64_slice().unwrap(), expected);
-        assert_eq!(output.shape, vec![1, 1, 2]);
+        assert_eq!(output.shape(), &[1, 1, 2]);
     }
     let before = records.borrow().len();
     for controls in [

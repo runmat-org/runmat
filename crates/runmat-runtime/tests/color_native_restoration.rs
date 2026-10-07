@@ -26,7 +26,7 @@ fn color_native_single_uses_actual_owner_capability_not_preferred_precision() {
             let input = inner
                 .upload_numeric_raw(&HostNumericTensorView {
                     data: HostNumericDataView::F32(host.as_f32_slice().unwrap()),
-                    shape: &host.shape,
+                    shape: host.shape(),
                     storage: GpuTensorStorage::Real,
                 })
                 .unwrap()

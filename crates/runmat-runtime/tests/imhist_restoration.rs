@@ -164,7 +164,7 @@ fn public_histogram_restoration_preserves_causes_classes_and_partial_ownership()
                             }
                             Value::Tensor(tensor) => {
                                 assert!(unsupported && !explicit && fail_at != 0);
-                                assert_eq!(tensor.shape, [3, 1]);
+                                assert_eq!(tensor.shape(), &[3, 1]);
                                 assert_eq!(tensor.numeric_dtype(), runmat_value::NumericDType::F64);
                                 assert_eq!(tensor.materialize_f64(), expected);
                             }

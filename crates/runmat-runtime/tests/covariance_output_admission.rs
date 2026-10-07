@@ -321,7 +321,7 @@ fn covariance_shape_admission_matches_host_vectors_matrices_and_empty_inputs() {
             panic!("covariance host result must be a dense tensor, got {host:?}");
         };
         let actual = block_on(provider.download(output)).unwrap();
-        assert_eq!(actual.shape, expected.shape, "{shape:?}");
+        assert_eq!(actual.shape, expected.shape(), "{shape:?}");
         let expected_data = expected.materialize_f64();
         assert_eq!(actual.data.len(), expected_data.len());
         for (actual, expected) in actual.data.iter().zip(expected_data) {
