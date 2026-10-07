@@ -30,6 +30,7 @@ mod row;
 mod target;
 mod vector;
 pub(crate) use pairing::pair_targets;
+pub use pairing::{constraint_pairing_workspace_profile, ConstraintPairingWorkspaceProfile};
 pub use phase::{build_phase_reduction, UnitPhaseConstraintError, UnitPhaseRelation};
 pub(crate) use target::resolve_nodal_target;
 

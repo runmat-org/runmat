@@ -138,3 +138,36 @@ shared constraint compiler currently accumulates fallible rows but explicitly la
 that pre-expansion profile. That gap remains open, along with the scheduled task,
 closed adaptive output/root, durable progression, semantic publication and all
 original scientific qualification criteria.
+
+
+## Counted shared pairing workspace
+
+Tie and periodic pairing now derive a checked requested-slot profile before building
+coordinate indexes or pairing evidence. The solid and mixed paths use compact sorted
+vector indexes with fallible exact reservations, replacing copied tree maps and the
+matching-used tree. Facets stream from the original mesh; transformed facet nodes and
+interpolation values use fixed stack arrays. Geometric weights are allocated only
+when a candidate replaces the retained best facet. The profile includes retained
+weights and both overlapping candidate buffers, including all six quadratic weights.
+Pairing row and term buffers also have checked counts and fallible reservations before
+expansion. Existing geometric formulas, thresholds and canonical identities remain.
+
+`constraint_pairing_workspace_profile` exposes the solid pairing inventory; the mixed
+owner derives the same inventory with its actual canonical node count. This is requested
+vector storage, excluding borrowed sources/targets, allocator rounding/bookkeeping,
+strings, row construction/encoding, fixed transform stack scratch and measured RSS.
+It is not a whole-constraint or whole-adaptive-task admission receipt, and no task cap
+or resource-policy authority is inferred from successful allocation.
+
+Cancellation reaches counting, index construction, matching candidates, facets and
+row expansion. Duplicate node-index keys and inconsistent counts reject; empty targets
+reject instead of indexing an absent secondary. Shared constraint canonical-byte goldens
+remain unchanged. An independent nonconformal Tet10 surface trace checks quadratic
+weights, negative coefficients, every displacement row and identity preservation under
+node/facet reordering. Original acoustic periodic field-convergence references and
+native cold-process checks still pass. No original scientific gate is replaced.
+
+Remaining pre-expansion work includes target selection/materialization, normal and
+coupling construction, reference points, row identity encoding, graph/rank/validation
+aggregation and adaptive evaluation/output storage. Only a complete composition of
+those owner profiles can support the separately scheduled task's whole reservation.

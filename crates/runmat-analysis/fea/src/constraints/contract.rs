@@ -183,6 +183,8 @@ pub struct CanonicalStructuralConstraintPlan {
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum ConstraintPlanError {
+    #[error("constraint construction cancelled")]
+    Cancelled,
     #[error("constraint `{constraint_id}` uses unsupported frame `{frame}`")]
     UnsupportedFrame {
         constraint_id: String,

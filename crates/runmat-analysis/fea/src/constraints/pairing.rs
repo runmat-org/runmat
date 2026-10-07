@@ -1,7 +1,5 @@
 //! Deterministic node and surface projection for tie and periodic relations.
 
-use std::collections::{BTreeMap, BTreeSet};
-
 use runmat_analysis_core::{PairingPolicy, PeriodicTransform};
 use runmat_meshing_core::{BoundaryTriangleOrder, SolverMeshArtifact, StableDigest};
 
@@ -11,10 +9,18 @@ use super::contract::{
     ConstraintPlanError, ResolvedConstraintTarget,
 };
 use super::row;
-use super::vector::{add, cross, dot, magnitude, scale, subtract};
+use super::vector::{magnitude, subtract};
 
 #[cfg(test)]
 mod tests;
+
+mod geometry;
+mod index;
+use geometry::{closest_triangle_point, identity, rotation_matrix, transform_position};
+mod profile;
+use index::{NodeCoordinates, NodeIdentities};
+use profile::{check_cancelled, reserve, row_term_count};
+pub use profile::{constraint_pairing_workspace_profile, ConstraintPairingWorkspaceProfile};
 
 pub(crate) fn pair_targets(
     mesh: &SolverMeshArtifact,
@@ -24,13 +30,17 @@ pub(crate) fn pair_targets(
     transform: &PeriodicTransform,
     constraint_id: &str,
 ) -> Result<Vec<ConstraintPairingEvidence>, ConstraintPlanError> {
+    check_cancelled()?;
     validate_inputs(policy, transform, constraint_id)?;
-    let nodes = mesh
-        .topology
-        .nodes
-        .iter()
-        .map(|node| (node.stable_identity, node.coordinates_m))
-        .collect::<BTreeMap<_, _>>();
+    require_nonempty_targets(primary, secondary, constraint_id)?;
+    let profile = constraint_pairing_workspace_profile(mesh, primary, secondary, policy)?;
+    let nodes = NodeCoordinates::derive(
+        mesh.topology
+            .nodes
+            .iter()
+            .map(|node| (node.stable_identity, node.coordinates_m)),
+        profile.coordinate_index_slots,
+    )?;
     pair_targets_with_nodes(
         mesh,
         &nodes,
@@ -51,11 +61,17 @@ pub(super) fn pair_mixed_targets(
     transform: &PeriodicTransform,
     constraint_id: &str,
 ) -> Result<Vec<ConstraintPairingEvidence>, ConstraintPlanError> {
-    let nodes = topology
-        .nodes
-        .iter()
-        .map(|node| (node.identity, node.coordinates_m))
-        .collect::<BTreeMap<_, _>>();
+    check_cancelled()?;
+    validate_inputs(policy, transform, constraint_id)?;
+    require_nonempty_targets(primary, secondary, constraint_id)?;
+    let profile = profile::derive(mesh, topology.nodes.len(), primary, secondary, policy)?;
+    let nodes = NodeCoordinates::derive(
+        topology
+            .nodes
+            .iter()
+            .map(|node| (node.identity, node.coordinates_m)),
+        profile.coordinate_index_slots,
+    )?;
     pair_targets_with_nodes(
         mesh,
         &nodes,
@@ -69,13 +85,14 @@ pub(super) fn pair_mixed_targets(
 
 fn pair_targets_with_nodes(
     mesh: &SolverMeshArtifact,
-    nodes: &BTreeMap<StableDigest, [f64; 3]>,
+    nodes: &NodeCoordinates,
     primary: &ResolvedConstraintTarget,
     secondary: &ResolvedConstraintTarget,
     policy: &PairingPolicy,
     transform: &PeriodicTransform,
     constraint_id: &str,
 ) -> Result<Vec<ConstraintPairingEvidence>, ConstraintPlanError> {
+    check_cancelled()?;
     let mut pairings = match policy {
         PairingPolicy::Matching => {
             pair_matching(mesh, nodes, primary, secondary, transform, constraint_id)?
@@ -90,8 +107,24 @@ fn pair_targets_with_nodes(
             constraint_id,
         )?,
     };
-    pairings.sort_by_key(|pairing| pairing.secondary_node_identity);
+    pairings.sort_unstable_by_key(|pairing| pairing.secondary_node_identity);
     Ok(pairings)
+}
+
+fn require_nonempty_targets(
+    primary: &ResolvedConstraintTarget,
+    secondary: &ResolvedConstraintTarget,
+    constraint_id: &str,
+) -> Result<(), ConstraintPlanError> {
+    for target in [primary, secondary] {
+        if target.matched_node_identities.is_empty() {
+            return Err(ConstraintPlanError::EmptyTarget {
+                constraint_id: constraint_id.into(),
+                region_id: target.authored.region_id.clone(),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn validate_inputs(
@@ -137,7 +170,7 @@ pub(super) fn displacement_transform(transform: &PeriodicTransform) -> [[f64; 3]
 
 fn pair_matching(
     mesh: &SolverMeshArtifact,
-    nodes: &BTreeMap<StableDigest, [f64; 3]>,
+    nodes: &NodeCoordinates,
     primary: &ResolvedConstraintTarget,
     secondary: &ResolvedConstraintTarget,
     transform: &PeriodicTransform,
@@ -149,14 +182,19 @@ fn pair_matching(
         });
     }
     let tolerance = matching_tolerance(mesh);
-    let mut used = BTreeSet::new();
-    let mut pairings = Vec::with_capacity(secondary.matched_node_identities.len());
+    let mut used = reserve::<StableDigest>(primary.matched_node_identities.len())?;
+    let mut pairings = reserve(secondary.matched_node_identities.len())?;
     for secondary_identity in &secondary.matched_node_identities {
+        check_cancelled()?;
         let secondary_point = node_point(nodes, *secondary_identity, constraint_id)?;
         let nearest = primary
             .matched_node_identities
             .iter()
-            .map(|identity| {
+            .enumerate()
+            .map(|(ordinal, identity)| {
+                if ordinal % 1024 == 0 {
+                    check_cancelled()?;
+                }
                 let point = node_point(nodes, *identity, constraint_id)?;
                 let distance = magnitude(subtract(
                     secondary_point,
@@ -185,11 +223,12 @@ fn pair_matching(
                 secondary_node_identity: *secondary_identity,
                 reason: "no transformed primary node matches exactly",
             })?;
-        if !used.insert(nearest.0) {
+        let Err(position) = used.binary_search(&nearest.0) else {
             return Err(ConstraintPlanError::NonBijectivePairing {
                 constraint_id: constraint_id.into(),
             });
-        }
+        };
+        used.insert(position, nearest.0);
         pairings.push(ConstraintPairingEvidence {
             secondary_node_identity: *secondary_identity,
             primary_weights: vec![ConstraintPairingWeight {
@@ -224,71 +263,66 @@ fn matching_tolerance(mesh: &SolverMeshArtifact) -> f64 {
 
 fn pair_geometrically(
     mesh: &SolverMeshArtifact,
-    nodes: &BTreeMap<StableDigest, [f64; 3]>,
+    nodes: &NodeCoordinates,
     primary: &ResolvedConstraintTarget,
     secondary: &ResolvedConstraintTarget,
     transform: &PeriodicTransform,
     tolerance: f64,
     constraint_id: &str,
 ) -> Result<Vec<ConstraintPairingEvidence>, ConstraintPlanError> {
-    let identities_by_id = mesh
-        .topology
-        .nodes
-        .iter()
-        .map(|node| (node.node_id, node.stable_identity))
-        .collect::<BTreeMap<_, _>>();
-    let faces = mesh
-        .topology
-        .boundary_faces
-        .iter()
-        .filter(|face| {
-            face.provenance
-                .iter()
-                .any(|entity| primary.matched_entities.contains(entity))
-        })
-        .collect::<Vec<_>>();
-    if faces.is_empty() {
+    let identities_by_id = NodeIdentities::derive(mesh)?;
+    let faces = mesh.topology.boundary_faces.iter().filter(|face| {
+        face.provenance
+            .iter()
+            .any(|entity| primary.matched_entities.contains(entity))
+    });
+    if faces.clone().next().is_none() {
         return Err(ConstraintPlanError::PairingUnavailable {
             constraint_id: constraint_id.into(),
             secondary_node_identity: secondary.matched_node_identities[0],
             reason: "primary target contains no boundary facets",
         });
     }
-    let mut pairings = Vec::with_capacity(secondary.matched_node_identities.len());
+    let mut pairings = reserve(secondary.matched_node_identities.len())?;
     for secondary_identity in &secondary.matched_node_identities {
+        check_cancelled()?;
         let point = node_point(nodes, *secondary_identity, constraint_id)?;
         let mut best: Option<(f64, StableDigest, Vec<ConstraintPairingWeight>)> = None;
-        for face in &faces {
-            let face_nodes = face
-                .node_ids
-                .iter()
-                .map(|node_id| {
-                    let identity = identities_by_id.get(node_id).copied().ok_or(
-                        ConstraintPlanError::PairingUnavailable {
-                            constraint_id: constraint_id.into(),
-                            secondary_node_identity: *secondary_identity,
-                            reason: "primary facet references an unavailable node",
-                        },
-                    )?;
-                    Ok((
-                        identity,
-                        transform_position(transform, node_point(nodes, identity, constraint_id)?),
-                    ))
-                })
-                .collect::<Result<Vec<_>, ConstraintPlanError>>()?;
+        for face in faces.clone() {
+            check_cancelled()?;
+            let count = profile::facet_node_count(face.order);
+            if face.node_ids.len() != count {
+                return Err(ConstraintPlanError::Invalid(
+                    "pairing facet node count is malformed".into(),
+                ));
+            }
+            let mut face_nodes = [(StableDigest::ZERO, [0.0; 3]); 6];
+            for (slot, node_id) in face_nodes.iter_mut().zip(&face.node_ids) {
+                let identity = identities_by_id.get(*node_id).ok_or(
+                    ConstraintPlanError::PairingUnavailable {
+                        constraint_id: constraint_id.into(),
+                        secondary_node_identity: *secondary_identity,
+                        reason: "primary facet references an unavailable node",
+                    },
+                )?;
+                *slot = (
+                    identity,
+                    transform_position(transform, node_point(nodes, identity, constraint_id)?),
+                );
+            }
             let (closest, barycentric) =
                 closest_triangle_point(point, face_nodes[0].1, face_nodes[1].1, face_nodes[2].1);
             let distance = magnitude(subtract(point, closest));
-            let weights = interpolation_weights(face.order, &face_nodes, barycentric);
-            let candidate = (distance, face.stable_identity, weights);
+            // Allocate weights only for a candidate that replaces the retained best facet.
+            // Distance and stable identity use the same deterministic tie break as before.
             if best.as_ref().is_none_or(|current| {
-                candidate
-                    .0
+                distance
                     .total_cmp(&current.0)
-                    .then_with(|| candidate.1.cmp(&current.1))
+                    .then_with(|| face.stable_identity.cmp(&current.1))
                     .is_lt()
             }) {
-                best = Some(candidate);
+                let weights = interpolation_weights(face.order, &face_nodes[..count], barycentric)?;
+                best = Some((distance, face.stable_identity, weights));
             }
         }
         let Some((distance, _, primary_weights)) = best.filter(|best| best.0 <= tolerance) else {
@@ -311,11 +345,11 @@ fn interpolation_weights(
     order: BoundaryTriangleOrder,
     nodes: &[(StableDigest, [f64; 3])],
     barycentric: [f64; 3],
-) -> Vec<ConstraintPairingWeight> {
+) -> Result<Vec<ConstraintPairingWeight>, ConstraintPlanError> {
     let [a, b, c] = barycentric;
     let values = match order {
-        BoundaryTriangleOrder::Tri3 => vec![a, b, c],
-        BoundaryTriangleOrder::Tri6 => vec![
+        BoundaryTriangleOrder::Tri3 => [a, b, c, 0.0, 0.0, 0.0],
+        BoundaryTriangleOrder::Tri6 => [
             a * (2.0 * a - 1.0),
             b * (2.0 * b - 1.0),
             c * (2.0 * c - 1.0),
@@ -324,27 +358,28 @@ fn interpolation_weights(
             4.0 * c * a,
         ],
     };
-    let mut weights = nodes
-        .iter()
-        .zip(values)
-        .filter(|(_, weight)| weight.abs() > 1.0e-14)
-        .map(|((identity, _), weight)| ConstraintPairingWeight {
-            primary_node_identity: *identity,
-            weight,
-        })
-        .collect::<Vec<_>>();
-    weights.sort_by_key(|weight| weight.primary_node_identity);
-    weights
+    let mut weights = reserve(nodes.len())?;
+    weights.extend(
+        nodes
+            .iter()
+            .zip(values)
+            .filter(|(_, weight)| weight.abs() > 1.0e-14)
+            .map(|((identity, _), weight)| ConstraintPairingWeight {
+                primary_node_identity: *identity,
+                weight,
+            }),
+    );
+    weights.sort_unstable_by_key(|weight| weight.primary_node_identity);
+    Ok(weights)
 }
 
 fn node_point(
-    nodes: &BTreeMap<StableDigest, [f64; 3]>,
+    nodes: &NodeCoordinates,
     identity: StableDigest,
     constraint_id: &str,
 ) -> Result<[f64; 3], ConstraintPlanError> {
     nodes
-        .get(&identity)
-        .copied()
+        .get(identity)
         .ok_or_else(|| ConstraintPlanError::PairingUnavailable {
             constraint_id: constraint_id.into(),
             secondary_node_identity: identity,
@@ -363,16 +398,19 @@ pub(super) fn pairing_rows(
     } else {
         identity()
     };
-    let mut rows = Vec::with_capacity(pairings.len() * 3);
+    let row_count = profile::multiply(pairings.len(), 3)?;
+    let mut rows = reserve(row_count)?;
     for pairing in pairings {
+        check_cancelled()?;
         for (secondary_dof, transformed_direction) in
             CanonicalStructuralDof::TRANSLATIONS.into_iter().zip(basis)
         {
-            let mut terms = vec![CanonicalStructuralConstraintTerm {
+            let mut terms = reserve(row_term_count(pairing, transformed_direction)?)?;
+            terms.push(CanonicalStructuralConstraintTerm {
                 owner: CanonicalStructuralDofOwner::StructuralNode(pairing.secondary_node_identity),
                 dof: secondary_dof,
                 coefficient: 1.0,
-            }];
+            });
             for weight in &pairing.primary_weights {
                 terms.extend(
                     CanonicalStructuralDof::TRANSLATIONS
@@ -392,106 +430,4 @@ pub(super) fn pairing_rows(
         }
     }
     Ok(rows)
-}
-
-fn transform_position(transform: &PeriodicTransform, point: [f64; 3]) -> [f64; 3] {
-    match transform {
-        PeriodicTransform::Identity => point,
-        PeriodicTransform::Translation(value) => add(point, value.meters),
-        PeriodicTransform::Rotation {
-            origin,
-            axis,
-            angle,
-        } => add(
-            origin.meters,
-            matrix_vector(
-                rotation_matrix(*axis, angle.radians),
-                subtract(point, origin.meters),
-            ),
-        ),
-    }
-}
-
-fn rotation_matrix(axis: [f64; 3], angle: f64) -> [[f64; 3]; 3] {
-    let inverse_length = magnitude(axis).recip();
-    let [x, y, z] = scale(axis, inverse_length);
-    let cosine = angle.cos();
-    let sine = angle.sin();
-    let one_minus_cosine = 1.0 - cosine;
-    [
-        [
-            cosine + x * x * one_minus_cosine,
-            x * y * one_minus_cosine - z * sine,
-            x * z * one_minus_cosine + y * sine,
-        ],
-        [
-            y * x * one_minus_cosine + z * sine,
-            cosine + y * y * one_minus_cosine,
-            y * z * one_minus_cosine - x * sine,
-        ],
-        [
-            z * x * one_minus_cosine - y * sine,
-            z * y * one_minus_cosine + x * sine,
-            cosine + z * z * one_minus_cosine,
-        ],
-    ]
-}
-
-fn matrix_vector(matrix: [[f64; 3]; 3], vector: [f64; 3]) -> [f64; 3] {
-    matrix.map(|row| dot(row, vector))
-}
-
-fn identity() -> [[f64; 3]; 3] {
-    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
-}
-
-// Ericson's closest-point regions, returning a point and barycentric coordinates.
-fn closest_triangle_point(
-    point: [f64; 3],
-    a: [f64; 3],
-    b: [f64; 3],
-    c: [f64; 3],
-) -> ([f64; 3], [f64; 3]) {
-    let ab = subtract(b, a);
-    let ac = subtract(c, a);
-    if magnitude(cross(ab, ac)) <= 1.0e-18 {
-        return (a, [1.0, 0.0, 0.0]);
-    }
-    let ap = subtract(point, a);
-    let d1 = dot(ab, ap);
-    let d2 = dot(ac, ap);
-    if d1 <= 0.0 && d2 <= 0.0 {
-        return (a, [1.0, 0.0, 0.0]);
-    }
-    let bp = subtract(point, b);
-    let d3 = dot(ab, bp);
-    let d4 = dot(ac, bp);
-    if d3 >= 0.0 && d4 <= d3 {
-        return (b, [0.0, 1.0, 0.0]);
-    }
-    let vc = d1 * d4 - d3 * d2;
-    if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
-        let v = d1 / (d1 - d3);
-        return (add(a, scale(ab, v)), [1.0 - v, v, 0.0]);
-    }
-    let cp = subtract(point, c);
-    let d5 = dot(ab, cp);
-    let d6 = dot(ac, cp);
-    if d6 >= 0.0 && d5 <= d6 {
-        return (c, [0.0, 0.0, 1.0]);
-    }
-    let vb = d5 * d2 - d1 * d6;
-    if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
-        let w = d2 / (d2 - d6);
-        return (add(a, scale(ac, w)), [1.0 - w, 0.0, w]);
-    }
-    let va = d3 * d6 - d5 * d4;
-    if va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0 {
-        let w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
-        return (add(b, scale(subtract(c, b), w)), [0.0, 1.0 - w, w]);
-    }
-    let denominator = (va + vb + vc).recip();
-    let v = vb * denominator;
-    let w = vc * denominator;
-    (add(a, add(scale(ab, v), scale(ac, w))), [1.0 - v - w, v, w])
 }
