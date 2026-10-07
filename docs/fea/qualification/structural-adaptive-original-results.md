@@ -25,7 +25,7 @@ through the shared observation owner and checks it against original retained
 fields. Displacement components and reductions keep their authored quantities,
 frames and signs. It does not manufacture a scalar quantity by relabeling raw
 field values. Shared canonical profiling admits encoding plus original-field
-copy/evaluation construction before payload copies; cancellation reaches the
+copy construction before payload copies; cancellation reaches the
 shared codec. This component budget is not whole-task resource admission or RSS.
 
 `build_structural_adaptation_iteration_from_solved_results` estimates original
@@ -96,7 +96,45 @@ not process-separated producer termination. A summary cannot be independently
 verified without its original sources.
 
 A separately scheduled adaptive worker task, complete evaluation resource plan,
-closed adaptive output/root, atomic semantic publication, durable retry/replay,
-producer termination and remote execution are still pending. The affine witness
+closed adaptive output/root, atomic semantic publication, durable progression and
+remote execution remain pending. The process witness below addresses producer
+termination and cold replay separately. The affine witness
 also does not resolve the original cantilever convergence gate, qualify nonlinear
 history transfer or close Stage 11.
+
+
+## Producer termination and cold consumers
+
+A process witness now prepares the original native requests and writes their
+immutable input objects without executing a solve in the parent. A separate child
+executes both requests through the existing native analysis kernel and returns the
+original externalized completion references. The parent observes and reaps that
+exact producer before launching either consumer. Fresh consumers import the
+request-bound original result/receipt closures from the filesystem and evaluate
+the shared adaptive evidence without invoking a solve. Independent checks cover
+all original nodal displacements and six integration-point stress components of
+the affine patch. Two consumers retain identical complete iteration evidence.
+
+Required decoder bytes pass; required-minus-one, cancellation, reversed source
+order, a missing original solver-result chunk and a corrupted chunk reject without
+writing an evidence file. Transport faults use a test read adapter and leave the
+original immutable artifacts intact. The test protocol has bounded canonical reads
+and a finite child lifetime; subprocess stdout/stderr goes to files with bounded
+inspection. Closing a store alone is no longer the sole cold-execution witness.
+This is a Mac native process witness, not a scheduled adaptive graph, remote solve,
+measured RSS or atomic semantic result publication.
+
+Source materialization admission now runs before constraint lowering and observation
+plan construction. The regression first reproduced the old late rejection and
+passes with the unchanged byte formula and ceiling. The component allowance covers
+canonical encoding and retained-field copies; it excludes the separate construction
+workspaces of constraints and observation plans. Native consumers use the shared
+borrowed input profiler directly and do not copy eight original payload closures
+just to size their decoder inventory.
+
+Complete pre-expansion constraint-lowering profiles and the adaptive evaluation
+working inventory are prerequisites for complete scheduled-task admission. The
+shared constraint compiler currently accumulates fallible rows but explicitly lacks
+that pre-expansion profile. That gap remains open, along with the scheduled task,
+closed adaptive output/root, durable progression, semantic publication and all
+original scientific qualification criteria.

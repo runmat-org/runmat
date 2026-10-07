@@ -194,7 +194,9 @@ impl runmat_canonical_codec::CanonicalCodecControl for ResourceProfileControl {
     }
 }
 
-pub(crate) fn prepared_input_resource_facts_from_refs<'a>(
+/// Borrowed input inventory profiling without copying retained payloads.
+/// Producing-contract and complete source authentication remain the consuming phase's responsibility.
+pub fn prepared_input_resource_facts_from_refs<'a>(
     inputs: impl Iterator<Item = &'a PreparedAnalysisObjects>,
 ) -> AnalysisBridgeResult<PreparedInputResourceFacts> {
     let inputs = inputs.collect::<Vec<_>>();

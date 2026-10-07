@@ -217,3 +217,25 @@ fn shared_field_transfer_observes_cancelled_owner_before_copying_payloads() {
         crate::adaptation::SolverFieldTransferError::Cancelled
     );
 }
+
+#[test]
+fn source_materialization_is_admitted_before_constraint_lowering() {
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let mut model = model(&mesh);
+    let run = solve(&model, &mesh);
+    let id = ObservationId("tip_displacement".into());
+    let AnalysisConstraint::Structural(constraint) = &mut model.constraints[0] else {
+        panic!("fixture constraint")
+    };
+    let StructuralConstraintKind::Prescribed(prescribed) = &mut constraint.kind else {
+        panic!("fixture prescribed DOFs")
+    };
+    // A target that would fail during lowering distinguishes early budget admission.
+    prescribed.target = RegionTarget::point("node:999999");
+    let mut input = source(&model, &mesh, &run, &id);
+    input.limits.maximum_materialization_bytes = 0;
+    assert_eq!(
+        StructuralAdaptationSolvedSource::derive(input).unwrap_err(),
+        Error::ResourceLimit
+    );
+}

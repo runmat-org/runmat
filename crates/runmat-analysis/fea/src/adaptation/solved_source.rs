@@ -25,7 +25,8 @@ pub use iteration::{
 #[derive(Clone, Copy, Debug)]
 pub struct StructuralAdaptationSourceLimits {
     pub canonical: CanonicalLimits,
-    /// Additional canonical encoding and original-field evaluation budget, excluding owned inputs.
+    /// Additional canonical encoding and retained-field-copy budget, excluding owned inputs
+    /// and constraint/observation-plan construction workspaces.
     pub maximum_materialization_bytes: u64,
     pub observations: ObservationLimits,
 }
@@ -80,6 +81,48 @@ impl StructuralAdaptationSolvedSource {
             observation_id,
             limits,
         } = input;
+        // Admit canonical encoding and retained-field copies before deriving constraints or
+        // observation plans. Their own construction workspaces remain separate admission.
+        let content = (model, mesh.canonical_digest, run);
+        let profile = profile_serialized(&content, limits.canonical).map_err(invalid)?;
+        let field_copy = profile_serialized(&run.fields, limits.canonical).map_err(invalid)?;
+        let preliminary = profile
+            .materialization_resident_bytes_estimate
+            .checked_add(field_copy.materialization_resident_bytes_estimate)
+            .ok_or(Error::ResourceLimit)?;
+        if preliminary > limits.maximum_materialization_bytes {
+            return Err(Error::ResourceLimit);
+        }
+        if crate::is_fea_cancelled() {
+            return Err(Error::Cancelled);
+        }
+        // Solver identity indexes borrowed metadata in owned vectors. That work follows
+        // admission of the original model/result and retained-field-copy profile.
+        let numerical = (
+            model.solver_identity_contract(),
+            mesh.canonical_digest,
+            &run.identity,
+            &run.structural_static_convergence,
+            &run.structural_static_balance,
+            &run.structural_constraint_result,
+            &run.structural_connector_result,
+            &run.spatial_projection_evidence,
+            &run.observations,
+            &run.fields,
+        );
+        let numerical_profile =
+            profile_serialized(&numerical, limits.canonical).map_err(invalid)?;
+        let required = profile
+            .materialization_resident_bytes_estimate
+            .max(numerical_profile.materialization_resident_bytes_estimate)
+            .checked_add(field_copy.materialization_resident_bytes_estimate)
+            .ok_or(Error::ResourceLimit)?;
+        if required > limits.maximum_materialization_bytes {
+            return Err(Error::ResourceLimit);
+        }
+        if crate::is_fea_cancelled() {
+            return Err(Error::Cancelled);
+        }
         mesh.validate().map_err(invalid)?;
         run.validate_solver_formulation().map_err(invalid)?;
         let convergence = run
@@ -156,36 +199,6 @@ impl StructuralAdaptationSolvedSource {
             .ok_or_else(|| invalid("target observation must retain original host values"))?;
         if values.len() != 1 {
             return Err(invalid("target observation must reduce to one scalar"));
-        }
-        // Bind the complete original physical result, authored model and exact mesh. Profile
-        // through the shared codec before constructing its canonical value tree or bytes.
-        let content = (model, mesh.canonical_digest, run);
-        let numerical = (
-            model.solver_identity_contract(),
-            mesh.canonical_digest,
-            &run.identity,
-            &run.structural_static_convergence,
-            &run.structural_static_balance,
-            &run.structural_constraint_result,
-            &run.structural_connector_result,
-            &run.spatial_projection_evidence,
-            &run.observations,
-            &run.fields,
-        );
-        let numerical_profile =
-            profile_serialized(&numerical, limits.canonical).map_err(invalid)?;
-        let profile = profile_serialized(&content, limits.canonical).map_err(invalid)?;
-        let field_copy = profile_serialized(&run.fields, limits.canonical).map_err(invalid)?;
-        let required = profile
-            .materialization_resident_bytes_estimate
-            .max(numerical_profile.materialization_resident_bytes_estimate)
-            .checked_add(field_copy.materialization_resident_bytes_estimate)
-            .ok_or(Error::ResourceLimit)?;
-        if required > limits.maximum_materialization_bytes {
-            return Err(Error::ResourceLimit);
-        }
-        if crate::is_fea_cancelled() {
-            return Err(Error::Cancelled);
         }
         observation::verify(input, &plan, observation)?;
         let bytes = encode_contract_with_control(

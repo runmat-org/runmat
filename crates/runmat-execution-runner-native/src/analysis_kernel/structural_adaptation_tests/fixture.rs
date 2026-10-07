@@ -211,3 +211,44 @@ pub(super) fn lineage(
     lineage.validate_against(source, target, &map).unwrap();
     (map, lineage)
 }
+
+pub(super) fn source_limits() -> StructuralAdaptationSourceLimits {
+    StructuralAdaptationSourceLimits {
+        canonical: runmat_canonical_codec::CanonicalLimits::new(
+            64 * 1024 * 1024,
+            1_000_000,
+            4096,
+            64,
+        ),
+        maximum_materialization_bytes: 256 * 1024 * 1024,
+        observations: ObservationLimits::default(),
+    }
+}
+
+pub(super) fn assert_affine_original(
+    mesh: &SolverMeshArtifact,
+    run: &runmat_analysis_fea::contracts::FeaRunResult,
+) {
+    let displacements = run
+        .field(runmat_analysis_fea::contracts::FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+        .unwrap()
+        .as_host_f64()
+        .unwrap();
+    assert_eq!(displacements.len(), mesh.topology.nodes.len() * 3);
+    for (values, node) in displacements.chunks_exact(3).zip(&mesh.topology.nodes) {
+        for (actual, expected) in values.iter().zip([0.02 * node.coordinates_m[0], 0.0, 0.0]) {
+            assert!((actual - expected).abs() < 1e-12);
+        }
+    }
+    for values in run
+        .field(runmat_analysis_fea::contracts::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS)
+        .unwrap()
+        .as_host_f64()
+        .unwrap()
+        .chunks_exact(6)
+    {
+        for (actual, expected) in values.iter().zip([2.4, 0.8, 0.8, 0.0, 0.0, 0.0]) {
+            assert!((actual - expected).abs() < 1e-12);
+        }
+    }
+}

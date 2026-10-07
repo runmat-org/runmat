@@ -22,17 +22,11 @@ use runmat_execution_artifact::{
 use runmat_meshing_core::*;
 mod cold;
 mod fixture;
+mod process;
 
-fn produce(
-    model: &AnalysisModel,
-    mesh: &SolverMeshArtifact,
-    store: &mut FilesystemObjectStore,
-) -> (
-    PreparedStructuralLinearProgram,
-    ImportedStructuralLinearResult,
-) {
+fn prepare(model: &AnalysisModel, mesh: &SolverMeshArtifact) -> PreparedStructuralLinearProgram {
     let digest = Digest::sha256(b"original-native-adaptive-patch");
-    let prepared = prepare_structural_linear_program(StructuralLinearProgramPreparation {
+    prepare_structural_linear_program(StructuralLinearProgramPreparation {
         authored_study_digest: digest,
         frozen_project_digest: None,
         program_revision: ProgramRevision::new(
@@ -66,7 +60,18 @@ fn produce(
         accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     })
-    .unwrap();
+    .unwrap()
+}
+
+fn produce(
+    model: &AnalysisModel,
+    mesh: &SolverMeshArtifact,
+    store: &mut FilesystemObjectStore,
+) -> (
+    PreparedStructuralLinearProgram,
+    ImportedStructuralLinearResult,
+) {
+    let prepared = prepare(model, mesh);
     prepared.program.write_to(store).unwrap();
     let completed = execute_serial_analysis(
         &prepared.program.request,
@@ -136,19 +141,8 @@ fn original_native_h_refinement_authenticates_receipts_and_cold_adaptive_evidenc
             .iterations
             > 0
     );
-    for run in [&source_result.result.run, &target_result.result.run] {
-        for stress in run
-            .field(runmat_analysis_fea::contracts::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS)
-            .unwrap()
-            .as_host_f64()
-            .unwrap()
-            .chunks_exact(6)
-        {
-            for (actual, expected) in stress.iter().zip([2.4, 0.8, 0.8, 0.0, 0.0, 0.0]) {
-                assert!((actual - expected).abs() < 1e-12);
-            }
-        }
-    }
+    fixture::assert_affine_original(&coarse, &source_result.result.run);
+    fixture::assert_affine_original(&fine, &target_result.result.run);
     let id = ObservationId("tip_displacement".into());
     let mut input = StructuralAdaptationNativeIterationInput {
         source: original(&source, &source_result),
@@ -157,32 +151,15 @@ fn original_native_h_refinement_authenticates_receipts_and_cold_adaptive_evidenc
         lineage: &lineage,
         observation_id: &id,
         accuracy: &accuracy,
-        source_limits: StructuralAdaptationSourceLimits {
-            canonical: runmat_canonical_codec::CanonicalLimits::new(
-                64 * 1024 * 1024,
-                1_000_000,
-                4096,
-                64,
-            ),
-            maximum_materialization_bytes: 256 * 1024 * 1024,
-            observations: ObservationLimits::default(),
-        },
+        source_limits: fixture::source_limits(),
         maximum_source_decode_bytes: 256 * 1024 * 1024,
         estimator_options: StructuralRecoveryEstimatorOptions::default(),
         previous: None,
     };
     let originals = [input.source, input.target]
         .into_iter()
-        .flat_map(|source| {
-            [
-                source.invocation.clone(),
-                source.mesh.clone(),
-                source.result.clone(),
-                source.receipt.clone(),
-            ]
-        })
-        .collect::<Vec<_>>();
-    let required = runmat_analysis_execution::prepared_input_resource_facts(&originals)
+        .flat_map(|s| [s.invocation, s.mesh, s.result, s.receipt]);
+    let required = runmat_analysis_execution::prepared_input_resource_facts_from_refs(originals)
         .unwrap()
         .decoded_resident_bytes_admission_budget
         .0;
