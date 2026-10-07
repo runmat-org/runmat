@@ -15,7 +15,7 @@ define_floating_conversion_contract!(
         data_arguments: &[0],
         operation: crate::BuiltinPreparationOperation::FloatingCast(NumericClass::Double),
         provider_requirement: crate::BuiltinPreparationProviderRequirement::F64,
-    }],
+    }, LIKE_PREPARATION_FORM],
     DOUBLE_DOCUMENTATION,
     "Double-precision output value.",
     "binary64 storage",

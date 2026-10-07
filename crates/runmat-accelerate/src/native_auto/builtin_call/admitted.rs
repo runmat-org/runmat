@@ -56,6 +56,11 @@ impl RuntimeAccelerationService for AdmittedAcceleration {
         request: AdmittedBuiltinPreparation,
     ) -> RuntimeServiceFuture<Result<PreparedBuiltinOperands, RuntimeError>> {
         Box::pin(async move {
+            if request.form().operation == Operation::RuntimeOwned {
+                return Ok(PreparedBuiltinOperands::passthrough(
+                    request.into_operands(),
+                ));
+            }
             if let Operation::Sink(mode) = request.form().operation {
                 fusion_residency::clear_inputs(
                     request.operands(),
@@ -94,6 +99,9 @@ pub(super) fn prepare_with(
     context: &RuntimeContext,
     request: AdmittedBuiltinPreparation,
 ) -> PreparationResult<PreparedBuiltinCall> {
+    if request.form().operation == Operation::RuntimeOwned {
+        return Ok(PreparedBuiltinCall::unobserved(request.into_operands()));
+    }
     if !auto.enabled
         || (request.form().provider_requirement == BuiltinPreparationProviderRequirement::F64
             && auto.provider.precision() != ProviderPrecision::F64)
@@ -189,7 +197,9 @@ pub(super) fn prepare_with(
             }
         }
         Operation::Reduction(_) => ArgumentOperation::Reduction,
-        Operation::Sink(_) => unreachable!("sinks handled independently of automatic promotion"),
+        Operation::Sink(_) | Operation::RuntimeOwned => {
+            unreachable!("runtime-owned and sink forms bypass automatic promotion")
+        }
     };
     let prepared = auto
         .prepare_operation(

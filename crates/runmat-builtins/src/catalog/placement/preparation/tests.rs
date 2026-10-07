@@ -64,6 +64,12 @@ fn roles_reference_existing_signatures_without_claiming_control_operands() {
         ..FORM
     }])
     .is_empty());
+    assert!(!errors(&[BuiltinPreparationForm {
+        operation: BuiltinPreparationOperation::RuntimeOwned,
+        provider_requirement: BuiltinPreparationProviderRequirement::F64,
+        ..FORM
+    }])
+    .is_empty());
 }
 
 #[test]
@@ -141,7 +147,7 @@ fn floating_cast_targets_are_typed_and_legacy_form_identity_is_preserved() {
     let BuiltinOperandPreparation::Forms(forms) = SINGLE_CATALOG_ENTRY.placement.preparation else {
         panic!("declared forms");
     };
-    assert_eq!(forms.len(), 2);
+    assert_eq!(forms.len(), 3);
     assert_eq!(forms[0].id, BuiltinPreparationFormId(0));
     assert_eq!(forms[0].signatures, &[0, 1]);
     assert_eq!(forms[0].operation, BuiltinPreparationOperation::Unary);
@@ -151,11 +157,22 @@ fn floating_cast_targets_are_typed_and_legacy_form_identity_is_preserved() {
         forms[1].operation,
         BuiltinPreparationOperation::FloatingCast(runmat_types::NumericClass::Single)
     );
+    assert_eq!(forms[2].id, BuiltinPreparationFormId(2));
+    assert_eq!(forms[2].signatures, &[1]);
+    assert_eq!(forms[2].data_arguments, &[0]);
+    assert_eq!(
+        forms[2].operation,
+        BuiltinPreparationOperation::RuntimeOwned
+    );
+    assert_eq!(
+        forms[2].provider_requirement,
+        BuiltinPreparationProviderRequirement::InputSupported
+    );
     assert!(validate_builtin_preparation(&SINGLE_CATALOG_ENTRY).is_empty());
     let BuiltinOperandPreparation::Forms(forms) = DOUBLE_CATALOG_ENTRY.placement.preparation else {
         panic!("declared double forms");
     };
-    assert_eq!(forms.len(), 2);
+    assert_eq!(forms.len(), 3);
     assert_eq!(forms[0].id, BuiltinPreparationFormId(0));
     assert_eq!(forms[0].signatures, &[0, 1]);
     assert_eq!(forms[0].operation, BuiltinPreparationOperation::Unary);
@@ -169,6 +186,17 @@ fn floating_cast_targets_are_typed_and_legacy_form_identity_is_preserved() {
     assert_eq!(
         forms[1].provider_requirement,
         BuiltinPreparationProviderRequirement::F64
+    );
+    assert_eq!(forms[2].id, BuiltinPreparationFormId(2));
+    assert_eq!(forms[2].signatures, &[1]);
+    assert_eq!(forms[2].data_arguments, &[0]);
+    assert_eq!(
+        forms[2].operation,
+        BuiltinPreparationOperation::RuntimeOwned
+    );
+    assert_eq!(
+        forms[2].provider_requirement,
+        BuiltinPreparationProviderRequirement::InputSupported
     );
     assert!(validate_builtin_preparation(&DOUBLE_CATALOG_ENTRY).is_empty());
 }

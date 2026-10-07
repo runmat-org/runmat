@@ -22,6 +22,54 @@ fn logical_request() -> AdmittedBuiltinPreparation {
     .unwrap()
 }
 
+fn conversion_like_request(name: &str) -> AdmittedBuiltinPreparation {
+    let entry = runmat_builtins::builtin_catalog_primary_entry_by_name(name).unwrap();
+    AdmittedBuiltinPreparation::new(
+        BuiltinPreparationAdmission {
+            binding: runmat_builtins::BuiltinBindingIdentity {
+                builtin: entry.identity,
+                variant: "default",
+            },
+            form: runmat_builtins::BuiltinPreparationFormId(2),
+            signature: 1,
+            input_count: 3,
+            requested_outputs: Some(1),
+        },
+        vec![Value::Tensor(
+            Tensor::new(vec![1.25, -0.0], vec![1, 2]).unwrap(),
+        )],
+    )
+    .unwrap()
+}
+
+#[test]
+fn runtime_owned_conversion_like_form_never_enters_native_placement_or_feedback() {
+    for name in ["single", "double"] {
+        for provider in [&PROVIDER as &dyn AccelProvider, &REJECTING_PROVIDER] {
+            let probe = Rc::new(Probe::default());
+            probe.provider.set(true);
+            let context = runtime(&probe);
+            let auto = NativeAutoOffload::new(provider, ThresholdConfig::default());
+            let prepared = super::super::admitted::prepare_with(
+                &auto,
+                &context,
+                conversion_like_request(name),
+            )
+            .unwrap();
+            assert_eq!(prepared.args().len(), 1);
+            assert!(matches!(&prepared.args()[0], Value::Tensor(value) if value.shape() == [1, 2]));
+            assert!(probe.requests.borrow().is_empty());
+            let result = futures::executor::block_on(prepared.execute(|mut operands| async move {
+                Ok(operands.pop().expect("unchanged conversion data operand"))
+            }))
+            .unwrap();
+            assert!(matches!(result, Value::Tensor(_)));
+            assert!(probe.requests.borrow().is_empty());
+            assert!(probe.feedback.borrow().is_empty());
+        }
+    }
+}
+
 fn sum_request(axes: Vec<usize>) -> AdmittedBuiltinPreparation {
     sum_request_for(runmat_types::SumInvocation::Sum, axes)
 }

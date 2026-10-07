@@ -168,6 +168,19 @@ macro_rules! define_floating_conversion_contract {
             provider_requirement: $preparation_requirement,
         };
 
+        // The like prototype selects output residency inside this domain;
+        // single/double determine the conversion class. Preserve legacy form 0
+        // and plain-cast form 1 identities;
+        // this distinct form does not claim a shared unary physical route.
+        const LIKE_PREPARATION_FORM: crate::BuiltinPreparationForm = crate::BuiltinPreparationForm {
+            id: crate::BuiltinPreparationFormId(2),
+            binding_variant: "default",
+            signatures: &[1],
+            data_arguments: &[0],
+            operation: crate::BuiltinPreparationOperation::RuntimeOwned,
+            provider_requirement: crate::BuiltinPreparationProviderRequirement::InputSupported,
+        };
+
         pub const CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
             identity: BuiltinCatalogIdentity { name: $name },

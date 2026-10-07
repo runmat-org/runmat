@@ -55,6 +55,11 @@ pub fn validate_builtin_preparation(entry: &BuiltinCatalogEntry) -> Vec<&'static
         {
             errors.push("sink preparation cannot require a floating provider precision");
         }
+        if matches!(form.operation, BuiltinPreparationOperation::RuntimeOwned)
+            && form.provider_requirement != BuiltinPreparationProviderRequirement::InputSupported
+        {
+            errors.push("runtime-owned preparation has no provider precision requirement");
+        }
         for &signature in form.signatures {
             let Some(signature) = entry.descriptor.signatures.get(signature) else {
                 errors.push("preparation references an unknown descriptor signature");

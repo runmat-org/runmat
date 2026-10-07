@@ -35,6 +35,10 @@ pub struct BuiltinPreparationForm {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BuiltinPreparationOperation {
     Unary,
+    /// The admitted form retains its physical route in the runtime domain.
+    /// The shared service still receives the declared data operand so a host
+    /// port can observe execution, but native auto must not model or promote it.
+    RuntimeOwned,
     /// Plain, shape-preserving floating cast; no output prototype adaptation.
     FloatingCast(runmat_types::NumericClass),
     /// A real unary route whose numerical domain is admitted by its owner.
@@ -85,6 +89,7 @@ impl BuiltinPreparationOperation {
     pub const fn data_arity(self) -> Option<usize> {
         match self {
             Self::Unary
+            | Self::RuntimeOwned
             | Self::FloatingCast(_)
             | Self::RealUnary(_)
             | Self::RoundDigits

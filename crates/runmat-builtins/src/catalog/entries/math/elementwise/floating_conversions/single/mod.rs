@@ -15,7 +15,7 @@ define_floating_conversion_contract!(
         data_arguments: &[0],
         operation: crate::BuiltinPreparationOperation::FloatingCast(NumericClass::Single),
         provider_requirement: crate::BuiltinPreparationProviderRequirement::InputSupported,
-    }],
+    }, LIKE_PREPARATION_FORM],
     SINGLE_DOCUMENTATION,
     "Single-precision output value.",
     "binary32 storage",

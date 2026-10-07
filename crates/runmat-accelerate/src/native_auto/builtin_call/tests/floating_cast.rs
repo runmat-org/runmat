@@ -128,7 +128,7 @@ fn actual_single_like_adaptation_has_no_plain_cast_candidate_or_completion_recei
             context
                 .service_ports()
                 .clone()
-                .with_acceleration(Rc::new(Adapter(provider, 0))),
+                .with_acceleration(Rc::new(Adapter(provider, 2))),
         );
         context.set_runmat_extensions_enabled(true);
         // Host-like must download the resident result; device-like must upload
@@ -182,4 +182,59 @@ fn actual_single_like_adaptation_has_no_plain_cast_candidate_or_completion_recei
     }
     drop(input);
     drop(prototype);
+}
+
+#[test]
+#[ignore = "requires actual WGPU device; execute explicitly for double host-like qualification"]
+fn actual_double_host_like_keeps_domain_gather_without_plain_cast_feedback() {
+    use runmat_accelerate_api::{GpuTensorStorage, HostNumericDataView, HostNumericTensorView};
+    let provider = crate::backend::wgpu::provider::register_wgpu_provider(Default::default())
+        .expect("actual WGPU provider required");
+    let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let probe = Rc::new(Probe::default());
+    probe.provider.set(true);
+    let context = runtime(&probe);
+    let context = context.clone().with_service_ports(
+        context
+            .service_ports()
+            .clone()
+            .with_acceleration(Rc::new(Adapter(provider, 2))),
+    );
+    context.set_runmat_extensions_enabled(true);
+    let data = [1.25_f32, -0.0, 16_777_216.0, 3.5];
+    let input = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&data),
+            shape: &[1, 2, 2],
+            storage: GpuTensorStorage::Real,
+        })
+        .expect("resident single input");
+    let output = futures::executor::block_on(context.scope(async {
+        runmat_runtime::dispatcher::call_builtin_async(
+            "double",
+            &[
+                Value::GpuTensor(input.clone()),
+                Value::from("like"),
+                Value::Num(0.0),
+            ],
+        )
+        .await
+    }))
+    .expect("host-like double conversion");
+    let Value::Tensor(output) = output else {
+        panic!("host prototype must select dense host double output: {output:?}");
+    };
+    assert_eq!(output.shape(), &[1, 2, 2]);
+    assert_eq!(
+        output
+            .as_f64_slice()
+            .expect("double storage")
+            .iter()
+            .map(|value| value.to_bits())
+            .collect::<Vec<_>>(),
+        data.map(|value| f64::from(value).to_bits())
+    );
+    assert!(probe.requests.borrow().is_empty());
+    assert!(probe.feedback.borrow().is_empty());
+    drop(input);
 }

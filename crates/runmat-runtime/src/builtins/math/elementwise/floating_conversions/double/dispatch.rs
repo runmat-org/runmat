@@ -38,7 +38,7 @@ pub(super) async fn execute(value: Value, rest: Vec<Value>) -> BuiltinResult<Val
         runmat_builtins::BuiltinPreparationFormId(if matches!(template, OutputTemplate::Default) {
             1
         } else {
-            0
+            2
         }),
         |value| execution::convert(value, template, borrowed),
     )
