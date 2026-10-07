@@ -1,4 +1,5 @@
 use super::run;
+use futures::executor::block_on;
 use runmat_value::{
     CellArray, IntValue, IntegerStorage, LogicalArray, ObjectArray, ObjectInstance, SparseTensor,
     StringArray, SymbolicArray, SymbolicExpr, Value,
@@ -43,6 +44,77 @@ fn string_symbolic_and_logical_arrays_preserve_element_kind() {
         panic!("expected cell");
     };
     assert_eq!(logical.get(0, 1).unwrap(), Value::Bool(false));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rank_zero_value_arrays_have_one_cell_but_an_empty_cell_array_stays_empty() {
+    let Value::Cell(logical) = run(
+        Value::LogicalArray(LogicalArray::new(vec![1], vec![]).unwrap()),
+        Vec::new(),
+    ) else {
+        panic!("rank-zero logical output expected")
+    };
+    assert_eq!(logical.shape, vec![1, 1]);
+    assert_eq!(logical.data, vec![Value::Bool(true)]);
+
+    let Value::Cell(strings) = run(
+        Value::StringArray(StringArray::new(vec!["only".into()], vec![]).unwrap()),
+        Vec::new(),
+    ) else {
+        panic!("rank-zero string output expected")
+    };
+    assert_eq!(strings.shape, vec![1, 1]);
+    assert_eq!(strings.data, vec![Value::String("only".into())]);
+
+    let symbol = SymbolicExpr::constant(7.0);
+    let Value::Cell(symbolic) = run(
+        Value::SymbolicArray(SymbolicArray::new(vec![symbol.clone()], vec![]).unwrap()),
+        Vec::new(),
+    ) else {
+        panic!("rank-zero symbolic output expected")
+    };
+    assert_eq!(symbolic.shape, vec![1, 1]);
+    assert_eq!(symbolic.data, vec![Value::Symbolic(symbol)]);
+
+    let empty = CellArray::new_with_shape(Vec::new(), vec![]).unwrap();
+    let Value::Cell(output) = run(Value::Cell(empty), Vec::new()) else {
+        panic!("empty cell output expected")
+    };
+    assert!(output.shape.is_empty());
+    assert!(output.data.is_empty());
+    assert_eq!((output.rows, output.cols), (0, 0));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn empty_cell_shape_revalidates_payload_cardinality_and_cached_geometry() {
+    let malformed = CellArray {
+        data: vec![Value::Num(1.0)],
+        shape: vec![],
+        rows: 0,
+        cols: 0,
+    };
+    let error = block_on(super::super::num2cell_builtin(
+        Value::Cell(malformed),
+        Vec::new(),
+    ))
+    .expect_err("malformed empty cell must not become one scalar cell");
+    assert_eq!(error.identifier(), Some("RunMat:num2cell:Internal"));
+    assert!(error.to_string().contains("Cell data length 1"));
+
+    let stale_cache = CellArray {
+        data: Vec::new(),
+        shape: vec![],
+        rows: 7,
+        cols: 8,
+    };
+    let Value::Cell(output) = run(Value::Cell(stale_cache), Vec::new()) else {
+        panic!("valid empty cell payload expected")
+    };
+    assert!(output.shape.is_empty());
+    assert!(output.data.is_empty());
+    assert_eq!((output.rows, output.cols), (0, 0));
 }
 
 #[test]

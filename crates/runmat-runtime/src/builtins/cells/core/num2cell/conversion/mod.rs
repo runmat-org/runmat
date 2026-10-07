@@ -33,7 +33,15 @@ pub(super) fn convert(value: Value, dimensions: &[usize]) -> crate::BuiltinResul
 }
 
 pub(super) fn output(plan: &PartitionPlan, cells: Vec<Value>) -> crate::BuiltinResult<Value> {
-    CellArray::new_with_shape(cells, plan.output_shape.clone())
+    // Numeric and other rank-zero scalar arrays own one element, but a cell
+    // shape of [] denotes zero cells. Preserve that distinction at the cell
+    // construction boundary without changing the partition plan's indexing.
+    let shape = if plan.output_shape.is_empty() && cells.len() == 1 {
+        vec![1, 1]
+    } else {
+        plan.output_shape.clone()
+    };
+    CellArray::new_with_shape(cells, shape)
         .map(Value::Cell)
         .map_err(error::internal)
 }

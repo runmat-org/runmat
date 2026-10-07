@@ -2,7 +2,7 @@ use super::*;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-fn absolute_startat_matches_rank_one_dates_before_lifecycle_effects() {
+fn absolute_startat_matches_exact_date_shape_before_lifecycle_effects() {
     let _lock = TIMER_TEST_LOCK.lock().unwrap();
     reset_timer_state_for_tests_with_clock(Some(Arc::new(Mutex::new(Duration::ZERO))));
     let timers = (0..2)
@@ -22,7 +22,7 @@ fn absolute_startat_matches_rank_one_dates_before_lifecycle_effects() {
         })
         .collect();
     let receiver = Value::ObjectArray(
-        ObjectArray::from_handles(TIMER_CLASS.to_string(), handles, vec![2]).unwrap(),
+        ObjectArray::from_handles(TIMER_CLASS.to_string(), handles, vec![1, 2]).unwrap(),
     );
     let now = chrono::DateTime::from_timestamp(1_700_000_000, 0)
         .unwrap()
@@ -34,7 +34,7 @@ fn absolute_startat_matches_rank_one_dates_before_lifecycle_effects() {
                 .to_string()
         })
         .collect::<Vec<_>>();
-    let mismatch = Value::StringArray(StringArray::new(dates.clone(), vec![1, 2]).unwrap());
+    let mismatch = Value::StringArray(StringArray::new(dates.clone(), vec![2]).unwrap());
     let error = block_on(super::super::timer_startat_builtin(
         Some(test_runtime()),
         Some(0),
@@ -49,14 +49,14 @@ fn absolute_startat_matches_rank_one_dates_before_lifecycle_effects() {
         };
         assert_eq!(string_property(handle, "Running").unwrap(), "off");
     }
-    let matching = Value::StringArray(StringArray::new(dates, vec![2]).unwrap());
+    let matching = Value::StringArray(StringArray::new(dates, vec![1, 2]).unwrap());
     block_on(super::super::timer_startat_builtin(
         Some(test_runtime()),
         Some(0),
         receiver.clone(),
         vec![matching],
     ))
-    .expect("matching rank-one firing times");
+    .expect("matching row-vector firing times");
     for timer in &timers {
         let Value::HandleObject(handle) = timer else {
             panic!("timer handle expected")
