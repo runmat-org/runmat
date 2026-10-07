@@ -193,6 +193,26 @@ fn daspect_rejects_nonvector_logical_complex_and_resident_ratio_inputs() {
     assert!(set_daspect(vec![resident]).is_err());
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn daspect_rank_one_ratio_is_admitted_but_rank_zero_is_not() {
+    let _guard = setup();
+    let scalar = Value::Tensor(Tensor::new(vec![0.5], Vec::new()).expect("rank-zero ratio"));
+    let error = ratio_from_value(&scalar).unwrap_err();
+    assert!(error.message().contains("3-element row or column"));
+    assert!(set_daspect(vec![scalar]).is_err());
+
+    let vector = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).expect("rank-one ratio");
+    assert_eq!(
+        set_daspect(vec![Value::Tensor(vector)]).unwrap(),
+        Value::OutputList(Vec::new())
+    );
+    assert_eq!(
+        tensor_data(daspect_builtin(Vec::new()).unwrap()),
+        vec![1.0, 2.0, 3.0]
+    );
+}
+
 #[test]
 fn daspect_rejects_registered_resident_ratio_without_provider_access() {
     crate::builtins::common::test_support::with_test_provider(|provider| {

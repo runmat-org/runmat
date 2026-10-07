@@ -333,9 +333,9 @@ fn validate_value_source(value: &Value) -> BuiltinResult<()> {
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. } => Ok(()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Ok(()),
-        Value::Tensor(tensor) => validate_host_vector_shape(&tensor.shape),
+        Value::Tensor(tensor) => validate_host_vector_shape(tensor.shape()),
         Value::LogicalArray(array) => validate_host_vector_shape(&array.shape),
-        Value::ComplexTensor(tensor) => validate_host_vector_shape(&tensor.shape),
+        Value::ComplexTensor(tensor) => validate_host_vector_shape(tensor.shape()),
         Value::Complex(_, _) => Ok(()),
         Value::GpuTensor(handle) => {
             crate::compatibility::ensure_builtin_extension_enabled(
@@ -410,6 +410,23 @@ mod tests {
             object.properties.get("Format"),
             Some(&Value::String("auto".into()))
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn preserves_low_rank_real_and_complex_value_sources() {
+        let values = [
+            Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap()),
+            Value::ComplexTensor(
+                runmat_value::ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![2]).unwrap(),
+            ),
+        ];
+        for value in values {
+            let row = data_tip_text_row_builtin(vec![Value::String("Value".into()), value.clone()])
+                .expect("low-rank value source");
+            let object = handle_payload(row);
+            assert_eq!(object.properties.get("Value"), Some(&value));
+        }
     }
 
     #[test]

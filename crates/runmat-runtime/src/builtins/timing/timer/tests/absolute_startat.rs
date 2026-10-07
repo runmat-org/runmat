@@ -1,4 +1,71 @@
 use super::*;
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn absolute_startat_matches_rank_one_dates_before_lifecycle_effects() {
+    let _lock = TIMER_TEST_LOCK.lock().unwrap();
+    reset_timer_state_for_tests_with_clock(Some(Arc::new(Mutex::new(Duration::ZERO))));
+    let timers = (0..2)
+        .map(|_| {
+            block_on(timer_builtin(vec![
+                Value::String("TimerFcn".into()),
+                Value::FunctionHandle("tick".into()),
+            ]))
+            .expect("timer")
+        })
+        .collect::<Vec<_>>();
+    let handles = timers
+        .iter()
+        .map(|timer| match timer {
+            Value::HandleObject(handle) => handle.clone(),
+            _ => panic!("timer handle expected"),
+        })
+        .collect();
+    let receiver = Value::ObjectArray(
+        ObjectArray::from_handles(TIMER_CLASS.to_string(), handles, vec![2]).unwrap(),
+    );
+    let now = chrono::DateTime::from_timestamp(1_700_000_000, 0)
+        .unwrap()
+        .naive_utc();
+    let dates = (1..=2)
+        .map(|seconds| {
+            (now + chrono::Duration::seconds(seconds))
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    let mismatch = Value::StringArray(StringArray::new(dates.clone(), vec![1, 2]).unwrap());
+    let error = block_on(super::super::timer_startat_builtin(
+        Some(test_runtime()),
+        Some(0),
+        receiver.clone(),
+        vec![mismatch],
+    ))
+    .expect_err("equal element counts do not replace exact firing-time shape");
+    assert_eq!(error.identifier(), Some("RunMat:timer:InvalidInput"));
+    for timer in &timers {
+        let Value::HandleObject(handle) = timer else {
+            panic!("timer handle expected")
+        };
+        assert_eq!(string_property(handle, "Running").unwrap(), "off");
+    }
+    let matching = Value::StringArray(StringArray::new(dates, vec![2]).unwrap());
+    block_on(super::super::timer_startat_builtin(
+        Some(test_runtime()),
+        Some(0),
+        receiver.clone(),
+        vec![matching],
+    ))
+    .expect("matching rank-one firing times");
+    for timer in &timers {
+        let Value::HandleObject(handle) = timer else {
+            panic!("timer handle expected")
+        };
+        assert_eq!(string_property(handle, "Running").unwrap(), "on");
+    }
+    block_on(timer_stop_builtin(receiver)).expect("stop timers");
+}
+
 #[test]
 fn timer_method_status_and_relative_startat_are_gated_before_lifecycle_effects() {
     let _lock = TIMER_TEST_LOCK.lock().unwrap();

@@ -499,7 +499,7 @@ fn values_match(property: &str, actual: &Value, expected: &Value) -> bool {
             &left.data.iter().collect::<String>() == right
         }
         (Value::Tensor(left), Value::Tensor(right)) => {
-            left.shape == right.shape && tensor_values_match(left, right)
+            left.shape() == right.shape() && tensor_values_match(left, right)
         }
         (Value::StringArray(left), Value::StringArray(right)) => {
             left.shape == right.shape && left.data == right.data

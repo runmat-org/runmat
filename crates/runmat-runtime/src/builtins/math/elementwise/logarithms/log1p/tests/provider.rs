@@ -51,7 +51,7 @@ fn negative_resident_input_uses_owner_preserving_complex_fallback() {
         .expect("download") else {
             panic!("expected complex tensor")
         };
-        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(output.shape(), &[2, 1]);
     });
 }
 

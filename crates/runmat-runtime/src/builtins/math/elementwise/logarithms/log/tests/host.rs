@@ -5,6 +5,28 @@ use runmat_value::{
     NumericStorage, SymbolicExpr, Tensor,
 };
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn log_preserves_rank_zero_scalar_and_rank_one_positive_real_geometry() {
+    let scalar = call(Value::Tensor(
+        Tensor::new(vec![1.0], Vec::new()).expect("rank-zero input"),
+    ))
+    .expect("rank-zero log");
+    assert_eq!(scalar, Value::Num(0.0));
+
+    let vector = call(Value::Tensor(
+        Tensor::new(vec![1.0, std::f64::consts::E], vec![2]).expect("rank-one input"),
+    ))
+    .expect("rank-one log");
+    let Value::Tensor(vector) = vector else {
+        panic!("rank-one tensor expected")
+    };
+    assert_eq!(vector.shape(), &[2]);
+    let values = vector.materialize_f64();
+    assert_eq!(values[0], 0.0);
+    assert!((values[1] - 1.0).abs() < 1.0e-12);
+}
+
 #[test]
 fn scalar_complex_single_and_invalid_inputs_preserve_contract() {
     assert_eq!(LOG_DESCRIPTOR.signatures[0].label, "Y = log(X)");
@@ -18,7 +40,7 @@ fn scalar_complex_single_and_invalid_inputs_preserve_contract() {
         panic!("expected tensor")
     };
     assert_eq!(output.numeric_dtype(), NumericDType::F32);
-    assert_eq!(output.shape, vec![1, 2]);
+    assert_eq!(output.shape(), &[1, 2]);
     assert_eq!(
         call(Value::from("bad"))
             .expect_err("string must fail")

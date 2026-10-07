@@ -28,7 +28,7 @@ pub(super) async fn start_at_absolute(
     let serials = crate::builtins::datetime::timer_firing_serials(args, reference)?;
     let serial_values = serials.materialize_f64();
     let scalar = serial_values.len() == 1;
-    if !scalar && serials.shape != receiver_shape {
+    if !scalar && serials.shape() != receiver_shape.as_slice() {
         return Err(timer_error(
             &TIMER_ERROR_INVALID_INPUT,
             "startat: firing-time array must match the timer array size",

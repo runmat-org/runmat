@@ -31,7 +31,7 @@ pub(super) fn evaluate_tensor(
     operation: LogarithmOperation,
     tensor: Tensor,
 ) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| super::errors::internal(operation, &error))?;
@@ -104,8 +104,8 @@ fn evaluate_f32(
 }
 
 fn evaluate_complex(operation: LogarithmOperation, tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
-    let storage = match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(values) => ComplexStorage::F64(
             values
                 .into_iter()

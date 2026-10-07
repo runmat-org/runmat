@@ -30,7 +30,7 @@ pub(super) fn evaluate_tensor(
     operation: ExponentialOperation,
     tensor: Tensor,
 ) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| super::errors::internal(operation, error))?;
@@ -84,8 +84,8 @@ fn evaluate_complex(
         &tensor,
         operation.name(),
     )?;
-    let shape = tensor.shape.clone();
-    let storage = match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(values) => ComplexStorage::F64(
             values
                 .into_iter()

@@ -48,7 +48,7 @@ fn negative_automatic_input_returns_host_complex_fallback() {
         let Value::ComplexTensor(output) = call(Value::GpuTensor(handle)).expect("log2") else {
             panic!("expected complex tensor")
         };
-        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(output.shape(), &[2, 1]);
     });
 }
 

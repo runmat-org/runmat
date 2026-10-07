@@ -48,7 +48,7 @@ fn scalar_dense_and_single_inputs_preserve_contract() {
     let Value::Tensor(output) = call(Value::Tensor(input)).expect("single log2") else {
         panic!("expected tensor")
     };
-    assert_eq!(output.shape, vec![3, 1]);
+    assert_eq!(output.shape(), &[3, 1]);
     assert_eq!(
         output.into_numeric_storage().expect("storage"),
         NumericStorage::F32(vec![0.0, 1.0, 2.0])

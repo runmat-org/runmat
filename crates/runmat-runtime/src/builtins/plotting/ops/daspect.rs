@@ -131,7 +131,7 @@ fn ratio_from_value(value: &Value) -> BuiltinResult<[f64; 3]> {
             "DataAspectRatio must be a host row or column numeric vector",
         ));
     };
-    let is_vector = matches!(tensor.shape.as_slice(), [3] | [1, 3] | [3, 1]);
+    let is_vector = matches!(tensor.shape(), [3] | [1, 3] | [3, 1]);
     if !is_vector {
         return Err(daspect_err(
             "DataAspectRatio must be a 3-element row or column vector",

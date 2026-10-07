@@ -42,7 +42,7 @@ fn real_domain_preserves_accuracy_shape_and_precision() {
     let Value::Tensor(output) = call(Value::Tensor(input)).expect("single log1p") else {
         panic!("expected tensor")
     };
-    assert_eq!(output.shape, vec![2, 1]);
+    assert_eq!(output.shape(), &[2, 1]);
     assert_eq!(
         output.into_numeric_storage().expect("storage"),
         NumericStorage::F32(vec![0.0, 0.5_f32.ln_1p()])

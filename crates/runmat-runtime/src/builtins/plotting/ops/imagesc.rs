@@ -396,7 +396,7 @@ fn parse_imagesc_color_limits(value: &Value) -> crate::BuiltinResult<Option<(f64
             "imagesc: color limits must be a two-element numeric vector",
         )
     })?;
-    if tensor.shape.iter().copied().product::<usize>() != 2 {
+    if tensor.shape().iter().copied().product::<usize>() != 2 {
         return Ok(None);
     }
     let values = tensor.materialize_f64();
@@ -653,6 +653,19 @@ mod tests {
         assert!(labels.contains(&"h = imagesc(C)"));
         assert!(labels.contains(&"h = imagesc(X, Y, C)"));
         assert!(labels.contains(&"h = imagesc(X, Y, C, Name, Value, ...)"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn color_limit_parser_retains_two_element_low_rank_admission() {
+        let scalar = Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap());
+        assert_eq!(parse_imagesc_color_limits(&scalar).unwrap(), None);
+
+        let vector = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap());
+        assert_eq!(
+            parse_imagesc_color_limits(&vector).unwrap(),
+            Some((1.0, 2.0))
+        );
     }
 
     #[test]

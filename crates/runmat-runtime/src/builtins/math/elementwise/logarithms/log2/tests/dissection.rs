@@ -26,8 +26,8 @@ fn dissection_preserves_shape_class_and_special_values() {
     let [Value::Tensor(fraction), Value::Tensor(exponent)] = outputs.as_slice() else {
         panic!("expected tensor outputs")
     };
-    assert_eq!(fraction.shape, vec![2, 4]);
-    assert_eq!(exponent.shape, vec![2, 4]);
+    assert_eq!(fraction.shape(), &[2, 4]);
+    assert_eq!(exponent.shape(), &[2, 4]);
     assert_eq!(fraction.numeric_dtype(), NumericDType::F64);
     assert_eq!(fraction.materialize_f64()[..3], [0.0, -0.0, 0.5]);
     assert_eq!(exponent.materialize_f64()[..3], [0.0, 0.0, 1.0]);

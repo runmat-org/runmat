@@ -22,7 +22,7 @@ pub(super) fn numeric(value: Value) -> BuiltinResult<(Value, Value)> {
 }
 
 fn tensor_values(tensor: Tensor) -> BuiltinResult<(Value, Value)> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| errors::internal(OPERATION, &error))?;

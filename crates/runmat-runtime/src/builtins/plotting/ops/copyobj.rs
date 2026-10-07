@@ -326,7 +326,7 @@ fn handle_list(value: &Value, role: &'static str) -> BuiltinResult<HandleList> {
             };
             Ok(HandleList {
                 handles,
-                shape: tensor.shape.clone(),
+                shape: tensor.shape().to_vec(),
                 is_scalar: tensor_utils::tensor_element_len(tensor) == 1,
             })
         }

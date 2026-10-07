@@ -12,6 +12,28 @@ fn descriptor_and_invalid_input_are_catalog_owned() {
     assert_eq!(error.identifier(), EXP_ERROR_INVALID_INPUT.identifier);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn exp_preserves_rank_zero_scalar_and_rank_one_real_geometry() {
+    let scalar = call(Value::Tensor(
+        Tensor::new(vec![1.0], Vec::new()).expect("rank-zero input"),
+    ))
+    .expect("rank-zero exp");
+    assert!(matches!(scalar, Value::Num(value) if (value - std::f64::consts::E).abs() < 1.0e-12));
+
+    let vector = call(Value::Tensor(
+        Tensor::new(vec![0.0, 1.0], vec![2]).expect("rank-one input"),
+    ))
+    .expect("rank-one exp");
+    let Value::Tensor(vector) = vector else {
+        panic!("rank-one tensor expected")
+    };
+    assert_eq!(vector.shape(), &[2]);
+    let values = vector.materialize_f64();
+    assert_eq!(values[0], 1.0);
+    assert!((values[1] - std::f64::consts::E).abs() < 1.0e-12);
+}
+
 #[test]
 fn scalar_dense_and_single_inputs_preserve_expected_shape_and_class() {
     let Value::Num(value) = call(Value::Num(1.0)).expect("exp") else {
@@ -23,7 +45,7 @@ fn scalar_dense_and_single_inputs_preserve_expected_shape_and_class() {
     let Value::Tensor(output) = call(Value::Tensor(tensor)).expect("single exp") else {
         panic!("expected tensor");
     };
-    assert_eq!(output.shape, vec![2, 1]);
+    assert_eq!(output.shape(), &[2, 1]);
     assert_eq!(
         output.into_numeric_storage().expect("storage"),
         NumericStorage::F32(vec![1.0, 1.0_f32.exp()])
@@ -103,7 +125,7 @@ fn table_and_character_inputs_map_elementwise() {
     let Value::Tensor(output) = call(Value::CharArray(chars)).expect("character exp") else {
         panic!("expected tensor");
     };
-    assert_eq!(output.shape, vec![1, 1]);
+    assert_eq!(output.shape(), &[1, 1]);
 
     let table = crate::builtins::table::table_from_columns(
         vec!["Double".into(), "Single".into()],
