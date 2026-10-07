@@ -606,7 +606,7 @@ impl SampleInput {
                     }
                     Value::ComplexTensor(tensor) => Ok(Self::Complex {
                         data: tensor.materialize_f64(),
-                        shape: tensor.shape,
+                        shape: tensor.shape().to_vec(),
                     }),
                     other => Err(sample_error_with_detail(
                         builtin,
@@ -624,7 +624,7 @@ impl SampleInput {
             }
             Value::ComplexTensor(tensor) => Ok(Self::Complex {
                 data: tensor.materialize_f64(),
-                shape: tensor.shape,
+                shape: tensor.shape().to_vec(),
             }),
             Value::Num(value) => Ok(Self::Real {
                 storage: NumericStorage::F64(vec![value]),
@@ -651,7 +651,7 @@ impl SampleInput {
     }
 
     fn from_tensor(tensor: Tensor, builtin: &'static str) -> BuiltinResult<Self> {
-        let shape = tensor.shape.clone();
+        let shape = tensor.shape().to_vec();
         let storage = tensor
             .into_numeric_storage()
             .map_err(|err| sample_error_with_detail(builtin, &SAMPLE_ERROR_INVALID_INPUT, err))?;
@@ -776,9 +776,9 @@ fn is_typed_integer_value(value: &Value) -> bool {
 
 fn value_rank(value: &Value) -> Option<usize> {
     match value {
-        Value::Tensor(tensor) => Some(tensor.shape.len()),
+        Value::Tensor(tensor) => Some(tensor.shape().len()),
         Value::LogicalArray(array) => Some(array.shape.len()),
-        Value::ComplexTensor(tensor) => Some(tensor.shape.len()),
+        Value::ComplexTensor(tensor) => Some(tensor.shape().len()),
         Value::GpuTensor(handle) => Some(handle.shape().len()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Some(2),
         _ => None,
@@ -1299,7 +1299,7 @@ async fn parse_filter_vector(value: Value) -> BuiltinResult<ResampleFilter> {
     let tensor = tensor::value_into_tensor_for(RESAMPLE_NAME, value).map_err(|err| {
         sample_error_with_detail(RESAMPLE_NAME, &SAMPLE_ERROR_INVALID_OPTION, err)
     })?;
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let values = tensor::tensor_into_values_f64(tensor);
     validate_filter_shape(values.len(), &shape)?;
     Ok(ResampleFilter::Host(values))
@@ -2316,7 +2316,7 @@ mod tests {
         let Value::Tensor(upsampled) = out else {
             panic!("expected tensor");
         };
-        assert_eq!(upsampled.shape, vec![1, 6]);
+        assert_eq!(upsampled.shape(), [1, 6]);
         assert_eq!(
             upsampled.materialize_f64(),
             vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]
@@ -2333,7 +2333,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.shape, vec![9, 1]);
+        assert_eq!(tensor.shape(), [9, 1]);
         assert_eq!(
             tensor.materialize_f64(),
             vec![0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 3.0, 0.0]
@@ -2347,7 +2347,7 @@ mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: &input.materialize_f64(),
-                    shape: &input.shape,
+                    shape: input.shape(),
                 })
                 .expect("upload input");
             provider.reset_telemetry();
@@ -2365,7 +2365,7 @@ mod tests {
 
             let gathered =
                 test_support::gather(Value::GpuTensor(out_handle)).expect("gather output");
-            assert_eq!(gathered.shape, vec![4, 2]);
+            assert_eq!(gathered.shape(), [4, 2]);
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![0.0, 1.0, 0.0, 2.0, 0.0, 3.0, 0.0, 4.0]
@@ -2445,7 +2445,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.shape, vec![1, 3]);
+        assert_eq!(tensor.shape(), [1, 3]);
         assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0, 5.0]);
     }
 
@@ -2459,7 +2459,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(tensor.shape(), [1, 2]);
         assert_eq!(tensor.materialize_f64(), vec![2.0, 4.0]);
     }
 
@@ -2478,7 +2478,7 @@ mod tests {
                     output.integer_storage(),
                     Some(&IntegerStorage::$variant($expected))
                 );
-                assert_eq!(output.shape, vec![1, 2]);
+                assert_eq!(output.shape(), [1, 2]);
             }};
         }
         check!(I8, vec![-1, 2, -3, 4, -5], vec![2, 4]);
@@ -2568,7 +2568,7 @@ mod tests {
         let Value::Tensor(output) = output else {
             panic!("expected tensor")
         };
-        assert_eq!(output.shape, vec![1, 1, 2]);
+        assert_eq!(output.shape(), [1, 1, 2]);
         assert_eq!(output.materialize_f64(), vec![1.0, 3.0]);
         drop(extensions);
     }
@@ -2795,7 +2795,7 @@ mod tests {
         let Value::Tensor(output) = output else {
             panic!("fallback must return a host tensor")
         };
-        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.shape(), [1, 2]);
         assert_eq!(output.materialize_f64(), vec![1.0, 3.0]);
         input.release().expect("free fallback input");
         assert_eq!(provider.live_count(), 0);
@@ -2808,7 +2808,7 @@ mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: &input.materialize_f64(),
-                    shape: &input.shape,
+                    shape: input.shape(),
                 })
                 .expect("upload input");
             provider.reset_telemetry();
@@ -2826,7 +2826,7 @@ mod tests {
 
             let gathered =
                 test_support::gather(Value::GpuTensor(out_handle)).expect("gather output");
-            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.shape(), [1, 2]);
             assert_eq!(gathered.materialize_f64(), vec![2.0, 4.0]);
             let _ = handle.release();
         });
@@ -2907,7 +2907,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.shape, vec![4, 2]);
+        assert_eq!(tensor.shape(), [4, 2]);
         assert_eq!(
             tensor.materialize_f64(),
             vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0, 4.0, 0.0]
@@ -2917,7 +2917,7 @@ mod tests {
         let Value::Tensor(tensor) = down else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.shape(), [2, 2]);
         assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
     }
 
@@ -2931,7 +2931,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.shape, vec![1, 4, 2]);
+        assert_eq!(tensor.shape(), [1, 4, 2]);
         assert_eq!(
             tensor.materialize_f64(),
             vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0, 4.0, 0.0]
@@ -2944,14 +2944,14 @@ mod tests {
         let Value::Tensor(array) = out else {
             panic!("expected tensor");
         };
-        assert_eq!(array.shape, vec![1, 0]);
+        assert_eq!(array.shape(), [1, 0]);
         assert!(array.materialize_f64().is_empty());
 
         let out = call_downsample(vec![tensor(Vec::new(), vec![0, 1]), Value::Num(2.0)]);
         let Value::Tensor(array) = out else {
             panic!("expected tensor");
         };
-        assert_eq!(array.shape, vec![0, 1]);
+        assert_eq!(array.shape(), [0, 1]);
         assert!(array.materialize_f64().is_empty());
     }
 
@@ -2964,7 +2964,7 @@ mod tests {
         let Value::ComplexTensor(tensor) = out else {
             panic!("expected complex tensor");
         };
-        assert_eq!(tensor.shape, vec![1, 4]);
+        assert_eq!(tensor.shape(), [1, 4]);
         assert_eq!(
             tensor.materialize_f64(),
             vec![(1.0, 2.0), (0.0, 0.0), (3.0, 4.0), (0.0, 0.0)]
@@ -3017,7 +3017,7 @@ mod tests {
         let Value::Tensor(upsampled) = out else {
             panic!("expected tensor");
         };
-        assert_eq!(upsampled.shape, vec![1, 6]);
+        assert_eq!(upsampled.shape(), [1, 6]);
         assert_eq!(
             upsampled.materialize_f64(),
             vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]
@@ -3032,7 +3032,7 @@ mod tests {
         let Value::Tensor(downsampled) = down else {
             panic!("expected tensor");
         };
-        assert_eq!(downsampled.shape, vec![1, 3]);
+        assert_eq!(downsampled.shape(), [1, 3]);
         assert_eq!(downsampled.materialize_f64(), vec![1.0, 3.0, 5.0]);
     }
 
@@ -3069,7 +3069,7 @@ mod tests {
         let Value::Tensor(upsampled) = out else {
             panic!("expected tensor");
         };
-        assert_eq!(upsampled.shape, vec![1, 6]);
+        assert_eq!(upsampled.shape(), [1, 6]);
         assert_eq!(
             upsampled.materialize_f64(),
             vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]
@@ -3135,7 +3135,7 @@ mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: &input.materialize_f64(),
-                    shape: &input.shape,
+                    shape: input.shape(),
                 })
                 .expect("upload input");
             provider.reset_telemetry();
@@ -3153,7 +3153,7 @@ mod tests {
 
             let gathered =
                 test_support::gather(Value::GpuTensor(out_handle)).expect("gather output");
-            assert_eq!(gathered.shape, vec![1, 6]);
+            assert_eq!(gathered.shape(), [1, 6]);
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]
@@ -3169,7 +3169,7 @@ mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: &input.materialize_f64(),
-                    shape: &input.shape,
+                    shape: input.shape(),
                 })
                 .expect("upload input");
             let filter = [0.0, 1.0, 0.0];
@@ -3196,7 +3196,7 @@ mod tests {
 
             let gathered =
                 test_support::gather(Value::GpuTensor(out_handle.clone())).expect("gather output");
-            assert_eq!(gathered.shape, vec![1, 6]);
+            assert_eq!(gathered.shape(), [1, 6]);
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]
@@ -3246,7 +3246,7 @@ mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: &input.materialize_f64(),
-                    shape: &input.shape,
+                    shape: input.shape(),
                 })
                 .expect("upload input");
 
@@ -3283,7 +3283,7 @@ mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: &input.materialize_f64(),
-                    shape: &input.shape,
+                    shape: input.shape(),
                 })
                 .expect("upload input");
 
@@ -3317,7 +3317,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.shape, vec![2, 4]);
+        assert_eq!(tensor.shape(), [2, 4]);
         assert_eq!(
             tensor.materialize_f64(),
             vec![1.0, 2.0, 0.0, 0.0, 3.0, 4.0, 0.0, 0.0]
@@ -3338,7 +3338,7 @@ mod tests {
         let Value::ComplexTensor(tensor) = out else {
             panic!("expected complex tensor");
         };
-        assert_eq!(tensor.shape, vec![1, 4]);
+        assert_eq!(tensor.shape(), [1, 4]);
         assert_eq!(
             tensor.materialize_f64(),
             vec![(1.0, 2.0), (0.0, 0.0), (3.0, 4.0), (0.0, 0.0)]
@@ -3365,8 +3365,8 @@ mod tests {
         let Value::Tensor(filter) = &values[1] else {
             panic!("expected filter tensor");
         };
-        assert_eq!(signal.shape, vec![5, 1]);
-        assert_eq!(filter.shape, vec![1, 7]);
+        assert_eq!(signal.shape(), [5, 1]);
+        assert_eq!(filter.shape(), [1, 7]);
         let sum = filter.materialize_f64().iter().sum::<f64>();
         assert!((sum - 3.0).abs() < 1e-10);
     }
@@ -3390,8 +3390,8 @@ mod tests {
         let Value::Tensor(filter) = &values[1] else {
             panic!("expected filter tensor");
         };
-        assert_eq!(signal.shape, vec![1, 8]);
-        assert_eq!(filter.shape, vec![1, 41]);
+        assert_eq!(signal.shape(), [1, 8]);
+        assert_eq!(filter.shape(), [1, 41]);
         let sum = filter.materialize_f64().iter().sum::<f64>();
         assert!((sum - 2.0).abs() < 1e-10);
     }

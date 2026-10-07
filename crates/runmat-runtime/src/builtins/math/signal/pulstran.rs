@@ -478,7 +478,7 @@ fn parse_delays(tensor: Tensor) -> BuiltinResult<Vec<PulseInstance>> {
         return Ok(Vec::new());
     }
     let values = tensor::tensor_values_f64(&tensor);
-    let shape = tensor.shape.as_slice();
+    let shape = tensor.shape();
     if shape.len() <= 2 {
         let rows = shape.first().copied().unwrap_or(values.len());
         let cols = shape.get(1).copied().unwrap_or(1);
@@ -565,7 +565,7 @@ async fn parse_sampled_prototype(pulse: Value, rest: Vec<Value>) -> BuiltinResul
     )
     .await?;
     let prototype = real_tensor_arg(pulse, &PULSTRAN_ERROR_INVALID_PULSE).await?;
-    if !is_vector_shape(&prototype.shape) {
+    if !is_vector_shape(prototype.shape()) {
         return Err(pulstran_error_with_detail(
             &PULSTRAN_ERROR_INVALID_PULSE,
             "sampled prototype must be a vector",
@@ -772,7 +772,7 @@ async fn evaluate_pulse_train(
             }
         }
     }
-    Tensor::new(out, t.shape.clone())
+    Tensor::new(out, t.shape().to_vec())
         .map_err(|err| pulstran_error_with_detail(&PULSTRAN_ERROR_INTERNAL, &err))
 }
 
@@ -781,7 +781,7 @@ fn shifted_time_value(t: &Tensor, delay: f64) -> BuiltinResult<Value> {
         .iter()
         .map(|value| value - delay)
         .collect::<Vec<_>>();
-    Tensor::new(data, t.shape.clone())
+    Tensor::new(data, t.shape().to_vec())
         .map(tensor_into_value)
         .map_err(|err| pulstran_error_with_detail(&PULSTRAN_ERROR_INTERNAL, &err))
 }
@@ -876,7 +876,7 @@ mod tests {
             )
             .expect("pulstran"),
         );
-        assert_eq!(out.shape, vec![1, 4]);
+        assert_eq!(out.shape(), [1, 4]);
         assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0]);
     }
 

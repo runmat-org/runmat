@@ -360,9 +360,8 @@ async fn complex_matrix(value: Value) -> BuiltinResult<ComplexMatrixInput> {
         })?;
     match value {
         Value::Tensor(tensor) => {
-            validate_sos_matrix_shape(&tensor.shape, tensor.len())?;
-            let rows = tensor.rows;
-            let cols = tensor.cols;
+            validate_sos_matrix_shape(tensor.shape(), tensor.len())?;
+            let (rows, cols) = sos_dense_dimensions(tensor.shape());
             let values = tensor::tensor_into_values_f64(tensor);
             Ok(ComplexMatrixInput {
                 rows,
@@ -372,9 +371,9 @@ async fn complex_matrix(value: Value) -> BuiltinResult<ComplexMatrixInput> {
             })
         }
         Value::ComplexTensor(tensor) => {
-            validate_sos_matrix_shape(&tensor.shape, tensor.materialize_f64().len())?;
-            let rows = tensor.shape.first().copied().unwrap_or(0);
-            let cols = tensor.shape.get(1).copied().unwrap_or(1);
+            validate_sos_matrix_shape(tensor.shape(), tensor.materialize_f64().len())?;
+            let rows = tensor.shape().first().copied().unwrap_or(0);
+            let cols = tensor.shape().get(1).copied().unwrap_or(1);
             Ok(ComplexMatrixInput {
                 data: tensor::complex_tensor_into_values_complex64(tensor),
                 rows,
@@ -386,6 +385,14 @@ async fn complex_matrix(value: Value) -> BuiltinResult<ComplexMatrixInput> {
             &ZPLANE_ERROR_INVALID_ARGUMENT,
             format!("SOS input must be a numeric matrix, got {other:?}"),
         )),
+    }
+}
+
+fn sos_dense_dimensions(shape: &[usize]) -> (usize, usize) {
+    match shape {
+        [] => (0, 0),
+        [cols] => (1, *cols),
+        [rows, cols, ..] => (*rows, *cols),
     }
 }
 
@@ -719,6 +726,25 @@ mod tests {
         assert!(data.poles.iter().any(|z| (z.re - 0.8).abs() < 1e-10));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn zplane_sos_dense_rank_zero_rejects_and_rank_one_is_a_row() {
+        let rank_zero = Tensor::new(vec![1.0], vec![]).expect("rank-zero SOS");
+        let error = block_on(evaluate(vec![Value::Tensor(rank_zero)]))
+            .expect_err("rank-zero SOS has no valid matrix element count");
+        assert_eq!(error.identifier(), ZPLANE_ERROR_INVALID_ARGUMENT.identifier);
+
+        let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
+        let rank_one =
+            Tensor::new(vec![1.0, 1.0, 0.0, 1.0, -0.8, 0.0], vec![6]).expect("rank-one SOS row");
+        let Value::Tensor(handles) = block_on(evaluate(vec![Value::Tensor(rank_one)]))
+            .expect("rank-one SOS is a six-column row")
+        else {
+            panic!("expected graphics handle tensor");
+        };
+        assert_eq!(handles.shape(), [1, 4]);
+    }
+
     #[test]
     fn sos_reads_typed_integer_storage_exactly() {
         let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 1, 0, 1, -1, 0]), vec![1, 6])
@@ -789,7 +815,7 @@ mod tests {
         let Value::Tensor(handles) = value else {
             panic!("expected handle tensor");
         };
-        assert_eq!(handles.shape, vec![1, 4]);
+        assert_eq!(handles.shape(), [1, 4]);
         assert!(handles
             .materialize_f64()
             .iter()

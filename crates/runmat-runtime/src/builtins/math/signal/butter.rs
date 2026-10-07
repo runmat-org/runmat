@@ -812,14 +812,14 @@ fn parse_cutoff(value: Value) -> BuiltinResult<Vec<f64>> {
         Value::Int(value) => vec![value.to_f64()],
         Value::Bool(value) => vec![if value { 1.0 } else { 0.0 }],
         Value::Tensor(tensor) => {
-            ensure_vector_shape("Wn", &tensor.shape)?;
+            ensure_vector_shape("Wn", tensor.shape())?;
             tensor::tensor_into_values_f64(tensor)
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(|detail| {
                 butter_error_with_detail(&BUTTER_ERROR_INVALID_FREQUENCY, detail)
             })?;
-            ensure_vector_shape("Wn", &tensor.shape)?;
+            ensure_vector_shape("Wn", tensor.shape())?;
             tensor::tensor_into_values_f64(tensor)
         }
         other => {
@@ -1804,18 +1804,18 @@ mod tests {
     fn butter_state_space_outputs_canonical_dimensions() {
         let values = output_values(2, Value::Num(0.25), Vec::new(), 4);
         match &values[0] {
-            Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![2, 2]),
+            Value::Tensor(tensor) => assert_eq!(tensor.shape(), [2, 2]),
             other => panic!("expected state matrix, got {other:?}"),
         }
         match &values[1] {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![2, 1]);
+                assert_eq!(tensor.shape(), [2, 1]);
                 assert_eq!(tensor.materialize_f64(), vec![1.0, 0.0]);
             }
             other => panic!("expected input matrix, got {other:?}"),
         }
         match &values[2] {
-            Value::Tensor(tensor) => assert_eq!(tensor.shape, vec![1, 2]),
+            Value::Tensor(tensor) => assert_eq!(tensor.shape(), [1, 2]),
             other => panic!("expected output matrix, got {other:?}"),
         }
         assert!(matches!(values[3], Value::Num(_)));

@@ -336,8 +336,8 @@ async fn sinc_complex_tensor(
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
     cooperation.completed(0).await?;
-    let shape = tensor.shape.clone();
-    let storage = match tensor.into_complex_storage() {
+    let (storage, shape) = tensor.into_complex_storage_and_shape();
+    let storage = match storage {
         ComplexStorage::F64(values) => ComplexStorage::F64(
             map_complex_values(
                 values,
@@ -562,7 +562,7 @@ mod tests {
         let result = call(Value::Tensor(tensor)).expect("sinc");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 6]);
+                assert_eq!(out.shape(), [1, 6]);
                 assert_eq!(out.materialize_f64(), vec![0.0; 6]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -602,7 +602,7 @@ mod tests {
         let result = call(Value::Tensor(tensor)).expect("sinc");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 4]);
+                assert_eq!(out.shape(), [1, 4]);
                 let expected = [0.0, 1.0, 0.0, 2.0 / std::f64::consts::PI];
                 for (got, want) in out.materialize_f64().iter().zip(expected) {
                     assert_close(*got, want);
@@ -617,7 +617,7 @@ mod tests {
         let tensor = Tensor::new(vec![0.0, 0.5, 1.5, 2.0], vec![2, 2]).unwrap();
         let result = call(Value::Tensor(tensor)).expect("sinc");
         match result {
-            Value::Tensor(out) => assert_eq!(out.shape, vec![2, 2]),
+            Value::Tensor(out) => assert_eq!(out.shape(), [2, 2]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -744,7 +744,7 @@ mod tests {
         let result = call(Value::ComplexTensor(tensor)).expect("sinc complex tensor");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_complex_close(out.materialize_f64()[0], (1.0, 0.0));
                 assert_complex_close(out.materialize_f64()[1], sinc_complex_value(0.5, 0.25));
             }
@@ -779,7 +779,7 @@ mod tests {
             block_on(gpu_helpers::gather_value_async(&result)).expect("gather restored result");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 let expected = [1.0, 2.0 / std::f64::consts::PI, 0.0];
                 for (got, want) in out.materialize_f64().iter().zip(expected) {
                     assert_close(*got, want);
@@ -901,7 +901,7 @@ mod tests {
             .expect("gather restored complex result");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_complex_close(out.materialize_f64()[0], (1.0, 0.0));
                 assert_complex_close(out.materialize_f64()[1], sinc_complex_value(0.5, 0.25));
             }
@@ -935,7 +935,7 @@ mod tests {
             let tensor = Tensor::new(vec![0.0, 0.5, 1.0], vec![1, 3]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = call(Value::GpuTensor(handle)).expect("sinc gpu");
@@ -944,7 +944,7 @@ mod tests {
                 "provider-backed sinc should keep gpuArray output resident"
             );
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), [1, 3]);
             let expected = [1.0, 2.0 / std::f64::consts::PI, 0.0];
             for (got, want) in gathered.materialize_f64().iter().zip(expected) {
                 assert_close(*got, want);
@@ -972,7 +972,7 @@ mod tests {
             let Value::ComplexTensor(out) = gathered else {
                 panic!("expected complex tensor");
             };
-            assert_eq!(out.shape, complex.shape);
+            assert_eq!(out.shape(), complex.shape());
             assert_complex_close(out.materialize_f64()[0], (1.0, 0.0));
             assert_complex_close(out.materialize_f64()[1], sinc_complex_value(0.5, 0.25));
         });
@@ -997,7 +997,7 @@ mod tests {
             block_on(sinc_real(Value::Tensor(tensor.clone()), &mut cooperation)).expect("cpu sinc");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = runmat_accelerate_api::provider()
             .expect("wgpu provider")
@@ -1006,7 +1006,7 @@ mod tests {
         let gpu = block_on(sinc_gpu(handle, None, &mut cooperation)).expect("gpu sinc");
         let gathered = test_support::gather(gpu).expect("gather");
         let expected = test_support::gather(cpu).expect("gather cpu");
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         let tol = match runmat_accelerate_api::provider().unwrap().precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
@@ -1058,7 +1058,7 @@ mod tests {
                 Value::ComplexTensor(tensor) => tensor,
                 other => panic!("expected complex tensor, got {other:?}"),
             };
-        assert_eq!(actual.shape, expected.shape);
+        assert_eq!(actual.shape(), expected.shape());
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
