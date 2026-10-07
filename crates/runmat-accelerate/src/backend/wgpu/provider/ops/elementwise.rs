@@ -29,6 +29,8 @@ use crate::backend::wgpu::types::NumericPrecision;
 mod indexed;
 #[path = "elementwise/complex_broadcast.rs"]
 mod complex_broadcast;
+#[path = "elementwise/broadcast_plan.rs"]
+mod broadcast_plan;
 use indexed::{
     validate_indexed_layout, FusionMultiRequest, IndexedFusionObserved, MultiFusionLayout,
 };
@@ -1161,16 +1163,7 @@ impl WgpuProvider {
     }
 
     pub(crate) fn binary_broadcast_buffer_demand(&self, len: u64) -> Option<u64> {
-        let output = len.max(1).checked_mul(self.element_size as u64)?;
-        if len == 0 {
-            return Some(output);
-        }
-        let uniform = (std::mem::size_of::<crate::backend::wgpu::params::BinaryBroadcastParams>()
-            as u64)
-            .max(1)
-            .div_ceil(256)
-            .checked_mul(256)?;
-        output.checked_add(uniform)
+        broadcast_plan::BroadcastRoute::requested_buffer_bound(len, self.element_size as u64)
     }
 
     pub(crate) fn scalar_op_exec(
@@ -1669,25 +1662,20 @@ impl WgpuProvider {
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         // Compute broadcasted output shape
-        let (shape_a, shape_b, out_shape) = super::backend_shared::matlab_broadcast_shapes(
-            "binary operation",
+        let route = broadcast_plan::BroadcastRoute::new(
             &entry_a.shape,
             &entry_b.shape,
             BCAST_MAX_RANK,
+            self.element_size as u64,
         )?;
+        let (shape_a, shape_b, out_shape) = (&route.shape_a, &route.shape_b, &route.out_shape);
         let rank = out_shape.len();
-        let len: usize = out_shape
-            .iter()
-            .copied()
-            .fold(1usize, |a, b| a.saturating_mul(b));
+        let len = route.len;
         if len == 0 {
             let out_buffer = self.with_emission(|emission, _| {
                 self.create_storage_buffer(emission, 0, "runmat-binary-bcast-out")
             })??;
-            return self.register_existing_buffer(out_buffer, out_shape, 0);
-        }
-        if len > (u32::MAX as usize) {
-            return Err(gpu_dispatch_length_limit_error("binary_op_broadcast", len));
+            return self.register_existing_buffer(out_buffer, out_shape.clone(), 0);
         }
         // Compute strides (column-major)
         let mut stride_a: Vec<u32> = vec![0; rank];
@@ -1742,13 +1730,11 @@ impl WgpuProvider {
                 });
 
             // Dispatch in chunks
-            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-            let mut offset = 0usize;
             let start = Instant::now();
-            while offset < len {
+            for chunk in 0..route.submissions {
+                let offset = chunk as usize * route.chunk_capacity;
                 let remaining = len - offset;
-                let chunk_len = remaining.min(chunk_capacity);
+                let chunk_len = remaining.min(route.chunk_capacity);
                 // Pack params
                 let mut params = BinaryBroadcastParams {
                     len: chunk_len as u32,
@@ -1782,11 +1768,10 @@ impl WgpuProvider {
                     &bind_group,
                     groups,
                 )?;
-                offset += chunk_len;
             }
             Ok((out_buffer, start))
         })??;
-        let handle = self.register_existing_buffer(out_buffer, out_shape, len)?;
+        let handle = self.register_existing_buffer(out_buffer, out_shape.clone(), len)?;
         self.telemetry
             .record_fused_elementwise_duration(start.elapsed());
         Ok(handle)

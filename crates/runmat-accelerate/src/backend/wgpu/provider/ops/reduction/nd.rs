@@ -1,5 +1,9 @@
 use super::*;
 
+#[path = "nd/geometry.rs"]
+mod geometry;
+use geometry::NdReductionGeometry;
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "nd/lazy_tests.rs"]
 mod lazy_tests;
@@ -46,46 +50,18 @@ impl WgpuProvider {
             return Ok(moments.mean);
         }
         let entry = self.get_entry(a)?;
-        let rank = entry.shape.len();
-        ensure!(rank > 0, "reduce_mean_nd: rank must be > 0");
-        let mut reduce: Vec<usize> = dims_zero_based
-            .iter()
-            .copied()
-            .filter(|&d| d < rank)
-            .collect();
-        reduce.sort_unstable();
-        reduce.dedup();
-        ensure!(
-            !reduce.is_empty(),
-            "reduce_mean_nd: no valid dims to reduce"
-        );
-        let kept: Vec<usize> = (0..rank).filter(|i| !reduce.contains(i)).collect();
-
-        // Compute strides (MATLAB/column-major)
-        let mut strides: Vec<usize> = vec![0; rank];
-        let mut s = 1usize;
-        for (i, stride_slot) in strides.iter_mut().enumerate().take(rank) {
-            *stride_slot = s;
-            s = s
-                .checked_mul(entry.shape[i])
-                .ok_or_else(|| anyhow!("reduce_mean_nd: shape too large"))?;
-        }
-
-        let kept_sizes: Vec<u32> = kept.iter().map(|&i| entry.shape[i] as u32).collect();
-        let reduce_sizes: Vec<u32> = reduce.iter().map(|&i| entry.shape[i] as u32).collect();
-        let kept_strides: Vec<u32> = kept.iter().map(|&i| strides[i] as u32).collect();
-        let reduce_strides: Vec<u32> = reduce.iter().map(|&i| strides[i] as u32).collect();
-
-        let rows: usize = reduce
-            .iter()
-            .fold(1usize, |acc, &i| acc.saturating_mul(entry.shape[i]));
-        let cols: usize = kept
-            .iter()
-            .fold(1usize, |acc, &i| acc.saturating_mul(entry.shape[i]));
-        ensure!(rows > 0 && cols > 0, "reduce_mean_nd: empty tensor");
-        if rows as u64 > u32::MAX as u64 || cols as u64 > u32::MAX as u64 {
-            return Err(anyhow!("reduce_mean_nd: tensor exceeds GPU limits"));
-        }
+        let NdReductionGeometry {
+            rank,
+            reduce,
+            kept,
+            kept_sizes,
+            reduce_sizes,
+            kept_strides,
+            reduce_strides,
+            rows,
+            cols,
+            out_shape,
+        } = NdReductionGeometry::new(&entry.shape, dims_zero_based, "reduce_mean_nd")?;
 
         // Geometry above is logical. The stride-based kernel (and sequenced fallback)
         // needs canonical storage, not the backing order of a lazy transpose.
@@ -124,10 +100,7 @@ impl WgpuProvider {
                     mapped_at_creation: false,
                 }));
             }
-            let mut out_shape = entry.shape.clone();
-            for &d in &reduce {
-                out_shape[d] = 1;
-            }
+            let out_shape = out_shape.clone();
 
             match entry.precision {
                 NumericPrecision::F64 => {
@@ -289,46 +262,18 @@ impl WgpuProvider {
         dims_zero_based: &[usize],
     ) -> Result<runmat_accelerate_api::ProviderMoments2> {
         let entry = self.get_entry(a)?;
-        let rank = entry.shape.len();
-        ensure!(rank > 0, "reduce_moments_nd: rank must be > 0");
-        let mut reduce: Vec<usize> = dims_zero_based
-            .iter()
-            .copied()
-            .filter(|&d| d < rank)
-            .collect();
-        reduce.sort_unstable();
-        reduce.dedup();
-        ensure!(
-            !reduce.is_empty(),
-            "reduce_moments_nd: no valid dims to reduce"
-        );
-        let kept: Vec<usize> = (0..rank).filter(|i| !reduce.contains(i)).collect();
-
-        // Strides in column-major
-        let mut strides: Vec<usize> = vec![0; rank];
-        let mut s = 1usize;
-        for (i, stride_slot) in strides.iter_mut().enumerate().take(rank) {
-            *stride_slot = s;
-            s = s
-                .checked_mul(entry.shape[i])
-                .ok_or_else(|| anyhow!("reduce_moments_nd: shape too large"))?;
-        }
-
-        let kept_sizes: Vec<u32> = kept.iter().map(|&i| entry.shape[i] as u32).collect();
-        let reduce_sizes: Vec<u32> = reduce.iter().map(|&i| entry.shape[i] as u32).collect();
-        let kept_strides: Vec<u32> = kept.iter().map(|&i| strides[i] as u32).collect();
-        let reduce_strides: Vec<u32> = reduce.iter().map(|&i| strides[i] as u32).collect();
-
-        let rows: usize = reduce
-            .iter()
-            .fold(1usize, |acc, &i| acc.saturating_mul(entry.shape[i]));
-        let cols: usize = kept
-            .iter()
-            .fold(1usize, |acc, &i| acc.saturating_mul(entry.shape[i]));
-        ensure!(rows > 0 && cols > 0, "reduce_moments_nd: empty tensor");
-        if rows as u64 > u32::MAX as u64 || cols as u64 > u32::MAX as u64 {
-            return Err(anyhow!("reduce_moments_nd: tensor exceeds GPU limits"));
-        }
+        let NdReductionGeometry {
+            rank,
+            reduce,
+            kept,
+            kept_sizes,
+            reduce_sizes,
+            kept_strides,
+            reduce_strides,
+            rows,
+            cols,
+            out_shape,
+        } = NdReductionGeometry::new(&entry.shape, dims_zero_based, "reduce_moments_nd")?;
 
         // Mean's normal cache-miss path and direct moments/variance consumers
         // share this boundary. Validate geometry before issuing the storage move.
@@ -343,10 +288,7 @@ impl WgpuProvider {
                     self.create_storage_buffer(emission, cols, "runmat-reduce-nd-moments-mean")?;
                 let ex2_out =
                     self.create_storage_buffer(emission, cols, "runmat-reduce-nd-moments-ex2")?;
-                let mut out_shape = entry.shape.clone();
-                for &d in &reduce {
-                    out_shape[d] = 1;
-                }
+                let out_shape = out_shape.clone();
 
                 match entry.precision {
                     NumericPrecision::F64 => {
