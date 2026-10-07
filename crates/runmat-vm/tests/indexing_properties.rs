@@ -332,7 +332,7 @@ fn fastpath_scatter_multi_columns_and_rows() {
 }
 
 #[test]
-fn func_returns_into_row_col_linear_slices() {
+fn function_single_output_scalar_expands_into_row_col_linear_slices() {
     let src = r#"
 		function [x,y] = g(); x=7; y=8; end
 		A = zeros(2,3);
@@ -346,37 +346,49 @@ fn func_returns_into_row_col_linear_slices() {
 		F = E;
 	"#;
     let vars = execute_source(src).unwrap();
-    // B should have row1 col2..3 set to 7,8
+    // An ordinary RHS expression requests the first function output, which
+    // then scalar-expands across the indexed destination.
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_value::Value::Tensor(t)
-		if t.shape()==vec![2,3] && t.materialize_f64()==vec![0.0,0.0, 7.0,0.0, 8.0,0.0])));
-    // D should have col1 rows 1..2 set to 7,8
+		if t.shape()==vec![2,3] && t.materialize_f64()==vec![0.0,0.0, 7.0,0.0, 7.0,0.0])));
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_value::Value::Tensor(t)
-		if t.shape()==vec![3,2] && t.materialize_f64()[0]==7.0 && t.materialize_f64()[1]==8.0)));
-    // F should have indices 1 and 9 set to 7 and 8
+		if t.shape()==vec![3,2] && t.materialize_f64()[0]==7.0 && t.materialize_f64()[1]==7.0)));
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_value::Value::Tensor(t)
-		if t.shape()==vec![3,3] && t.materialize_f64()[0]==7.0 && t.materialize_f64()[8]==8.0)));
+		if t.shape()==vec![3,3] && t.materialize_f64()[0]==7.0 && t.materialize_f64()[8]==7.0)));
 }
 
 #[test]
-fn cell_expansion_into_row_col_linear_slices() {
+fn function_single_vector_output_assigns_slice_elements() {
+    let vars =
+        execute_source("function values = g(); values = [7,8]; end; A=zeros(1,3); A(2:3)=g();")
+            .expect("one vector output should assign matching slice elements");
+    assert!(vars.iter().any(|value| matches!(
+        value,
+        runmat_value::Value::Tensor(tensor)
+            if tensor.shape() == vec![1, 3]
+                && tensor.materialize_f64() == vec![0.0, 7.0, 8.0]
+    )));
+}
+
+#[test]
+fn cell_list_concatenation_assigns_row_col_linear_slices() {
     let src = r#"
 		A = zeros(2,3);
 		C = {7,8};
-		A(1, 2:3) = C{:}; % row slice two elements
+		A(1, 2:3) = [C{:}]; % explicitly concatenate the comma-separated list
 		B = A;
 		D = zeros(3,2);
 		E = {11,12};
-		D(1:2, 1) = E{:}; % column slice two elements
+		D(1:2, 1) = [E{:}];
 		F = D;
 		G = reshape([1:9],3,3);
 		H = {70,80};
-		G([1 9]) = H{:};   % linear slice two positions
+		G([1 9]) = [H{:}];
 		I = G;
 	"#;
     let vars = execute_source(src).unwrap();

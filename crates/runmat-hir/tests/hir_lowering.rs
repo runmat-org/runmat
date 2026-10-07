@@ -1008,6 +1008,28 @@ fn multi_output_assignment_records_requested_outputs_and_discard() {
 }
 
 #[test]
+fn indexed_assignment_requests_one_rhs_function_output() {
+    let result = lower_result(
+        r#"
+function [first, second] = pair()
+  first = 7;
+  second = 8;
+end
+A = zeros(1, 2);
+A(1:2) = pair();
+"#,
+    );
+
+    let pair = result
+        .hir_index
+        .calls
+        .iter()
+        .find(|call| call.name.display_name().as_deref() == Some("pair"))
+        .expect("indexed assignment RHS call");
+    assert_eq!(pair.requested_outputs, RequestedOutputCount::One);
+}
+
+#[test]
 fn ordinary_builtin_args_do_not_infer_outputs_from_last_call_argument() {
     let result = lower_result(
         r#"
@@ -1620,23 +1642,39 @@ fn undefined_variable_errors_have_stable_identifier() {
 }
 
 #[test]
-fn ragged_tensor_literal_rejected_with_identifier() {
-    let ast = runmat_parser::parse("x = [1 2; 3];").unwrap();
-    let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
-    assert_eq!(
-        err.identifier.as_deref(),
-        Some("RunMat:AggregateShapeMismatch")
-    );
+fn tensor_literal_preserves_syntactic_rows_for_realized_shape_validation() {
+    let assembly = lower_semantic("x = [1 2; 3];");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let HirStmtKind::Assign(_, value, _) = &function.body.statements[0].kind else {
+        panic!("expected tensor assignment");
+    };
+    let HirExprKind::Tensor(rows) = &value.kind else {
+        panic!("expected tensor literal");
+    };
+    assert_eq!(rows.iter().map(Vec::len).collect::<Vec<_>>(), vec![2, 1]);
 }
 
 #[test]
-fn ragged_cell_literal_rejected_with_identifier() {
-    let ast = runmat_parser::parse("x = {1, 2; 3};").unwrap();
-    let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
-    assert_eq!(
-        err.identifier.as_deref(),
-        Some("RunMat:AggregateShapeMismatch")
-    );
+fn cell_literal_preserves_syntactic_rows_for_realized_shape_validation() {
+    let assembly = lower_semantic("x = {1, 2; 3};");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let HirStmtKind::Assign(_, value, _) = &function.body.statements[0].kind else {
+        panic!("expected cell assignment");
+    };
+    let HirExprKind::Cell(rows) = &value.kind else {
+        panic!("expected cell literal");
+    };
+    assert_eq!(rows.iter().map(Vec::len).collect::<Vec<_>>(), vec![2, 1]);
 }
 
 #[test]
@@ -2167,7 +2205,7 @@ fn discarded_subscript_chain_has_statement_context_independent_of_output_arity()
 }
 
 #[test]
-fn single_contextual_end_index_uses_typed_subscript_path() {
+fn single_contextual_end_binding_uses_typed_index_path() {
     let assembly = lower_semantic("obj = 1; y = obj(end);");
     let entry = assembly.modules[0].synthetic_entry_function.unwrap();
     let function = assembly
@@ -2178,20 +2216,16 @@ fn single_contextual_end_index_uses_typed_subscript_path() {
     let HirStmtKind::Assign(_, value, _) = &function.body.statements[1].kind else {
         panic!("expected assignment");
     };
-    let HirExprKind::SubscriptChain(chain) = &value.kind else {
-        panic!("expected contextual indexing to use the typed subscript path");
+    let HirExprKind::Index(base, indexing) = &value.kind else {
+        panic!("expected contextual binding indexing to use the typed index path");
     };
-    assert_eq!(chain.steps.len(), 1);
+    assert!(matches!(&base.kind, HirExprKind::Binding(_)));
+    assert_eq!(indexing.kind, IndexKind::Paren);
+    assert_eq!(indexing.result_context, IndexResultContext::ReadSingle);
     assert!(matches!(
-        chain.steps.as_slice(),
-        [runmat_hir::HirSubscriptStep::Index(indexing)]
-            if matches!(indexing.components.as_slice(), [runmat_hir::IndexComponent::End { .. }])
+        indexing.components.as_slice(),
+        [IndexComponent::Expr(end)] if matches!(&end.kind, HirExprKind::End)
     ));
-    assert_eq!(chain.sequence_use, runmat_types::SequenceUse::RequireSingle);
-    assert_eq!(
-        chain.context,
-        runmat_types::ObjectIndexingContext::Expression
-    );
 }
 
 #[test]

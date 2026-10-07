@@ -2140,6 +2140,36 @@ fn analysis_store_preserves_log2_requested_output_contract() {
 }
 
 #[test]
+fn indexed_assignment_mir_preserves_single_rhs_output_request() {
+    let mir = lower_mir(
+        r#"
+function [first, second] = pair()
+  first = 7;
+  second = 8;
+end
+A = zeros(1, 2);
+A(1:2) = pair();
+"#,
+    );
+    let entrypoint = mir.entrypoints[0];
+    let body = mir.bodies.get(&entrypoint).expect("entrypoint MIR body");
+    let pair = body
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|statement| match &statement.kind {
+            MirStmtKind::Assign {
+                place: MirPlace::Index(_, _),
+                value: MirRvalue::Call(call),
+                ..
+            } => Some(call),
+            _ => None,
+        })
+        .expect("indexed assignment RHS call");
+    assert_eq!(pair.requested_outputs, RequestedOutputCount::One);
+}
+
+#[test]
 fn analysis_store_preserves_numeric_limit_identity_and_literal_class() {
     for (name, class_name, expected_class) in [
         ("intmin", "uint64", NumericClass::UInt64),

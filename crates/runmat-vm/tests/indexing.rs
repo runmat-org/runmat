@@ -190,17 +190,21 @@ fn cell_paren_range_index_returns_cell_subset() {
 }
 
 #[test]
-fn range_start_selector_rejects_non_numeric_value() {
-    let err = execute_source("A=1:5; s='x'; y=A(s:end);")
-        .expect_err("non-numeric range start selector should fail");
-    assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+fn character_range_start_uses_character_code() {
+    let values = execute_source("A=1:5; s='x'; y=A(s:end);")
+        .expect("character range start should use its character code");
+    let Value::Tensor(selected) = &values[2] else {
+        panic!("expected y to be an empty tensor, got {:?}", values[2]);
+    };
+    assert_eq!(selected.shape(), vec![1, 0]);
+    assert!(selected.materialize_f64().is_empty());
 }
 
 #[test]
-fn range_step_selector_rejects_non_numeric_value() {
-    let err = execute_source("A=1:10; st='x'; y=A(1:st:end);")
-        .expect_err("non-numeric range step selector should fail");
-    assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+fn character_range_step_uses_character_code() {
+    let values = execute_source("A=[37,42,55]; st='x'; y=A(1:st:end);")
+        .expect("character range step should use its character code");
+    assert!(matches!(&values[2], Value::Num(number) if *number == 37.0));
 }
 
 #[test]

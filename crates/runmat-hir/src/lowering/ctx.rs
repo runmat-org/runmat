@@ -3760,6 +3760,14 @@ fn requested_outputs_for_lvalue_assignment(
     lvalue: &runmat_parser::LValue,
     expr: &AstExpr,
 ) -> RequestedOutputCount {
+    // Parenthesis indexing is one assignment destination.  Its cardinality
+    // constrains the shape of the one RHS value; it does not request multiple
+    // function outputs.  Comma-separated destinations (including brace
+    // targets) are represented separately and retain their output-cardinality
+    // selection below.
+    if matches!(lvalue, runmat_parser::LValue::Index(_, _)) {
+        return RequestedOutputCount::One;
+    }
     if !matches!(expr, AstExpr::FuncCall(_, _, _) | AstExpr::Ident(_, _)) {
         return RequestedOutputCount::One;
     }
