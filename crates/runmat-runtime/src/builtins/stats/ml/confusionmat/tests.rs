@@ -106,6 +106,34 @@ fn confusionmat(group: Value, grouphat: Value, rest: Vec<Value>, outputs: usize)
     })
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn confusionmat_accepts_rank_zero_and_rank_one_numeric_labels() {
+    let scalar = confusionmat(
+        tensor(vec![1.0], Vec::new()),
+        tensor(vec![1.0], Vec::new()),
+        Vec::new(),
+        1,
+    );
+    let Value::Tensor(scalar) = &scalar[0] else {
+        panic!("scalar confusion matrix");
+    };
+    assert_eq!(scalar.shape(), &[1, 1]);
+    assert_eq!(scalar.materialize_f64(), vec![1.0]);
+
+    let vector = confusionmat(
+        tensor(vec![1.0, 2.0], vec![2]),
+        tensor(vec![1.0, 2.0], vec![2]),
+        Vec::new(),
+        1,
+    );
+    let Value::Tensor(vector) = &vector[0] else {
+        panic!("vector confusion matrix");
+    };
+    assert_eq!(vector.shape(), &[2, 2]);
+    assert_eq!(vector.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
+}
+
 #[test]
 fn counts_numeric_labels_in_sorted_order() {
     let values = confusionmat(
@@ -117,7 +145,7 @@ fn counts_numeric_labels_in_sorted_order() {
     let Value::Tensor(c) = &values[0] else {
         panic!("matrix");
     };
-    assert_eq!(c.shape, vec![3, 3]);
+    assert_eq!(c.shape(), &[3, 3]);
     assert_eq!(
         c.materialize_f64(),
         vec![0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0]
@@ -279,7 +307,7 @@ fn resident_floating_labels_use_the_resident_extension_gate() {
         let handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &data,
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             })
             .expect("upload");
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -310,7 +338,7 @@ fn honors_explicit_order_and_ignores_missing_labels() {
     let Value::Tensor(c) = &values[0] else {
         panic!("matrix");
     };
-    assert_eq!(c.shape, vec![3, 3]);
+    assert_eq!(c.shape(), &[3, 3]);
     assert_eq!(
         c.materialize_f64(),
         vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0]
@@ -347,7 +375,7 @@ fn supports_string_and_cell_text_labels() {
     let Value::Tensor(c) = &values[0] else {
         panic!("matrix");
     };
-    assert_eq!(c.shape, vec![2, 2]);
+    assert_eq!(c.shape(), &[2, 2]);
     assert_eq!(c.materialize_f64(), vec![1.0, 1.0, 1.0, 0.0]);
     let Value::StringArray(order) = &values[1] else {
         panic!("order");
@@ -361,7 +389,7 @@ fn inferred_logical_order_contains_false_and_true() {
     let Value::Tensor(c) = &values[0] else {
         panic!("matrix");
     };
-    assert_eq!(c.shape, vec![2, 2]);
+    assert_eq!(c.shape(), &[2, 2]);
     assert_eq!(c.materialize_f64(), vec![0.0, 0.0, 0.0, 1.0]);
     let Value::LogicalArray(order) = &values[1] else {
         panic!("order");
@@ -418,7 +446,7 @@ fn supports_categorical_labels_in_category_order() {
     let Value::Tensor(c) = &values[0] else {
         panic!("matrix");
     };
-    assert_eq!(c.shape, vec![3, 3]);
+    assert_eq!(c.shape(), &[3, 3]);
     assert_eq!(
         c.materialize_f64(),
         vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]

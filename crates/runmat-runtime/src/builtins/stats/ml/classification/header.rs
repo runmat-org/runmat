@@ -143,7 +143,7 @@ fn preflight_host_predictor(value: &Value, role: &str) -> BuiltinResult<()> {
 
 pub(super) fn preflight_numeric_vector(value: &Value, role: &str) -> BuiltinResult<()> {
     let shape = match value {
-        Value::Tensor(tensor) => tensor.shape.as_slice(),
+        Value::Tensor(tensor) => tensor.shape(),
         Value::GpuTensor(handle) => {
             if handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real
                 || runmat_accelerate_api::handle_is_logical(handle)
@@ -171,7 +171,7 @@ pub(super) fn preflight_numeric_vector(value: &Value, role: &str) -> BuiltinResu
 
 fn predictor_geometry(value: &Value, role: &str) -> BuiltinResult<(usize, usize)> {
     let shape = match value {
-        Value::Tensor(tensor) => tensor.shape.as_slice(),
+        Value::Tensor(tensor) => tensor.shape(),
         Value::LogicalArray(array) => array.shape.as_slice(),
         Value::GpuTensor(handle) => {
             if handle.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real {
@@ -202,7 +202,7 @@ fn predictor_geometry(value: &Value, role: &str) -> BuiltinResult<(usize, usize)
 pub(super) fn group_count(value: &Value) -> BuiltinResult<Option<usize>> {
     let count = match value {
         Value::Tensor(tensor) => {
-            ensure_group_vector(&tensor.shape)?;
+            ensure_group_vector(tensor.shape())?;
             Some(tensor.len())
         }
         Value::LogicalArray(array) => {

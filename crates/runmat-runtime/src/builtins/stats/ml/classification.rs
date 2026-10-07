@@ -292,17 +292,31 @@ fn classify_compute(
 fn numeric_matrix(value: Value, name: &str) -> BuiltinResult<FloatingMatrix> {
     let tensor = tensor::value_into_tensor_for(CLASSIFY_NAME, value)
         .map_err(|err| invalid_argument(format!("classify: {name}: {err}")))?;
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(invalid_argument(format!(
             "classify: {name} must be a 2-D numeric matrix"
         )));
     }
     ensure_exact_integer_tensor_boundary(&tensor, name)?;
+    let (rows, cols) = classification_matrix_dimensions(&tensor);
     Ok(FloatingMatrix {
         values: tensor.materialize_f64(),
-        rows: tensor.rows,
-        cols: tensor.cols,
+        rows,
+        cols,
     })
+}
+
+/// Matrix geometry used by the classifier's column-major numerical core.
+///
+/// A rank-one dense value is one row with `n` predictors, while rank zero has
+/// no matrix geometry. The predictor header applies its own separate shape
+/// projection before this numerical matrix is materialized.
+fn classification_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
 }
 
 fn parse_type(value: &Value) -> BuiltinResult<DiscriminantType> {

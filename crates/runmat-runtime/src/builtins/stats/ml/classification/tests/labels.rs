@@ -81,7 +81,7 @@ fn classify_empirical_prior_and_missing_labels() {
         let Value::Tensor(posterior) = &values[2] else {
             panic!("posterior");
         };
-        assert_eq!(posterior.shape, vec![2, 2]);
+        assert_eq!(posterior.shape(), &[2, 2]);
     });
 }
 

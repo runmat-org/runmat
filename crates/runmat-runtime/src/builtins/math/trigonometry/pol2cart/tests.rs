@@ -20,7 +20,7 @@ fn single_xy_and_elevation_keep_independent_classes() {
             panic!("tensor")
         };
         assert_eq!(t.numeric_dtype(), runmat_value::NumericDType::F32);
-        assert_eq!(t.shape, vec![1, 2, 2]);
+        assert_eq!(t.shape(), &[1, 2, 2]);
     }
     let Value::Tensor(z) = &outputs[2] else {
         panic!("elevation tensor")
@@ -41,7 +41,7 @@ fn one_dimensional_storage_is_aligned_as_row_and_empty_nd_stays_empty() {
     let Value::Tensor(out) = outputs else {
         panic!("tensor")
     };
-    assert_eq!(out.shape, vec![2, 3]);
+    assert_eq!(out.shape(), &[2, 3]);
     assert_eq!(out.materialize_f64(), vec![2.0, 4.0, 2.0, 4.0, 2.0, 4.0]);
     let output = call(
         Value::Tensor(Tensor::from_f32(Vec::new(), vec![0, 1, 2]).unwrap()),
@@ -52,8 +52,40 @@ fn one_dimensional_storage_is_aligned_as_row_and_empty_nd_stays_empty() {
     let Value::Tensor(out) = output else {
         panic!("empty tensor")
     };
-    assert_eq!(out.shape, vec![0, 3, 2]);
+    assert_eq!(out.shape(), &[0, 3, 2]);
     assert_eq!(out.numeric_dtype(), runmat_value::NumericDType::F32);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn low_rank_coordinates_preserve_requested_outputs_and_row_broadcasting() {
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    let scalar = output_list(
+        call(
+            Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap()),
+            Value::Num(2.0),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
+    assert_eq!(scalar, vec![Value::Num(2.0), Value::Num(0.0)]);
+
+    let outputs = output_list(
+        call(
+            Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![2]).unwrap()),
+            Value::Num(2.0),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
+    assert_eq!(outputs.len(), 2);
+    for (output, expected) in outputs.into_iter().zip([vec![2.0, 2.0], vec![0.0, 0.0]]) {
+        let Value::Tensor(output) = output else {
+            panic!("expected coordinate tensor");
+        };
+        assert_eq!(output.shape(), &[1, 2]);
+        assert_eq!(output.materialize_f64(), expected);
+    }
 }
 
 use crate::builtins::common::test_support;
@@ -184,7 +216,7 @@ fn cylindrical_broadcasts_missing_trailing_dimension() {
     );
     match &outputs[0] {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![3, 4, 2]);
+            assert_eq!(out.shape(), &[3, 4, 2]);
             assert_close(
                 &out.materialize_f64(),
                 &(1..=24).map(|value| value as f64).collect::<Vec<_>>(),
@@ -194,7 +226,7 @@ fn cylindrical_broadcasts_missing_trailing_dimension() {
     }
     match &outputs[1] {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![3, 4, 2]);
+            assert_eq!(out.shape(), &[3, 4, 2]);
             assert_close(&out.materialize_f64(), &[0.0; 24]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -246,11 +278,11 @@ fn empty_inputs_preserve_broadcast_shape() {
     let _guard = crate::output_count::push_output_count(Some(2));
     let outputs = output_list(call(Value::Tensor(theta), Value::Tensor(rho), Vec::new()).unwrap());
     match &outputs[0] {
-        Value::Tensor(out) => assert_eq!(out.shape, vec![0, 3]),
+        Value::Tensor(out) => assert_eq!(out.shape(), &[0, 3]),
         other => panic!("expected empty tensor, got {other:?}"),
     }
     match &outputs[1] {
-        Value::Tensor(out) => assert_eq!(out.shape, vec![0, 3]),
+        Value::Tensor(out) => assert_eq!(out.shape(), &[0, 3]),
         other => panic!("expected empty tensor, got {other:?}"),
     }
 }

@@ -426,7 +426,7 @@ fn parse_cost(value: &Value) -> BuiltinResult<[[f64; 2]; 2]> {
         Value::Tensor(tensor) => tensor,
         _ => return Err(invalid("perfcurve: Cost must be a 2-by-2 numeric matrix")),
     };
-    if tensor.shape.as_slice() != [2, 2] {
+    if tensor.shape() != [2, 2] {
         return Err(invalid("perfcurve: Cost must be a 2-by-2 numeric matrix"));
     }
     let values = tensor::tensor_values_f64(tensor);
@@ -444,7 +444,7 @@ fn parse_cost(value: &Value) -> BuiltinResult<[[f64; 2]; 2]> {
 fn score_vector(value: Value) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
-            ensure_vector_shape(&tensor.shape, "scores")?;
+            ensure_vector_shape(tensor.shape(), "scores")?;
             Ok(tensor::tensor_into_values_f64(tensor))
         }
         Value::Num(value) => Ok(vec![value]),
@@ -458,7 +458,7 @@ fn score_vector(value: Value) -> BuiltinResult<Vec<f64>> {
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
-            ensure_vector_shape(&tensor.shape, name)?;
+            ensure_vector_shape(tensor.shape(), name)?;
             Ok(tensor::tensor_values_f64(tensor))
         }
         Value::Num(value) => Ok(vec![*value]),

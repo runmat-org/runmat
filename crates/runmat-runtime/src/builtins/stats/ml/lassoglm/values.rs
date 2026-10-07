@@ -175,7 +175,7 @@ pub(super) fn bounded_usize(value: &Value, label: &str, max: usize) -> BuiltinRe
 pub(super) fn numeric_vector(value: &Value, label: &str) -> BuiltinResult<Vec<f64>> {
     let data = match value {
         Value::Tensor(tensor) => {
-            if !is_vector_shape(&tensor.shape) {
+            if !is_vector_shape(tensor.shape()) {
                 return Err(invalid(format!(
                     "lassoglm: {label} must be a numeric vector"
                 )));

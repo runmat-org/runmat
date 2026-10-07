@@ -13,13 +13,13 @@ pub(super) fn response_values(
     }
     match distribution {
         Distribution::Normal => {
-            if !is_vector_shape(&tensor.shape) {
+            if !is_vector_shape(tensor.shape()) {
                 return Err(invalid("lassoglm: normal Y must be a vector"));
             }
             Ok((values, Vec::new()))
         }
         Distribution::Poisson => {
-            if !is_vector_shape(&tensor.shape) {
+            if !is_vector_shape(tensor.shape()) {
                 return Err(invalid("lassoglm: poisson Y must be a vector"));
             }
             if values.iter().any(|value| *value < 0.0) {
@@ -49,7 +49,7 @@ pub(super) fn response_values(
                 }
                 Ok((successes, trials))
             } else {
-                if !is_vector_shape(&tensor.shape) {
+                if !is_vector_shape(tensor.shape()) {
                     return Err(invalid(
                         "lassoglm: binomial Y must be a vector or two-column count matrix",
                     ));

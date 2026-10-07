@@ -49,7 +49,7 @@ fn normal_explicit_lambda_matches_linear_trend() {
     let Value::Tensor(coeffs) = b else {
         panic!("expected B tensor");
     };
-    assert_eq!(coeffs.shape, vec![1, 1]);
+    assert_eq!(coeffs.shape(), &[1, 1]);
     assert!((coeffs.materialize_f64()[0] - 2.0).abs() < 1.0e-3);
     let Value::Struct(info) = fit_info else {
         panic!("expected FitInfo");
@@ -58,6 +58,58 @@ fn normal_explicit_lambda_matches_linear_trend() {
     assert!((intercept.materialize_f64()[0] - 1.0).abs() < 1.0e-3);
     assert!(info.fields.contains_key("Deviance"));
     assert!(info.fields.contains_key("Distribution"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn lassoglm_rank_zero_response_reaches_row_count_admission() {
+    let error = block_on(lassoglm_builtin(
+        tensor(vec![0.0, 1.0], vec![2, 1]),
+        tensor(vec![1.0], Vec::new()),
+        Value::String("normal".into()),
+        vec![Value::String("Lambda".into()), Value::Num(0.0)],
+    ))
+    .expect_err("one rank-zero response cannot match two observations");
+    assert!(error
+        .message()
+        .contains("Y length 1 must match the number of rows in X (2)"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn lassoglm_rank_one_response_retains_vector_admission() {
+    let output = block_on(lassoglm_builtin(
+        tensor(vec![0.0, 1.0], vec![2, 1]),
+        tensor(vec![1.0, 3.0], vec![2]),
+        Value::String("normal".into()),
+        vec![
+            Value::String("Lambda".into()),
+            Value::Num(0.0),
+            Value::String("Standardize".into()),
+            Value::Bool(false),
+        ],
+    ))
+    .expect("rank-one response");
+    let Value::Tensor(coefficients) = output else {
+        panic!("lassoglm coefficients");
+    };
+    assert_eq!(coefficients.shape(), &[1, 1]);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn lassoglm_numeric_options_retain_vector_shape_admission() {
+    assert_eq!(
+        numeric_vector(&tensor(vec![0.25], Vec::new()), "Lambda").unwrap(),
+        vec![0.25]
+    );
+    assert_eq!(
+        numeric_vector(&tensor(vec![0.25, 0.5], vec![2]), "Lambda").unwrap(),
+        vec![0.25, 0.5]
+    );
+    let error = numeric_vector(&tensor(vec![0.25; 4], vec![2, 2]), "Lambda")
+        .expect_err("matrix option is not a vector");
+    assert!(error.message().contains("Lambda must be a numeric vector"));
 }
 
 #[test]
@@ -81,7 +133,7 @@ fn binomial_and_poisson_paths_return_fitinfo() {
     let Value::Tensor(coeffs) = b else {
         panic!("expected B tensor");
     };
-    assert_eq!(coeffs.shape, vec![1, 2]);
+    assert_eq!(coeffs.shape(), &[1, 2]);
     let Value::Struct(info) = fit_info else {
         panic!("expected FitInfo");
     };
@@ -109,7 +161,7 @@ fn binomial_and_poisson_paths_return_fitinfo() {
     let Value::Tensor(coeffs) = b else {
         panic!("expected B tensor");
     };
-    assert_eq!(coeffs.shape, vec![1, 1]);
+    assert_eq!(coeffs.shape(), &[1, 1]);
     assert!(coeffs.materialize_f64()[0].is_finite());
 }
 
@@ -136,7 +188,7 @@ fn binomial_size_and_single_row_count_response_are_supported() {
     let Value::Tensor(coeffs) = b else {
         panic!("expected B tensor");
     };
-    assert_eq!(coeffs.shape, vec![1, 2]);
+    assert_eq!(coeffs.shape(), &[1, 2]);
     let Value::Struct(info) = fit_info else {
         panic!("expected FitInfo");
     };
@@ -161,7 +213,7 @@ fn binomial_size_and_single_row_count_response_are_supported() {
     let Value::Tensor(coeffs) = b else {
         panic!("expected B tensor");
     };
-    assert_eq!(coeffs.shape, vec![1, 1]);
+    assert_eq!(coeffs.shape(), &[1, 1]);
 }
 
 #[test]
@@ -285,7 +337,7 @@ fn lassoglm_reads_typed_integer_storage_exactly() {
     let Value::Tensor(coeffs) = b else {
         panic!("expected B tensor");
     };
-    assert_eq!(coeffs.shape, vec![1, 1]);
+    assert_eq!(coeffs.shape(), &[1, 1]);
     assert!((coeffs.materialize_f64()[0] - 2.0).abs() < 1.0e-3);
     let Value::Struct(info) = fit_info else {
         panic!("expected FitInfo");
@@ -380,7 +432,7 @@ fn lassoglm_reads_typed_integer_binomial_counts_exactly() {
     let Value::Tensor(coeffs) = out else {
         panic!("expected B tensor");
     };
-    assert_eq!(coeffs.shape, vec![1, 1]);
+    assert_eq!(coeffs.shape(), &[1, 1]);
     assert!(coeffs.materialize_f64()[0].is_finite());
 }
 

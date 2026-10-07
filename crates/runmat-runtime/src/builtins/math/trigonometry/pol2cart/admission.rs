@@ -18,7 +18,7 @@ pub(super) fn admit(inputs: &[Value], outputs: Option<usize>) -> BuiltinResult<V
     for value in inputs {
         let next = match value {
             Value::Num(_) | Value::Int(_) => vec![1, 1],
-            Value::Tensor(tensor) => tensor.shape.clone(),
+            Value::Tensor(tensor) => tensor.shape().to_vec(),
             Value::GpuTensor(handle) => {
                 if gpu_helpers::exact_provider_for_handle(handle).is_none() {
                     return Err(pol2cart_error(

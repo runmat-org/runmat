@@ -241,7 +241,7 @@ fn atan2_host(y: Value, x: Value) -> BuiltinResult<Value> {
 }
 
 fn compute_atan2_tensor(y: &Tensor, x: &Tensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&y.shape, &x.shape)
+    let plan = BroadcastPlan::new(y.shape(), x.shape())
         .map_err(|e| atan2_error_with_detail(&ATAN2_ERROR_SIZE_MISMATCH, e))?;
     let y_dtype = y.numeric_dtype();
     let x_dtype = x.numeric_dtype();

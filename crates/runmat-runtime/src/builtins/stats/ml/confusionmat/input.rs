@@ -2,7 +2,7 @@ use super::*;
 pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<LabelVector> {
     match value {
         Value::Tensor(tensor) => {
-            ensure_vector_shape(&tensor.shape, name)?;
+            ensure_vector_shape(tensor.shape(), name)?;
             if let Some(storage) = tensor.integer_storage() {
                 Ok(LabelVector { labels: storage.exact_values().into_iter().map(Label::Integer).collect(), kind: LabelKind::Integer(storage.numeric_dtype()), categories: None })
             } else {
@@ -89,7 +89,7 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
 }
 
 pub(super) fn vector_values(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f64>> {
-    ensure_vector_shape(&tensor.shape, name)?;
+    ensure_vector_shape(tensor.shape(), name)?;
     Ok(tensor::tensor_values_f64(tensor))
 }
 
@@ -117,7 +117,7 @@ pub(super) fn ensure_categorical_vector_shape(
     name: &str,
 ) -> BuiltinResult<()> {
     match object.properties.get("Codes") {
-        Some(Value::Tensor(tensor)) => ensure_vector_shape(&tensor.shape, name),
+        Some(Value::Tensor(tensor)) => ensure_vector_shape(tensor.shape(), name),
         Some(_) => Err(invalid("confusionmat: categorical Codes must be numeric")),
         None => Ok(()),
     }

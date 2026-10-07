@@ -159,7 +159,7 @@ pub(super) fn convert_real_to_complex(value: Value) -> BuiltinResult<Value> {
             let data: Vec<(f64, f64)> = values.iter().map(|&v| (v, 0.0)).collect();
             let tensor = ComplexTensor::from_f64_values_with_dtype(
                 data,
-                tensor.shape.clone(),
+                tensor.shape().to_vec(),
                 tensor.numeric_dtype(),
             )
             .map_err(|e| atan_error_with_detail(&ATAN_ERROR_INTERNAL, e))?;

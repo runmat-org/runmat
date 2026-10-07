@@ -76,6 +76,21 @@ fn perfcurve_scalar_bool_rejects_wide_uint64_option() {
     assert!(scalar_bool(&Value::Int(runmat_value::IntValue::U64(u64::MAX)), "option").is_err());
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn perfcurve_rank_zero_score_reaches_observation_count_admission() {
+    let error = block_on(perfcurve_builtin(
+        tensor(&[1.0, 0.0], &[2]),
+        tensor(&[0.5], &[]),
+        Value::Num(1.0),
+        Vec::new(),
+    ))
+    .expect_err("one rank-zero score cannot match two labels");
+    assert!(error
+        .message()
+        .contains("labels and scores must contain the same number of observations"));
+}
+
 #[test]
 fn wide_integer_class_identity_and_exact_score_boundary() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
@@ -99,7 +114,7 @@ fn wide_integer_class_identity_and_exact_score_boundary() {
     ))
     .expect("exactly representable wide scores and adjacent exact class labels");
     match result {
-        Value::Tensor(curve) => assert_eq!(curve.shape[1], 1),
+        Value::Tensor(curve) => assert_eq!(curve.shape()[1], 1),
         other => panic!("expected ROC curve, got {other:?}"),
     }
     let error = block_on(perfcurve_builtin(
@@ -245,9 +260,9 @@ async fn default_roc_returns_thresholds_auc_and_optimal_point() {
     let x = output_tensor(&result, 0);
     let y = output_tensor(&result, 1);
     let thresholds = output_tensor(&result, 2);
-    assert_eq!(x.shape, vec![5, 1]);
-    assert_eq!(y.shape, vec![5, 1]);
-    assert_eq!(thresholds.shape, vec![5, 1]);
+    assert_eq!(x.shape(), &[5, 1]);
+    assert_eq!(y.shape(), &[5, 1]);
+    assert_eq!(thresholds.shape(), &[5, 1]);
     assert!((output_num(&result, 3) - 0.75).abs() < 1.0e-12);
     assert_eq!(x.materialize_f64()[0], 0.0);
     assert_eq!(y.materialize_f64()[0], 0.0);
@@ -258,7 +273,7 @@ async fn default_roc_returns_thresholds_auc_and_optimal_point() {
     assert_eq!(x.materialize_f64()[4], 1.0);
     assert_eq!(y.materialize_f64()[4], 1.0);
     let opt = output_tensor(&result, 4);
-    assert_eq!(opt.shape, vec![1, 2]);
+    assert_eq!(opt.shape(), &[1, 2]);
 }
 
 #[tokio::test]
@@ -280,8 +295,8 @@ async fn perfcurve_accepts_typed_integer_labels_scores_and_weights() {
     )
     .await
     .unwrap();
-    assert_eq!(output_tensor(&result, 0).shape, vec![5, 1]);
-    assert_eq!(output_tensor(&result, 1).shape, vec![5, 1]);
+    assert_eq!(output_tensor(&result, 0).shape(), &[5, 1]);
+    assert_eq!(output_tensor(&result, 1).shape(), &[5, 1]);
     assert!(output_num(&result, 3).is_finite());
 }
 
@@ -321,8 +336,8 @@ async fn supports_text_labels_negclass_weights_and_precision_recall() {
     let x = output_tensor(&result, 0);
     let y = output_tensor(&result, 1);
     let suby = output_tensor(&result, 5);
-    assert_eq!(x.shape, vec![4, 1]);
-    assert_eq!(suby.shape, vec![4, 1]);
+    assert_eq!(x.shape(), &[4, 1]);
+    assert_eq!(suby.shape(), &[4, 1]);
     assert!(y
         .materialize_f64()
         .iter()
@@ -351,7 +366,7 @@ async fn xvals_nearest_returns_actual_points_and_interpolation_sorts_targets() {
     .await
     .unwrap();
     let x = output_tensor(&result, 0);
-    assert_eq!(x.shape, vec![2, 1]);
+    assert_eq!(x.shape(), &[2, 1]);
     assert_eq!(x.materialize_f64(), vec![0.5, 0.0]);
     assert!(output_num(&result, 3).is_finite());
 

@@ -35,13 +35,13 @@ pub(super) async fn try_pol2cart_gpu(
                 let mut tensor = value_into_real_tensor(value.clone())?;
                 if tensor.integer_storage().is_some() {
                     // Admission proved every authored integer exactly representable.
-                    tensor = Tensor::new(tensor.materialize_f64(), tensor.shape.clone())
+                    tensor = Tensor::new(tensor.materialize_f64(), tensor.shape().to_vec())
                         .map_err(|error| pol2cart_error(&ERROR_INTERNAL, error))?;
                 }
                 let uploaded =
                     gpu_helpers::upload_tensor_protecting(provider, &tensor, &outputs.protected())
                         .map_err(upload_error)?;
-                outputs.adopt(provider, uploaded, anchor, &tensor.shape, precision)?
+                outputs.adopt(provider, uploaded, anchor, tensor.shape(), precision)?
             }
         };
         operands.push(handle);

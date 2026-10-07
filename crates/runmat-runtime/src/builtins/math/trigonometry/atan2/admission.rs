@@ -12,7 +12,7 @@ fn operand(value: &Value) -> BuiltinResult<Operand<'_>> {
         Value::Num(_) => (&[1, 1], true),
         Value::Int(_) | Value::Bool(_) => (&[1, 1], false),
         Value::Tensor(tensor) => (
-            &tensor.shape,
+            tensor.shape(),
             matches!(
                 tensor.numeric_dtype(),
                 NumericDType::F32 | NumericDType::F64

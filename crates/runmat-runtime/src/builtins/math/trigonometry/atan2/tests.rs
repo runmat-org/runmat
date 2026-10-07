@@ -25,6 +25,30 @@ fn atan2_scalar_pair() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn atan2_preserves_rank_zero_scalarization_and_rank_one_broadcast_shape() {
+    let scalar = atan2_builtin(
+        Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap()),
+        Value::Num(1.0),
+    )
+    .expect("rank-zero atan2");
+    assert_eq!(scalar, Value::Num(0.0));
+
+    let vector = atan2_builtin(
+        Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2]).unwrap()),
+        Value::Num(1.0),
+    )
+    .expect("rank-one atan2 broadcast");
+    let Value::Tensor(vector) = vector else {
+        panic!("expected broadcast tensor")
+    };
+    assert_eq!(vector.shape(), &[1, 2]);
+    let values = vector.materialize_f64();
+    assert_eq!(values[0], 0.0);
+    assert!((values[1] - PI / 4.0).abs() < EPS);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn atan2_quadrant_detection() {
     let result = atan2_builtin(Value::Num(-1.0), Value::Num(-1.0)).expect("atan2");
@@ -41,7 +65,7 @@ fn atan2_matrix_vs_scalar_broadcast() {
     let result = atan2_builtin(Value::Tensor(matrix), Value::Num(2.0)).expect("broadcast");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             let expected = [
                 (1.0f64).atan2(2.0),
                 (2.0f64).atan2(2.0),
@@ -64,7 +88,7 @@ fn atan2_row_vector_broadcast() {
     let result = atan2_builtin(Value::Tensor(y), Value::Tensor(x)).expect("row broadcast");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             let expected = [
                 (1.0f64).atan2(1.0),
                 (-1.0f64).atan2(1.0),
@@ -152,7 +176,7 @@ fn atan2_typed_integer_tensors_read_exact_storage() {
     let result = atan2_builtin(Value::Tensor(y), Value::Tensor(x)).expect("atan2");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             let expected = [
                 (1.0f64).atan2(1.0),
                 (-1.0f64).atan2(1.0),
@@ -335,7 +359,7 @@ fn atan2_empty_tensor_result() {
     let result = atan2_builtin(Value::Tensor(y), Value::Tensor(x)).expect("atan2");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![0, 3]);
+            assert_eq!(t.shape(), &[0, 3]);
             assert!(t.materialize_f64().is_empty());
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -383,18 +407,18 @@ fn atan2_gpu_provider_roundtrip() {
         let hy = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &y.materialize_f64(),
-                shape: &y.shape,
+                shape: y.shape(),
             })
             .expect("upload y");
         let hx = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &x.materialize_f64(),
-                shape: &x.shape,
+                shape: x.shape(),
             })
             .expect("upload x");
         let result = atan2_builtin(Value::GpuTensor(hy), Value::GpuTensor(hx)).expect("gpu atan2");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![1, 7]);
+        assert_eq!(gathered.shape(), &[1, 7]);
         let expected = [
             (1.0f64).atan2(1.0),
             (1.0f64).atan2(-1.0),
@@ -422,12 +446,12 @@ fn atan2_gpu_host_mix_falls_back() {
         let hy = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &y.materialize_f64(),
-                shape: &y.shape,
+                shape: y.shape(),
             })
             .expect("upload y");
         let result = atan2_builtin(Value::GpuTensor(hy), Value::Num(2.0)).expect("atan2");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), &[2, 1]);
         let expected = [(1.0f64).atan2(2.0), (2.0f64).atan2(2.0)];
         for (actual, expect) in gathered.materialize_f64().iter().zip(expected.iter()) {
             assert!((actual - expect).abs() < EPS);
@@ -443,14 +467,14 @@ fn atan2_gpu_host_mix_reads_typed_integer_rhs_exactly() {
         let hy = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &y.materialize_f64(),
-                shape: &y.shape,
+                shape: y.shape(),
             })
             .expect("upload y");
         let x = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1]).unwrap();
 
         let result = atan2_builtin(Value::GpuTensor(hy), Value::Tensor(x)).expect("atan2");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), &[2, 1]);
         assert!((gathered.materialize_f64()[0] - 1.0f64.atan2(1.0)).abs() < EPS);
         assert!((gathered.materialize_f64()[1] - 2.0f64.atan2(2.0)).abs() < EPS);
     });
@@ -464,14 +488,14 @@ fn atan2_gpu_host_mix_reads_typed_integer_lhs_exactly() {
         let hx = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &x.materialize_f64(),
-                shape: &x.shape,
+                shape: x.shape(),
             })
             .expect("upload x");
         let y = Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![2, 1]).unwrap();
 
         let result = atan2_builtin(Value::Tensor(y), Value::GpuTensor(hx)).expect("atan2");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), &[2, 1]);
         assert!((gathered.materialize_f64()[0] - 1.0f64.atan2(1.0)).abs() < EPS);
         assert!((gathered.materialize_f64()[1] - 2.0f64.atan2(2.0)).abs() < EPS);
     });
@@ -492,20 +516,20 @@ fn atan2_wgpu_matches_cpu_elementwise() {
     let hy = provider
         .upload(&runmat_accelerate_api::HostTensorView {
             data: &y.materialize_f64(),
-            shape: &y.shape,
+            shape: y.shape(),
         })
         .unwrap();
     let hx = provider
         .upload(&runmat_accelerate_api::HostTensorView {
             data: &x.materialize_f64(),
-            shape: &x.shape,
+            shape: x.shape(),
         })
         .unwrap();
     let gpu = block_on(atan2_gpu_pair(hy, hx, &[])).unwrap();
     let gathered = test_support::gather(gpu).expect("gather");
     match cpu {
         Value::Tensor(ct) => {
-            assert_eq!(ct.shape, gathered.shape);
+            assert_eq!(ct.shape(), gathered.shape());
             let tol = match provider.precision() {
                 runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                 runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

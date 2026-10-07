@@ -42,7 +42,7 @@ fn classify_linear_predicts_numeric_groups() {
         let Value::Tensor(posterior) = &values[2] else {
             panic!("posterior");
         };
-        assert_eq!(posterior.shape, vec![2, 2]);
+        assert_eq!(posterior.shape(), &[2, 2]);
         let posterior = posterior.as_f64_slice().expect("double posterior");
         assert!(posterior[0] > posterior[2]);
         assert!(posterior[3] > posterior[1]);
@@ -78,12 +78,40 @@ fn classify_materializes_only_requested_prediction_outputs() {
     assert!(linear_coefficients.quadratic.is_none());
 
     let posterior = predict_rows(&model, &sample, true, false).unwrap();
-    assert_eq!(posterior.posterior.as_ref().unwrap().shape, vec![2, 2]);
+    assert_eq!(posterior.posterior.as_ref().unwrap().shape(), &[2, 2]);
     assert!(posterior.logp.is_none());
 
     let complete = predict_rows(&model, &sample, true, true).unwrap();
-    assert_eq!(complete.posterior.as_ref().unwrap().shape, vec![2, 2]);
-    assert_eq!(complete.logp.as_ref().unwrap().shape, vec![2, 1]);
+    assert_eq!(complete.posterior.as_ref().unwrap().shape(), &[2, 2]);
+    assert_eq!(complete.logp.as_ref().unwrap().shape(), &[2, 1]);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn classification_matrix_dimensions_preserve_numerical_core_projection() {
+    let rank_zero = Tensor::new(vec![1.0], Vec::new()).unwrap();
+    let rank_one = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
+    let matrix = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+    assert_eq!(classification_matrix_dimensions(&rank_zero), (0, 0));
+    assert_eq!(classification_matrix_dimensions(&rank_one), (1, 2));
+    assert_eq!(classification_matrix_dimensions(&matrix), (2, 1));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn classify_rank_zero_and_rank_one_inputs_preserve_existing_late_geometry_rejection() {
+    let training = || tensor(vec![0.0, 0.5, 2.0, 2.5], vec![4, 1]);
+    let groups = || tensor(vec![1.0, 1.0, 2.0, 2.0], vec![4, 1]);
+    for sample in [
+        tensor(vec![0.2], Vec::new()),
+        tensor(vec![0.2, 2.2], vec![2]),
+    ] {
+        let error = block_on(classify_builtin(sample, training(), groups(), Vec::new()))
+            .expect_err("header and numerical matrix projections remain distinct");
+        assert!(error
+            .message()
+            .contains("sample and training must have the same number of columns"));
+    }
 }
 
 #[test]

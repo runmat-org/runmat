@@ -350,13 +350,35 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn atan_preserves_rank_zero_scalarization_and_rank_one_shape() {
+        let scalar = atan_builtin(
+            Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap()),
+            Vec::new(),
+        )
+        .expect("rank-zero atan");
+        assert_eq!(scalar, Value::Num(0.0));
+
+        let vector = atan_builtin(
+            Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![2]).unwrap()),
+            Vec::new(),
+        )
+        .expect("rank-one atan");
+        let Value::Tensor(vector) = vector else {
+            panic!("expected rank-one tensor")
+        };
+        assert_eq!(vector.shape(), &[2]);
+        assert_eq!(vector.materialize_f64(), vec![0.0, 0.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atan_tensor_elements() {
         let tensor = Tensor::new(vec![-1.0, 0.0, 1.0], vec![3, 1]).unwrap();
         let result = atan_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("atan");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 for (value, expected) in out
                     .materialize_f64()
                     .iter()
@@ -379,7 +401,7 @@ pub(crate) mod tests {
         let result = atan_builtin(Value::Tensor(tensor), Vec::new()).expect("atan");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 let expected = [0.0, 1.0f64.atan(), 2.0f64.atan()];
                 for (actual, expected) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - expected).abs() < 1e-12);
@@ -406,7 +428,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(out) = result else {
             panic!("expected complex tensor result");
         };
-        assert_eq!(out.shape, vec![3, 1]);
+        assert_eq!(out.shape(), &[3, 1]);
         let expected = [-3.0f64.atan(), 0.0f64.atan(), 5.0f64.atan()];
         for (actual, expected) in out.materialize_f64().iter().zip(expected) {
             assert!((actual.0 - expected).abs() < 1e-12);
@@ -463,7 +485,7 @@ pub(crate) mod tests {
         let result = atan_builtin(Value::ComplexTensor(tensor.clone()), Vec::new()).expect("atan");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), &[2, 1]);
                 for (value, expected) in out.materialize_f64().iter().zip(
                     tensor
                         .materialize_f64()
@@ -488,7 +510,7 @@ pub(crate) mod tests {
         let result = atan_builtin(Value::CharArray(chars.clone()), Vec::new()).expect("atan");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, chars.cols]);
+                assert_eq!(t.shape(), &[1, chars.cols]);
                 for (value, ch) in t.materialize_f64().iter().zip(chars.data.iter()) {
                     let expected = (*ch as u32 as f64).atan();
                     assert!((value - expected).abs() < 1e-12);
@@ -560,7 +582,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![-1.0, 0.0, 1.0], vec![3, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let Value::GpuTensor(result_handle) =
@@ -575,7 +597,7 @@ pub(crate) mod tests {
                 })
             );
             let gathered = test_support::gather(Value::GpuTensor(result_handle)).expect("gather");
-            assert_eq!(gathered.shape, vec![3, 1]);
+            assert_eq!(gathered.shape(), &[3, 1]);
             let expected: Vec<f64> = tensor.materialize_f64().iter().map(|&v| v.atan()).collect();
             assert_eq!(gathered.materialize_f64(), expected);
         });
@@ -588,7 +610,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let input = provider.upload(&view).expect("upload");
             let proto = provider.upload(&view).expect("proto upload");
@@ -634,7 +656,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let proto = provider.upload(&view).expect("upload");
             let err = atan_builtin(
@@ -718,14 +740,14 @@ pub(crate) mod tests {
         let cpu = atan_real(Value::Tensor(tensor.clone())).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).unwrap();
         let gpu = block_on(atan_gpu(handle, &[])).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
-                assert_eq!(gt.shape, ct.shape);
+                assert_eq!(gt.shape(), ct.shape());
                 let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
