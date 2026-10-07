@@ -23,7 +23,7 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) async fn real_to_c
             real_to_complex(context, Value::Tensor(tensor)).await
         }
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let storage = tensor
                 .into_numeric_storage()
                 .map_err(|error| context.internal_error(error))?;

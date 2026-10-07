@@ -22,7 +22,7 @@ where
             (Value::Tensor(a), Value::Tensor(b)) => {
                 matches!(a.numeric_dtype(), NumericDType::F32 | NumericDType::F64)
                     && matches!(b.numeric_dtype(), NumericDType::F32 | NumericDType::F64)
-                    && BroadcastPlan::new(&a.shape, &b.shape).is_ok()
+                    && BroadcastPlan::new(a.shape(), b.shape()).is_ok()
             }
             _ => false,
         };
