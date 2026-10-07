@@ -133,38 +133,8 @@ pub(crate) fn delete_integer_complex_storage_positions(
     .expect("paired integer complex storage must retain matching classes and lengths")
 }
 
-fn validated_assignment_rhs_shape(
-    rhs_shape: &[usize],
-    rhs_len: usize,
-    selection_lengths: &[usize],
-) -> Result<Vec<usize>, RuntimeError> {
-    let dims = selection_lengths.len();
-    if rhs_len == 1 {
-        return Ok(vec![1; dims]);
-    }
-    if dims == 1 {
-        if rhs_len == selection_lengths[0] {
-            return Ok(vec![rhs_len]);
-        }
-        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-    }
-    if rhs_shape.len() > dims && rhs_shape.iter().skip(dims).any(|&dimension| dimension != 1) {
-        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-    }
-    let mut shape = rhs_shape.iter().copied().take(dims).collect::<Vec<_>>();
-    shape.resize(dims, 1);
-    if shape != selection_lengths {
-        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-    }
-    let expected = shape
-        .iter()
-        .try_fold(1usize, |length, dimension| length.checked_mul(*dimension))
-        .ok_or_else(|| mex("ShapeMismatch", "shape mismatch for slice assign"))?;
-    if rhs_len != expected {
-        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-    }
-    Ok(shape)
-}
+mod rhs_shape;
+use rhs_shape::{checked_assignment_element_count, validated_assignment_rhs_shape};
 
 pub enum ComplexRhsView {
     Scalar((f64, f64)),
@@ -1146,12 +1116,7 @@ pub async fn materialize_rhs_nd_real(
                 strides[d] = strides[d - 1] * shape[d - 1].max(1);
             }
             let data = tensor::tensor_into_values_f64(t);
-            if data.len()
-                != shape
-                    .iter()
-                    .copied()
-                    .fold(1usize, |acc, len| acc.saturating_mul(len.max(1)))
-            {
+            if data.len() != checked_assignment_element_count(&shape)? {
                 return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
             RhsView::Tensor {
@@ -1167,12 +1132,7 @@ pub async fn materialize_rhs_nd_real(
             for d in 1..selection_lengths.len() {
                 strides[d] = strides[d - 1] * shape[d - 1].max(1);
             }
-            if la.data.len()
-                != shape
-                    .iter()
-                    .copied()
-                    .fold(1usize, |acc, len| acc.saturating_mul(len.max(1)))
-            {
+            if la.data.len() != checked_assignment_element_count(&shape)? {
                 return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
             let data: Vec<f64> = la
@@ -1194,13 +1154,10 @@ pub async fn materialize_rhs_nd_real(
         }
     };
 
-    let total = selection_lengths
-        .iter()
-        .copied()
-        .fold(1usize, |acc, len| acc.saturating_mul(len.max(1)));
+    let total = checked_assignment_element_count(selection_lengths)?;
     let mut out = Vec::with_capacity(total);
     let mut idx = vec![0usize; selection_lengths.len()];
-    if selection_lengths.is_empty() {
+    if total == 0 || selection_lengths.is_empty() {
         return Ok(out);
     }
     loop {
@@ -1217,7 +1174,11 @@ pub async fn materialize_rhs_nd_real(
                     let pos = if rhs_len == 1 { 0 } else { idx[d] };
                     rlin += pos * strides[d];
                 }
-                out.push(data.get(rlin).copied().unwrap_or(0.0));
+                out.push(
+                    *data
+                        .get(rlin)
+                        .ok_or_else(|| mex("ShapeMismatch", "shape mismatch for slice assign"))?,
+                );
             }
         }
         let mut d = 0usize;
