@@ -40,7 +40,7 @@ mod admission;
 mod options;
 mod prediction;
 mod projection;
-use admission::{build_fit_spec, is_table_value};
+use admission::{build_fit_spec, classification_tree_matrix_dimensions, is_table_value};
 use options::{decode_option, parse_fit_options, parse_formula, FitctreeAction};
 pub(crate) use prediction::predict_classification_tree_object;
 use projection::model_object;

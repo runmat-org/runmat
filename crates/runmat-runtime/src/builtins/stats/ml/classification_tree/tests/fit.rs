@@ -27,8 +27,8 @@ fn fitctree_matrix_predicts_numeric_labels_and_scores() {
         panic!("expected output list");
     };
     assert_eq!(tensor(&values[0]).materialize_f64(), vec![0.0, 1.0]);
-    assert_eq!(tensor(&values[1]).shape, vec![2, 2]);
-    assert_eq!(tensor(&values[2]).shape, vec![2, 1]);
+    assert_eq!(tensor(&values[1]).shape(), [2, 2]);
+    assert_eq!(tensor(&values[2]).shape(), [2, 1]);
     assert_eq!(tensor(&values[3]).materialize_f64(), vec![1.0, 2.0]);
 }
 

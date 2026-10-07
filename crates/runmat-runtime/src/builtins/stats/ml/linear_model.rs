@@ -27,6 +27,19 @@ const FITLM_NAME: &str = "fitlm";
 const PREDICT_NAME: &str = "predict";
 const EPS: f64 = 1.0e-12;
 
+/// Project a dense predictor tensor into fitlm's matrix domain.
+///
+/// fitlm historically treats an explicit rank-one tensor as one observation
+/// with N predictors, while a rank-zero tensor has no matrix extent. This is
+/// deliberately distinct from Tensor's general-purpose rows/cols projection.
+fn fitlm_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        shape => (shape[0], shape[1]),
+    }
+}
+
 mod training;
 use training::{evaluate_term, fit_ols};
 mod header;

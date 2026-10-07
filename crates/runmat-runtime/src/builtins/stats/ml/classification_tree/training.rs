@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn fit_tree(spec: &FitSpec) -> BuiltinResult<TreeFit> {
     let mut nodes = Vec::new();
     let mut splits = 0usize;
-    let rows = (0..spec.x.rows).collect::<Vec<_>>();
+    let rows = (0..classification_tree_matrix_dimensions(&spec.x).0).collect::<Vec<_>>();
     build_node(spec, &rows, &mut nodes, &mut splits, 0)?;
     Ok(TreeFit {
         nodes,
@@ -84,7 +84,7 @@ fn best_split(
     _parent_counts: &[f64],
 ) -> BuiltinResult<Option<SplitCandidate>> {
     let mut best = None;
-    for col in 0..spec.x.cols {
+    for col in 0..classification_tree_matrix_dimensions(&spec.x).1 {
         let mut entries = rows
             .iter()
             .filter(|row| !x_value(&spec.x, **row, col).is_nan())

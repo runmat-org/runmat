@@ -5,10 +5,11 @@ pub(super) fn terms_from_object(object: &ObjectInstance) -> BuiltinResult<Vec<Ve
         Some(Value::Tensor(tensor)) => tensor,
         _ => return Err(predict_invalid("predict: model is missing term metadata")),
     };
-    let mut terms = Vec::with_capacity(tensor.rows);
-    for row in 0..tensor.rows {
-        let mut term = Vec::with_capacity(tensor.cols);
-        for col in 0..tensor.cols {
+    let (rows, cols) = fitlm_matrix_dimensions(tensor);
+    let mut terms = Vec::with_capacity(rows);
+    for row in 0..rows {
+        let mut term = Vec::with_capacity(cols);
+        for col in 0..cols {
             let value = x_value(tensor, row, col);
             if value < 0.0 || value.fract().abs() > EPS {
                 return Err(predict_invalid("predict: model term metadata is invalid"));
@@ -32,7 +33,9 @@ pub(super) fn numeric_property(object: &ObjectInstance, name: &str) -> BuiltinRe
 
 pub(super) fn matrix_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<f64>> {
     match object.properties.get(name) {
-        Some(Value::Tensor(tensor)) if tensor.rows == tensor.cols => {
+        Some(Value::Tensor(tensor))
+            if fitlm_matrix_dimensions(tensor).0 == fitlm_matrix_dimensions(tensor).1 =>
+        {
             Ok(tensor::tensor_values_f64(tensor))
         }
         _ => Err(predict_invalid(format!(
@@ -72,7 +75,8 @@ pub(super) fn string_property(object: &ObjectInstance, name: &str) -> BuiltinRes
 }
 
 pub(super) fn vector_values(tensor: &Tensor, label: &str) -> BuiltinResult<Vec<f64>> {
-    if tensor.shape.len() > 2 || !(tensor.rows == 1 || tensor.cols == 1) {
+    let (rows, cols) = fitlm_matrix_dimensions(tensor);
+    if tensor.shape().len() > 2 || !(rows == 1 || cols == 1) {
         return Err(fitlm_invalid(format!("fitlm: {label} must be a vector")));
     }
     Ok(tensor::tensor_values_f64(tensor))
@@ -114,7 +118,8 @@ pub(super) fn ensure_exact_fitlm_integer_scalar_boundary(
 }
 
 pub(super) fn vector_values_predict(tensor: &Tensor, label: &str) -> BuiltinResult<Vec<f64>> {
-    if tensor.shape.len() > 2 || !(tensor.rows == 1 || tensor.cols == 1) {
+    let (rows, cols) = fitlm_matrix_dimensions(tensor);
+    if tensor.shape().len() > 2 || !(rows == 1 || cols == 1) {
         return Err(predict_invalid(format!(
             "predict: {label} must be a vector"
         )));
@@ -300,7 +305,7 @@ pub(super) fn columns_to_tensor_predict(columns: Vec<Vec<f64>>) -> BuiltinResult
 }
 
 pub(super) fn x_value(tensor: &Tensor, row: usize, col: usize) -> f64 {
-    tensor::tensor_value_f64(tensor, col * tensor.rows + row)
+    tensor::tensor_value_f64(tensor, col * fitlm_matrix_dimensions(tensor).0 + row)
 }
 
 pub(super) fn terms_tensor(terms: &[Vec<u32>]) -> BuiltinResult<Value> {

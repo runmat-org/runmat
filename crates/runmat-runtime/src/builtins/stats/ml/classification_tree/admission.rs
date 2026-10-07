@@ -1,5 +1,18 @@
 use super::*;
 
+/// Projects dense predictors into classification-tree observation geometry.
+///
+/// A rank-one tensor is one observation row, while an empty-rank tensor is an
+/// empty matrix. This domain policy deliberately differs from Tensor's general
+/// matrix getter projection.
+pub(super) fn classification_tree_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 pub(super) fn build_fit_spec(
     first: Value,
     mut rest: Vec<Value>,
@@ -31,11 +44,12 @@ fn build_matrix_fit_spec(
     let x = tensor::value_into_tensor_for(FITCTREE_NAME, x_value)
         .map_err(|err| fitctree_invalid(format!("fitctree: {err}")))?;
     ensure_integer_tensor_exact(&x, "predictors")?;
-    if x.shape.len() > 2 {
+    if x.shape().len() > 2 {
         return Err(fitctree_invalid("fitctree: X must be a 2-D numeric matrix"));
     }
+    let (x_rows, x_cols) = classification_tree_matrix_dimensions(&x);
     let labels = label_vector(y_value, "Y")?;
-    if labels.labels.len() != x.rows {
+    if labels.labels.len() != x_rows {
         return Err(fitctree_invalid(
             "fitctree: length(Y) must match the number of rows in X",
         ));
@@ -48,15 +62,15 @@ fn build_matrix_fit_spec(
         ));
     }
     let predictor_names = if let Some(names) = options.predictor_names.clone() {
-        if names.len() != x.cols {
+        if names.len() != x_cols {
             return Err(fitctree_invalid(format!(
                 "fitctree: PredictorNames must contain {} names",
-                x.cols
+                x_cols
             )));
         }
         names
     } else {
-        (1..=x.cols).map(|idx| format!("x{idx}")).collect()
+        (1..=x_cols).map(|idx| format!("x{idx}")).collect()
     };
     let response_name = options
         .response_name
@@ -65,7 +79,7 @@ fn build_matrix_fit_spec(
     let weights = match &options.weights {
         Some(WeightSpec::Values(values)) => values.clone(),
         Some(WeightSpec::Variable(_)) => unreachable!("checked above"),
-        None => vec![1.0; x.rows],
+        None => vec![1.0; x_rows],
     };
     finalize_fit_spec(x, labels, predictor_names, response_name, weights, options)
 }
@@ -178,7 +192,7 @@ fn build_table_fit_spec(
             })?;
             numeric_vector(value, "Weights")?
         }
-        None => vec![1.0; x.rows],
+        None => vec![1.0; classification_tree_matrix_dimensions(&x).0],
     };
     finalize_fit_spec(x, labels, predictor_names, response_name, weights, options)
 }
@@ -191,12 +205,13 @@ fn finalize_fit_spec(
     weights: Vec<f64>,
     mut options: FitOptions,
 ) -> BuiltinResult<FitSpec> {
-    if labels.labels.len() != x.rows {
+    let (x_rows, x_cols) = classification_tree_matrix_dimensions(&x);
+    if labels.labels.len() != x_rows {
         return Err(fitctree_invalid(
             "fitctree: response length must match the number of observations",
         ));
     }
-    if weights.len() != x.rows {
+    if weights.len() != x_rows {
         return Err(fitctree_invalid(
             "fitctree: Weights length must match the number of observations",
         ));
@@ -221,7 +236,7 @@ fn finalize_fit_spec(
     let mut clean_rows = Vec::new();
     let mut clean_classes = Vec::new();
     let mut clean_weights = Vec::new();
-    for row in 0..x.rows {
+    for row in 0..x_rows {
         let weight = weights[row];
         if weight == 0.0 {
             continue;
@@ -235,9 +250,9 @@ fn finalize_fit_spec(
             .ok_or_else(|| {
                 fitctree_invalid("fitctree: response contains a class outside ClassNames")
             })?;
-        let mut row_values = Vec::with_capacity(x.cols);
+        let mut row_values = Vec::with_capacity(x_cols);
         let mut has_observed_predictor = false;
-        for col in 0..x.cols {
+        for col in 0..x_cols {
             let value = x_value(&x, row, col);
             if value.is_infinite() {
                 return Err(fitctree_invalid(
@@ -274,13 +289,13 @@ fn finalize_fit_spec(
             "fitctree: at least two observed classes are required",
         ));
     }
-    let mut clean_data = Vec::with_capacity(clean_rows.len() * x.cols);
-    for col in 0..x.cols {
+    let mut clean_data = Vec::with_capacity(clean_rows.len() * x_cols);
+    for col in 0..x_cols {
         for row in &clean_rows {
             clean_data.push(row[col]);
         }
     }
-    let clean_x = Tensor::new(clean_data, vec![clean_rows.len(), x.cols])
+    let clean_x = Tensor::new(clean_data, vec![clean_rows.len(), x_cols])
         .map_err(|err| fitctree_internal(format!("fitctree: {err}")))?;
     if options.max_num_splits.is_none() {
         options.max_num_splits = Some(clean_classes.len().saturating_sub(1));

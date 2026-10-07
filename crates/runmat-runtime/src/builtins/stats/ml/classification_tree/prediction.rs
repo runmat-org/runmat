@@ -26,6 +26,7 @@ pub(crate) fn predict_classification_tree_object(
     let class_names = labels_from_value(class_names_value, "ClassNames")?;
     let class_count = class_names.labels.len();
     let node_count = predictors.len();
+    let (x_rows, _) = classification_tree_matrix_dimensions(&x);
     if children.len() != node_count * 2
         || thresholds.len() != node_count
         || node_classes.len() != node_count
@@ -33,31 +34,31 @@ pub(crate) fn predict_classification_tree_object(
     {
         return Err(predict_invalid("predict: tree metadata is inconsistent"));
     }
-    let mut label_indices = Vec::with_capacity(x.rows);
-    let mut score_data = vec![0.0; x.rows * class_count];
-    let mut node_data = Vec::with_capacity(x.rows);
-    let mut class_number_data = Vec::with_capacity(x.rows);
-    for row in 0..x.rows {
+    let mut label_indices = Vec::with_capacity(x_rows);
+    let mut score_data = vec![0.0; x_rows * class_count];
+    let mut node_data = Vec::with_capacity(x_rows);
+    let mut class_number_data = Vec::with_capacity(x_rows);
+    for row in 0..x_rows {
         let node = traverse_tree(&x, row, &children, &predictors, &thresholds, node_count)?;
         let class_index = checked_one_based_index(node_classes[node], class_count, "class number")?;
         label_indices.push(class_index);
         node_data.push(node as f64 + 1.0);
         class_number_data.push(class_index as f64 + 1.0);
         for class in 0..class_count {
-            score_data[class * x.rows + row] = node_probs[class * node_count + node];
+            score_data[class * x_rows + row] = node_probs[class * node_count + node];
         }
     }
     let labels = predicted_labels_value(&class_names.labels, class_kind, &label_indices)?;
     let scores = Value::Tensor(
-        Tensor::new(score_data, vec![x.rows, class_count])
+        Tensor::new(score_data, vec![x_rows, class_count])
             .map_err(|err| predict_internal(format!("predict: {err}")))?,
     );
     let node = Value::Tensor(
-        Tensor::new(node_data, vec![x.rows, 1])
+        Tensor::new(node_data, vec![x_rows, 1])
             .map_err(|err| predict_internal(format!("predict: {err}")))?,
     );
     let cnum = Value::Tensor(
-        Tensor::new(class_number_data, vec![x.rows, 1])
+        Tensor::new(class_number_data, vec![x_rows, 1])
             .map_err(|err| predict_internal(format!("predict: {err}")))?,
     );
     Ok(vec![labels, scores, node, cnum])
@@ -77,7 +78,11 @@ fn traverse_tree(
         if predictor <= 0.0 {
             return Ok(node);
         }
-        let predictor_idx = checked_one_based_index(predictor, x.cols, "predictor")?;
+        let predictor_idx = checked_one_based_index(
+            predictor,
+            classification_tree_matrix_dimensions(x).1,
+            "predictor",
+        )?;
         let value = x_value(x, row, predictor_idx);
         if value.is_nan() {
             return Ok(node);
@@ -126,7 +131,9 @@ fn predictors_for_prediction(value: Value, predictor_names: &[String]) -> Builti
     let tensor = tensor::value_into_tensor_for(PREDICT_NAME, value)
         .map_err(|err| predict_invalid(format!("predict: {err}")))?;
     ensure_integer_tensor_exact_predict(&tensor, "predictors")?;
-    if tensor.shape.len() > 2 || tensor.cols != predictor_names.len() {
+    if tensor.shape().len() > 2
+        || classification_tree_matrix_dimensions(&tensor).1 != predictor_names.len()
+    {
         return Err(predict_invalid(format!(
             "predict: X must have {} predictor columns",
             predictor_names.len()

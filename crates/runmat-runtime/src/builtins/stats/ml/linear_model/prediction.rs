@@ -21,7 +21,7 @@ pub(super) fn predict_linear_model(
     let predictor_names = string_property(&object, "PredictorNames")?;
     let x = predictors_for_prediction(xnew, &predictor_names)?;
     let design = design_matrix(&x, &terms);
-    let rows = x.rows;
+    let rows = fitlm_matrix_dimensions(&x).0;
     let cols = terms.len();
     if beta.len() != cols {
         return Err(predict_invalid(
@@ -108,7 +108,7 @@ fn predictors_for_prediction(value: Value, predictor_names: &[String]) -> Builti
     }
     let tensor = tensor::value_into_tensor_for(PREDICT_NAME, value)
         .map_err(|err| predict_invalid(format!("predict: {err}")))?;
-    if tensor.shape.len() > 2 || tensor.cols != predictor_names.len() {
+    if tensor.shape().len() > 2 || fitlm_matrix_dimensions(&tensor).1 != predictor_names.len() {
         return Err(predict_invalid(format!(
             "predict: Xnew must have {} predictor columns",
             predictor_names.len()
@@ -118,9 +118,10 @@ fn predictors_for_prediction(value: Value, predictor_names: &[String]) -> Builti
 }
 
 fn design_matrix(x: &Tensor, terms: &[Vec<u32>]) -> Vec<f64> {
-    let mut out = Vec::with_capacity(x.rows * terms.len());
-    for row in 0..x.rows {
-        let raw = (0..x.cols)
+    let (rows, cols) = fitlm_matrix_dimensions(x);
+    let mut out = Vec::with_capacity(rows * terms.len());
+    for row in 0..rows {
+        let raw = (0..cols)
             .map(|col| x_value(x, row, col))
             .collect::<Vec<_>>();
         for term in terms {

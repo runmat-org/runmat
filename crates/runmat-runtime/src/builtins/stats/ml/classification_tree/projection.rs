@@ -1,6 +1,7 @@
 use super::*;
 
 pub(super) fn model_object(spec: FitSpec, fit: TreeFit) -> BuiltinResult<ObjectInstance> {
+    let (observation_count, predictor_count) = classification_tree_matrix_dimensions(&spec.x);
     let mut object = ObjectInstance::new(runmat_types::standard::CLASSIFICATION_TREE.to_string());
     object.properties.insert(
         "ResponseName".to_string(),
@@ -28,11 +29,12 @@ pub(super) fn model_object(spec: FitSpec, fit: TreeFit) -> BuiltinResult<ObjectI
     );
     object.properties.insert(
         "NumObservations".to_string(),
-        Value::Num(spec.x.rows as f64),
+        Value::Num(observation_count as f64),
     );
-    object
-        .properties
-        .insert("NumPredictors".to_string(), Value::Num(spec.x.cols as f64));
+    object.properties.insert(
+        "NumPredictors".to_string(),
+        Value::Num(predictor_count as f64),
+    );
     object
         .properties
         .insert("NumNodes".to_string(), Value::Num(fit.nodes.len() as f64));

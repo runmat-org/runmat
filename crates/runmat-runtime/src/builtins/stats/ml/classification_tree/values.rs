@@ -66,7 +66,8 @@ pub(super) fn vector_values(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f6
 }
 
 pub(super) fn vector_values_predict(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<f64>> {
-    if tensor.shape.len() > 2 || (tensor.rows != 1 && tensor.cols != 1) {
+    let (rows, columns) = classification_tree_matrix_dimensions(tensor);
+    if tensor.shape().len() > 2 || (rows != 1 && columns != 1) {
         return Err(predict_invalid(format!("predict: {name} must be a vector")));
     }
     Ok(tensor::tensor_values_f64(tensor))
@@ -190,7 +191,10 @@ pub(super) fn columns_to_tensor_predict(columns: Vec<Vec<f64>>) -> BuiltinResult
 }
 
 pub(super) fn x_value(tensor: &Tensor, row: usize, col: usize) -> f64 {
-    tensor::tensor_value_f64(tensor, col * tensor.rows + row)
+    tensor::tensor_value_f64(
+        tensor,
+        col * classification_tree_matrix_dimensions(tensor).0 + row,
+    )
 }
 
 pub(super) fn string_column(values: &[String]) -> BuiltinResult<Value> {

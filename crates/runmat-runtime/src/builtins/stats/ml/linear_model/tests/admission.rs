@@ -1,6 +1,62 @@
 use super::super::values::ensure_exact_fitlm_integer_scalar_boundary;
 use super::*;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn fitlm_dense_matrix_projection_preserves_rank_zero_and_rank_one_policy() {
+    let scalar = Tensor::new(vec![7.0], Vec::new()).expect("rank-zero tensor");
+    assert_eq!(fitlm_matrix_dimensions(&scalar), (0, 0));
+
+    let vector = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).expect("rank-one tensor");
+    assert_eq!(fitlm_matrix_dimensions(&vector), (1, 3));
+
+    let one_response = Value::Tensor(Tensor::new(vec![4.0], vec![1, 1]).expect("one response"));
+    preflight_response_shape(&Value::Tensor(vector.clone()), &[one_response.clone()])
+        .expect("rank-one predictors have one observation at preflight");
+    let rank_zero_error = preflight_response_shape(&Value::Tensor(scalar.clone()), &[one_response])
+        .expect_err("rank-zero predictors have no observation at preflight");
+    assert!(rank_zero_error.message().contains("length(y)"));
+
+    let arguments = || FitlmArguments {
+        option_start: 1,
+        options: Vec::new(),
+    };
+    let spec = build_fit_spec(
+        Value::Tensor(vector.clone()),
+        vec![Value::Tensor(
+            Tensor::new(vec![4.0], vec![1, 1]).expect("one response"),
+        )],
+        arguments(),
+    )
+    .expect("rank-one predictors are one observation with three predictors");
+    assert_eq!(fitlm_matrix_dimensions(&spec.x), (1, 3));
+    assert_eq!(spec.y, vec![4.0]);
+    assert_eq!(
+        spec.predictor_names,
+        vec!["x1".to_string(), "x2".to_string(), "x3".to_string()]
+    );
+
+    let mismatch = build_fit_spec(
+        Value::Tensor(vector),
+        vec![Value::Tensor(
+            Tensor::new(vec![4.0, 5.0], vec![2, 1]).expect("two responses"),
+        )],
+        arguments(),
+    )
+    .expect_err("rank-one predictors do not have two observations");
+    assert!(mismatch.message().contains("length(y)"));
+
+    let phantom_row = build_fit_spec(
+        Value::Tensor(scalar),
+        vec![Value::Tensor(
+            Tensor::new(vec![4.0], vec![1, 1]).expect("one response"),
+        )],
+        arguments(),
+    )
+    .expect_err("rank-zero predictors do not acquire a phantom observation");
+    assert!(phantom_row.message().contains("length(y)"));
+}
+
 #[test]
 fn fitlm_header_keeps_model_spec_separate_from_typed_options() {
     let first = tensor_value(vec![0.0, 1.0], 2, 1);
@@ -114,7 +170,7 @@ fn fitlm_matrix_fits_coefficients_and_predicts() {
     ))
     .unwrap();
     let ypred = tensor(&predicted);
-    assert_eq!(ypred.shape, vec![2, 1]);
+    assert_eq!(ypred.shape(), [2, 1]);
     assert!((ypred.materialize_f64()[0] - 9.0).abs() < 1.0e-10);
     assert!((ypred.materialize_f64()[1] - 11.0).abs() < 1.0e-10);
 }
@@ -141,7 +197,7 @@ fn registered_predict_preserves_statistical_output_overloads_without_ambient_ari
     );
     assert_eq!(predicted.len(), 1);
     let values = tensor(&predicted.as_slice()[0]);
-    assert_eq!(values.shape, vec![2, 1]);
+    assert_eq!(values.shape(), [2, 1]);
     assert!((values.materialize_f64()[0] - 9.0).abs() < 1.0e-10);
 
     let predicted = block_on((bindings[0].implementation)(
@@ -178,7 +234,7 @@ fn fitlm_and_predict_read_typed_integer_storage_exactly() {
     ))
     .unwrap();
     let ypred = tensor(&predicted);
-    assert_eq!(ypred.shape, vec![2, 1]);
+    assert_eq!(ypred.shape(), [2, 1]);
     assert!((ypred.materialize_f64()[0] - 7.0).abs() < 1.0e-10);
     assert!((ypred.materialize_f64()[1] - 9.0).abs() < 1.0e-10);
 }

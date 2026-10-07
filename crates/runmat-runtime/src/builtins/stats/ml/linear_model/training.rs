@@ -124,8 +124,7 @@ pub(super) fn fit_ols(spec: &FitSpec) -> BuiltinResult<OlsFit> {
 }
 
 fn clean_data(spec: &FitSpec) -> BuiltinResult<CleanData> {
-    let rows = spec.x.rows;
-    let cols = spec.x.cols;
+    let (rows, cols) = fitlm_matrix_dimensions(&spec.x);
     let exclude_mask = exclude_mask(spec.exclude.as_ref(), rows)?;
     let weights = spec.weights.as_ref();
     if let Some(weights) = weights {

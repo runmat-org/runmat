@@ -31,19 +31,19 @@ fn build_matrix_fit_spec(
     let x = tensor::value_into_tensor_for(FITLM_NAME, x_value)
         .map_err(|err| fitlm_invalid(format!("fitlm: {err}")))?;
     ensure_exact_fitlm_integer_tensor_boundary(&x, "X")?;
-    if x.shape.len() > 2 {
+    if x.shape().len() > 2 {
         return Err(fitlm_invalid("fitlm: X must be a 2-D numeric matrix"));
     }
     let y_tensor = tensor::value_into_tensor_for(FITLM_NAME, y_value)
         .map_err(|err| fitlm_invalid(format!("fitlm: {err}")))?;
     ensure_exact_fitlm_integer_tensor_boundary(&y_tensor, "y")?;
     let y = vector_values(&y_tensor, "y")?;
-    if y.len() != x.rows {
+    let (rows, cols) = fitlm_matrix_dimensions(&x);
+    if y.len() != rows {
         return Err(fitlm_invalid(
             "fitlm: length(y) must match the number of rows in X",
         ));
     }
-    let cols = x.cols;
     let mut options = FitOptions::default();
     let mut model_spec = ModelSpec::Linear;
     if arguments.option_start == 2 {

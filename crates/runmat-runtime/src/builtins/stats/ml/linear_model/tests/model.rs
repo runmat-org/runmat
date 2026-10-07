@@ -39,7 +39,7 @@ fn fitlm_quadratic_adds_square_term() {
         other => panic!("coefficients {other:?}"),
     };
     let estimates = tensor(coeffs.fields.get("Estimate").unwrap());
-    assert_eq!(estimates.shape, vec![3, 1]);
+    assert_eq!(estimates.shape(), [3, 1]);
     assert!((estimates.materialize_f64()[0] - 1.0).abs() < 1.0e-10);
     assert!(estimates.materialize_f64()[1].abs() < 1.0e-10);
     assert!((estimates.materialize_f64()[2] - 2.0).abs() < 1.0e-10);
@@ -73,7 +73,7 @@ fn predict_confidence_intervals_are_column_major() {
         Value::OutputList(list) => tensor(&list[1]).clone(),
         other => panic!("expected tensor or output list, got {other:?}"),
     };
-    assert_eq!(yci.shape, vec![2, 2]);
+    assert_eq!(yci.shape(), [2, 2]);
     assert!(yci.materialize_f64()[0] < yci.materialize_f64()[1]);
     assert!(yci.materialize_f64()[2] < yci.materialize_f64()[3]);
     assert!(yci.materialize_f64()[0] < yci.materialize_f64()[2]);
@@ -102,7 +102,7 @@ fn fitlm_formula_no_intercept_and_intercept_only_are_supported() {
         other => panic!("coefficients {other:?}"),
     };
     let estimates = tensor(coeffs.fields.get("Estimate").unwrap());
-    assert_eq!(estimates.shape, vec![1, 1]);
+    assert_eq!(estimates.shape(), [1, 1]);
     assert!((estimates.materialize_f64()[0] - 2.0).abs() < 1.0e-10);
 
     let intercept_only =
@@ -112,7 +112,7 @@ fn fitlm_formula_no_intercept_and_intercept_only_are_supported() {
         other => panic!("coefficients {other:?}"),
     };
     let estimates = tensor(coeffs.fields.get("Estimate").unwrap());
-    assert_eq!(estimates.shape, vec![1, 1]);
+    assert_eq!(estimates.shape(), [1, 1]);
     assert!((estimates.materialize_f64()[0] - 4.0).abs() < 1.0e-10);
 }
 
@@ -137,7 +137,7 @@ fn intercept_only_table_model_predicts_one_value_per_table_row() {
     .unwrap();
     let predicted = block_on(predict_builtin(model, xnew, Vec::new())).unwrap();
     let yhat = tensor(&predicted);
-    assert_eq!(yhat.shape, vec![2, 1]);
+    assert_eq!(yhat.shape(), [2, 1]);
     assert_eq!(yhat.materialize_f64(), vec![4.0, 4.0]);
 }
 

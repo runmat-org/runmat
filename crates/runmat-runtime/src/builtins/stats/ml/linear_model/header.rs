@@ -128,7 +128,7 @@ pub(super) fn preflight_matrix_rank(first: &Value) -> BuiltinResult<()> {
         return Ok(());
     }
     let rank = match first {
-        Value::Tensor(tensor) => Some(tensor.shape.len()),
+        Value::Tensor(tensor) => Some(tensor.shape().len()),
         Value::LogicalArray(array) => Some(array.shape.len()),
         Value::GpuTensor(handle) => Some(handle.shape().len()),
         _ => None,
@@ -147,7 +147,7 @@ pub(super) fn preflight_response_shape(first: &Value, rest: &[Value]) -> Builtin
         return Ok(());
     };
     let shape = match response {
-        Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
+        Value::Tensor(tensor) => Some(tensor.shape()),
         Value::LogicalArray(array) => Some(array.shape.as_slice()),
         Value::GpuTensor(handle) => Some(handle.shape()),
         _ => None,
@@ -161,7 +161,7 @@ pub(super) fn preflight_response_shape(first: &Value, rest: &[Value]) -> Builtin
         return Err(fitlm_invalid("fitlm: y must be a vector"));
     }
     let rows = match first {
-        Value::Tensor(tensor) => Some(tensor.rows),
+        Value::Tensor(tensor) => Some(fitlm_matrix_dimensions(tensor).0),
         Value::LogicalArray(array) => Some(array.shape.first().copied().unwrap_or(1)),
         Value::GpuTensor(handle) => Some(handle.shape().first().copied().unwrap_or(1)),
         _ => None,

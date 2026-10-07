@@ -501,7 +501,7 @@ fn hilbert_length_is_zero(value: &Value) -> bool {
 }
 
 fn real_part_tensor(tensor: ComplexTensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = match tensor.into_complex_storage() {
         ComplexStorage::F64(values) => {
             NumericStorage::F64(values.into_iter().map(|(real, _)| real).collect())
@@ -563,7 +563,7 @@ fn hilbert_tensor(tensor: Tensor, length: Option<usize>) -> BuiltinResult<Value>
 }
 
 fn analytic_signal(tensor: ComplexTensor, length: Option<usize>) -> BuiltinResult<ComplexTensor> {
-    let mut shape = tensor.shape.clone();
+    let mut shape = tensor.shape().to_vec();
     if crate::builtins::common::shape::is_scalar_shape(&shape) {
         shape = crate::builtins::common::shape::normalize_scalar_shape(&shape);
     }
@@ -639,7 +639,7 @@ fn apply_analytic_signal_mask(
     dim_index: usize,
 ) -> BuiltinResult<ComplexTensor> {
     let dtype = spectrum.numeric_dtype();
-    let mut shape = spectrum.shape.clone();
+    let mut shape = spectrum.shape().to_vec();
     let mut data = spectrum.materialize_f64();
     while shape.len() <= dim_index {
         shape.push(1);
@@ -677,7 +677,8 @@ fn apply_analytic_signal_mask(
         }
     }
 
-    ComplexTensor::from_f64_values_with_dtype(data, spectrum.shape, dtype)
+    let (_, shape) = spectrum.into_complex_storage_and_shape();
+    ComplexTensor::from_f64_values_with_dtype(data, shape, dtype)
         .map_err(|error| hilbert_error_with_detail(&HILBERT_ERROR_INTERNAL, error))
 }
 

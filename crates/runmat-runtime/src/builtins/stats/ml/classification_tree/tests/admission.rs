@@ -1,5 +1,35 @@
 use super::*;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn fitctree_dense_rank_boundaries_preserve_observation_geometry() {
+    let rank_one = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
+    assert_eq!(classification_tree_matrix_dimensions(&rank_one), (1, 3));
+    let error = build_fit_spec(
+        Value::Tensor(rank_one),
+        vec![tensor_value(vec![0.0, 1.0, 0.0], 3, 1)],
+        FitctreeArguments {
+            option_start: 1,
+            options: Vec::new(),
+        },
+    )
+    .expect_err("rank-one predictors are one observation, not three rows");
+    assert!(error.message.contains("length(Y)"));
+
+    let rank_zero = Tensor::new(vec![1.0], Vec::new()).unwrap();
+    assert_eq!(classification_tree_matrix_dimensions(&rank_zero), (0, 0));
+    let error = build_fit_spec(
+        Value::Tensor(rank_zero),
+        vec![tensor_value(vec![0.0], 1, 1)],
+        FitctreeArguments {
+            option_start: 1,
+            options: Vec::new(),
+        },
+    )
+    .expect_err("rank-zero predictors do not create a phantom observation");
+    assert!(error.message.contains("length(Y)"));
+}
+
 #[test]
 fn fitctree_header_retains_typed_options_and_rejects_malformed_pairs() {
     let first = tensor_value(vec![0.0, 1.0], 2, 1);
