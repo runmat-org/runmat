@@ -1,3 +1,4 @@
+use super::admission::classification_matrix_dimensions;
 use super::*;
 
 pub(crate) fn predict_classification_linear_object(
@@ -9,11 +10,12 @@ pub(crate) fn predict_classification_linear_object(
     let predictor_names = string_array_property(&object, "PredictorNames")?;
     let x = predictors_for_prediction(xnew, &predictor_names, options.observations_in)?;
     let beta = tensor_property(&object, "Beta")?;
-    if beta.shape.len() > 2 || beta.rows != predictor_names.len() {
+    let (beta_rows, beta_cols) = classification_matrix_dimensions(&beta);
+    if beta.shape().len() > 2 || beta_rows != predictor_names.len() {
         return Err(predict_invalid("predict: model Beta has invalid shape"));
     }
     let bias = numeric_vector_property(&object, "Bias")?;
-    if bias.len() != beta.cols {
+    if bias.len() != beta_cols {
         return Err(predict_invalid(
             "predict: model Bias length does not match Beta",
         ));
@@ -32,19 +34,20 @@ pub(crate) fn predict_classification_linear_object(
         ));
     }
     let score_transform = score_transform_property(&object)?;
-    let mut label_indices = Vec::with_capacity(x.rows * beta.cols);
-    let mut score_data = Vec::with_capacity(x.rows * 2 * beta.cols);
+    let x_rows = classification_matrix_dimensions(&x).0;
+    let mut label_indices = Vec::with_capacity(x_rows * beta_cols);
+    let mut score_data = Vec::with_capacity(x_rows * 2 * beta_cols);
     let beta_values = beta.materialize_f64();
-    for model_idx in 0..beta.cols {
-        let model_beta = (0..beta.rows)
-            .map(|row| beta_values[row + model_idx * beta.rows])
+    for model_idx in 0..beta_cols {
+        let model_beta = (0..beta_rows)
+            .map(|row| beta_values[row + model_idx * beta_rows])
             .collect::<Vec<_>>();
-        for row in 0..x.rows {
+        for row in 0..x_rows {
             let margin = dot_row(&x, row, &model_beta) + bias[model_idx];
             label_indices.push(if margin >= 0.0 { 1 } else { 0 });
         }
         for class_col in 0..2 {
-            for row in 0..x.rows {
+            for row in 0..x_rows {
                 let margin = dot_row(&x, row, &model_beta) + bias[model_idx];
                 let value = match score_transform {
                     ScoreTransform::Logit => {
@@ -71,13 +74,13 @@ pub(crate) fn predict_classification_linear_object(
         &class_names.labels,
         class_names.kind,
         &label_indices,
-        x.rows,
-        beta.cols,
+        x_rows,
+        beta_cols,
     )?;
-    let score_shape = if beta.cols == 1 {
-        vec![x.rows, 2]
+    let score_shape = if beta_cols == 1 {
+        vec![x_rows, 2]
     } else {
-        vec![x.rows, 2, beta.cols]
+        vec![x_rows, 2, beta_cols]
     };
     let score = Value::Tensor(
         Tensor::new(score_data, score_shape)
@@ -158,7 +161,8 @@ fn predictors_for_prediction(
         }
     }
     let tensor = normalize_prediction_matrix(numeric_matrix_for_predict(value)?, observations_in)?;
-    if tensor.shape.len() > 2 || tensor.cols != predictor_names.len() {
+    let columns = classification_matrix_dimensions(&tensor).1;
+    if tensor.shape().len() > 2 || columns != predictor_names.len() {
         return Err(predict_invalid(format!(
             "predict: X must have {} predictor columns",
             predictor_names.len()

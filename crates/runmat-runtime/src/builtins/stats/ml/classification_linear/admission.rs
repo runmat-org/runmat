@@ -1,5 +1,18 @@
 use super::*;
 
+/// Projects a dense predictor value into fitclinear's observation matrix.
+///
+/// Rank-one predictors are one observation with N predictors, while rank-zero
+/// predictors have no matrix extent. This preserves the classification domain
+/// contract rather than adopting Tensor's general matrix projection.
+pub(super) fn classification_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 pub(super) fn build_fit_spec(
     first: Value,
     mut rest: Vec<Value>,
@@ -36,22 +49,23 @@ fn build_matrix_fit_spec(
         ));
     }
     let x = normalize_observation_matrix(numeric_matrix_for_fit(x_value)?, &options)?;
+    let (x_rows, x_cols) = classification_matrix_dimensions(&x);
     let labels = label_vector(y_value, "Y")?;
-    if labels.labels.len() != x.rows {
+    if labels.labels.len() != x_rows {
         return Err(fitclinear_invalid(
             "fitclinear: length(Y) must match the number of observations in X",
         ));
     }
     let predictor_names = if let Some(names) = options.predictor_names.clone() {
-        if names.len() != x.cols {
+        if names.len() != x_cols {
             return Err(fitclinear_invalid(format!(
                 "fitclinear: PredictorNames must contain {} names",
-                x.cols
+                x_cols
             )));
         }
         names
     } else {
-        (1..=x.cols).map(|idx| format!("x{idx}")).collect()
+        (1..=x_cols).map(|idx| format!("x{idx}")).collect()
     };
     let response_name = options
         .response_name
@@ -60,7 +74,7 @@ fn build_matrix_fit_spec(
     let weights = match &options.weights {
         Some(WeightSpec::Values(values)) => values.clone(),
         Some(WeightSpec::Variable(_)) => unreachable!("checked above"),
-        None => vec![1.0; x.rows],
+        None => vec![1.0; x_rows],
     };
     finalize_fit_spec(x, labels, predictor_names, response_name, weights, options)
 }
@@ -165,6 +179,7 @@ fn build_table_fit_spec(
         columns.push(vector_values(&tensor, name)?);
     }
     let x = columns_to_tensor(columns)?;
+    let x_rows = classification_matrix_dimensions(&x).0;
     let weights = match &options.weights {
         Some(WeightSpec::Values(values)) => values.clone(),
         Some(WeightSpec::Variable(name)) => {
@@ -175,7 +190,7 @@ fn build_table_fit_spec(
             })?;
             numeric_vector(value, "Weights")?
         }
-        None => vec![1.0; x.rows],
+        None => vec![1.0; x_rows],
     };
     finalize_fit_spec(x, labels, predictor_names, response_name, weights, options)
 }
@@ -188,20 +203,21 @@ fn finalize_fit_spec(
     weights: Vec<f64>,
     mut options: FitOptions,
 ) -> BuiltinResult<FitSpec> {
-    if labels.labels.len() != x.rows {
+    let (x_rows, x_cols) = classification_matrix_dimensions(&x);
+    if labels.labels.len() != x_rows {
         return Err(fitclinear_invalid(
             "fitclinear: response length must match the number of observations",
         ));
     }
-    if weights.len() != x.rows {
+    if weights.len() != x_rows {
         return Err(fitclinear_invalid(
             "fitclinear: Weights length must match the number of observations",
         ));
     }
-    if predictor_names.len() != x.cols {
+    if predictor_names.len() != x_cols {
         return Err(fitclinear_invalid(format!(
             "fitclinear: PredictorNames must contain {} names",
-            x.cols
+            x_cols
         )));
     }
     for weight in &weights {
@@ -224,7 +240,7 @@ fn finalize_fit_spec(
     let mut clean_rows = Vec::new();
     let mut clean_classes = Vec::new();
     let mut clean_weights = Vec::new();
-    for row in 0..x.rows {
+    for row in 0..x_rows {
         let weight = weights[row];
         if weight == 0.0 || is_missing_label(&labels.labels[row]) {
             continue;
@@ -235,9 +251,9 @@ fn finalize_fit_spec(
             .ok_or_else(|| {
                 fitclinear_invalid("fitclinear: response contains a class outside ClassNames")
             })?;
-        let mut row_values = Vec::with_capacity(x.cols);
+        let mut row_values = Vec::with_capacity(x_cols);
         let mut complete = true;
-        for col in 0..x.cols {
+        for col in 0..x_cols {
             let value = x_value(&x, row, col);
             if value.is_infinite() {
                 return Err(fitclinear_invalid(
@@ -267,10 +283,11 @@ fn finalize_fit_spec(
         ));
     }
     let clean_x = rows_to_tensor(clean_rows)?;
+    let (clean_rows, clean_cols) = classification_matrix_dimensions(&clean_x);
     let lambdas = options
         .lambdas
         .clone()
-        .unwrap_or_else(|| vec![1.0 / clean_x.rows.max(1) as f64]);
+        .unwrap_or_else(|| vec![1.0 / clean_rows.max(1) as f64]);
     if lambdas.is_empty() {
         return Err(fitclinear_invalid(
             "fitclinear: Lambda must contain at least one value",
@@ -285,10 +302,10 @@ fn finalize_fit_spec(
     }
     options.lambdas = Some(lambdas);
     if let Some(beta0) = &options.beta0 {
-        if beta0.len() != clean_x.cols {
+        if beta0.len() != clean_cols {
             return Err(fitclinear_invalid(format!(
                 "fitclinear: Beta must contain {} coefficients",
-                clean_x.cols
+                clean_cols
             )));
         }
     }
@@ -304,4 +321,44 @@ fn finalize_fit_spec(
         priors,
         options,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn arguments() -> FitclinearArguments {
+        FitclinearArguments {
+            option_start: 1,
+            options: Vec::new(),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn matrix_admission_keeps_rank_one_and_rank_zero_observation_geometry() {
+        let rank_one = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).expect("rank-one predictors");
+        assert_eq!(classification_matrix_dimensions(&rank_one), (1, 3));
+        let labels = Tensor::new(vec![0.0, 1.0, 0.0], vec![3, 1]).expect("three labels");
+        let error = build_matrix_fit_spec(
+            Value::Tensor(rank_one),
+            Value::Tensor(labels),
+            Vec::new(),
+            arguments(),
+        )
+        .expect_err("rank-one X is one observation, not three");
+        assert!(error.message().contains("length(Y)"));
+
+        let rank_zero = Tensor::new(vec![1.0], vec![]).expect("rank-zero predictors");
+        assert_eq!(classification_matrix_dimensions(&rank_zero), (0, 0));
+        let labels = Tensor::new(vec![0.0], vec![1, 1]).expect("one label");
+        let error = build_matrix_fit_spec(
+            Value::Tensor(rank_zero),
+            Value::Tensor(labels),
+            Vec::new(),
+            arguments(),
+        )
+        .expect_err("rank-zero X has no phantom observation");
+        assert!(error.message().contains("length(Y)"));
+    }
 }
