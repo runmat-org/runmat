@@ -244,8 +244,8 @@ pub fn is_scalarish_for_division(value: &Value) -> bool {
         | Value::Symbolic(_) => true,
         Value::SymbolicArray(array) => is_scalar_shape(&array.shape),
         Value::LogicalArray(arr) => is_scalar_shape(&arr.shape),
-        Value::Tensor(tensor) => is_scalar_shape(&tensor.shape),
-        Value::ComplexTensor(tensor) => is_scalar_shape(&tensor.shape),
+        Value::Tensor(tensor) => is_scalar_shape(tensor.shape()),
+        Value::ComplexTensor(tensor) => is_scalar_shape(tensor.shape()),
         Value::GpuTensor(handle) => is_scalar_shape(handle.shape()),
         _ => false,
     }

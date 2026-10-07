@@ -148,7 +148,7 @@ fn typed_complex_integer_comparison(
         (Value::ComplexTensor(left), Value::ComplexTensor(right))
             if left.integer_storage().is_some() || right.integer_storage().is_some() =>
         {
-            if left.shape != right.shape {
+            if left.shape() != right.shape() {
                 return Err(crate::interpreter::errors::mex(
                     "ShapeMismatch",
                     "shape mismatch for element-wise comparison",
@@ -191,7 +191,7 @@ fn typed_complex_integer_comparison(
                 (None, None) => unreachable!("guard requires one typed complex integer operand"),
             }
             return Ok(Some(Value::Tensor(
-                Tensor::new(out, left.shape.clone())
+                Tensor::new(out, left.shape().to_vec())
                     .map_err(|error| format!("complex eq: {error}"))?,
             )));
         }
@@ -209,7 +209,7 @@ fn typed_complex_integer_comparison(
                 })
                 .collect();
             return Ok(Some(Value::Tensor(
-                Tensor::new(out, tensor.shape.clone())
+                Tensor::new(out, tensor.shape().to_vec())
                     .map_err(|error| format!("complex scalar eq: {error}"))?,
             )));
         }
@@ -227,14 +227,14 @@ fn typed_complex_integer_comparison(
                 })
                 .collect();
             return Ok(Some(Value::Tensor(
-                Tensor::new(out, tensor.shape.clone())
+                Tensor::new(out, tensor.shape().to_vec())
                     .map_err(|error| format!("complex scalar eq: {error}"))?,
             )));
         }
         (Value::ComplexTensor(tensor), Value::Tensor(real))
             if tensor.integer_storage().is_some() =>
         {
-            if tensor.shape != real.shape {
+            if tensor.shape() != real.shape() {
                 return Err(crate::interpreter::errors::mex(
                     "ShapeMismatch",
                     "shape mismatch for element-wise comparison",
@@ -253,14 +253,14 @@ fn typed_complex_integer_comparison(
                 })
                 .collect();
             return Ok(Some(Value::Tensor(
-                Tensor::new(out, tensor.shape.clone())
+                Tensor::new(out, tensor.shape().to_vec())
                     .map_err(|error| format!("complex real eq: {error}"))?,
             )));
         }
         (Value::Tensor(real), Value::ComplexTensor(tensor))
             if tensor.integer_storage().is_some() =>
         {
-            if tensor.shape != real.shape {
+            if tensor.shape() != real.shape() {
                 return Err(crate::interpreter::errors::mex(
                     "ShapeMismatch",
                     "shape mismatch for element-wise comparison",
@@ -279,7 +279,7 @@ fn typed_complex_integer_comparison(
                 })
                 .collect();
             return Ok(Some(Value::Tensor(
-                Tensor::new(out, tensor.shape.clone())
+                Tensor::new(out, tensor.shape().to_vec())
                     .map_err(|error| format!("real complex eq: {error}"))?,
             )));
         }
@@ -293,7 +293,7 @@ fn typed_complex_integer_comparison(
                 .map(|index| make(complex_integer_element_equals_real_value(storage, index, b)))
                 .collect();
             return Ok(Some(Value::Tensor(
-                Tensor::new(out, tensor.shape.clone())
+                Tensor::new(out, tensor.shape().to_vec())
                     .map_err(|error| format!("complex scalar eq: {error}"))?,
             )));
         }
@@ -307,7 +307,7 @@ fn typed_complex_integer_comparison(
                 .map(|index| make(complex_integer_element_equals_real_value(storage, index, a)))
                 .collect();
             return Ok(Some(Value::Tensor(
-                Tensor::new(out, tensor.shape.clone())
+                Tensor::new(out, tensor.shape().to_vec())
                     .map_err(|error| format!("scalar complex eq: {error}"))?,
             )));
         }
@@ -542,7 +542,7 @@ where
                              tensor: &runmat_value::Tensor,
                              stack: &mut Vec<Value>|
      -> Result<(), RuntimeError> {
-        if array.shape != tensor.shape {
+        if array.shape.as_slice() != tensor.shape() {
             return Err(crate::interpreter::errors::mex(
                 "ShapeMismatch",
                 "shape mismatch for element-wise comparison",
@@ -625,7 +625,7 @@ where
         (Value::LogicalArray(la), Value::Tensor(tb)) => logical_eq_tensor(la, tb, stack)?,
         (Value::Tensor(ta), Value::LogicalArray(lb)) => logical_eq_tensor(lb, ta, stack)?,
         (Value::Tensor(ta), Value::Tensor(tb)) => {
-            if ta.shape != tb.shape {
+            if ta.shape() != tb.shape() {
                 return Err(crate::interpreter::errors::mex(
                     "ShapeMismatch",
                     "shape mismatch for element-wise comparison",
@@ -640,7 +640,8 @@ where
                 });
             }
             stack.push(Value::Tensor(
-                runmat_value::Tensor::new(out, ta.shape.clone()).map_err(|e| format!("eq: {e}"))?,
+                runmat_value::Tensor::new(out, ta.shape().to_vec())
+                    .map_err(|e| format!("eq: {e}"))?,
             ));
         }
         (Value::Tensor(t), Value::Num(_)) | (Value::Tensor(t), Value::Int(_)) => {
@@ -654,7 +655,8 @@ where
                 })
                 .collect();
             stack.push(Value::Tensor(
-                runmat_value::Tensor::new(out, t.shape.clone()).map_err(|e| format!("eq: {e}"))?,
+                runmat_value::Tensor::new(out, t.shape().to_vec())
+                    .map_err(|e| format!("eq: {e}"))?,
             ));
         }
         (Value::Num(_), Value::Tensor(t)) | (Value::Int(_), Value::Tensor(t)) => {
@@ -668,7 +670,8 @@ where
                 })
                 .collect();
             stack.push(Value::Tensor(
-                runmat_value::Tensor::new(out, t.shape.clone()).map_err(|e| format!("eq: {e}"))?,
+                runmat_value::Tensor::new(out, t.shape().to_vec())
+                    .map_err(|e| format!("eq: {e}"))?,
             ));
         }
         (Value::StringArray(sa), Value::StringArray(sb)) => {
@@ -797,7 +800,7 @@ where
             stack.push(call_builtin("ne", a.clone(), b.clone()).await?)
         }
         (Value::Tensor(ta), Value::Tensor(tb)) => {
-            if ta.shape != tb.shape {
+            if ta.shape() != tb.shape() {
                 return Err(crate::interpreter::errors::mex(
                     "ShapeMismatch",
                     "shape mismatch for element-wise comparison",
@@ -812,7 +815,8 @@ where
                 });
             }
             stack.push(Value::Tensor(
-                runmat_value::Tensor::new(out, ta.shape.clone()).map_err(|e| format!("ne: {e}"))?,
+                runmat_value::Tensor::new(out, ta.shape().to_vec())
+                    .map_err(|e| format!("ne: {e}"))?,
             ));
         }
         (Value::Tensor(t), Value::Num(_)) | (Value::Tensor(t), Value::Int(_)) => {
@@ -826,7 +830,8 @@ where
                 })
                 .collect();
             stack.push(Value::Tensor(
-                runmat_value::Tensor::new(out, t.shape.clone()).map_err(|e| format!("ne: {e}"))?,
+                runmat_value::Tensor::new(out, t.shape().to_vec())
+                    .map_err(|e| format!("ne: {e}"))?,
             ));
         }
         (Value::Num(_), Value::Tensor(t)) | (Value::Int(_), Value::Tensor(t)) => {
@@ -840,7 +845,8 @@ where
                 })
                 .collect();
             stack.push(Value::Tensor(
-                runmat_value::Tensor::new(out, t.shape.clone()).map_err(|e| format!("ne: {e}"))?,
+                runmat_value::Tensor::new(out, t.shape().to_vec())
+                    .map_err(|e| format!("ne: {e}"))?,
             ));
         }
         (Value::StringArray(sa), Value::StringArray(sb)) => {
@@ -941,7 +947,7 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected tensor result, got {value:?}");
         };
-        assert_eq!(tensor.shape, shape);
+        assert_eq!(tensor.shape(), shape);
         assert_eq!(tensor.materialize_f64(), expected);
     }
 

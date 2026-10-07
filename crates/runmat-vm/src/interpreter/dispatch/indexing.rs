@@ -88,7 +88,7 @@ fn logical_value_from_tensor(t: runmat_value::Tensor) -> Result<Value, RuntimeEr
     if logical_data.len() <= 1 {
         Ok(Value::Bool(logical_data.first().copied().unwrap_or(0) != 0))
     } else {
-        let logical = runmat_value::LogicalArray::new(logical_data, t.shape.clone())
+        let logical = runmat_value::LogicalArray::new(logical_data, t.shape().to_vec())
             .map_err(|e| map_slice_shape_error("slice assign", e))?;
         Ok(Value::LogicalArray(logical))
     }

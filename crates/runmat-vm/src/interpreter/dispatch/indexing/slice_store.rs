@@ -86,9 +86,9 @@ pub(super) async fn dispatch(
                 }
                 Value::Tensor(t) => {
                     let selectors =
-                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &t.shape)
+                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, t.shape())
                             .await?;
-                    let plan = build_index_plan(&selectors, *dims, &t.shape)?;
+                    let plan = build_index_plan(&selectors, *dims, t.shape())?;
                     stack.push(if delete {
                         idx_write_slice::delete_tensor_with_plan(t, &plan, &rhs)?
                     } else {
@@ -102,10 +102,10 @@ pub(super) async fn dispatch(
                         *colon_mask,
                         *end_mask,
                         &numeric,
-                        &tensor.shape,
+                        tensor.shape(),
                     )
                     .await?;
-                    let plan = build_index_plan(&selectors, *dims, &tensor.shape)?;
+                    let plan = build_index_plan(&selectors, *dims, tensor.shape())?;
                     stack.push(assign_integer_scalar_with_plan(value, &plan, &rhs, delete).await?);
                 }
                 Value::LogicalArray(la) => {
@@ -121,10 +121,10 @@ pub(super) async fn dispatch(
                         *colon_mask,
                         *end_mask,
                         &numeric,
-                        &tensor.shape,
+                        tensor.shape(),
                     )
                     .await?;
-                    let plan = build_index_plan(&selectors, *dims, &tensor.shape)?;
+                    let plan = build_index_plan(&selectors, *dims, tensor.shape())?;
                     let updated = if delete {
                         idx_write_slice::delete_tensor_with_plan(tensor, &plan, &rhs)?
                     } else {
@@ -155,10 +155,10 @@ pub(super) async fn dispatch(
                 }),
                 Value::ComplexTensor(ct) => {
                     let selectors =
-                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &ct.shape)
+                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, ct.shape())
                             .await
                             .map_err(|e| map_slice_plan_error("slice assign", e))?;
-                    let plan = build_index_plan(&selectors, *dims, &ct.shape)
+                    let plan = build_index_plan(&selectors, *dims, ct.shape())
                         .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     if delete {
                         stack.push(idx_write_slice::delete_complex_with_plan(ct, &plan, &rhs)?);

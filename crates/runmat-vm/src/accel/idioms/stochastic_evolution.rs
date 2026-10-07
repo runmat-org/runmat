@@ -244,14 +244,14 @@ fn upload_tensor_view(
         return provider
             .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
                 data,
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             })
             .map_err(|e| crate::interpreter::errors::mex("UploadFailed", &e.to_string()));
     }
     let data = tensor.materialize_f64();
     let view = runmat_accelerate_api::HostTensorView {
         data: &data,
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     provider
         .upload(&view)

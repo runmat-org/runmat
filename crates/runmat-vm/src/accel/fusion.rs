@@ -66,7 +66,7 @@ pub fn value_kind(value: &Value) -> &'static str {
 pub fn summarize_value(i: usize, v: &Value) -> String {
     match v {
         Value::GpuTensor(h) => format!("in#{i}:GpuTensor shape={:?}", h.shape()),
-        Value::Tensor(t) => format!("in#{i}:Tensor shape={:?}", t.shape),
+        Value::Tensor(t) => format!("in#{i}:Tensor shape={:?}", t.shape()),
         Value::Num(n) => format!("in#{i}:Num({n:.6})"),
         Value::Int(n) => format!("in#{i}:Int({n:?})"),
         Value::Bool(b) => format!("in#{i}:Bool({})", if *b { 1 } else { 0 }),
@@ -79,8 +79,8 @@ pub fn summarize_value(i: usize, v: &Value) -> String {
 fn is_scalarish_runtime_value(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => true,
-        Value::Tensor(tensor) => is_scalar_shape(&tensor.shape),
-        Value::ComplexTensor(tensor) => is_scalar_shape(&tensor.shape),
+        Value::Tensor(tensor) => is_scalar_shape(tensor.shape()),
+        Value::ComplexTensor(tensor) => is_scalar_shape(tensor.shape()),
         Value::LogicalArray(array) => is_scalar_shape(&array.shape),
         Value::GpuTensor(handle) => is_scalar_shape(handle.shape()),
         Value::CharArray(array) => array.data.len() == 1,
