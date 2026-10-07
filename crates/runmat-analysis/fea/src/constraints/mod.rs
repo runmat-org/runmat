@@ -18,6 +18,7 @@ mod frame;
 mod matrix_apply;
 mod mixed;
 mod mixed_surface;
+mod node_index;
 mod normal;
 mod pairing;
 mod phase;
@@ -29,10 +30,17 @@ mod result_state;
 mod row;
 mod target;
 mod vector;
+mod workspace;
+pub use compile::{
+    constraint_reference_point_workspace_profile, ConstraintReferencePointWorkspaceProfile,
+};
+pub use coupling::{constraint_coupling_workspace_profile, ConstraintCouplingWorkspaceProfile};
+pub use normal::{constraint_normal_workspace_profile, ConstraintNormalWorkspaceProfile};
 pub(crate) use pairing::pair_targets;
 pub use pairing::{constraint_pairing_workspace_profile, ConstraintPairingWorkspaceProfile};
 pub use phase::{build_phase_reduction, UnitPhaseConstraintError, UnitPhaseRelation};
 pub(crate) use target::resolve_nodal_target;
+pub use target::{constraint_target_workspace_profile, ConstraintTargetWorkspaceProfile};
 
 pub use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
 pub use contract::{
@@ -56,6 +64,8 @@ pub use result::{
 
 #[cfg(test)]
 mod compilation_tests;
+#[cfg(test)]
+mod construction_tests;
 #[cfg(test)]
 mod tests;
 pub use algebra::{AffineConstraintReduction, ConstraintAlgebraError, ResolvedConstraintMatrix};

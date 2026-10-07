@@ -15,11 +15,12 @@ use super::vector::{magnitude, subtract};
 mod tests;
 
 mod geometry;
-mod index;
 use geometry::{closest_triangle_point, identity, rotation_matrix, transform_position};
 mod profile;
-use index::{NodeCoordinates, NodeIdentities};
-use profile::{check_cancelled, reserve, row_term_count};
+use super::node_index::{NodeIdentities, NodeValues};
+type NodeCoordinates = NodeValues<[f64; 3]>;
+use super::workspace::{check_cancelled, multiply, reserve};
+use profile::row_term_count;
 pub use profile::{constraint_pairing_workspace_profile, ConstraintPairingWorkspaceProfile};
 
 pub(crate) fn pair_targets(
@@ -379,7 +380,8 @@ fn node_point(
     constraint_id: &str,
 ) -> Result<[f64; 3], ConstraintPlanError> {
     nodes
-        .get(identity)
+        .get(&identity)
+        .copied()
         .ok_or_else(|| ConstraintPlanError::PairingUnavailable {
             constraint_id: constraint_id.into(),
             secondary_node_identity: identity,
@@ -398,7 +400,7 @@ pub(super) fn pairing_rows(
     } else {
         identity()
     };
-    let row_count = profile::multiply(pairings.len(), 3)?;
+    let row_count = multiply(pairings.len(), 3)?;
     let mut rows = reserve(row_count)?;
     for pairing in pairings {
         check_cancelled()?;

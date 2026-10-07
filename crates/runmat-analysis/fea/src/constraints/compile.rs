@@ -1,7 +1,5 @@
 //! One-way lowering from authored structural constraints to solver-topology rows.
 
-use std::collections::BTreeMap;
-
 use runmat_analysis_core::{
     AnalysisModel, CoordinateFrame, PairedConstraint, PeriodicConstraint, PeriodicTransform,
     PrescribedStructuralDofs, PrescribedStructuralMotion, PrescribedValue, StructuralConstraint,
@@ -25,6 +23,7 @@ use super::pairing::{pair_targets, pairing_rows};
 use super::plan::reference_point_identity;
 use super::row;
 use super::target::{node_coordinates, resolve_nodal_target};
+use super::workspace::{check_cancelled, reserve};
 
 type CompiledConstraint = (
     Vec<ResolvedConstraintTarget>,
@@ -33,54 +32,11 @@ type CompiledConstraint = (
     Option<ConstraintCouplingEvidence>,
 );
 
-pub(super) fn canonical_reference_points(
-    constraints: &[&StructuralConstraint],
-) -> Result<Vec<CanonicalStructuralReferencePoint>, ConstraintPlanError> {
-    let mut by_id = BTreeMap::<String, [f64; 3]>::new();
-    for constraint in constraints {
-        let coupling = match &constraint.kind {
-            StructuralConstraintKind::RigidCoupling(coupling)
-            | StructuralConstraintKind::DistributingCoupling(coupling) => coupling,
-            _ => continue,
-        };
-        let id = coupling.reference_point.reference_point_id.trim();
-        let position = coupling.reference_point.position.meters;
-        if id.is_empty() || position.iter().any(|value| !value.is_finite()) {
-            return Err(ConstraintPlanError::Invalid(format!(
-                "constraint `{}` has an invalid reference point",
-                constraint.constraint_id
-            )));
-        }
-        if by_id
-            .insert(id.into(), position)
-            .is_some_and(|existing| existing != position)
-        {
-            return Err(ConstraintPlanError::Invalid(format!(
-                "reference point `{id}` has conflicting positions"
-            )));
-        }
-    }
-    let mut points = by_id
-        .into_iter()
-        .map(|(reference_point_id, position_meters)| {
-            Ok(CanonicalStructuralReferencePoint {
-                identity: reference_point_identity(&reference_point_id, position_meters)?,
-                reference_point_id,
-                position_meters,
-            })
-        })
-        .collect::<Result<Vec<_>, ConstraintPlanError>>()?;
-    points.sort_by_key(|point| point.identity);
-    if points
-        .windows(2)
-        .any(|pair| pair[0].identity == pair[1].identity)
-    {
-        return Err(ConstraintPlanError::Invalid(
-            "reference-point identities collide".into(),
-        ));
-    }
-    Ok(points)
-}
+mod reference_points;
+pub(super) use reference_points::canonical_reference_points;
+pub use reference_points::{
+    constraint_reference_point_workspace_profile, ConstraintReferencePointWorkspaceProfile,
+};
 
 pub(super) fn compile_constraint(
     model: &AnalysisModel,

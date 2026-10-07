@@ -54,6 +54,7 @@ pub(super) fn compile(
     model: &AnalysisModel,
     mesh: Option<&SolverMeshArtifact>,
 ) -> Result<CanonicalStructuralConstraintPlan, ConstraintPlanError> {
+    super::workspace::check_cancelled()?;
     let authored = structural_constraints(model);
     validate_unique_ids(&authored)?;
     let topology = CompilationTopology::derive(model, mesh)?;

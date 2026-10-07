@@ -1,10 +1,12 @@
-use std::collections::BTreeSet;
-
 use runmat_analysis_core::{EntityDimension, ExpectedTopology, RegionTarget, TargetCardinality};
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 
 use super::contract::{ConstraintPlanError, ResolvedConstraintTarget};
 use super::plan::canonical_digest;
+
+mod profile;
+mod selection;
+pub use profile::{constraint_target_workspace_profile, ConstraintTargetWorkspaceProfile};
 
 #[cfg(test)]
 mod tests;
@@ -14,75 +16,8 @@ pub(crate) fn resolve_nodal_target(
     target: &RegionTarget,
     constraint_id: &str,
 ) -> Result<ResolvedConstraintTarget, ConstraintPlanError> {
-    let (entities, mut nodes) = match (target.entity_dimension, target.expected_topology) {
-        (EntityDimension::Face, ExpectedTopology::BoundaryFace) => {
-            let faces = mesh.topology.boundary_faces.iter().filter(|face| {
-                face.provenance
-                    .iter()
-                    .any(|entity| target.matches_persistent_entity(entity))
-            });
-            // Borrow and deduplicate CAD provenance before cloning it. A single source face
-            // may occur on many boundary triangles; ownership scales with unique entities.
-            let entities = faces
-                .clone()
-                .flat_map(|face| face.provenance.iter())
-                .filter(|entity| target.matches_persistent_entity(entity))
-                .collect::<BTreeSet<_>>();
-            let node_ids = faces
-                .flat_map(|face| face.node_ids.iter().copied())
-                .collect::<BTreeSet<_>>();
-            let nodes = mesh
-                .topology
-                .nodes
-                .iter()
-                .filter(|node| node_ids.contains(&node.node_id))
-                .map(|node| node.stable_identity)
-                .collect::<Vec<_>>();
-            (entities, nodes)
-        }
-        (EntityDimension::Point, ExpectedTopology::MeshNode) => {
-            if target.resolved_entities().is_empty() {
-                let node_id = target
-                    .region_id
-                    .strip_prefix("node:")
-                    .and_then(|value| value.parse::<u64>().ok())
-                    .ok_or_else(|| ConstraintPlanError::UnsupportedTarget {
-                        constraint_id: constraint_id.into(),
-                        reason: "mesh-node targets require a `node:<id>` selector or exact vertex resolution",
-                    })?;
-                let nodes = mesh
-                    .topology
-                    .nodes
-                    .iter()
-                    .filter(|node| node.node_id == node_id)
-                    .map(|node| node.stable_identity)
-                    .collect::<Vec<_>>();
-                (BTreeSet::new(), nodes)
-            } else {
-                let nodes = mesh
-                    .topology
-                    .nodes
-                    .iter()
-                    .filter(|node| {
-                        node.provenance
-                            .iter()
-                            .any(|entity| target.matches_persistent_entity(entity))
-                    })
-                    .map(|node| node.stable_identity)
-                    .collect::<Vec<_>>();
-                (
-                    target.resolved_entities().iter().collect::<BTreeSet<_>>(),
-                    nodes,
-                )
-            }
-        }
-        _ => {
-            return Err(ConstraintPlanError::UnsupportedTarget {
-                constraint_id: constraint_id.into(),
-                reason: "solid essential constraints require a boundary-face or mesh-node target",
-            });
-        }
-    };
+    let selection = selection::Selection::derive(mesh, target, constraint_id)?;
+    let (entities, mut nodes) = selection.into_parts();
     nodes.sort_unstable();
     nodes.dedup();
     if nodes.is_empty() {
@@ -106,7 +41,7 @@ pub(crate) fn resolve_nodal_target(
         canonical_digest("resolved-constraint-target", &(target, &entities, &nodes))?;
     Ok(ResolvedConstraintTarget {
         authored: target.clone(),
-        matched_entities: entities.into_iter().cloned().collect(),
+        matched_entities: selection::clone_entities(&entities)?,
         matched_node_identities: nodes,
         selection_digest,
     })

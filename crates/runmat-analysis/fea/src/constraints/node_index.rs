@@ -1,13 +1,15 @@
-//! Counted coordinate/identity indexes. Borrow physical nodes; retain only compact keys/values.
+//! Compact counted indexes for canonical constraint node data.
 use super::{
-    profile::{check_cancelled, reserve},
-    ConstraintPlanError, SolverMeshArtifact, StableDigest,
+    workspace::{check_cancelled, reserve},
+    ConstraintPlanError,
 };
+use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
+use std::ops::Index;
 
-pub(super) struct NodeCoordinates(Vec<(StableDigest, [f64; 3])>);
-impl NodeCoordinates {
+pub(super) struct NodeValues<T>(Vec<(StableDigest, T)>);
+impl<T> NodeValues<T> {
     pub(super) fn derive(
-        values: impl Iterator<Item = (StableDigest, [f64; 3])>,
+        values: impl Iterator<Item = (StableDigest, T)>,
         count: usize,
     ) -> Result<Self, ConstraintPlanError> {
         let mut index = reserve(count)?;
@@ -29,11 +31,29 @@ impl NodeCoordinates {
         }
         Ok(Self(index))
     }
-    pub(super) fn get(&self, key: StableDigest) -> Option<[f64; 3]> {
+    pub(super) fn get(&self, key: &StableDigest) -> Option<&T> {
         self.0
-            .binary_search_by_key(&key, |(key, _)| *key)
+            .binary_search_by_key(key, |(key, _)| *key)
             .ok()
-            .map(|i| self.0[i].1)
+            .map(|i| &self.0[i].1)
+    }
+    pub(super) fn get_mut(&mut self, key: &StableDigest) -> Option<&mut T> {
+        self.0
+            .binary_search_by_key(key, |(key, _)| *key)
+            .ok()
+            .map(|i| &mut self.0[i].1)
+    }
+    pub(super) fn entries(&self) -> std::slice::Iter<'_, (StableDigest, T)> {
+        self.0.iter()
+    }
+    pub(super) fn into_entries(self) -> std::vec::IntoIter<(StableDigest, T)> {
+        self.0.into_iter()
+    }
+}
+impl<T> Index<&StableDigest> for NodeValues<T> {
+    type Output = T;
+    fn index(&self, key: &StableDigest) -> &T {
+        self.get(key).expect("validated constraint node index")
     }
 }
 
@@ -62,6 +82,6 @@ impl NodeIdentities {
 }
 fn invalid() -> ConstraintPlanError {
     ConstraintPlanError::Invalid(
-        "pairing node index has duplicate keys or an inconsistent count".into(),
+        "constraint node index has duplicate keys or an inconsistent count".into(),
     )
 }

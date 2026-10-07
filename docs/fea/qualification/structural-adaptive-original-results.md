@@ -167,7 +167,42 @@ weights, negative coefficients, every displacement row and identity preservation
 node/facet reordering. Original acoustic periodic field-convergence references and
 native cold-process checks still pass. No original scientific gate is replaced.
 
-Remaining pre-expansion work includes target selection/materialization, normal and
-coupling construction, reference points, row identity encoding, graph/rank/validation
-aggregation and adaptive evaluation/output storage. Only a complete composition of
-those owner profiles can support the separately scheduled task's whole reservation.
+At the pairing checkpoint, remaining pre-expansion work included target selection,
+normals, coupling and reference points. The shared construction slice below addresses
+those components. Complete row encoding, topology, graph/validation and task storage
+composition remains required before whole-task reservation can be claimed.
+
+
+## Counted target, normal and coupling construction
+
+Shared constraint construction now exposes checked requested-storage profiles for
+nodal target selection and metadata copies, original normal recovery, solid coupling
+and reference-point preparation. Borrowed entity candidates are deduplicated before
+cloning unique metadata. Counted sorted vectors replace raw-node and coordinate tree
+indexes and coupling measure maps. Fallible exact reservations precede expansion;
+overflow and cancellation reject through the shared typed constraint error.
+
+Normals reuse one buffer for accumulation and normalized output. Projection storage
+uses the existing topology owner's construction estimate; facet coordinate and vector
+scratch are counted separately. Original area-vector recovery, curved-facet orientation,
+subtriangle coupling weights, geometric thresholds and rigid/distributing equations
+remain unchanged. Explicit-surface coupling borrows its original coordinate map;
+this slice does not account for constructing that separate topology owner's geometry.
+Coupling equations and rotational checks are in focused modules under constraints.
+The superseded pairing-only node index is removed in favor of the shared compact index.
+
+Reference points clone only unique trimmed IDs. Duplicate IDs retain the original
+last-authored position, including the signed-zero case where numeric equality alone
+would hide a canonical identity change. Existing mixed solid/beam/shell canonical-byte
+goldens pass. Independent tests cover Tet4/Tet10 right-triangle area weights, outward
+normals and every rigid/distributing equation against a prescribed rigid motion.
+Cold native producer-termination and original-result replay remain separate evidence.
+
+These are component requested-storage profiles. They exclude borrowed inputs,
+allocator rounding/bookkeeping and RSS. Row/coupling/target identity encoding and row
+stable-sort scratch are separate; the normal projection quantity is the shared owner's
+estimate, not exact allocator instrumentation. Complete compilation also needs mixed
+and explicit-surface topology construction, row/plan encoding, accumulation/sorting,
+graph/rank/validation aggregation and adaptive evaluation/output composition. No
+whole-constraint/task admission, scheduled adaptive graph, atomic semantic publication,
+measured resource envelope or original scientific gate is qualified by these profiles.

@@ -1,9 +1,9 @@
 //! Pre-expansion requested-slot inventory for tie/periodic geometric pairing.
+use super::super::workspace::{check_cancelled, multiply, overflow, slots};
 use super::{
     BoundaryTriangleOrder, ConstraintPairingEvidence, ConstraintPairingWeight, ConstraintPlanError,
     PairingPolicy, ResolvedConstraintTarget, SolverMeshArtifact, StableDigest,
 };
-use std::mem::size_of;
 
 /// Additional Rust vector slots for constructing pairing evidence. Excludes borrowed
 /// mesh/targets, allocator rounding/bookkeeping, strings, row construction/encoding,
@@ -112,26 +112,6 @@ pub(super) fn row_term_count(
     .checked_add(1)
     .ok_or_else(overflow)
 }
-pub(super) fn check_cancelled() -> Result<(), ConstraintPlanError> {
-    if crate::is_fea_cancelled() {
-        Err(ConstraintPlanError::Cancelled)
-    } else {
-        Ok(())
-    }
-}
-pub(super) fn reserve<T>(count: usize) -> Result<Vec<T>, ConstraintPlanError> {
-    let mut values = Vec::new();
-    values.try_reserve_exact(count).map_err(|_| overflow())?;
-    Ok(values)
-}
-fn slots<T>(count: usize) -> Result<u64, ConstraintPlanError> {
-    u64::try_from(multiply(count, size_of::<T>())?).map_err(|_| overflow())
-}
-pub(super) fn multiply(a: usize, b: usize) -> Result<usize, ConstraintPlanError> {
-    a.checked_mul(b).ok_or_else(overflow)
-}
-fn overflow() -> ConstraintPlanError {
-    ConstraintPlanError::Invalid("pairing requested storage exceeds addressable slots".into())
-}
+
 #[cfg(test)]
 mod tests;

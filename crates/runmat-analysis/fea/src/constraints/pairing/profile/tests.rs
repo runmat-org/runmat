@@ -1,6 +1,7 @@
 use super::super::tests::target;
 use super::*;
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
+use std::mem::size_of;
 
 #[test]
 fn matching_profile_counts_live_vector_slots_and_rejects_overflow() {
