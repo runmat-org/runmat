@@ -63,7 +63,7 @@ fn integer_family_real_provider_preparation_and_execution_use_existing_observer(
                     let Value::Tensor(tensor) = output else {
                         panic!("host integer array")
                     };
-                    assert_eq!(tensor.shape, vec![1, 2, 2]);
+                    assert_eq!(tensor.shape(), &[1, 2, 2]);
                     assert!(tensor.integer_storage().is_some());
                     assert_eq!(probe.feedback.borrow().len(), 1);
                     assert!(probe.feedback.borrow()[0].succeeded);

@@ -68,7 +68,7 @@ fn pol2cart_actual_nary_preparation_preserves_all_outputs_and_provider_feedback(
                         }
                         Value::Tensor(tensor) => {
                             assert!(!use_provider);
-                            (tensor.shape.clone(), tensor.materialize_f64())
+                            (tensor.shape().to_vec(), tensor.materialize_f64())
                         }
                         _ => panic!("dense coordinate"),
                     };

@@ -63,7 +63,7 @@ fn native_include_contract_matches_actual_host_domains() {
                                 }
                                 _ => panic!("real host extrema expected"),
                             };
-                            assert_eq!(actual.shape(), expected.shape);
+                            assert_eq!(actual.shape(), expected.shape());
                             let downloaded = block_on(provider.download(actual)).unwrap();
                             let values =
                                 runmat_runtime::builtins::common::tensor::tensor_values_f64_cow(

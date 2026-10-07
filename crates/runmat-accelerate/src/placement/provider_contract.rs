@@ -667,11 +667,15 @@ mod tests {
     fn native_single_representation_keeps_full_low_rank_shape() {
         use super::*;
         for (shape, values) in [(Vec::new(), vec![1.0_f32]), (vec![2], vec![1.0_f32, 2.0])] {
+            let expected_shape: Vec<u64> = shape
+                .iter()
+                .map(|&dimension| u64::try_from(dimension).expect("fixture dimension"))
+                .collect();
             let value =
                 Value::Tensor(runmat_value::Tensor::from_f32(values, shape.clone()).unwrap());
             for precision in [ProviderPrecision::F32, ProviderPrecision::F64] {
                 let representation = tensor_representation(&value, precision).unwrap();
-                assert_eq!(representation.shape, shape);
+                assert_eq!(representation.shape, expected_shape);
                 assert_eq!(representation.element_type, ProviderElementType::F32);
                 assert_eq!(representation.storage, ProviderStorage::DenseReal);
                 assert_eq!(representation.residency, ProviderResidency::Host);
