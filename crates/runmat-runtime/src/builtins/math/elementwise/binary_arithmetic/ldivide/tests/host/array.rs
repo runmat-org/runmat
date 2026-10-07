@@ -7,7 +7,7 @@ fn ldivide_matrix_scalar() {
         ldivide_builtin(Value::Tensor(tensor), Value::Num(2.0), Vec::new()).expect("ldivide");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), vec![2, 2]);
             let expected = [1.0, 0.5, 0.3333333333333333, 0.25];
             for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                 assert!((got - exp).abs() < 1e-12);
@@ -26,7 +26,7 @@ fn ldivide_row_column_broadcast() {
         .expect("broadcast ldivide");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![3, 3]);
+            assert_eq!(t.shape(), vec![3, 3]);
             let expected = [
                 10.0,
                 5.0,
@@ -75,7 +75,7 @@ fn ldivide_logical_inputs_promote() {
     .expect("logical ldivide");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), vec![2, 2]);
             let expected = [1.0, f64::INFINITY, 4.0, 8.0];
             for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                 if exp.is_infinite() {
@@ -97,7 +97,7 @@ fn ldivide_char_array_promotes_to_double() {
         ldivide_builtin(Value::CharArray(chars), Value::Num(2.0), Vec::new()).expect("ldivide");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), vec![1, 2]);
             assert!((t.materialize_f64()[0] - (2.0 / 65.0)).abs() < EPS);
             assert!((t.materialize_f64()[1] - (2.0 / 66.0)).abs() < EPS);
         }

@@ -139,7 +139,7 @@ fn complex_low_rank_construction_preserves_scalarization_and_single_class() {
     else {
         panic!("single complex scalar retains tensor class")
     };
-    assert_eq!(single.shape(), &[]);
+    assert!(single.shape().is_empty());
     assert_eq!(single.numeric_dtype(), NumericDType::F32);
     let component: (f32, f32) = single.as_f32_slice().unwrap()[0].into();
     assert_eq!(component, (1.0_f32, 2.0_f32));

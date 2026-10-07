@@ -286,7 +286,7 @@ fn typed_integer_partition_counts_are_exact_and_lossy_f64_is_rejected() {
     let PartitionOutput::Folds(Value::Tensor(folds)) = folds else {
         panic!("expected fold tensor");
     };
-    assert_eq!(folds.shape, vec![6, 1]);
+    assert_eq!(folds.shape(), &[6, 1]);
 
     for value in [
         Value::Int(runmat_value::IntValue::I8(-1)),

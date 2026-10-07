@@ -47,7 +47,7 @@ fn unary_pow2_preserves_low_rank_scalarization_shape_and_native_class() {
     else {
         panic!("expected native complex single tensor");
     };
-    assert_eq!(complex.shape(), &[]);
+    assert!(complex.shape().is_empty());
     assert_eq!(complex.numeric_dtype(), runmat_value::NumericDType::F32);
     let values = complex.materialize_f64();
     let [(real, imaginary)] = values.as_slice() else {

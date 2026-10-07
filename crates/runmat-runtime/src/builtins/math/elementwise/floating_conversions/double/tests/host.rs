@@ -265,7 +265,7 @@ fn double_preserves_low_rank_real_and_complex_geometry_while_promoting_class() {
     else {
         panic!("tensor input remains a tensor")
     };
-    assert_eq!(scalar.shape(), &[]);
+    assert!(scalar.shape().is_empty());
     assert_eq!(scalar.numeric_dtype(), NumericDType::F64);
     assert_eq!(scalar.materialize_f64(), vec![1.25]);
 

@@ -54,7 +54,7 @@ fn rdivide_like_complex_conversion_reads_typed_integer_storage_exactly() {
 
     match result {
         Value::ComplexTensor(out) => {
-            assert_eq!(out.shape, vec![1, 2]);
+            assert_eq!(out.shape(), vec![1, 2]);
             assert_eq!(out.materialize_f64(), vec![(-4.0, 0.0), (5.0, 0.0)]);
         }
         other => panic!("expected complex tensor, got {other:?}"),
@@ -92,7 +92,7 @@ fn rdivide_matrix_scalar() {
         rdivide_builtin(Value::Tensor(tensor), Value::Num(2.0), Vec::new()).expect("rdivide");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), vec![2, 2]);
             assert_eq!(double_values(&t), &[1.0, 2.0, 3.0, 4.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -108,7 +108,7 @@ fn rdivide_row_column_broadcast() {
         .expect("broadcast rdivide");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![3, 3]);
+            assert_eq!(t.shape(), vec![3, 3]);
             let expected = [0.1, 0.2, 0.3, 0.05, 0.10, 0.15, 0.025, 0.05, 0.075];
             for (got, exp) in double_values(&t).iter().zip(expected.iter()) {
                 assert!((got - exp).abs() < EPS);
@@ -149,7 +149,7 @@ fn rdivide_logical_inputs_promote() {
     .expect("logical rdivide");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), vec![2, 2]);
             let expected = [1.0, 0.0, 0.25, 0.125];
             for (got, exp) in double_values(&t).iter().zip(expected.iter()) {
                 assert!((got - exp).abs() < EPS);
@@ -167,7 +167,7 @@ fn rdivide_char_array_promotes_to_double() {
         rdivide_builtin(Value::CharArray(chars), Value::Num(2.0), Vec::new()).expect("rdivide");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), vec![1, 2]);
             assert!((double_values(&t)[0] - 32.5).abs() < EPS);
             assert!((double_values(&t)[1] - 33.0).abs() < EPS);
         }

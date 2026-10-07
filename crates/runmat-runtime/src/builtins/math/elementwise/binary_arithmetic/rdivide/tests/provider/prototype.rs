@@ -41,7 +41,7 @@ fn rdivide_like_gpu_prototype_uploads_typed_integer_storage_exactly() {
         .expect("rdivide like gpu");
 
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), vec![2, 1]);
         assert_eq!(
             gathered.integer_storage(),
             Some(&IntegerStorage::U32(vec![5, 10]))
@@ -67,7 +67,7 @@ fn rdivide_like_host_gathers_gpu_value() {
         let Value::Tensor(t) = result else {
             panic!("expected tensor result after host gather");
         };
-        assert_eq!(t.shape, vec![2, 1]);
+        assert_eq!(t.shape(), vec![2, 1]);
         assert_eq!(double_values(&t), &[4.0, 6.0]);
     });
 }
@@ -86,7 +86,7 @@ fn rdivide_like_complex_prototype_yields_complex() {
     .expect("rdivide like complex");
     match result {
         Value::ComplexTensor(ct) => {
-            assert_eq!(ct.shape, vec![2, 1]);
+            assert_eq!(ct.shape(), vec![2, 1]);
             let expected = [(2.0, 0.0), (2.0, 0.0)];
             for (got, exp) in ct.materialize_f64().iter().zip(expected.iter()) {
                 assert!((got.0 - exp.0).abs() < EPS);

@@ -61,7 +61,7 @@ fn statset_empty_single_tolerance_retains_class_and_shape() {
         panic!("expected empty numeric tolerance")
     };
     assert_eq!(tolerance.numeric_dtype(), runmat_value::NumericDType::F32);
-    assert_eq!(tolerance.shape, vec![1, 0]);
+    assert_eq!(tolerance.shape(), &[1, 0]);
 }
 
 #[test]
@@ -151,7 +151,7 @@ fn statset_reads_typed_integer_tensor_options_exactly() {
     let Some(Value::Tensor(parsed_deriv_step)) = options.fields.get("DerivStep") else {
         panic!("expected DerivStep tensor");
     };
-    assert_eq!(parsed_deriv_step.shape, deriv_step.shape);
+    assert_eq!(parsed_deriv_step.shape(), deriv_step.shape());
     assert_eq!(
         parsed_deriv_step.integer_storage(),
         deriv_step.integer_storage()
@@ -443,7 +443,7 @@ fn statget_unknown_field_ignores_resident_default() {
         vec![Value::GpuTensor(allocation.handle.clone())],
     ))
     .expect("unknown field returns empty without touching default");
-    assert!(matches!(result, Value::Tensor(tensor) if tensor.shape == vec![0, 0]));
+    assert!(matches!(result, Value::Tensor(tensor) if tensor.shape() == [0, 0]));
     assert_eq!(allocation.probe.retirements(), 0);
     allocation.handle.release().unwrap();
     assert_eq!(allocation.probe.retirements(), 1);

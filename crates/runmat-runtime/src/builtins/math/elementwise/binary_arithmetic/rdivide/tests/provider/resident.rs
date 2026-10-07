@@ -10,7 +10,7 @@ fn rdivide_gpu_pair_roundtrip() {
         let result = rdivide_builtin(Value::GpuTensor(ha), Value::GpuTensor(hb), Vec::new())
             .expect("gpu rdivide");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![3, 1]);
+        assert_eq!(gathered.shape(), vec![3, 1]);
         assert_eq!(double_values(&gathered), &[5.0, 4.0, 3.0]);
     });
 }
@@ -37,7 +37,7 @@ fn rdivide_complex_gpu_pair_stays_resident() {
         let Value::ComplexTensor(t) = gathered else {
             panic!("expected gathered complex tensor, got {gathered:?}");
         };
-        assert_eq!(t.shape, vec![1, 2]);
+        assert_eq!(t.shape(), vec![1, 2]);
         let expected = [(0.0, 1.0), (-3.5, 0.5)];
         for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
             assert!((got.0 - exp.0).abs() < EPS);

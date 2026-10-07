@@ -35,7 +35,7 @@ fn plus_matrix_scalar() {
     let result = plus_builtin(Value::Tensor(tensor), Value::Num(2.0), Vec::new()).expect("plus");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), vec![2, 2]);
             assert_eq!(
                 t.as_f64_slice().expect("double output"),
                 &[3.0, 4.0, 5.0, 6.0]
@@ -96,7 +96,7 @@ fn plus_dense_integer_arrays_preserve_exact_storage_without_mirror() {
     let Value::Tensor(result) = result else {
         panic!("expected integer tensor");
     };
-    assert_eq!(result.shape, vec![2, 3]);
+    assert_eq!(result.shape(), vec![2, 3]);
     assert_eq!(
         result.integer_storage(),
         Some(&IntegerStorage::U64(vec![
@@ -228,7 +228,7 @@ fn plus_real_complex_single_reverse_path_and_empty_class_are_preserved() {
     let Value::ComplexTensor(result) = result else {
         panic!("expected empty complex single tensor");
     };
-    assert_eq!(result.shape, vec![0, 2]);
+    assert_eq!(result.shape(), vec![0, 2]);
     assert_eq!(result.as_f32_slice(), Some(&[][..]));
 }
 
@@ -284,7 +284,7 @@ fn plus_row_column_broadcast() {
         .expect("broadcast plus");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![3, 3]);
+            assert_eq!(t.shape(), vec![3, 3]);
             let expected = vec![11.0, 12.0, 13.0, 21.0, 22.0, 23.0, 31.0, 32.0, 33.0];
             assert_eq!(t.as_f64_slice().expect("double output"), expected);
         }
@@ -305,7 +305,7 @@ fn plus_complex_inputs() {
     .expect("complex plus");
     match result {
         Value::ComplexTensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), vec![1, 2]);
             let expected = [(3.0, 1.0), (2.0, -3.0)];
             for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                 assert!((got.0 - exp.0).abs() < EPS && (got.1 - exp.1).abs() < EPS);
@@ -323,7 +323,7 @@ fn plus_char_input() {
         plus_builtin(Value::CharArray(chars), Value::Num(2.0), Vec::new()).expect("char plus");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 3]);
+            assert_eq!(t.shape(), vec![1, 3]);
             assert_eq!(
                 t.as_f64_slice().expect("double output"),
                 &[67.0, 68.0, 69.0]

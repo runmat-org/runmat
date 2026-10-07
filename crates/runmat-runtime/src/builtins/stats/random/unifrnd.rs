@@ -451,7 +451,7 @@ mod tests {
         let result = block_on(unifrnd_builtin(args)).expect("unifrnd");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 4]);
+                assert_eq!(t.shape(), &[3, 4]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -469,7 +469,7 @@ mod tests {
         let args = vec![Value::Num(0.0), Value::Num(1.0), Value::Tensor(size)];
         let result = block_on(unifrnd_builtin(args)).expect("unifrnd");
         match result {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![3, 4]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[3, 4]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -490,7 +490,7 @@ mod tests {
         .expect("unifrnd");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), &[2, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()

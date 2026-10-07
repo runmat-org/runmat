@@ -68,7 +68,7 @@ fn low_rank_tensors_preserve_shape_class_and_values() {
     else {
         panic!("expected native single tensor");
     };
-    assert_eq!(scalar.shape(), &[]);
+    assert!(scalar.shape().is_empty());
     assert_eq!(scalar.as_f32_slice().expect("single storage"), &[4.0]);
 
     let vector =

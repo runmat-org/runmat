@@ -600,7 +600,7 @@ mod tests {
         ];
         let result = block_on(normrnd_builtin(args)).expect("normrnd");
         match result {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![3, 4]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[3, 4]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -613,7 +613,7 @@ mod tests {
         let args = vec![Value::Num(0.0), Value::Num(1.0), Value::Tensor(size)];
         let result = block_on(normrnd_builtin(args)).expect("normrnd");
         match result {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![3, 4]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[3, 4]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -633,7 +633,7 @@ mod tests {
         ]))
         .expect("normrnd");
         match result {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 3]),
+            Value::Tensor(t) => assert_eq!(t.shape(), &[2, 3]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -694,7 +694,7 @@ mod tests {
         let host = crate::builtins::common::test_support::gather(Value::GpuTensor(out))
             .expect("gather automatic output");
         assert_eq!(host.numeric_dtype(), NumericDType::F64);
-        assert_eq!(host.shape, vec![2, 2]);
+        assert_eq!(host.shape(), &[2, 2]);
         let handle = handle
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .expect("validated provenance");

@@ -7,7 +7,7 @@ fn times_gpu_pair_roundtrip() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let ha = provider
             .upload(&view)
@@ -43,7 +43,7 @@ fn times_gpu_scalar_right() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = times_builtin(Value::GpuTensor(handle), Value::Num(2.0), Vec::new())
@@ -60,7 +60,7 @@ fn times_gpu_scalar_left() {
         let tensor = Tensor::new(vec![2.0, 4.0], vec![2, 1]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = times_builtin(Value::Num(3.0), Value::GpuTensor(handle), Vec::new())
@@ -91,7 +91,7 @@ fn times_like_gpu_prototype_keeps_residency() {
         match result {
             Value::GpuTensor(handle) => {
                 let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                assert_eq!(gathered.shape, vec![2, 1]);
+                assert_eq!(gathered.shape(), vec![2, 1]);
                 assert_eq!(gathered.materialize_f64(), vec![3.0, 8.0]);
             }
             other => panic!("expected GPU tensor result, got {other:?}"),
@@ -119,7 +119,7 @@ fn times_like_gpu_prototype_uploads_typed_integer_storage_exactly() {
         .expect("times like gpu");
 
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), vec![2, 1]);
         assert_eq!(gathered.materialize_f64(), vec![30.0, 60.0]);
     });
 }
@@ -133,11 +133,11 @@ fn times_like_host_gathers_gpu_value() {
         let rhs = Tensor::new(vec![5.0, 6.0], vec![2, 1]).unwrap();
         let view_l = HostTensorView {
             data: &lhs.materialize_f64(),
-            shape: &lhs.shape,
+            shape: lhs.shape(),
         };
         let view_r = HostTensorView {
             data: &rhs.materialize_f64(),
-            shape: &rhs.shape,
+            shape: rhs.shape(),
         };
         let ha = provider.upload(&view_l).expect("upload lhs");
         let hb = provider.upload(&view_r).expect("upload rhs");
@@ -150,7 +150,7 @@ fn times_like_host_gathers_gpu_value() {
         let Value::Tensor(t) = result else {
             panic!("expected tensor result after host gather");
         };
-        assert_eq!(t.shape, vec![2, 1]);
+        assert_eq!(t.shape(), vec![2, 1]);
         assert_eq!(t.materialize_f64(), vec![5.0, 12.0]);
     });
 }
@@ -169,7 +169,7 @@ fn times_like_complex_prototype_yields_complex() {
     .expect("times like complex");
     match result {
         Value::ComplexTensor(ct) => {
-            assert_eq!(ct.shape, vec![2, 1]);
+            assert_eq!(ct.shape(), vec![2, 1]);
             let expected = [(8.0, 0.0), (15.0, 0.0)];
             for (got, exp) in ct.materialize_f64().iter().zip(expected.iter()) {
                 assert!((got.0 - exp.0).abs() < EPS);

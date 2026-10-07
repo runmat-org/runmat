@@ -81,7 +81,7 @@ pub(crate) mod tests {
         let expected = (0..2)
             .map(|i| (i as f64 + 1.0) * (0.1f64 * 3.0).exp())
             .collect::<Vec<_>>();
-        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(tensor.shape(), &[2, 1]);
         for (got, exp) in tensor.materialize_f64().iter().zip(expected.iter()) {
             assert!((got - exp).abs() < 1e-12, "got {got} expected {exp}");
         }

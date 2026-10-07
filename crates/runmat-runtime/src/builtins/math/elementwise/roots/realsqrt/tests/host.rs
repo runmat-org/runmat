@@ -210,7 +210,7 @@ fn realsqrt_low_rank_inputs_preserve_geometry_class_and_domain_order() {
     let Value::Tensor(scalar) = call(Value::Tensor(scalar)).expect("realsqrt scalar") else {
         panic!("single scalar retains tensor class")
     };
-    assert_eq!(scalar.shape(), &[]);
+    assert!(scalar.shape().is_empty());
     assert_eq!(scalar.numeric_dtype(), NumericDType::F32);
     assert_eq!(scalar.as_f32_slice(), Some(&[2.0_f32][..]));
 

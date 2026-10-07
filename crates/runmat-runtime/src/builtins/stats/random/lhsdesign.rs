@@ -646,7 +646,7 @@ mod tests {
         let _guard = reset_rng();
         let out = block_on(lhsdesign_builtin(vec![Value::Num(6.0), Value::Num(3.0)])).unwrap();
         let tensor = tensor(out);
-        assert_eq!(tensor.shape, vec![6, 3]);
+        assert_eq!(tensor.shape(), &[6, 3]);
         assert!(tensor
             .materialize_f64()
             .iter()
@@ -692,7 +692,7 @@ mod tests {
         ]))
         .unwrap();
         let tensor = tensor(out);
-        assert_eq!(tensor.shape, vec![8, 3]);
+        assert_eq!(tensor.shape(), &[8, 3]);
         for value in tensor.materialize_f64() {
             let scaled = value * 8.0;
             assert!((scaled.fract() - 0.5).abs() < 1.0e-12);
@@ -715,7 +715,7 @@ mod tests {
         ]))
         .expect("lhsdesign");
         let tensor = tensor(out);
-        assert_eq!(tensor.shape, vec![4, 2]);
+        assert_eq!(tensor.shape(), &[4, 2]);
         for value in tensor.materialize_f64() {
             let scaled = value * 4.0;
             assert!((scaled.fract() - 0.5).abs() < 1.0e-12);
@@ -874,7 +874,7 @@ mod tests {
             let Value::Tensor(output) = output else {
                 panic!("lhsdesign remains a host implementation");
             };
-            assert_eq!(output.shape, vec![4, 2]);
+            assert_eq!(output.shape(), &[4, 2]);
         });
     }
 }

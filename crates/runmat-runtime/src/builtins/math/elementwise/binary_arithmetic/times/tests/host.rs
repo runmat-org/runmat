@@ -35,7 +35,7 @@ fn times_matrix_scalar() {
     let result = times_builtin(Value::Tensor(tensor), Value::Num(2.0), Vec::new()).expect("times");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), vec![2, 2]);
             assert_eq!(t.materialize_f64(), vec![2.0, 4.0, 6.0, 8.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -93,7 +93,7 @@ fn times_like_complex_conversion_reads_typed_integer_storage_exactly() {
 
     match result {
         Value::ComplexTensor(out) => {
-            assert_eq!(out.shape, vec![1, 2]);
+            assert_eq!(out.shape(), vec![1, 2]);
             assert_eq!(out.materialize_f64(), vec![(2.0, 0.0), (3.0, 0.0)]);
         }
         other => panic!("expected complex tensor, got {other:?}"),
@@ -136,7 +136,7 @@ fn times_dense_integer_arrays_preserve_exact_storage_without_mirror() {
     let Value::Tensor(result) = result else {
         panic!("expected integer tensor");
     };
-    assert_eq!(result.shape, vec![2, 3]);
+    assert_eq!(result.shape(), vec![2, 3]);
     assert_eq!(
         result.integer_storage(),
         Some(&IntegerStorage::U64(vec![
@@ -167,7 +167,7 @@ fn times_row_column_broadcast() {
         .expect("broadcast times");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![3, 3]);
+            assert_eq!(t.shape(), vec![3, 3]);
             let expected = vec![10.0, 20.0, 30.0, 20.0, 40.0, 60.0, 30.0, 60.0, 90.0];
             assert_eq!(t.materialize_f64(), expected);
         }
@@ -188,7 +188,7 @@ fn times_complex_inputs() {
     .expect("complex times");
     match result {
         Value::ComplexTensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), vec![1, 2]);
             let expected = [(4.0, 3.0), (1.0, 7.0)];
             for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                 assert!((got.0 - exp.0).abs() < EPS && (got.1 - exp.1).abs() < EPS);
@@ -291,7 +291,7 @@ fn times_preserves_empty_complex_single_class() {
     let Value::ComplexTensor(result) = result else {
         panic!("expected complex single tensor");
     };
-    assert_eq!(result.shape, vec![0, 2]);
+    assert_eq!(result.shape(), vec![0, 2]);
     assert_eq!(result.as_f32_slice(), Some(&[][..]));
 }
 
@@ -303,7 +303,7 @@ fn times_char_input() {
         times_builtin(Value::CharArray(chars), Value::Num(2.0), Vec::new()).expect("char times");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 3]);
+            assert_eq!(t.shape(), vec![1, 3]);
             assert_eq!(t.materialize_f64(), vec![130.0, 132.0, 134.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),

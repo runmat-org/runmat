@@ -77,7 +77,7 @@ fn categorical_classes_preserve_unused_categories() {
     let Value::Tensor(dummy) = block_on(dummyvar_builtin(group.clone())).unwrap() else {
         panic!("dummy tensor");
     };
-    assert_eq!(dummy.shape, vec![2, 3]);
+    assert_eq!(dummy.shape(), &[2, 3]);
     assert_eq!(dummy.materialize_f64(), vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
 
     let Value::Tensor(encoded) =
@@ -85,7 +85,7 @@ fn categorical_classes_preserve_unused_categories() {
     else {
         panic!("encoded tensor");
     };
-    assert_eq!(encoded.shape, vec![2, 3]);
+    assert_eq!(encoded.shape(), &[2, 3]);
     assert_eq!(
         encoded.materialize_f64(),
         vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]

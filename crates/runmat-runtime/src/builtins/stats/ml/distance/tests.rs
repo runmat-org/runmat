@@ -295,7 +295,7 @@ fn pdist2_matrix_and_selection_modes_work() {
     ))
     .unwrap();
     let tensor = tensor_out(out);
-    assert_eq!(tensor.shape, vec![1, 2]);
+    assert_eq!(tensor.shape(), &[1, 2]);
     assert_eq!(tensor.materialize_f64(), vec![1.0, 1.0]);
 }
 
@@ -313,7 +313,7 @@ fn pdist2_selection_reads_typed_integer_count_exactly() {
     ))
     .unwrap();
     let tensor = tensor_out(out);
-    assert_eq!(tensor.shape, vec![1, 2]);
+    assert_eq!(tensor.shape(), &[1, 2]);
     assert_eq!(tensor.materialize_f64(), vec![1.0, 1.0]);
 
     assert!(parse_positive_integer(
@@ -366,8 +366,8 @@ fn knnsearch_returns_indices_then_distances() {
     };
     let idx = tensor_out(values[0].clone());
     let dist = tensor_out(values[1].clone());
-    assert_eq!(idx.shape, vec![2, 2]);
-    assert_eq!(dist.shape, vec![2, 2]);
+    assert_eq!(idx.shape(), &[2, 2]);
+    assert_eq!(dist.shape(), &[2, 2]);
     assert_eq!(idx.materialize_f64(), vec![1.0, 3.0, 2.0, 2.0]);
     assert_eq!(dist.materialize_f64(), vec![1.0, 1.0, 1.0, 2.0]);
 }
@@ -388,7 +388,7 @@ fn knnsearch_supports_metrics_and_ties() {
     ))
     .unwrap();
     let idx = tensor_out(out);
-    assert_eq!(idx.shape, vec![1, 2]);
+    assert_eq!(idx.shape(), &[1, 2]);
     assert_eq!(idx.materialize_f64(), vec![1.0, 2.0]);
 
     let out = block_on(knnsearch_builtin(
@@ -409,7 +409,7 @@ fn knnsearch_supports_metrics_and_ties() {
     let Value::Tensor(tied) = &cells.data[0] else {
         panic!("expected tensor in cell");
     };
-    assert_eq!(tied.shape, vec![1, 3]);
+    assert_eq!(tied.shape(), &[1, 3]);
     assert_eq!(tied.materialize_f64(), vec![1.0, 2.0, 3.0]);
 }
 
@@ -475,7 +475,7 @@ fn knnsearch_options_read_typed_integer_storage_exactly() {
     ))
     .unwrap();
     let idx = tensor_out(out);
-    assert_eq!(idx.shape, vec![2, 2]);
+    assert_eq!(idx.shape(), &[2, 2]);
     assert_eq!(idx.materialize_f64(), vec![1.0, 3.0, 2.0, 2.0]);
 }
 
@@ -543,8 +543,8 @@ fn knnsearch_handles_nan_rows_empty_queries_and_option_validation() {
     let Value::OutputList(values) = out else {
         panic!("expected output list");
     };
-    assert_eq!(tensor_out(values[0].clone()).shape, vec![0, 1]);
-    assert_eq!(tensor_out(values[1].clone()).shape, vec![0, 1]);
+    assert_eq!(tensor_out(values[0].clone()).shape(), &[0, 1]);
+    assert_eq!(tensor_out(values[1].clone()).shape(), &[0, 1]);
 
     let out = block_on(knnsearch_builtin(
         tensor(vec![0.0, 2.0, -2.0], 3, 1),
@@ -590,7 +590,7 @@ fn squareform_converts_both_directions() {
         6,
     );
     let matrix = tensor_out(block_on(squareform_builtin(vector, Vec::new())).unwrap());
-    assert_eq!(matrix.shape, vec![4, 4]);
+    assert_eq!(matrix.shape(), &[4, 4]);
     assert_eq!(
         matrix.materialize_f64(),
         vec![
@@ -615,7 +615,7 @@ fn squareform_converts_both_directions() {
 
     let vector =
         tensor_out(block_on(squareform_builtin(Value::Tensor(matrix), Vec::new())).unwrap());
-    assert_eq!(vector.shape, vec![1, 6]);
+    assert_eq!(vector.shape(), &[1, 6]);
     assert_eq!(
         vector.materialize_f64(),
         vec![
@@ -634,7 +634,7 @@ fn squareform_reads_typed_integer_storage_exactly() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let vector = cleared_int_tensor(IntegerStorage::U8(vec![5, 4, 2]), 1, 3);
     let matrix = tensor_out(block_on(squareform_builtin(vector, Vec::new())).unwrap());
-    assert_eq!(matrix.shape, vec![3, 3]);
+    assert_eq!(matrix.shape(), &[3, 3]);
     assert_eq!(matrix.numeric_dtype(), NumericDType::U8);
     assert_eq!(
         matrix.materialize_f64(),
@@ -643,7 +643,7 @@ fn squareform_reads_typed_integer_storage_exactly() {
 
     let matrix = poisoned_int_tensor(IntegerStorage::U8(vec![0, 5, 4, 5, 0, 2, 4, 2, 0]), 3, 3);
     let vector = tensor_out(block_on(squareform_builtin(matrix, Vec::new())).unwrap());
-    assert_eq!(vector.shape, vec![1, 3]);
+    assert_eq!(vector.shape(), &[1, 3]);
     assert_eq!(vector.numeric_dtype(), NumericDType::U8);
     assert_eq!(vector.materialize_f64(), vec![5.0, 4.0, 2.0]);
 }
@@ -807,5 +807,5 @@ fn knn_preserves_legacy_near_integer_floating_count() {
         vec![Value::from("K"), Value::Num(1.0 + 5.0e-13)],
     ))
     .expect("legacy floating-count tolerance");
-    assert_eq!(tensor_out(output).shape, vec![1, 1]);
+    assert_eq!(tensor_out(output).shape(), &[1, 1]);
 }

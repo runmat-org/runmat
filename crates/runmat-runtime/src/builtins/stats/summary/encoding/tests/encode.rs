@@ -72,7 +72,7 @@ fn onehotencode_uses_feature_dimension_and_class_names() {
     .unwrap() else {
         panic!("logical");
     };
-    assert_eq!(out.shape, vec![3, 2]);
+    assert_eq!(out.shape(), &[3, 2]);
     assert_eq!(out.data, vec![0, 1, 0, 1, 0, 1]);
 }
 
@@ -92,7 +92,7 @@ fn onehotencode_accepts_typename_before_name_value_options() {
     .unwrap() else {
         panic!("tensor");
     };
-    assert_eq!(out.shape, vec![3, 2]);
+    assert_eq!(out.shape(), &[3, 2]);
     assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0]);
 }
 
@@ -117,7 +117,7 @@ fn onehotencode_requires_classnames_for_noncategorical_and_marks_excluded_labels
     .unwrap() else {
         panic!("tensor");
     };
-    assert_eq!(out.shape, vec![3, 2]);
+    assert_eq!(out.shape(), &[3, 2]);
     assert_f64_slice_eq_nan(
         &out.materialize_f64(),
         &[1.0, f64::NAN, f64::NAN, 0.0, f64::NAN, f64::NAN],
@@ -149,7 +149,7 @@ fn onehotencode_reads_typed_integer_labels_and_classes_exactly() {
     .unwrap() else {
         panic!("tensor");
     };
-    assert_eq!(out.shape, vec![3, 2]);
+    assert_eq!(out.shape(), &[3, 2]);
     assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0]);
 }
 

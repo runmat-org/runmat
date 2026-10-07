@@ -244,7 +244,7 @@ fn sqrt_low_rank_inputs_preserve_existing_scalarization_and_class_policy() {
     else {
         panic!("single scalar retains tensor class")
     };
-    assert_eq!(positive.shape(), &[]);
+    assert!(positive.shape().is_empty());
     assert_eq!(positive.numeric_dtype(), runmat_value::NumericDType::F32);
 
     let negative = Tensor::from_f32(vec![-4.0], Vec::new()).expect("single negative");
@@ -253,7 +253,7 @@ fn sqrt_low_rank_inputs_preserve_existing_scalarization_and_class_policy() {
     else {
         panic!("single negative scalar retains complex tensor class")
     };
-    assert_eq!(negative.shape(), &[]);
+    assert!(negative.shape().is_empty());
     assert_eq!(negative.numeric_dtype(), runmat_value::NumericDType::F32);
 
     let vector =

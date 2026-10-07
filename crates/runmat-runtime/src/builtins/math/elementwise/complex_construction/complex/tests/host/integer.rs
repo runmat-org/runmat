@@ -10,7 +10,7 @@ fn complex_exact_integer_low_rank_inputs_preserve_shape_class_and_values() {
     else {
         panic!("integer scalar retains exact complex tensor storage")
     };
-    assert_eq!(scalar.shape(), &[]);
+    assert!(scalar.shape().is_empty());
     assert_eq!(
         scalar.integer_storage().cloned(),
         Some(

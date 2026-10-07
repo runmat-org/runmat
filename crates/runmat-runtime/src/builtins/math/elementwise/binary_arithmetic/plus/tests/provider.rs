@@ -99,7 +99,7 @@ fn plus_like_gpu_prototype_keeps_residency() {
         match result {
             Value::GpuTensor(handle) => {
                 let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                assert_eq!(gathered.shape, vec![2, 1]);
+                assert_eq!(gathered.shape(), vec![2, 1]);
                 assert_eq!(gathered.as_f64_slice().expect("double output"), &[4.0, 6.0]);
             }
             other => panic!("expected GPU tensor result, got {other:?}"),
@@ -125,7 +125,7 @@ fn plus_like_host_gathers_gpu_value() {
         let Value::Tensor(t) = result else {
             panic!("expected tensor result after host gather");
         };
-        assert_eq!(t.shape, vec![2, 1]);
+        assert_eq!(t.shape(), vec![2, 1]);
         assert_eq!(t.as_f64_slice().expect("double output"), &[6.0, 8.0]);
     });
 }
@@ -144,7 +144,7 @@ fn plus_like_complex_prototype_yields_complex() {
     .expect("plus like complex");
     match result {
         Value::ComplexTensor(ct) => {
-            assert_eq!(ct.shape, vec![2, 1]);
+            assert_eq!(ct.shape(), vec![2, 1]);
             let expected = [(6.0, 0.0), (8.0, 0.0)];
             for (got, exp) in ct.materialize_f64().iter().zip(expected.iter()) {
                 assert!((got.0 - exp.0).abs() < EPS);

@@ -111,7 +111,7 @@ fn minus_like_gpu_prototype_keeps_residency() {
         match result {
             Value::GpuTensor(handle) => {
                 let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                assert_eq!(gathered.shape, vec![2, 1]);
+                assert_eq!(gathered.shape(), vec![2, 1]);
                 assert_eq!(
                     gathered.as_f64_slice().expect("double result"),
                     &[7.0, 16.0]
@@ -142,7 +142,7 @@ fn minus_like_gpu_prototype_uploads_typed_integer_storage_exactly() {
         .expect("minus like gpu");
 
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), vec![2, 1]);
         assert_eq!(
             gathered.integer_storage(),
             Some(&IntegerStorage::I16(vec![7, 17]))
@@ -168,7 +168,7 @@ fn minus_like_host_gathers_gpu_value() {
         let Value::Tensor(t) = result else {
             panic!("expected tensor result after host gather");
         };
-        assert_eq!(t.shape, vec![2, 1]);
+        assert_eq!(t.shape(), vec![2, 1]);
         assert_eq!(t.as_f64_slice().expect("double result"), &[5.0, 14.0]);
     });
 }
@@ -187,7 +187,7 @@ fn minus_like_complex_prototype_yields_complex() {
     .expect("minus like complex");
     match result {
         Value::ComplexTensor(t) => {
-            assert_eq!(t.shape, vec![2, 1]);
+            assert_eq!(t.shape(), vec![2, 1]);
             let expected = [(-2.0, 0.0), (-2.0, 0.0)];
             for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                 assert!((got.0 - exp.0).abs() < EPS && (got.1 - exp.1).abs() < EPS);
@@ -226,7 +226,7 @@ fn minus_like_keyword_case_insensitive() {
     .expect("minus like upper");
     match result {
         Value::Tensor(out) => {
-            assert_eq!(out.shape, vec![2, 1]);
+            assert_eq!(out.shape(), vec![2, 1]);
             assert_eq!(out.as_f64_slice().expect("double result"), &[-1.0, 0.0]);
         }
         other => panic!("unexpected result {other:?}"),

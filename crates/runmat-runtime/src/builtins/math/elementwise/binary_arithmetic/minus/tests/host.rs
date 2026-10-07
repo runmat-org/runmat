@@ -35,7 +35,7 @@ fn minus_matrix_scalar() {
     let result = minus_builtin(Value::Tensor(tensor), Value::Num(2.0), Vec::new()).expect("minus");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), vec![2, 2]);
             assert_eq!(
                 t.as_f64_slice().expect("double result"),
                 &[-1.0, 0.0, 1.0, 2.0]
@@ -57,7 +57,7 @@ fn minus_like_complex_conversion_reads_typed_integer_storage_exactly() {
 
     match result {
         Value::ComplexTensor(out) => {
-            assert_eq!(out.shape, vec![1, 2]);
+            assert_eq!(out.shape(), vec![1, 2]);
             assert_eq!(out.materialize_f64(), vec![(-2.0, 0.0), (3.0, 0.0)]);
         }
         other => panic!("expected complex tensor, got {other:?}"),
@@ -102,7 +102,7 @@ fn minus_dense_integer_arrays_preserve_exact_storage() {
     let Value::Tensor(result) = result else {
         panic!("expected integer tensor");
     };
-    assert_eq!(result.shape, vec![2, 3]);
+    assert_eq!(result.shape(), vec![2, 3]);
     assert_eq!(
         result.integer_storage(),
         Some(&IntegerStorage::I64(vec![
@@ -234,7 +234,7 @@ fn minus_real_complex_single_reverse_path_and_empty_class_are_preserved() {
     let Value::ComplexTensor(result) = result else {
         panic!("expected empty complex single tensor");
     };
-    assert_eq!(result.shape, vec![0, 2]);
+    assert_eq!(result.shape(), vec![0, 2]);
     assert_eq!(result.as_f32_slice(), Some(&[][..]));
 }
 
@@ -290,7 +290,7 @@ fn minus_row_column_broadcast() {
         .expect("broadcast minus");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![3, 3]);
+            assert_eq!(t.shape(), vec![3, 3]);
             let expected = vec![
                 -9.0, -8.0, -7.0, // column-first order
                 -19.0, -18.0, -17.0, -29.0, -28.0, -27.0,
@@ -314,7 +314,7 @@ fn minus_complex_inputs() {
     .expect("complex minus");
     match result {
         Value::ComplexTensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), vec![1, 2]);
             let expected = [(-1.0, 3.0), (4.0, -5.0)];
             for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                 assert!((got.0 - exp.0).abs() < EPS && (got.1 - exp.1).abs() < EPS);
@@ -332,7 +332,7 @@ fn minus_char_input() {
         minus_builtin(Value::CharArray(chars), Value::Num(1.0), Vec::new()).expect("char minus");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 3]);
+            assert_eq!(t.shape(), vec![1, 3]);
             assert_eq!(
                 t.as_f64_slice().expect("double result"),
                 &[67.0, 68.0, 69.0]

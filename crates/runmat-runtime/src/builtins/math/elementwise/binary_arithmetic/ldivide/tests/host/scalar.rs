@@ -56,7 +56,7 @@ fn ldivide_like_complex_conversion_reads_typed_integer_storage_exactly() {
 
     match result {
         Value::ComplexTensor(out) => {
-            assert_eq!(out.shape, vec![1, 2]);
+            assert_eq!(out.shape(), vec![1, 2]);
             assert_eq!(out.materialize_f64(), vec![(4.0, 0.0), (5.0, 0.0)]);
         }
         other => panic!("expected complex tensor, got {other:?}"),

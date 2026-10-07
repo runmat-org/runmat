@@ -12,7 +12,7 @@ fn rdivide_complex_inputs() {
     .expect("complex rdivide");
     match result {
         Value::ComplexTensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), vec![1, 2]);
             let expected = [(0.0, 1.0), (-3.5, 0.5)];
             for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                 assert!((got.0 - exp.0).abs() < 1e-10 && (got.1 - exp.1).abs() < 1e-10);
@@ -127,6 +127,6 @@ fn rdivide_preserves_empty_complex_single_class() {
     let Value::ComplexTensor(result) = result else {
         panic!("expected complex single tensor");
     };
-    assert_eq!(result.shape, vec![0, 2]);
+    assert_eq!(result.shape(), vec![0, 2]);
     assert_eq!(result.as_f32_slice(), Some(&[][..]));
 }

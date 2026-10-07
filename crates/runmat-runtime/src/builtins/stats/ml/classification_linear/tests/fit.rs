@@ -145,7 +145,7 @@ async fn fitclinear_svm_predicts_binary_numeric_labels() {
         other => panic!("expected labels, got {other:?}"),
     }
     match &outputs[1] {
-        Value::Tensor(score) => assert_eq!(score.shape, vec![2, 2]),
+        Value::Tensor(score) => assert_eq!(score.shape(), &[2, 2]),
         other => panic!("expected score, got {other:?}"),
     }
 }

@@ -250,7 +250,7 @@ fn single_preserves_low_rank_real_and_complex_geometry_while_rounding_class() {
     else {
         panic!("single tensor output")
     };
-    assert_eq!(scalar.shape(), &[]);
+    assert!(scalar.shape().is_empty());
     assert_eq!(scalar.numeric_dtype(), runmat_value::NumericDType::F32);
     assert_eq!(scalar.as_f32_slice(), Some(&[1.25_f32][..]));
 

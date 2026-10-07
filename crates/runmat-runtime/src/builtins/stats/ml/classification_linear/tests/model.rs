@@ -35,7 +35,7 @@ async fn fitclinear_logistic_returns_fitinfo_and_probability_scores() {
     .unwrap();
     match &outputs[1] {
         Value::Tensor(score) => {
-            assert_eq!(score.shape, vec![2, 2]);
+            assert_eq!(score.shape(), &[2, 2]);
             assert!((score.materialize_f64()[0] + score.materialize_f64()[2] - 1.0).abs() < 1.0e-8);
         }
         other => panic!("expected score, got {other:?}"),

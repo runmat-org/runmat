@@ -7,18 +7,18 @@ fn ldivide_gpu_pair_roundtrip() {
         let rhs = Tensor::new(vec![2.0, 5.0, 10.0], vec![3, 1]).unwrap();
         let view_l = HostTensorView {
             data: &lhs.materialize_f64(),
-            shape: &lhs.shape,
+            shape: lhs.shape(),
         };
         let view_r = HostTensorView {
             data: &rhs.materialize_f64(),
-            shape: &rhs.shape,
+            shape: rhs.shape(),
         };
         let ha = provider.upload(&view_l).expect("upload lhs");
         let hb = provider.upload(&view_r).expect("upload rhs");
         let result = ldivide_builtin(Value::GpuTensor(ha), Value::GpuTensor(hb), Vec::new())
             .expect("gpu ldivide");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![3, 1]);
+        assert_eq!(gathered.shape(), vec![3, 1]);
         let expected = [0.2, 0.25, 0.3333333333333333];
         for (got, exp) in gathered.materialize_f64().iter().zip(expected.iter()) {
             assert!((got - exp).abs() < GPU_EPS);
@@ -77,7 +77,7 @@ fn ldivide_like_gpu_prototype_uploads_typed_integer_storage_exactly() {
         .expect("ldivide like gpu");
 
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), vec![2, 1]);
         assert_eq!(gathered.materialize_f64(), vec![10.0, 5.0]);
     });
 }
@@ -91,11 +91,11 @@ fn ldivide_like_host_gathers_gpu_value() {
         let rhs = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
         let view_l = HostTensorView {
             data: &lhs.materialize_f64(),
-            shape: &lhs.shape,
+            shape: lhs.shape(),
         };
         let view_r = HostTensorView {
             data: &rhs.materialize_f64(),
-            shape: &rhs.shape,
+            shape: rhs.shape(),
         };
         let ha = provider.upload(&view_l).expect("upload lhs");
         let hb = provider.upload(&view_r).expect("upload rhs");
@@ -108,7 +108,7 @@ fn ldivide_like_host_gathers_gpu_value() {
         let Value::Tensor(t) = result else {
             panic!("expected tensor result after host gather");
         };
-        assert_eq!(t.shape, vec![2, 1]);
+        assert_eq!(t.shape(), vec![2, 1]);
         let expected = [0.25, 1.0 / 6.0];
         for (got, exp) in t.materialize_f64().iter().zip(expected.iter()) {
             assert!((got - exp).abs() < GPU_EPS);
@@ -130,7 +130,7 @@ fn ldivide_like_complex_prototype_yields_complex() {
     .expect("ldivide like complex");
     match result {
         Value::ComplexTensor(ct) => {
-            assert_eq!(ct.shape, vec![2, 1]);
+            assert_eq!(ct.shape(), vec![2, 1]);
             let expected = [(0.5, 0.0), (0.5, 0.0)];
             for (got, exp) in ct.materialize_f64().iter().zip(expected.iter()) {
                 assert!((got.0 - exp.0).abs() < EPS);

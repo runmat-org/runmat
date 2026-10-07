@@ -7,7 +7,7 @@ fn stored_matrix_helpers_read_typed_integer_storage_exactly() {
     match conjugate_transpose(matrix).expect("ctranspose") {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.numeric_dtype(), NumericDType::I16);
-            assert_eq!(tensor.shape, vec![3, 2]);
+            assert_eq!(tensor.shape(), vec![3, 2]);
             assert_eq!(
                 tensor::tensor_values_f64(&tensor),
                 vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]
@@ -55,7 +55,7 @@ fn stored_matrix_helpers_read_typed_complex_integer_storage_exactly() {
 
     match conjugate_transpose(matrix).expect("ctranspose") {
         Value::ComplexTensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.shape(), vec![2, 2]);
             assert_eq!(
                 tensor.materialize_f64(),
                 vec![(1.0, -5.0), (3.0, -7.0), (2.0, -6.0), (4.0, -8.0)]
