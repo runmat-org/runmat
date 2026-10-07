@@ -273,7 +273,7 @@ fn ensure_extensions(value: &Value) -> BuiltinResult<()> {
 
 fn det_real_value(tensor: Tensor) -> BuiltinResult<Value> {
     if tensor.numeric_dtype() == NumericDType::F32 {
-        let (rows, cols) = matrix_dimensions(tensor.shape.as_slice())?;
+        let (rows, cols) = matrix_dimensions(tensor.shape())?;
         if rows != cols {
             return Err(builtin_error(format!(
                 "{NAME}: input must be a square matrix."
@@ -333,7 +333,7 @@ fn determinant_from_value(value: Value) -> BuiltinResult<Determinant> {
 }
 
 fn det_real_tensor(matrix: &Tensor) -> BuiltinResult<f64> {
-    let (rows, cols) = matrix_dimensions(matrix.shape.as_slice())?;
+    let (rows, cols) = matrix_dimensions(matrix.shape())?;
     if rows != cols {
         return Err(builtin_error(format!(
             "{NAME}: input must be a square matrix."
@@ -351,7 +351,7 @@ fn det_real_tensor(matrix: &Tensor) -> BuiltinResult<f64> {
 }
 
 fn det_complex_tensor(matrix: &ComplexTensor) -> BuiltinResult<(f64, f64)> {
-    let (rows, cols) = matrix_dimensions(matrix.shape.as_slice())?;
+    let (rows, cols) = matrix_dimensions(matrix.shape())?;
     if rows != cols {
         return Err(builtin_error(format!(
             "{NAME}: input must be a square matrix."
@@ -841,12 +841,12 @@ pub(crate) mod tests {
         let data = tensor.as_f64_slice().expect("double tensor");
         let view = HostTensorView {
             data,
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = det_builtin(Value::GpuTensor(handle)).expect("det");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![1, 1]);
+        assert_eq!(gathered.shape(), [1, 1]);
         let det_gpu = gathered.numeric_value_at(0).unwrap();
         let det_gpu = floating_scalar_to_f64(det_gpu).unwrap();
         let tol = match provider.precision() {

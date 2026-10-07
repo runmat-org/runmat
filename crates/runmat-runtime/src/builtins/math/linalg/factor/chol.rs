@@ -702,7 +702,7 @@ impl RowMajorMatrix {
     }
 
     fn from_tensor(tensor: &Tensor, label: &str) -> BuiltinResult<Self> {
-        if tensor.shape.len() > 2 {
+        if tensor.shape().len() > 2 {
             return Err(chol_invalid_input(format!("{label}: input must be 2-D")));
         }
         let rows = tensor.rows();
@@ -720,11 +720,11 @@ impl RowMajorMatrix {
     }
 
     fn from_complex_tensor(tensor: &ComplexTensor, label: &str) -> BuiltinResult<Self> {
-        if tensor.shape.len() > 2 {
+        if tensor.shape().len() > 2 {
             return Err(chol_invalid_input(format!("{label}: input must be 2-D")));
         }
-        let rows = tensor.rows;
-        let cols = tensor.cols;
+        let rows = tensor.rows();
+        let cols = tensor.cols();
         let mut data = vec![Complex64::new(0.0, 0.0); rows.saturating_mul(cols)];
         for col in 0..cols {
             for row in 0..rows {
@@ -905,7 +905,7 @@ pub(crate) mod tests {
     }
 
     fn tensor_close(lhs: &Matrix, rhs: &Matrix, tol: f64) {
-        assert_eq!(lhs.shape, rhs.shape, "shape mismatch");
+        assert_eq!(lhs.shape(), rhs.shape(), "shape mismatch");
         for (a, b) in lhs
             .materialize_f64()
             .iter()
@@ -926,7 +926,7 @@ pub(crate) mod tests {
             }
             Value::Tensor(t) => {
                 let data: Vec<(f64, f64)> = t.materialize_f64().iter().map(|&v| (v, 0.0)).collect();
-                ComplexTensor::new(data, t.shape.clone()).expect("complex tensor")
+                ComplexTensor::new(data, t.shape().to_vec()).expect("complex tensor")
             }
             Value::Num(n) => {
                 ComplexTensor::new(vec![(n, 0.0)], vec![1, 1]).expect("complex tensor")
@@ -936,8 +936,8 @@ pub(crate) mod tests {
     }
 
     fn reconstruct_complex_upper(matrix: &ComplexTensor) -> ComplexTensor {
-        let rows = matrix.rows;
-        let cols = matrix.cols;
+        let rows = matrix.rows();
+        let cols = matrix.cols();
         assert_eq!(rows, cols, "expected square matrix");
         let mut data = vec![(0.0, 0.0); rows * rows];
         for i in 0..rows {
@@ -965,8 +965,8 @@ pub(crate) mod tests {
     }
 
     fn reconstruct_complex_lower(matrix: &ComplexTensor) -> ComplexTensor {
-        let rows = matrix.rows;
-        let cols = matrix.cols;
+        let rows = matrix.rows();
+        let cols = matrix.cols();
         assert_eq!(rows, cols, "expected square matrix");
         let mut data = vec![(0.0, 0.0); rows * rows];
         for i in 0..rows {
@@ -994,7 +994,7 @@ pub(crate) mod tests {
     }
 
     fn complex_tensor_close(lhs: &ComplexTensor, rhs: &ComplexTensor, tol: f64) {
-        assert_eq!(lhs.shape, rhs.shape, "shape mismatch");
+        assert_eq!(lhs.shape(), rhs.shape(), "shape mismatch");
         for ((ar, ai), (br, bi)) in lhs
             .materialize_f64()
             .iter()
@@ -1023,7 +1023,7 @@ pub(crate) mod tests {
         .unwrap();
         let r = chol_builtin(Value::Tensor(a.clone()), Vec::new()).expect("chol");
         let r_tensor = tensor_from_value(r);
-        assert_eq!(r_tensor.shape, vec![3, 3]);
+        assert_eq!(r_tensor.shape(), [3, 3]);
         for diag in 0..3 {
             let value = r_tensor.materialize_f64()[diag + diag * 3];
             assert!(value > 0.0, "Cholesky diagonal must be positive");
@@ -1067,7 +1067,7 @@ pub(crate) mod tests {
         let result =
             chol_builtin(Value::Tensor(a.clone()), vec![Value::from("lower")]).expect("chol");
         let l = tensor_from_value(result);
-        assert_eq!(l.shape, vec![3, 3]);
+        assert_eq!(l.shape(), [3, 3]);
         for diag in 0..3 {
             let value = l.materialize_f64()[diag + diag * 3];
             assert!(value > 0.0, "Cholesky diagonal must be positive");
@@ -1103,7 +1103,7 @@ pub(crate) mod tests {
         let eval = evaluate(Value::Tensor(a), &[]).expect("chol eval");
         assert_eq!(eval.flag_index(), 2);
         let factor = tensor_from_value(eval.factor());
-        assert_eq!(factor.shape, vec![2, 2]);
+        assert_eq!(factor.shape(), [2, 2]);
         assert!((factor.materialize_f64()[0] - 1.0).abs() < 1e-12);
         assert!((factor.materialize_f64()[1] - 0.0).abs() < 1e-12);
         assert!((factor.materialize_f64()[2] - 2.0).abs() < 1e-12);
@@ -1150,7 +1150,7 @@ pub(crate) mod tests {
         let eval = evaluate(Value::Tensor(empty.clone()), &[]).expect("chol eval");
         assert_eq!(eval.flag_index(), 0);
         let factor = tensor_from_value(eval.factor());
-        assert_eq!(factor.shape, vec![0, 0]);
+        assert_eq!(factor.shape(), [0, 0]);
         assert!(factor.materialize_f64().is_empty());
     }
 
@@ -1307,7 +1307,7 @@ pub(crate) mod tests {
             let a = Matrix::new(vec![6.0, 2.0, 2.0, 5.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = chol_builtin(Value::GpuTensor(handle), Vec::new()).expect("chol");
@@ -1324,7 +1324,7 @@ pub(crate) mod tests {
             let a = Matrix::new(vec![1.0, 2.0, 2.0, 1.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval = evaluate(Value::GpuTensor(handle), &[]).expect("chol eval");
@@ -1404,7 +1404,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("provider");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
 
@@ -1422,7 +1422,7 @@ pub(crate) mod tests {
         match result {
             Value::Num(n) => assert!((n - 3.0).abs() < 1e-12),
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 1]);
+                assert_eq!(t.shape(), [1, 1]);
                 assert!((t.materialize_f64()[0] - 3.0).abs() < 1e-12);
             }
             other => panic!("expected scalar-like, got {other:?}"),

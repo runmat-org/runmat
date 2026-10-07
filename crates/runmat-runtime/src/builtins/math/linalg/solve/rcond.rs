@@ -389,7 +389,7 @@ fn rcond_complex_tensor(matrix: &ComplexTensor) -> BuiltinResult<f64> {
 }
 
 fn rcond_real_tensor_impl(matrix: &Tensor) -> BuiltinResult<f64> {
-    let (rows, cols) = matrix_dimensions_for(NAME, &matrix.shape).map_err(builtin_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(builtin_error)?;
     if rows != cols {
         return Err(builtin_error(format!(
             "{NAME}: input must be a square matrix."
@@ -408,7 +408,7 @@ fn rcond_real_tensor_impl(matrix: &Tensor) -> BuiltinResult<f64> {
 }
 
 fn rcond_complex_tensor_impl(matrix: &ComplexTensor) -> BuiltinResult<f64> {
-    let (rows, cols) = matrix_dimensions_for(NAME, &matrix.shape).map_err(builtin_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(builtin_error)?;
     if rows != cols {
         return Err(builtin_error(format!(
             "{NAME}: input must be a square matrix."
@@ -649,12 +649,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![2.0, 0.0, 0.0, 0.5], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let gpu_value = rcond_builtin(Value::GpuTensor(handle)).expect("rcond");
             let gathered = test_support::gather(gpu_value).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.shape(), [1, 1]);
             assert!((gathered.materialize_f64()[0] - 0.25).abs() < 1e-12);
         });
     }
@@ -687,13 +687,13 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
 
         let gpu_value = rcond_builtin(Value::GpuTensor(handle)).expect("gpu rcond");
         let gathered = test_support::gather(gpu_value).expect("gather");
-        assert_eq!(gathered.shape, vec![1, 1]);
+        assert_eq!(gathered.shape(), [1, 1]);
         assert!((gathered.materialize_f64()[0] - cpu_scalar).abs() < tol);
     }
 

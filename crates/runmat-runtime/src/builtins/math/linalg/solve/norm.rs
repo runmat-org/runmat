@@ -477,7 +477,7 @@ fn norm_complex_tensor(tensor: &ComplexTensor, order: NormOrder) -> BuiltinResul
 
 fn norm_real_tensor_impl(tensor: &Tensor, order: NormOrder) -> BuiltinResult<f64> {
     ensure_integer_tensor_exactly_representable(tensor)?;
-    let kind = classify_tensor(&tensor.shape)?;
+    let kind = classify_tensor(tensor.shape())?;
     let values = tensor::tensor_values_f64_cow(tensor);
     let resolved = match order {
         NormOrder::Default => NormOrder::Two,
@@ -519,7 +519,7 @@ fn ensure_integer_tensor_exactly_representable(tensor: &Tensor) -> BuiltinResult
 }
 
 fn norm_complex_tensor_impl(tensor: &ComplexTensor, order: NormOrder) -> BuiltinResult<f64> {
-    let kind = classify_tensor(&tensor.shape)?;
+    let kind = classify_tensor(tensor.shape())?;
     let resolved = match order {
         NormOrder::Default => NormOrder::Two,
         other => other,
@@ -1105,7 +1105,7 @@ pub(crate) mod tests {
             panic!("expected single scalar tensor");
         };
         assert_eq!(out.numeric_dtype(), NumericDType::F32);
-        assert_eq!(out.shape, vec![1, 1]);
+        assert_eq!(out.shape(), [1, 1]);
         assert_close(out.materialize_f64()[0], 5.0);
     }
 
@@ -1418,7 +1418,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = norm_builtin(Value::GpuTensor(handle), Vec::new()).expect("norm");
@@ -1439,7 +1439,7 @@ pub(crate) mod tests {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload");

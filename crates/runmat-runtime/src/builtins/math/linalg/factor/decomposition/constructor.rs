@@ -81,11 +81,11 @@ pub(super) async fn gather_values(args: Vec<Value>) -> BuiltinResult<Vec<Value>>
 pub(super) fn normalize_matrix(value: Value) -> BuiltinResult<(Value, bool)> {
     match value {
         Value::Tensor(tensor) => {
-            validate_matrix_shape(&tensor.shape)?;
+            validate_matrix_shape(tensor.shape())?;
             Ok((Value::Tensor(tensor), false))
         }
         Value::ComplexTensor(tensor) => {
-            validate_matrix_shape(&tensor.shape)?;
+            validate_matrix_shape(tensor.shape())?;
             Ok((Value::ComplexTensor(tensor), false))
         }
         Value::LogicalArray(array) => {

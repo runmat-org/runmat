@@ -658,7 +658,7 @@ fn matrix_host_value(value: Value) -> BuiltinResult<Value> {
 fn matrix_order(value: &Value) -> BuiltinResult<usize> {
     let (rows, cols) = match value {
         Value::Tensor(tensor) => (tensor.rows(), tensor.cols()),
-        Value::ComplexTensor(tensor) => (tensor.rows, tensor.cols),
+        Value::ComplexTensor(tensor) => (tensor.rows(), tensor.cols()),
         Value::LogicalArray(logical) => matrix_shape_from_slice(&logical.shape),
         Value::SparseTensor(sparse) => (sparse.rows, sparse.cols),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => (1, 1),
@@ -1142,10 +1142,10 @@ fn select_columns(matrix: &Value, selected: &[usize]) -> BuiltinResult<Value> {
                 .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))
         }
         Value::ComplexTensor(tensor) => {
-            let rows = tensor.rows;
+            let rows = tensor.rows();
             let mut data = Vec::with_capacity(rows * selected.len());
             for &col in selected {
-                if col >= tensor.cols {
+                if col >= tensor.cols() {
                     return Err(error_with_detail(
                         "eigs: eigenvector column index out of range",
                         &ERROR_INTERNAL,
@@ -1278,8 +1278,8 @@ fn dense_complex_matrix(value: Value) -> BuiltinResult<DenseComplexMatrix> {
                 .collect(),
         }),
         Value::ComplexTensor(tensor) => Ok(DenseComplexMatrix {
-            rows: tensor.rows,
-            cols: tensor.cols,
+            rows: tensor.rows(),
+            cols: tensor.cols(),
             data: tensor
                 .materialize_f64()
                 .into_iter()
@@ -1404,7 +1404,7 @@ fn numeric_vector_len(value: &Value, name: &str) -> BuiltinResult<usize> {
         Value::Tensor(tensor) if tensor.rows() == 1 || tensor.cols() == 1 => {
             Ok(tensor_element_len(tensor))
         }
-        Value::ComplexTensor(tensor) if tensor.rows == 1 || tensor.cols == 1 => {
+        Value::ComplexTensor(tensor) if tensor.rows() == 1 || tensor.cols() == 1 => {
             Ok(complex_tensor_element_len(tensor))
         }
         Value::LogicalArray(logical) => {
@@ -1722,7 +1722,7 @@ mod tests {
         );
         let selected = tensor(select_columns(&matrix, &[1]).expect("selected column"));
         assert_eq!(selected.numeric_dtype(), runmat_value::NumericDType::F32);
-        assert_eq!(selected.shape, vec![2, 1]);
+        assert_eq!(selected.shape(), [2, 1]);
         assert_eq!(selected.materialize_f64(), vec![3.0, 4.0]);
     }
 
@@ -1884,7 +1884,7 @@ mod tests {
     fn eigs_defaults_to_largest_magnitude_six_clamped() {
         let a = real_matrix(vec![1.0, 0.0, 0.0, 4.0], 2, 2);
         let out = tensor(call(a, Vec::new()).unwrap());
-        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.shape(), [2, 1]);
         assert_eq!(out.materialize_f64(), vec![4.0, 1.0]);
     }
 
@@ -1913,9 +1913,9 @@ mod tests {
         let out = outputs(call(a, vec![Value::Num(1.0)]).unwrap());
         drop(guard);
         assert_eq!(out.len(), 3);
-        assert_eq!(tensor(out[0].clone()).shape, vec![2, 1]);
+        assert_eq!(tensor(out[0].clone()).shape(), [2, 1]);
         let d = tensor(out[1].clone());
-        assert_eq!(d.shape, vec![1, 1]);
+        assert_eq!(d.shape(), [1, 1]);
         assert_eq!(d.materialize_f64(), vec![5.0]);
         assert_eq!(out[2], Value::Num(0.0));
     }
@@ -2130,7 +2130,7 @@ mod tests {
 
         let out = tensor(call(a, vec![Value::Num(1.0), Value::Struct(opts)]).unwrap());
 
-        assert_eq!(out.shape, vec![1, 1]);
+        assert_eq!(out.shape(), [1, 1]);
         assert_eq!(out.materialize_f64(), vec![3.0]);
     }
 

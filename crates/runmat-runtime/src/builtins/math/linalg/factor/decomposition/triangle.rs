@@ -33,15 +33,15 @@ pub(super) fn keep_triangle(matrix: Value, flag: TriangularFlag) -> BuiltinResul
             Ok(Value::LogicalArray(array))
         }
         Value::ComplexTensor(mut tensor) if tensor.integer_storage().is_none() => {
-            for col in 0..tensor.cols {
-                for row in 0..tensor.rows {
+            for col in 0..tensor.cols() {
+                for row in 0..tensor.rows() {
                     let zero = match flag {
                         TriangularFlag::Upper => row > col,
                         TriangularFlag::Lower => row < col,
                     };
                     if zero {
                         tensor
-                            .set_f64_assignment_at(row + col * tensor.rows, 0.0, 0.0)
+                            .set_f64_assignment_at(row + col * tensor.rows(), 0.0, 0.0)
                             .map_err(internal)?;
                     }
                 }
@@ -49,8 +49,8 @@ pub(super) fn keep_triangle(matrix: Value, flag: TriangularFlag) -> BuiltinResul
             Ok(Value::ComplexTensor(tensor))
         }
         Value::ComplexTensor(tensor) => {
-            let shape = tensor.shape.clone();
-            let rows = tensor.rows;
+            let shape = tensor.shape().to_vec();
+            let rows = tensor.rows();
             let storage = tensor
                 .integer_storage()
                 .cloned()
@@ -59,8 +59,8 @@ pub(super) fn keep_triangle(matrix: Value, flag: TriangularFlag) -> BuiltinResul
             let mut imag = storage.imag.exact_values();
             let real_zero = zero_int_like(&storage.real);
             let imag_zero = zero_int_like(&storage.imag);
-            for col in 0..tensor.cols {
-                for row in 0..tensor.rows {
+            for col in 0..tensor.cols() {
+                for row in 0..tensor.rows() {
                     let zero = match flag {
                         TriangularFlag::Upper => row > col,
                         TriangularFlag::Lower => row < col,
@@ -139,23 +139,23 @@ pub(super) fn symmetrize_from_triangle(
             Ok(Value::LogicalArray(array))
         }
         Value::ComplexTensor(mut tensor) if tensor.integer_storage().is_none() => {
-            for col in 0..tensor.cols {
-                for row in 0..tensor.rows {
+            for col in 0..tensor.cols() {
+                for row in 0..tensor.rows() {
                     if row == col {
                         continue;
                     }
                     let maybe_value = match flag {
                         TriangularFlag::Upper if row > col => tensor
-                            .numeric_value_at(col + row * tensor.rows)
+                            .numeric_value_at(col + row * tensor.rows())
                             .map(|(real, imag)| (real.materialize_f64(), -imag.materialize_f64())),
                         TriangularFlag::Lower if row < col => tensor
-                            .numeric_value_at(col + row * tensor.rows)
+                            .numeric_value_at(col + row * tensor.rows())
                             .map(|(real, imag)| (real.materialize_f64(), -imag.materialize_f64())),
                         _ => None,
                     };
                     if let Some(value) = maybe_value {
                         tensor
-                            .set_f64_assignment_at(row + col * tensor.rows, value.0, value.1)
+                            .set_f64_assignment_at(row + col * tensor.rows(), value.0, value.1)
                             .map_err(internal)?;
                     }
                 }
@@ -163,16 +163,16 @@ pub(super) fn symmetrize_from_triangle(
             Ok(Value::ComplexTensor(tensor))
         }
         Value::ComplexTensor(tensor) => {
-            let shape = tensor.shape.clone();
-            let rows = tensor.rows;
+            let shape = tensor.shape().to_vec();
+            let rows = tensor.rows();
             let storage = tensor
                 .integer_storage()
                 .cloned()
                 .expect("integer complex branch");
             let mut real = storage.real.exact_values();
             let mut imag = storage.imag.exact_values();
-            for col in 0..tensor.cols {
-                for row in 0..tensor.rows {
+            for col in 0..tensor.cols() {
+                for row in 0..tensor.rows() {
                     if row == col {
                         continue;
                     }

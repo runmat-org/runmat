@@ -529,7 +529,7 @@ async fn value_to_numeric_matrix(value: Value) -> BuiltinResult<NumericMatrix> {
 }
 
 fn tensor_to_matrix(tensor: &Tensor) -> BuiltinResult<DMatrix<f64>> {
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(svd_invalid_input("svd: input must be 2-D"));
     }
     let rows = tensor.rows();
@@ -539,11 +539,11 @@ fn tensor_to_matrix(tensor: &Tensor) -> BuiltinResult<DMatrix<f64>> {
 }
 
 fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> BuiltinResult<DMatrix<Complex64>> {
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(svd_invalid_input("svd: input must be 2-D"));
     }
-    let rows = tensor.rows;
-    let cols = tensor.cols;
+    let rows = tensor.rows();
+    let cols = tensor.cols();
     let mut data = Vec::with_capacity(tensor.materialize_f64().len());
     for &(re, im) in &tensor.materialize_f64() {
         data.push(Complex64::new(re, im));
@@ -1058,7 +1058,7 @@ pub(crate) mod tests {
                     .iter()
                     .map(|(re, im)| Complex64::new(*re, *im))
                     .collect();
-                DMatrix::from_column_slice(ct.rows, ct.cols, &data)
+                DMatrix::from_column_slice(ct.rows(), ct.cols(), &data)
             }
             Value::Tensor(t) => {
                 let data: Vec<Complex64> = t
@@ -1115,21 +1115,21 @@ pub(crate) mod tests {
         let tensor = Tensor::new(Vec::new(), vec![0, 0]).expect("tensor");
         let eval = evaluate(Value::Tensor(tensor), &[]).expect("svd empty");
         match eval.singular_values() {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![0, 0]),
+            Value::Tensor(t) => assert_eq!(t.shape(), [0, 0]),
             other => panic!("expected empty singular values, got {other:?}"),
         }
         match eval.sigma_matrix() {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![0, 0]),
+            Value::Tensor(t) => assert_eq!(t.shape(), [0, 0]),
             other => panic!("expected empty sigma matrix, got {other:?}"),
         }
         match eval.u() {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![0, 0]),
-            Value::ComplexTensor(ct) => assert_eq!(ct.shape, vec![0, 0]),
+            Value::Tensor(t) => assert_eq!(t.shape(), [0, 0]),
+            Value::ComplexTensor(ct) => assert_eq!(ct.shape(), [0, 0]),
             other => panic!("expected empty U, got {other:?}"),
         }
         match eval.v() {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![0, 0]),
-            Value::ComplexTensor(ct) => assert_eq!(ct.shape, vec![0, 0]),
+            Value::Tensor(t) => assert_eq!(t.shape(), [0, 0]),
+            Value::ComplexTensor(ct) => assert_eq!(ct.shape(), [0, 0]),
             other => panic!("expected empty V, got {other:?}"),
         }
     }
@@ -1155,7 +1155,7 @@ pub(crate) mod tests {
             .iter()
             .map(|(re, im)| Complex64::new(*re, *im))
             .collect();
-        let original = DMatrix::from_column_slice(complex.rows, complex.cols, &original_data);
+        let original = DMatrix::from_column_slice(complex.rows(), complex.cols(), &original_data);
         complex_matrix_close(&recon, &original, 1e-10);
     }
 
@@ -1174,8 +1174,8 @@ pub(crate) mod tests {
         for eval in &[eval_numeric, eval_string, eval_word] {
             let u = tensor_from_value(eval.u());
             let s = tensor_from_value(eval.sigma());
-            assert_eq!(u.shape, vec![3, 2], "unexpected U shape {:?}", u.shape);
-            assert_eq!(s.shape, vec![2, 2], "unexpected S shape {:?}", s.shape);
+            assert_eq!(u.shape(), [3, 2], "unexpected U shape {:?}", u.shape());
+            assert_eq!(s.shape(), [2, 2], "unexpected S shape {:?}", s.shape());
         }
     }
 
@@ -1190,7 +1190,7 @@ pub(crate) mod tests {
         .expect("svd");
         match eval.sigma() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), [2, 2]);
                 assert!(t.materialize_f64()[0] >= t.materialize_f64()[1]);
             }
             other => panic!("expected sigma matrix, got {other:?}"),
@@ -1250,7 +1250,7 @@ pub(crate) mod tests {
 
         let logical_s = tensor_from_value(logical_eval.singular_values());
         let numeric_s = tensor_from_value(numeric_eval.singular_values());
-        assert_eq!(logical_s.shape, numeric_s.shape);
+        assert_eq!(logical_s.shape(), numeric_s.shape());
         for (a, b) in logical_s
             .materialize_f64()
             .iter()
@@ -1331,9 +1331,9 @@ pub(crate) mod tests {
         let u = tensor_from_value(eval.u());
         let s = tensor_from_value(eval.sigma());
         let v = tensor_from_value(eval.v());
-        assert_eq!(u.shape, vec![3, 2]);
-        assert_eq!(s.shape, vec![2, 2]);
-        assert_eq!(v.shape, vec![2, 2]);
+        assert_eq!(u.shape(), [3, 2]);
+        assert_eq!(s.shape(), [2, 2]);
+        assert_eq!(v.shape(), [2, 2]);
 
         let wide =
             Tensor::new(vec![1.0, 3.0, 5.0, 7.0, 2.0, 4.0, 6.0, 8.0], vec![2, 4]).expect("tensor");
@@ -1345,16 +1345,16 @@ pub(crate) mod tests {
         let u = tensor_from_value(eval.u());
         let s_val = eval.sigma();
         match s_val {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 1]),
+            Value::Tensor(t) => assert_eq!(t.shape(), [2, 1]),
             Value::Num(_) => {}
             other => panic!("unexpected sigma value {other:?}"),
         }
-        assert_eq!(u.shape, vec![2, 2]);
+        assert_eq!(u.shape(), [2, 2]);
         let s_matrix = tensor_from_value(eval.sigma_matrix());
-        assert_eq!(s_matrix.shape, vec![2, 4]);
+        assert_eq!(s_matrix.shape(), [2, 4]);
         match eval.v() {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![4, 4]),
-            Value::ComplexTensor(ct) => assert_eq!(ct.shape, vec![4, 4]),
+            Value::Tensor(t) => assert_eq!(t.shape(), [4, 4]),
+            Value::ComplexTensor(ct) => assert_eq!(ct.shape(), [4, 4]),
             other => panic!("unexpected V shape from {other:?}"),
         }
     }
@@ -1366,7 +1366,7 @@ pub(crate) mod tests {
         let eval = evaluate(Value::Tensor(matrix), &[Value::from("vector")]).expect("svd");
         match eval.sigma() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.shape(), [2, 1]);
                 assert!(t.materialize_f64()[0] >= t.materialize_f64()[1]);
             }
             Value::Num(n) => assert!(n >= 0.0),
@@ -1381,12 +1381,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0], vec![2, 2]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = svd_builtin(Value::GpuTensor(handle), Vec::new()).expect("svd");
             match result {
-                Value::Tensor(t) => assert_eq!(t.shape, vec![2, 1]),
+                Value::Tensor(t) => assert_eq!(t.shape(), [2, 1]),
                 Value::Num(n) => assert!(n >= 0.0),
                 other => panic!("expected host tensor, got {other:?}"),
             }
@@ -1410,7 +1410,7 @@ pub(crate) mod tests {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
         let handle = provider.upload(&view).expect("upload");

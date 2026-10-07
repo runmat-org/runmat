@@ -365,8 +365,7 @@ fn pinv_complex_tensor(matrix: &ComplexTensor, tol: Option<f64>) -> BuiltinResul
 }
 
 fn pinv_real_tensor_impl(matrix: &Tensor, tol: Option<f64>) -> BuiltinResult<Tensor> {
-    let (rows, cols) =
-        matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(builtin_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(builtin_error)?;
     if rows == 0 || cols == 0 {
         return Tensor::new(vec![0.0; cols * rows], vec![cols, rows])
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
@@ -381,8 +380,7 @@ fn pinv_complex_tensor_impl(
     matrix: &ComplexTensor,
     tol: Option<f64>,
 ) -> BuiltinResult<ComplexTensor> {
-    let (rows, cols) =
-        matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(builtin_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(builtin_error)?;
     if rows == 0 || cols == 0 {
         return ComplexTensor::new(vec![(0.0, 0.0); cols * rows], vec![cols, rows])
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
@@ -532,7 +530,7 @@ pub(crate) mod tests {
         let result = pinv_builtin(Value::Tensor(tensor), Vec::new()).expect("pinv");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 approx_equal(&out.materialize_f64(), &[0.04, 0.08, 0.08, 0.16], 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -549,7 +547,7 @@ pub(crate) mod tests {
         let result = pinv_builtin(Value::Tensor(tensor), Vec::new()).expect("pinv");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 approx_equal(&out.materialize_f64(), &[0.5, 0.0, 0.0, 0.25], 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -590,7 +588,7 @@ pub(crate) mod tests {
         let result = pinv_builtin(Value::Tensor(tensor), Vec::new()).expect("pinv");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 3]);
+                assert_eq!(out.shape(), [2, 3]);
                 approx_equal(
                     &out.materialize_f64(),
                     &[1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
@@ -608,7 +606,7 @@ pub(crate) mod tests {
         let result = pinv_builtin(Value::Tensor(tensor), vec![Value::Num(1e-6)]).expect("pinv");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 approx_equal(&out.materialize_f64(), &[1.0, 0.0, 0.0, 0.0], 1e-9);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -626,7 +624,7 @@ pub(crate) mod tests {
         let result = pinv_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("pinv");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 let expected = [
                     (0.4, -0.2),
                     (0.0, 0.0),
@@ -649,7 +647,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 2.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = pinv_builtin(Value::GpuTensor(handle), Vec::new()).expect("gpu pinv");
@@ -675,14 +673,14 @@ pub(crate) mod tests {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload");
 
         let gpu_value = pinv_builtin(Value::GpuTensor(handle), Vec::new()).expect("gpu pinv");
         let gathered = test_support::gather(gpu_value).expect("gather");
-        assert_eq!(gathered.shape, cpu.shape, "shape mismatch");
+        assert_eq!(gathered.shape(), cpu.shape(), "shape mismatch");
 
         match runmat_accelerate_api::provider().unwrap().precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => {

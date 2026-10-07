@@ -100,7 +100,7 @@ fn ensure_chol_numeric_boundary(matrix: &Value) -> BuiltinResult<()> {
 pub(super) fn matrix_dims(matrix: &Value) -> (usize, usize) {
     match matrix {
         Value::Tensor(tensor) => (tensor.rows(), tensor.cols()),
-        Value::ComplexTensor(tensor) => (tensor.rows, tensor.cols),
+        Value::ComplexTensor(tensor) => (tensor.rows(), tensor.cols()),
         Value::LogicalArray(array) => (logical_rows(array), logical_cols(array)),
         _ => (1, 1),
     }
@@ -128,9 +128,9 @@ pub(super) fn is_diagonal_matrix(matrix: &Value) -> bool {
         }
         Value::ComplexTensor(tensor) => {
             let values = complex_tensor_values_pair_view(tensor);
-            for col in 0..tensor.cols {
-                for row in 0..tensor.rows {
-                    if row != col && values.get(row + col * tensor.rows) != (0.0, 0.0) {
+            for col in 0..tensor.cols() {
+                for row in 0..tensor.rows() {
+                    if row != col && values.get(row + col * tensor.rows()) != (0.0, 0.0) {
                         return false;
                     }
                 }
@@ -166,9 +166,9 @@ pub(super) fn is_upper_triangular(matrix: &Value) -> bool {
         }
         Value::ComplexTensor(tensor) => {
             let values = complex_tensor_values_pair_view(tensor);
-            for col in 0..tensor.cols {
-                for row in (col + 1)..tensor.rows {
-                    if values.get(row + col * tensor.rows) != (0.0, 0.0) {
+            for col in 0..tensor.cols() {
+                for row in (col + 1)..tensor.rows() {
+                    if values.get(row + col * tensor.rows()) != (0.0, 0.0) {
                         return false;
                     }
                 }
@@ -199,9 +199,9 @@ pub(super) fn is_lower_triangular(matrix: &Value) -> bool {
         }
         Value::ComplexTensor(tensor) => {
             let values = complex_tensor_values_pair_view(tensor);
-            for col in 0..tensor.cols {
-                for row in 0..col.min(tensor.rows) {
-                    if values.get(row + col * tensor.rows) != (0.0, 0.0) {
+            for col in 0..tensor.cols() {
+                for row in 0..col.min(tensor.rows()) {
+                    if values.get(row + col * tensor.rows()) != (0.0, 0.0) {
                         return false;
                     }
                 }

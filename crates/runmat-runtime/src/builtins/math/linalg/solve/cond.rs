@@ -396,7 +396,7 @@ fn cond_complex_tensor_builtin(matrix: &ComplexTensor, norm: CondNorm) -> Builti
 }
 
 fn cond_real_tensor(matrix: &Tensor, norm: CondNorm) -> BuiltinResult<f64> {
-    let (rows, cols) = matrix_dimensions_for(NAME, &matrix.shape).map_err(builtin_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(builtin_error)?;
     ensure_integer_matrix_exact_at_f64_boundary(matrix)?;
     let values = tensor::tensor_values_f64_cow(matrix);
     if rows == 0 || cols == 0 {
@@ -448,7 +448,7 @@ fn ensure_integer_matrix_exact_at_f64_boundary(matrix: &Tensor) -> BuiltinResult
 }
 
 fn cond_complex_tensor(matrix: &ComplexTensor, norm: CondNorm) -> BuiltinResult<f64> {
-    let (rows, cols) = matrix_dimensions_for(NAME, &matrix.shape).map_err(builtin_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(builtin_error)?;
     if rows == 0 || cols == 0 {
         return Ok(0.0);
     }
@@ -1085,12 +1085,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![4.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let gpu_value = cond_builtin(Value::GpuTensor(handle), Vec::new()).expect("cond");
             let gathered = test_support::gather(gpu_value).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.shape(), [1, 1]);
             let expected = cond_builtin(Value::Tensor(tensor.clone()), Vec::new())
                 .map(|v| match v {
                     Value::Num(n) => n,
@@ -1117,7 +1117,7 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu = cond_builtin(Value::GpuTensor(handle), Vec::new()).expect("cond");

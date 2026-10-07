@@ -30,8 +30,8 @@ pub(super) fn conjugate_transpose(value: Value) -> BuiltinResult<Value> {
             ))
         }
         Value::ComplexTensor(tensor) => {
-            let rows = tensor.rows;
-            let cols = tensor.cols;
+            let rows = tensor.rows();
+            let cols = tensor.cols();
             let dtype = tensor.numeric_dtype();
             let shape = vec![cols, rows];
             let mut indices = vec![0; tensor.len()];
@@ -111,7 +111,7 @@ pub(super) fn scale_matrix(value: Value, scale: (f64, f64)) -> BuiltinResult<Val
     }
     match value {
         Value::Tensor(tensor) if scale.1 == 0.0 => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let dtype = floating_scale_dtype(tensor.numeric_dtype());
             Ok(Value::Tensor(
                 Tensor::new_with_dtype(
@@ -126,7 +126,7 @@ pub(super) fn scale_matrix(value: Value, scale: (f64, f64)) -> BuiltinResult<Val
             ))
         }
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let dtype = floating_scale_dtype(tensor.numeric_dtype());
             Ok(Value::ComplexTensor(
                 ComplexTensor::from_f64_values_with_dtype(
@@ -141,7 +141,7 @@ pub(super) fn scale_matrix(value: Value, scale: (f64, f64)) -> BuiltinResult<Val
             ))
         }
         Value::ComplexTensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let dtype = floating_scale_dtype(tensor.numeric_dtype());
             let data = tensor::complex_tensor_into_values_complex64(tensor)
                 .into_iter()

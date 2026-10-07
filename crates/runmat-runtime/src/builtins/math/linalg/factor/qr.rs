@@ -1038,7 +1038,7 @@ impl ColMajorMatrix {
     }
 
     fn from_tensor(tensor: &Tensor) -> BuiltinResult<Self> {
-        if tensor.shape.len() > 2 {
+        if tensor.shape().len() > 2 {
             return Err(qr_invalid_input("qr: input must be 2-D"));
         }
         let rows = tensor.rows();
@@ -1055,11 +1055,11 @@ impl ColMajorMatrix {
     }
 
     fn from_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<Self> {
-        if tensor.shape.len() > 2 {
+        if tensor.shape().len() > 2 {
             return Err(qr_invalid_input("qr: input must be 2-D"));
         }
-        let rows = tensor.rows;
-        let cols = tensor.cols;
+        let rows = tensor.rows();
+        let cols = tensor.cols();
         let mut data = vec![Complex64::new(0.0, 0.0); rows.saturating_mul(cols)];
         for col in 0..cols {
             for row in 0..rows {
@@ -1182,7 +1182,7 @@ pub(crate) mod tests {
     }
 
     fn tensor_close(a: &Matrix, b: &Matrix, tol: f64) {
-        assert_eq!(a.shape, b.shape);
+        assert_eq!(a.shape(), b.shape());
         for (lhs, rhs) in a.materialize_f64().iter().zip(&b.materialize_f64()) {
             if (lhs - rhs).abs() > tol {
                 panic!("tensor mismatch: lhs={lhs}, rhs={rhs}, tol={tol}");
@@ -1387,7 +1387,7 @@ pub(crate) mod tests {
         let eval = evaluate(Value::Tensor(a), &[Value::from("vector")]).expect("evaluate");
         assert_eq!(eval.pivot_mode(), PivotMode::Vector);
         let vector = tensor_from_value(eval.permutation());
-        assert_eq!(vector.shape, vec![2, 1]);
+        assert_eq!(vector.shape(), [2, 1]);
         assert!(vector
             .materialize_f64()
             .iter()
@@ -1403,8 +1403,8 @@ pub(crate) mod tests {
         assert_eq!(eval.mode(), QrMode::Economy);
         let q = tensor_from_value(eval.q());
         let r = tensor_from_value(eval.r());
-        assert_eq!(q.shape, vec![4, 3]);
-        assert_eq!(r.shape, vec![3, 3]);
+        assert_eq!(q.shape(), [4, 3]);
+        assert_eq!(r.shape(), [3, 3]);
     }
 
     #[test]
@@ -1416,8 +1416,8 @@ pub(crate) mod tests {
 
         let eval = evaluate(Value::Tensor(a), &[Value::Tensor(option)]).expect("evaluate econ");
         assert_eq!(eval.mode(), QrMode::Economy);
-        assert_eq!(tensor_from_value(eval.q()).shape, vec![4, 3]);
-        assert_eq!(tensor_from_value(eval.r()).shape, vec![3, 3]);
+        assert_eq!(tensor_from_value(eval.q()).shape(), [4, 3]);
+        assert_eq!(tensor_from_value(eval.r()).shape(), [3, 3]);
     }
 
     #[test]
@@ -1462,7 +1462,7 @@ pub(crate) mod tests {
             let a = Matrix::new(data.clone(), vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let gpu_eval = evaluate(Value::GpuTensor(handle), &[]).expect("evaluate gpu");
@@ -1520,7 +1520,7 @@ pub(crate) mod tests {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
         let handle = provider.upload(&view).expect("upload");
@@ -1564,7 +1564,7 @@ pub(crate) mod tests {
         .unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
         let handle = provider.upload(&view).expect("upload");
@@ -1616,7 +1616,8 @@ pub(crate) mod tests {
         // The evaluation envelope always exposes pivoted factors and their
         // permutation, so Q*R reconstructs A*P.
         let qr_product = crate::builtins::common::matrix::matrix_mul(&gpu_q, &gpu_r).expect("Q*R");
-        let a_matrix = Matrix::new(tensor.materialize_f64().clone(), tensor.shape.clone()).unwrap();
+        let a_matrix =
+            Matrix::new(tensor.materialize_f64().clone(), tensor.shape().to_vec()).unwrap();
         let gpu_p = test_support::gather(gpu_eval.permutation_matrix()).expect("gather P");
         let permuted = crate::builtins::common::matrix::matrix_mul(&a_matrix, &gpu_p).expect("A*P");
         tensor_close(&qr_product, &permuted, 1e-3);

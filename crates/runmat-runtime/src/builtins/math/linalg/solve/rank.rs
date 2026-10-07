@@ -407,8 +407,7 @@ fn rank_complex_tensor(matrix: &ComplexTensor, tol: Option<f64>) -> BuiltinResul
 }
 
 fn rank_real_tensor_impl(matrix: &Tensor, tol: Option<f64>) -> BuiltinResult<usize> {
-    let (rows, cols) =
-        matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(builtin_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(builtin_error)?;
     if rows == 0 || cols == 0 {
         return Ok(0);
     }
@@ -425,8 +424,7 @@ fn rank_real_tensor_impl(matrix: &Tensor, tol: Option<f64>) -> BuiltinResult<usi
 }
 
 fn rank_complex_tensor_impl(matrix: &ComplexTensor, tol: Option<f64>) -> BuiltinResult<usize> {
-    let (rows, cols) =
-        matrix_dimensions_for(NAME, matrix.shape.as_slice()).map_err(builtin_error)?;
+    let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(builtin_error)?;
     if rows == 0 || cols == 0 {
         return Ok(0);
     }
@@ -675,7 +673,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = rank_builtin(Value::GpuTensor(handle), Vec::new()).expect("rank");
@@ -705,7 +703,7 @@ pub(crate) mod tests {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("provider");
         let handle = provider.upload(&view).expect("upload");

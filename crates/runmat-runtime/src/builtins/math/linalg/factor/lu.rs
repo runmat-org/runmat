@@ -879,7 +879,7 @@ impl RowMajorMatrix {
     }
 
     fn from_tensor(tensor: &Tensor) -> BuiltinResult<Self> {
-        if tensor.shape.len() > 2 {
+        if tensor.shape().len() > 2 {
             return Err(lu_invalid_input("lu: input must be 2-D"));
         }
         let rows = tensor.rows();
@@ -902,11 +902,11 @@ impl RowMajorMatrix {
     }
 
     fn from_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<Self> {
-        if tensor.shape.len() > 2 {
+        if tensor.shape().len() > 2 {
             return Err(lu_invalid_input("lu: input must be 2-D"));
         }
-        let rows = tensor.rows;
-        let cols = tensor.cols;
+        let rows = tensor.rows();
+        let cols = tensor.cols();
         let mut data = vec![Complex64::new(0.0, 0.0); rows.saturating_mul(cols)];
         for col in 0..cols {
             for row in 0..rows {
@@ -1138,7 +1138,7 @@ pub(crate) mod tests {
     }
 
     fn assert_tensor_close(a: &Matrix, b: &Matrix, tol: f64) {
-        assert_eq!(a.shape, b.shape);
+        assert_eq!(a.shape(), b.shape());
         for (lhs, rhs) in a.materialize_f64().iter().zip(&b.materialize_f64()) {
             assert!(
                 (lhs - rhs).abs() <= tol,
@@ -1234,7 +1234,7 @@ pub(crate) mod tests {
             evaluate(Value::Tensor(a), &[Value::from("vector")]).expect("evaluate vector mode");
         assert_eq!(eval.pivot_mode(), PivotMode::Vector);
         let pivot = tensor_from_value(eval.pivot_vector());
-        assert_eq!(pivot.shape, vec![2, 1]);
+        assert_eq!(pivot.shape(), [2, 1]);
         assert_eq!(pivot.materialize_f64(), vec![2.0, 1.0]);
     }
 
@@ -1256,7 +1256,7 @@ pub(crate) mod tests {
         assert_eq!(eval.pivot_mode(), PivotMode::Matrix);
         let perm_selected = tensor_from_value(eval.permutation());
         let perm_matrix = tensor_from_value(eval.permutation_matrix());
-        assert_eq!(perm_selected.shape, perm_matrix.shape);
+        assert_eq!(perm_selected.shape(), perm_matrix.shape());
         assert_tensor_close(&perm_selected, &perm_matrix, 1e-12);
     }
 
@@ -1268,9 +1268,9 @@ pub(crate) mod tests {
         let l = tensor_from_value(eval.lower());
         let u = tensor_from_value(eval.upper());
         let p = tensor_from_value(eval.permutation_matrix());
-        assert_eq!(l.shape, vec![2, 2]);
-        assert_eq!(u.shape, vec![2, 3]);
-        assert_eq!(p.shape, vec![2, 2]);
+        assert_eq!(l.shape(), [2, 2]);
+        assert_eq!(u.shape(), [2, 3]);
+        assert_eq!(p.shape(), [2, 2]);
 
         let pa = crate::builtins::common::matrix::matrix_mul(&p, &a).expect("P*A");
         let lu_product = crate::builtins::common::matrix::matrix_mul(&l, &u).expect("L*U");
@@ -1339,7 +1339,7 @@ pub(crate) mod tests {
             let host = Matrix::new(vec![10.0, 3.0, 7.0, 2.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &host.materialize_f64(),
-                shape: &host.shape,
+                shape: host.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval = evaluate(Value::GpuTensor(handle.clone()), &[]).expect("evaluate gpu input");
@@ -1365,7 +1365,7 @@ pub(crate) mod tests {
             let host = Matrix::new(vec![4.0, 6.0, 3.0, 3.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &host.materialize_f64(),
-                shape: &host.shape,
+                shape: host.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval =
@@ -1373,7 +1373,7 @@ pub(crate) mod tests {
             let pivot_val = eval.permutation();
             assert!(matches!(pivot_val, Value::GpuTensor(_)));
             let pivot = test_support::gather(pivot_val).expect("gather pivot");
-            assert_eq!(pivot.shape, vec![2, 1]);
+            assert_eq!(pivot.shape(), [2, 1]);
             let expected = Matrix::new(vec![2.0, 1.0], vec![2, 1]).unwrap();
             assert_tensor_close(&pivot, &expected, 1e-12);
         });
@@ -1408,7 +1408,7 @@ pub(crate) mod tests {
         let cpu_eval = evaluate(Value::Tensor(host.clone()), &[]).expect("cpu evaluate");
         let view = runmat_accelerate_api::HostTensorView {
             data: &host.materialize_f64(),
-            shape: &host.shape,
+            shape: host.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_eval = evaluate(Value::GpuTensor(handle), &[]).expect("gpu evaluate");

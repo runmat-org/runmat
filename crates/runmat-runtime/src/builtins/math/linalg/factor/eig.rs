@@ -813,26 +813,32 @@ fn cast_eig_eval_precision(eval: EigEval, precision: NumericDType) -> BuiltinRes
 
 fn cast_eig_value_to_single(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::Tensor(tensor) => Tensor::from_f32(
-            tensor
-                .materialize_f64()
-                .into_iter()
-                .map(|value| value as f32)
-                .collect(),
-            tensor.shape,
-        )
-        .map(Value::Tensor)
-        .map_err(|err| eig_internal_error(format!("eig: {err}"))),
-        Value::ComplexTensor(tensor) => ComplexTensor::from_f32(
-            tensor
-                .materialize_f64()
-                .into_iter()
-                .map(|(real, imag)| (real as f32, imag as f32))
-                .collect(),
-            tensor.shape,
-        )
-        .map(Value::ComplexTensor)
-        .map_err(|err| eig_internal_error(format!("eig: {err}"))),
+        Value::Tensor(tensor) => {
+            let shape = tensor.shape().to_vec();
+            Tensor::from_f32(
+                tensor
+                    .materialize_f64()
+                    .into_iter()
+                    .map(|value| value as f32)
+                    .collect(),
+                shape,
+            )
+            .map(Value::Tensor)
+            .map_err(|err| eig_internal_error(format!("eig: {err}")))
+        }
+        Value::ComplexTensor(tensor) => {
+            let (storage, shape) = tensor.into_complex_storage_and_shape();
+            ComplexTensor::from_f32(
+                storage
+                    .materialize_f64()
+                    .into_iter()
+                    .map(|(real, imag)| (real as f32, imag as f32))
+                    .collect(),
+                shape,
+            )
+            .map(Value::ComplexTensor)
+            .map_err(|err| eig_internal_error(format!("eig: {err}")))
+        }
         Value::Num(number) => Tensor::from_f32(vec![number as f32], vec![1, 1])
             .map(Value::Tensor)
             .map_err(|err| eig_internal_error(format!("eig: {err}"))),
@@ -1384,7 +1390,7 @@ async fn value_to_complex_matrix(value: Value) -> BuiltinResult<DMatrix<Complex6
 }
 
 fn tensor_to_matrix(tensor: &Tensor) -> BuiltinResult<DMatrix<Complex64>> {
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(eig_invalid_input("eig: input must be 2-D"));
     }
     let rows = tensor.rows();
@@ -1398,11 +1404,11 @@ fn tensor_to_matrix(tensor: &Tensor) -> BuiltinResult<DMatrix<Complex64>> {
 }
 
 fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> BuiltinResult<DMatrix<Complex64>> {
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(eig_invalid_input("eig: input must be 2-D"));
     }
-    let rows = tensor.rows;
-    let cols = tensor.cols;
+    let rows = tensor.rows();
+    let cols = tensor.cols();
     let mut data = Vec::with_capacity(tensor.materialize_f64().len());
     for &(re, im) in &tensor.materialize_f64() {
         data.push(Complex64::new(re, im));
@@ -1801,9 +1807,11 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     fn assert_tensor_close(a: &Tensor, b: &Tensor, tol: f64) {
         assert_eq!(
-            a.shape, b.shape,
+            a.shape(),
+            b.shape(),
             "shape mismatch: {:?} vs {:?}",
-            a.shape, b.shape
+            a.shape(),
+            b.shape()
         );
         for (idx, (lhs, rhs)) in a
             .materialize_f64()
@@ -1909,7 +1917,7 @@ pub(crate) mod tests {
             evaluate(Value::Tensor(tensor), &[Value::from("vector")], false).expect("evaluate");
         match eval.diagonal() {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.shape(), [2, 1]);
             }
             other => panic!("expected vector second output, got {other:?}"),
         }
@@ -1924,13 +1932,13 @@ pub(crate) mod tests {
         let eval =
             evaluate(Value::Tensor(tensor), &[Value::from("vector")], true).expect("evaluate");
         match eval.diagonal() {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 1]),
+            Value::Tensor(t) => assert_eq!(t.shape(), [2, 1]),
             other => panic!("expected vector second output, got {other:?}"),
         }
         let left = eval.left().expect("left eigenvectors");
         match left {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 2]),
-            Value::ComplexTensor(ct) => assert_eq!(ct.shape, vec![2, 2]),
+            Value::Tensor(t) => assert_eq!(t.shape(), [2, 2]),
+            Value::ComplexTensor(ct) => assert_eq!(ct.shape(), [2, 2]),
             other => panic!("unexpected type for left eigenvectors: {other:?}"),
         }
     }
@@ -2019,8 +2027,8 @@ pub(crate) mod tests {
         )
         .expect("evaluate");
         match eval.diagonal() {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 1]),
-            Value::ComplexTensor(ct) => assert_eq!(ct.shape, vec![2, 1]),
+            Value::Tensor(t) => assert_eq!(t.shape(), [2, 1]),
+            Value::ComplexTensor(ct) => assert_eq!(ct.shape(), [2, 1]),
             other => panic!("expected vector second output, got {other:?}"),
         }
         let _ = matrix_from_value(eval.diagonal_matrix());
@@ -2057,7 +2065,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![2.0, 1.0, 0.0, 3.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval = evaluate(Value::GpuTensor(handle), &[Value::from("vector")], false)
@@ -2077,7 +2085,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![2.0, 0.0, 0.0, 3.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result =
@@ -2131,7 +2139,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![4.0, 2.0, 1.0, 3.0], vec![2, 2]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
 
@@ -2187,7 +2195,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 1.0, 0.0, 2.0], vec![2, 2]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let eval = evaluate(Value::GpuTensor(handle), &[Value::from("nobalance")], false)

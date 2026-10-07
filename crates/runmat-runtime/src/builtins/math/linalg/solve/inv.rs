@@ -334,9 +334,9 @@ fn inv_real_tensor_impl(matrix: &Tensor) -> BuiltinResult<Tensor> {
     } else {
         NumericDType::F64
     };
-    let (rows, cols) = matrix_dimensions(matrix.shape.as_slice())?;
+    let (rows, cols) = matrix_dimensions(matrix.shape())?;
     if rows == 0 && cols == 0 {
-        return Tensor::new_with_dtype(Vec::new(), matrix.shape.clone(), output_dtype)
+        return Tensor::new_with_dtype(Vec::new(), matrix.shape().to_vec(), output_dtype)
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     if rows != cols {
@@ -345,7 +345,7 @@ fn inv_real_tensor_impl(matrix: &Tensor) -> BuiltinResult<Tensor> {
         )));
     }
     if rows == 0 || cols == 0 {
-        return Tensor::new_with_dtype(Vec::new(), matrix.shape.clone(), output_dtype)
+        return Tensor::new_with_dtype(Vec::new(), matrix.shape().to_vec(), output_dtype)
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     let values = tensor::tensor_values_f64_cow(matrix);
@@ -353,7 +353,7 @@ fn inv_real_tensor_impl(matrix: &Tensor) -> BuiltinResult<Tensor> {
     let inverse = dm.try_inverse().ok_or_else(|| {
         builtin_error(format!("{NAME}: matrix is singular to working precision."))
     })?;
-    matrix_to_tensor(NAME, inverse, &matrix.shape, output_dtype)
+    matrix_to_tensor(NAME, inverse, matrix.shape(), output_dtype)
 }
 
 fn inv_complex_tensor_impl(matrix: &ComplexTensor) -> BuiltinResult<ComplexTensor> {
@@ -362,11 +362,11 @@ fn inv_complex_tensor_impl(matrix: &ComplexTensor) -> BuiltinResult<ComplexTenso
     } else {
         NumericDType::F64
     };
-    let (rows, cols) = matrix_dimensions(matrix.shape.as_slice())?;
+    let (rows, cols) = matrix_dimensions(matrix.shape())?;
     if rows == 0 && cols == 0 {
         return ComplexTensor::from_f64_values_with_dtype(
             Vec::new(),
-            matrix.shape.clone(),
+            matrix.shape().to_vec(),
             output_dtype,
         )
         .map_err(|e| builtin_error(format!("{NAME}: {e}")));
@@ -379,7 +379,7 @@ fn inv_complex_tensor_impl(matrix: &ComplexTensor) -> BuiltinResult<ComplexTenso
     if rows == 0 || cols == 0 {
         return ComplexTensor::from_f64_values_with_dtype(
             Vec::new(),
-            matrix.shape.clone(),
+            matrix.shape().to_vec(),
             output_dtype,
         )
         .map_err(|e| builtin_error(format!("{NAME}: {e}")));
@@ -393,7 +393,7 @@ fn inv_complex_tensor_impl(matrix: &ComplexTensor) -> BuiltinResult<ComplexTenso
     let inverse = dm.try_inverse().ok_or_else(|| {
         builtin_error(format!("{NAME}: matrix is singular to working precision."))
     })?;
-    matrix_to_complex_tensor(NAME, inverse, &matrix.shape, output_dtype)
+    matrix_to_complex_tensor(NAME, inverse, matrix.shape(), output_dtype)
 }
 
 fn matrix_dimensions(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
@@ -527,7 +527,7 @@ pub(crate) mod tests {
         let result = inv_builtin(Value::Tensor(tensor)).expect("inv");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 let a = DMatrix::from_column_slice(2, 2, &data);
                 let inv_m = DMatrix::from_column_slice(2, 2, &out.materialize_f64());
                 let identity = &a * &inv_m;
@@ -579,7 +579,7 @@ pub(crate) mod tests {
         let result = inv_builtin(Value::Tensor(tensor())).expect("RunMat integer inv");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 let expected = [0.3, -0.1, -0.2, 0.4];
                 for (actual, expected) in out.materialize_f64().iter().zip(expected) {
                     assert!((actual - expected).abs() < 1e-12);
@@ -597,7 +597,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(out) => {
                 assert!(out.materialize_f64().is_empty());
-                assert_eq!(out.shape, vec![0, 0]);
+                assert_eq!(out.shape(), [0, 0]);
             }
             other => panic!("expected empty tensor, got {other:?}"),
         }
@@ -611,7 +611,7 @@ pub(crate) mod tests {
         let result = inv_builtin(Value::Tensor(tensor)).expect("inv");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2, 1]);
+                assert_eq!(out.shape(), [2, 2, 1]);
                 let expected = vec![0.25, 0.0, 0.0, 0.5];
                 assert_eq!(out.materialize_f64(), expected);
             }
@@ -641,7 +641,7 @@ pub(crate) mod tests {
         let result = inv_builtin(Value::ComplexTensor(tensor)).expect("inv");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 let input: Vec<Complex64> =
                     raw.iter().map(|&(re, im)| Complex64::new(re, im)).collect();
                 let inv_vec: Vec<Complex64> = out
@@ -701,13 +701,13 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![3.0, 0.0, 1.0, 2.0], vec![2, 2]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let gpu_value = inv_builtin(Value::GpuTensor(handle)).expect("gpu inv");
             let gathered = test_support::gather(gpu_value).expect("gather");
             let cpu = inv_real_tensor(&tensor).expect("cpu");
-            assert_eq!(gathered.shape, cpu.shape);
+            assert_eq!(gathered.shape(), cpu.shape());
             for (a, b) in gathered
                 .materialize_f64()
                 .iter()
@@ -802,14 +802,14 @@ pub(crate) mod tests {
         };
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
 
         let gpu_value = inv_builtin(Value::GpuTensor(handle)).expect("gpu inv");
         let gathered = test_support::gather(gpu_value).expect("gather");
 
-        assert_eq!(gathered.shape, cpu.shape);
+        assert_eq!(gathered.shape(), cpu.shape());
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

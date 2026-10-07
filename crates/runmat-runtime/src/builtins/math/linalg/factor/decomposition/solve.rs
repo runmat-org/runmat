@@ -126,13 +126,13 @@ pub(super) async fn floating_solve_operand(value: &Value) -> BuiltinResult<Value
 pub(super) fn promote_coefficient_to_floating(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             Ok(Value::Tensor(
                 Tensor::new(tensor::tensor_into_values_f64(tensor), shape).map_err(internal)?,
             ))
         }
         Value::ComplexTensor(tensor) if tensor.integer_storage().is_some() => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             Ok(Value::ComplexTensor(
                 ComplexTensor::new(tensor.materialize_f64(), shape).map_err(internal)?,
             ))

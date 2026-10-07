@@ -377,14 +377,14 @@ async fn vecnorm_gpu(handle: GpuTensorHandle, args: VecnormArgs) -> BuiltinResul
 }
 
 fn vecnorm_real_tensor(tensor: &Tensor, args: VecnormArgs) -> BuiltinResult<Tensor> {
-    let dim = resolve_dim(&tensor.shape, args.dim);
+    let dim = resolve_dim(tensor.shape(), args.dim);
     let dtype = if tensor.numeric_dtype() == NumericDType::F32 {
         NumericDType::F32
     } else {
         NumericDType::F64
     };
     let result = reduce_magnitudes(
-        &tensor.shape,
+        tensor.shape(),
         dim,
         args.order,
         // The compatibility gate proves that any accepted integer extension
@@ -396,7 +396,7 @@ fn vecnorm_real_tensor(tensor: &Tensor, args: VecnormArgs) -> BuiltinResult<Tens
 }
 
 fn vecnorm_complex_tensor(tensor: &ComplexTensor, args: VecnormArgs) -> BuiltinResult<Tensor> {
-    let dim = resolve_dim(&tensor.shape, args.dim);
+    let dim = resolve_dim(tensor.shape(), args.dim);
     let dtype = if tensor.numeric_dtype() == NumericDType::F32 {
         NumericDType::F32
     } else {
@@ -404,7 +404,7 @@ fn vecnorm_complex_tensor(tensor: &ComplexTensor, args: VecnormArgs) -> BuiltinR
     };
     let values = tensor.materialize_f64();
     reduce_magnitudes(
-        &tensor.shape,
+        tensor.shape(),
         dim,
         args.order,
         |index| values[index].0.hypot(values[index].1),
@@ -784,7 +784,7 @@ mod tests {
         let result = call(Value::Tensor(tensor), Vec::new()).expect("vecnorm");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_close(out.materialize_f64()[0], (4.0f64 + 1.0 + 9.0).sqrt());
                 assert_close(out.materialize_f64()[1], (0.0f64 + 1.0 + 9.0).sqrt());
                 assert_close(out.materialize_f64()[2], 1.0);
@@ -804,7 +804,7 @@ mod tests {
         .expect("vecnorm");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_close(out.materialize_f64()[0], 4.0);
                 assert_close(out.materialize_f64()[1], 6.0);
             }
@@ -977,7 +977,7 @@ mod tests {
         .expect("vecnorm");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1005,7 +1005,7 @@ mod tests {
         let result = call(Value::Tensor(tensor), Vec::new()).expect("vecnorm");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(out.materialize_f64(), vec![0.0, 0.0, 0.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1100,7 +1100,7 @@ mod tests {
         .expect("vecnorm");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_close(out.materialize_f64()[0], 10.0f64.sqrt());
                 assert_close(out.materialize_f64()[1], 20.0f64.sqrt());
             }
@@ -1173,7 +1173,7 @@ mod tests {
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = call(Value::GpuTensor(handle), Vec::new()).expect("vecnorm");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.shape(), [1, 2]);
             assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
             assert_close(gathered.materialize_f64()[0], 5.0);
             assert_close(gathered.materialize_f64()[1], 13.0);
@@ -1184,7 +1184,7 @@ mod tests {
             let handle = gpu_helpers::upload_tensor(provider, &single).expect("upload single");
             let result = call(Value::GpuTensor(handle), Vec::new()).expect("single vecnorm");
             let gathered = test_support::gather(result).expect("gather single");
-            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.shape(), [1, 2]);
             assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
             assert_eq!(gathered.materialize_f64(), vec![5.0, 13.0]);
         });
@@ -1218,12 +1218,12 @@ mod tests {
         };
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = call(Value::GpuTensor(handle), Vec::new()).expect("vecnorm");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, cpu.shape);
+        assert_eq!(gathered.shape(), cpu.shape());
         for (actual, expected) in gathered
             .materialize_f64()
             .iter()
