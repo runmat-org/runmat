@@ -1,6 +1,7 @@
 use super::*;
 use crate::context::{HostDocumentRequest, RuntimeContext};
 use fixture::{args, controlled_context, poll_pending_until_host_starts, poll_ready};
+use futures::FutureExt;
 use std::error::Error;
 use std::rc::Rc;
 
