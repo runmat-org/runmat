@@ -1,6 +1,6 @@
 use super::*;
 
-fn lscov_dense_dimensions(tensor: &Tensor) -> (usize, usize) {
+pub(super) fn lscov_dense_dimensions(tensor: &Tensor) -> (usize, usize) {
     match tensor.shape() {
         [] => (0, 0),
         [cols] => (1, *cols),

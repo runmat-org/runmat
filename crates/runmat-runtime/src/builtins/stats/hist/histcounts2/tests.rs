@@ -24,6 +24,41 @@ fn double_values(tensor: &Tensor) -> &[f64] {
     tensor.as_f64_slice().expect("expected double tensor")
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn five_outputs_preserve_rank_zero_and_rank_one_observation_shapes() {
+    let _outputs = crate::output_count::push_output_count(Some(5));
+    for shape in [Vec::new(), vec![1]] {
+        let observation = || Value::Tensor(Tensor::new(vec![0.5], shape.clone()).unwrap());
+        let edges = || Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap());
+        let result = block_on(histcounts2_builtin(
+            observation(),
+            observation(),
+            vec![edges(), edges()],
+        ))
+        .expect("histogram retains observation geometry");
+        let Value::OutputList(outputs) = result else {
+            panic!("expected five outputs");
+        };
+        assert_eq!(outputs.len(), 5);
+        let counts = tensor_from_value(outputs[0].clone());
+        assert_eq!(counts.shape(), &[1, 1]);
+        assert_eq!(double_values(&counts), &[1.0]);
+        for bin in &outputs[3..] {
+            let bin = tensor_from_value(bin.clone());
+            assert_eq!(bin.shape(), shape);
+            assert_eq!(double_values(&bin), &[1.0]);
+        }
+    }
+    let error = block_on(histcounts2_builtin(
+        Value::Tensor(Tensor::new(vec![0.5], Vec::new()).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.5], vec![1]).unwrap()),
+        Vec::new(),
+    ))
+    .expect_err("equal element counts do not waive exact shape admission");
+    assert!(error.message().contains("must be the same size"));
+}
+
 #[test]
 fn excessive_outputs_are_rejected_before_option_parsing_or_evaluation() {
     let _outputs = crate::output_count::push_output_count(Some(6));
@@ -57,7 +92,7 @@ fn five_outputs_preserve_bin_shapes_and_zero_excluded_positions() {
     assert_eq!(outputs.len(), 5);
     let mut outputs = outputs.into_iter();
     let counts = tensor_from_value(outputs.next().unwrap());
-    assert_eq!(counts.shape, vec![2, 2]);
+    assert_eq!(counts.shape(), vec![2, 2]);
     assert_eq!(double_values(&counts), &[1.0, 0.0, 0.0, 1.0]);
     assert_eq!(
         double_values(&tensor_from_value(outputs.next().unwrap())),
@@ -69,8 +104,8 @@ fn five_outputs_preserve_bin_shapes_and_zero_excluded_positions() {
     );
     let x_bins = tensor_from_value(outputs.next().unwrap());
     let y_bins = tensor_from_value(outputs.next().unwrap());
-    assert_eq!(x_bins.shape, vec![2, 2]);
-    assert_eq!(y_bins.shape, vec![2, 2]);
+    assert_eq!(x_bins.shape(), vec![2, 2]);
+    assert_eq!(y_bins.shape(), vec![2, 2]);
     assert_eq!(double_values(&x_bins), &[1.0, 2.0, 0.0, 0.0]);
     assert_eq!(double_values(&y_bins), &[1.0, 2.0, 1.0, 2.0]);
 }
@@ -82,7 +117,7 @@ fn host_and_resident_shape_mismatch_is_rejected_at_admission() {
         let handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: double_values(&resident),
-                shape: &resident.shape,
+                shape: resident.shape(),
             })
             .expect("upload");
         let host = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("host input");
@@ -209,7 +244,7 @@ fn histcounts2_accepts_every_integer_class_and_native_single_at_floating_boundar
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn histcounts2_basic_counts() {
     let x = Tensor::new(vec![0.5, 1.5, 2.5, 3.5], vec![4, 1]).unwrap();
     let y = Tensor::new(vec![0.2, 0.9, 1.4, 2.8], vec![4, 1]).unwrap();
@@ -224,18 +259,18 @@ fn histcounts2_basic_counts() {
     .expect("histcounts2");
     let (counts, xedges, yedges) = eval.into_triple();
     let counts = tensor_from_value(counts);
-    assert_eq!(counts.shape, vec![4, 3]);
+    assert_eq!(counts.shape(), vec![4, 3]);
     let xedges = tensor_from_value(xedges);
     let yedges = tensor_from_value(yedges);
     assert_eq!(double_values(&xedges), &[0.0, 1.0, 2.0, 3.0, 4.0]);
     assert_eq!(double_values(&yedges), &[0.0, 1.0, 2.0, 3.0]);
-    let rows = counts.shape[0];
+    let rows = counts.shape()[0];
     let count = |ix: usize, iy: usize| double_values(&counts)[ix + iy * rows];
     assert_eq!(count(0, 0), 1.0);
     assert_eq!(count(1, 0), 1.0);
     assert_eq!(count(2, 1), 1.0);
     assert_eq!(count(3, 2), 1.0);
-    for iy in 0..counts.shape[1] {
+    for iy in 0..counts.shape()[1] {
         for ix in 0..rows {
             let keep = matches!((ix, iy), (0, 0) | (1, 0) | (2, 1) | (3, 2));
             if !keep {
@@ -246,7 +281,7 @@ fn histcounts2_basic_counts() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn histcounts2_probability_normalization() {
     let x = Tensor::new(vec![0.2, 0.4, 1.1, 1.5], vec![4, 1]).unwrap();
     let y = Tensor::new(vec![0.1, 0.8, 1.2, 1.9], vec![4, 1]).unwrap();
@@ -262,12 +297,12 @@ fn histcounts2_probability_normalization() {
     ))
     .expect("histcounts2");
     let counts = tensor_from_value(eval.into_counts_value());
-    assert_eq!(counts.shape, vec![2, 2]);
+    assert_eq!(counts.shape(), vec![2, 2]);
     assert_eq!(double_values(&counts), &[0.5, 0.0, 0.0, 0.5]);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn histcounts2_nan_pairs_excluded() {
     let x = Tensor::new(vec![1.0, 2.0, f64::NAN, 3.0], vec![4, 1]).unwrap();
     let y = Tensor::new(vec![2.0, 2.0, 2.0, f64::NAN], vec![4, 1]).unwrap();
@@ -285,7 +320,7 @@ fn histcounts2_nan_pairs_excluded() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn histcounts2_num_bins_vector() {
     let x = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
     let y = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
@@ -299,12 +334,12 @@ fn histcounts2_num_bins_vector() {
     ))
     .expect("histcounts2");
     let counts = tensor_from_value(eval.into_counts_value());
-    assert_eq!(counts.shape, vec![2, 4]);
+    assert_eq!(counts.shape(), vec![2, 4]);
     assert_eq!(double_values(&counts).iter().sum::<f64>(), 4.0);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn histcounts2_bin_width_and_limits() {
     let x_tensor = Tensor::new(vec![0.2, 1.2, 2.4, 2.6], vec![4, 1]).unwrap();
     let y_tensor = Tensor::new(vec![0.1, 0.6, 1.4, 2.2], vec![4, 1]).unwrap();
@@ -330,7 +365,7 @@ fn histcounts2_bin_width_and_limits() {
 
     assert_eq!(double_values(&xedges), &[0.0, 1.0, 2.0, 3.0]);
     assert_eq!(double_values(&yedges), &[0.0, 0.5, 1.0, 1.5, 2.0, 2.5]);
-    assert_eq!(counts.shape, vec![3, 5]);
+    assert_eq!(counts.shape(), vec![3, 5]);
     assert_eq!(double_values(&counts).iter().sum::<f64>(), 4.0);
 
     let density_eval = block_on(evaluate(
@@ -362,7 +397,7 @@ fn histcounts2_bin_width_and_limits() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn histcounts2_cdf_normalization() {
     let x = Tensor::new(vec![0.1, 0.9, 1.2, 1.8], vec![4, 1]).unwrap();
     let y = Tensor::new(vec![0.2, 0.7, 1.4, 1.6], vec![4, 1]).unwrap();
@@ -378,13 +413,13 @@ fn histcounts2_cdf_normalization() {
     ))
     .expect("histcounts2");
     let cdf = tensor_from_value(eval.into_counts_value());
-    assert_eq!(cdf.shape, vec![2, 2]);
+    assert_eq!(cdf.shape(), vec![2, 2]);
     assert_eq!(double_values(&cdf).last().copied().unwrap(), 1.0);
     assert!(double_values(&cdf).windows(2).all(|w| w[0] <= w[1] + 1e-12));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn histcounts2_integer_bin_method() {
     let x = Tensor::new(vec![0.2, 1.7, 2.1], vec![3, 1]).unwrap();
     let y = Tensor::new(vec![1.2, 1.8, 2.9], vec![3, 1]).unwrap();
@@ -414,7 +449,7 @@ fn histcounts2_integer_bin_method() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn histcounts2_num_bins_zero_errors() {
     let x = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
     let y = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
@@ -493,7 +528,7 @@ fn empty_integer_method_axes_use_finite_default_edges() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn histcounts2_binmethod_conflict_errors() {
     let x = Tensor::new(vec![1.0, 1.0, 1.0], vec![3, 1]).unwrap();
     let y = Tensor::new(vec![1.0, 1.0, 1.0], vec![3, 1]).unwrap();
@@ -524,8 +559,8 @@ fn histcounts2_returns_bin_indices_with_source_shapes() {
     let (_, _, _, bin_x, bin_y) = eval.into_all();
     let bin_x = tensor_from_value(bin_x);
     let bin_y = tensor_from_value(bin_y);
-    assert_eq!(bin_x.shape, vec![1, 3]);
-    assert_eq!(bin_y.shape, vec![1, 3]);
+    assert_eq!(bin_x.shape(), vec![1, 3]);
+    assert_eq!(bin_y.shape(), vec![1, 3]);
     assert_eq!(double_values(&bin_x), &[1.0, 2.0, 0.0]);
     assert_eq!(double_values(&bin_y), &[1.0, 2.0, 2.0]);
 }
@@ -641,7 +676,7 @@ fn histcounts2_percentage_and_cumulative_are_two_dimensional() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn histcounts2_gpu_roundtrip() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     test_support::with_test_provider(|provider| {
@@ -649,11 +684,11 @@ fn histcounts2_gpu_roundtrip() {
         let y = Tensor::new(vec![1.0, 1.1, 2.9], vec![3, 1]).unwrap();
         let x_view = runmat_accelerate_api::HostTensorView {
             data: double_values(&x),
-            shape: &x.shape,
+            shape: x.shape(),
         };
         let y_view = runmat_accelerate_api::HostTensorView {
             data: double_values(&y),
-            shape: &y.shape,
+            shape: y.shape(),
         };
         let x_handle = provider.upload(&x_view).expect("upload X");
         let y_handle = provider.upload(&y_view).expect("upload Y");
@@ -667,8 +702,8 @@ fn histcounts2_gpu_roundtrip() {
         ))
         .expect("histcounts2");
         let counts = tensor_from_value(eval.into_counts_value());
-        assert_eq!(counts.shape, vec![3, 2]);
-        let rows = counts.shape[0];
+        assert_eq!(counts.shape(), vec![3, 2]);
+        let rows = counts.shape()[0];
         let count = |ix: usize, iy: usize| double_values(&counts)[ix + iy * rows];
         assert_eq!(count(0, 0), 1.0);
         assert_eq!(count(1, 0), 1.0);
@@ -680,7 +715,7 @@ fn histcounts2_gpu_roundtrip() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg(feature = "wgpu")]
 fn histcounts2_wgpu_roundtrip() {
     use runmat_accelerate_api::AccelProvider;
@@ -696,13 +731,13 @@ fn histcounts2_wgpu_roundtrip() {
     let x_handle = provider
         .upload(&runmat_accelerate_api::HostTensorView {
             data: double_values(&x),
-            shape: &x.shape,
+            shape: x.shape(),
         })
         .expect("upload x");
     let y_handle = provider
         .upload(&runmat_accelerate_api::HostTensorView {
             data: double_values(&y),
-            shape: &y.shape,
+            shape: y.shape(),
         })
         .expect("upload y");
 
@@ -724,8 +759,8 @@ fn histcounts2_wgpu_roundtrip() {
     assert_eq!(double_values(&xedges), &[0.0, 1.0, 2.0, 3.0]);
     assert_eq!(double_values(&yedges), &[0.0, 2.0, 3.0]);
 
-    assert_eq!(counts.shape, vec![3, 2]);
-    let rows = counts.shape[0];
+    assert_eq!(counts.shape(), vec![3, 2]);
+    let rows = counts.shape()[0];
     let count = |ix: usize, iy: usize| double_values(&counts)[ix + iy * rows];
     assert_eq!(count(0, 0), 1.0);
     assert_eq!(count(1, 0), 1.0);

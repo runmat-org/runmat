@@ -10,8 +10,8 @@ struct VisibleShape {
 
 fn visible_shape(value: &Value) -> BuiltinResult<VisibleShape> {
     let shape: &[usize] = match value {
-        Value::Tensor(value) => &value.shape,
-        Value::ComplexTensor(value) => &value.shape,
+        Value::Tensor(value) => value.shape(),
+        Value::ComplexTensor(value) => value.shape(),
         Value::LogicalArray(value) => &value.shape,
         Value::GpuTensor(handle) => handle.shape(),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => &[1, 1],
@@ -221,7 +221,7 @@ fn parse_weighting_host(value: Value, rows: usize) -> BuiltinResult<Weighting> {
         }
         return Ok(Weighting::Weights(weights));
     }
-    if tensor.shape.len() > 2 || tensor.rows != rows || tensor.cols != rows {
+    if tensor.shape().len() > 2 || lscov_dense_dimensions(&tensor) != (rows, rows) {
         return Err(invalid(
             "lscov: V must be empty, a weight vector, or a square covariance matrix matching A rows",
         ));

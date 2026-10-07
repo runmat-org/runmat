@@ -136,7 +136,7 @@ pub async fn evaluate(x: Value, y: Value, rest: &[Value]) -> BuiltinResult<Histc
 fn preflight_observation_shapes(x: &Value, y: &Value) -> BuiltinResult<()> {
     fn known_shape(value: &Value) -> Option<&[usize]> {
         match value {
-            Value::Tensor(tensor) => Some(&tensor.shape),
+            Value::Tensor(tensor) => Some(tensor.shape()),
             Value::LogicalArray(array) => Some(&array.shape),
             Value::GpuTensor(handle) => Some(handle.shape()),
             Value::Num(_) | Value::Int(_) | Value::Bool(_) => Some(&[1, 1]),
@@ -176,7 +176,7 @@ fn histcounts2_from_tensors(
             "{NAME}: X and Y must contain the same number of elements"
         )));
     }
-    if x_tensor.shape != y_tensor.shape {
+    if x_tensor.shape() != y_tensor.shape() {
         return Err(builtin_error(format!(
             "{NAME}: X and Y must be the same size"
         )));
@@ -184,8 +184,8 @@ fn histcounts2_from_tensors(
 
     // Histogram statistics and returned edges are defined in the floating
     // computation domain even when observations arrive in integer storage.
-    let x_shape = x_tensor.shape.clone();
-    let y_shape = y_tensor.shape.clone();
+    let x_shape = x_tensor.shape().to_vec();
+    let y_shape = y_tensor.shape().to_vec();
     let x_exact = x_tensor
         .integer_storage()
         .map(|storage| storage.exact_values());
