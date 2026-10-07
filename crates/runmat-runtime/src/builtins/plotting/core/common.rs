@@ -36,7 +36,7 @@ pub fn numeric_pair(
 }
 
 pub fn numeric_plot_data(tensor: Tensor) -> BuiltinResult<NumericPlotData> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|err| plotting_error("plotting", err))?;
@@ -105,6 +105,29 @@ mod tests {
     use super::*;
     use runmat_value::IntegerStorage;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn host_surface_geometry_preserves_rank_zero_and_rank_one_policy() {
+        let scalar = Tensor::new(vec![7.0], Vec::new()).unwrap();
+        assert_eq!(surface_matrix_dimensions(&scalar), (0, 0));
+        assert!(SurfaceDataInput::Host(scalar.clone())
+            .grid_shape("surf")
+            .is_err());
+        assert!(tensor_to_surface_grid_matlab_xy(scalar, 1, 1, "surf").is_err());
+
+        let vector = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
+        assert_eq!(
+            SurfaceDataInput::Host(vector.clone())
+                .grid_shape("surf")
+                .unwrap(),
+            (1, 3)
+        );
+        assert_eq!(
+            tensor_to_surface_grid_matlab_xy(vector, 1, 3, "surf").unwrap(),
+            vec![vec![1.0], vec![2.0], vec![3.0]]
+        );
+    }
+
     #[test]
     fn numeric_pair_accepts_matching_numel_vectors_with_different_shapes() {
         let row = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).unwrap();
@@ -155,6 +178,16 @@ pub enum SurfaceDataInput {
     Gpu(GpuTensorHandle),
 }
 
+/// Projects host surface data into its row-by-column grid layout.
+/// Rank-one inputs form one row; rank-zero inputs have no grid extent.
+pub(super) fn surface_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 impl SurfaceDataInput {
     pub fn from_value(value: Value, context: &'static str) -> BuiltinResult<Self> {
         match value {
@@ -184,13 +217,14 @@ impl SurfaceDataInput {
     pub fn grid_shape(&self, context: &'static str) -> BuiltinResult<(usize, usize)> {
         match self {
             Self::Host(tensor) => {
-                if tensor.rows == 0 || tensor.cols == 0 {
+                let (rows, cols) = surface_matrix_dimensions(tensor);
+                if rows == 0 || cols == 0 {
                     Err(plotting_error(
                         context,
                         format!("{context}: Z must contain at least a 2-D grid"),
                     ))
                 } else {
-                    Ok((tensor.rows, tensor.cols))
+                    Ok((rows, cols))
                 }
             }
             Self::Gpu(handle) => {
@@ -249,7 +283,7 @@ pub fn tensor_to_surface_grid_matlab_xy(
         .checked_mul(cols)
         .ok_or_else(|| plotting_error(context, format!("{context}: grid dimensions overflowed")))?;
     let z_data = tensor::tensor_values_f64(&z);
-    if z.rows != rows || z.cols != cols || z_data.len() != expected_len {
+    if surface_matrix_dimensions(&z) != (rows, cols) || z_data.len() != expected_len {
         return Err(plotting_error(
             context,
             format!("{context}: Z must have shape {rows}x{cols} to match X({cols}) and Y({rows})"),

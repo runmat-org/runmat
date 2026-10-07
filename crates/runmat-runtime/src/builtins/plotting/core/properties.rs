@@ -2845,7 +2845,8 @@ fn parse_figure_position(value: &Value, builtin: &'static str) -> BuiltinResult<
 }
 
 fn is_figure_position_vector_shape(tensor: &Tensor) -> bool {
-    tensor.shape.len() <= 1 || (tensor.shape.len() == 2 && (tensor.rows == 1 || tensor.cols == 1))
+    tensor.shape().len() <= 1
+        || (tensor.shape().len() == 2 && (tensor.rows() == 1 || tensor.cols() == 1))
 }
 
 fn text_position_value(position: glam::Vec3) -> Value {
@@ -6620,7 +6621,7 @@ fn binscatter_numeric_data(
 ) -> BuiltinResult<Tensor> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| plotting_error(builtin, format!("{builtin}: {name} must be numeric")))?;
-    if tensor.shape.iter().filter(|&&dim| dim > 1).count() > 1 {
+    if tensor.shape().iter().filter(|&&dim| dim > 1).count() > 1 {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: {name} must be a real numeric vector"),
@@ -7194,7 +7195,7 @@ fn line_numeric_data(
 ) -> BuiltinResult<NumericPlotData> {
     let tensor = tensor::value_to_tensor(value)
         .map_err(|_| plotting_error(builtin, format!("{builtin}: {name} must be numeric")))?;
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|err| plotting_error(builtin, format!("{builtin}: {name}: {err}")))?;
@@ -7833,7 +7834,7 @@ fn surface_coordinate_data_from_value(
             format!("{builtin}: {name} must be non-empty"),
         ));
     }
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: {name} must be a vector or 2-D matrix"),
@@ -7845,11 +7846,10 @@ fn surface_coordinate_data_from_value(
             format!("{builtin}: {name} must contain finite coordinates"),
         ));
     }
-    if tensor.rows == 1 || tensor.cols == 1 {
+    let (rows, cols) = super::common::surface_matrix_dimensions(&tensor);
+    if rows == 1 || cols == 1 {
         return Ok(SurfaceCoordinateData::Vector(data));
     }
-    let rows = tensor.rows;
-    let cols = tensor.cols;
     let grid = super::common::tensor_to_surface_grid_matlab_xy(tensor, rows, cols, builtin)?;
     Ok(SurfaceCoordinateData::Grid(grid))
 }
@@ -7873,13 +7873,14 @@ fn surface_z_grid_from_value(
     }
     tensor = tensor::integer_tensor_to_f64(tensor)
         .map_err(|err| plotting_error(builtin, format!("{builtin}: {err}")))?;
-    if tensor.rows == rows && tensor.cols == cols {
+    let (input_rows, input_cols) = super::common::surface_matrix_dimensions(&tensor);
+    if input_rows == rows && input_cols == cols {
         return super::common::tensor_to_surface_grid_matlab_xy(tensor, rows, cols, builtin);
     }
-    if tensor.rows == 1 || tensor.cols == 1 {
-        tensor.rows = rows;
-        tensor.cols = cols;
-        tensor.shape = vec![rows, cols];
+    if input_rows == 1 || input_cols == 1 {
+        tensor
+            .reshape_in_place(vec![rows, cols])
+            .map_err(|error| plotting_error(builtin, format!("{builtin}: {error}")))?;
         return super::common::tensor_to_surface_grid_matlab_xy(tensor, rows, cols, builtin);
     }
     Err(plotting_error(
@@ -8355,6 +8356,26 @@ impl AxesMetadataExt for runmat_plot::plots::AxesMetadata {
 mod tests {
     use super::*;
     use runmat_value::IntegerStorage;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn surface_property_rank_boundaries_keep_host_grid_geometry() {
+        let scalar = Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap());
+        assert!(surface_coordinate_data_from_value(&scalar, "XData", "set").is_err());
+        assert!(surface_z_grid_from_value(&scalar, 1, 1, "set").is_err());
+
+        let vector = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4]).unwrap());
+        let SurfaceCoordinateData::Vector(coordinates) =
+            surface_coordinate_data_from_value(&vector, "XData", "set").unwrap()
+        else {
+            panic!("rank-one coordinates must stay a vector")
+        };
+        assert_eq!(coordinates, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(
+            surface_z_grid_from_value(&vector, 2, 2, "set").unwrap(),
+            vec![vec![1.0, 2.0], vec![3.0, 4.0]]
+        );
+    }
 
     #[test]
     fn label_strings_preserve_exact_uint64_text() {

@@ -88,7 +88,7 @@ fn operand_shape(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Object(object) if object.is_class(DURATION_CLASS) => {
             match object.properties.get(DAYS_FIELD) {
-                Some(Value::Tensor(tensor)) => Ok(tensor.shape.clone()),
+                Some(Value::Tensor(tensor)) => Ok(tensor.shape().to_vec()),
                 Some(Value::Num(_)) => Ok(vec![1, 1]),
                 Some(Value::GpuTensor(handle)) => Ok(handle.shape().to_vec()),
                 _ => Err(duration_error(
@@ -97,7 +97,7 @@ fn operand_shape(value: &Value) -> BuiltinResult<Vec<usize>> {
                 )),
             }
         }
-        Value::Tensor(tensor) => Ok(tensor.shape.clone()),
+        Value::Tensor(tensor) => Ok(tensor.shape().to_vec()),
         Value::LogicalArray(array) => Ok(array.shape.clone()),
         Value::GpuTensor(handle) => Ok(handle.shape().to_vec()),
         _ => Ok(vec![1, 1]),
@@ -107,7 +107,9 @@ fn operand_shape(value: &Value) -> BuiltinResult<Vec<usize>> {
 pub(super) fn preflight_operand_shapes(lhs: &Value, rhs: &Value, op: &str) -> BuiltinResult<()> {
     let left = operand_shape(lhs)?;
     let right = if crate::builtins::datetime::is_datetime_object(rhs) {
-        crate::builtins::datetime::serials_from_datetime_value(rhs)?.shape
+        crate::builtins::datetime::serials_from_datetime_value(rhs)?
+            .shape()
+            .to_vec()
     } else {
         operand_shape(rhs)?
     };
@@ -164,7 +166,7 @@ pub(super) fn broadcast_duration_days(
     lhs: &Tensor,
     rhs: &Tensor,
 ) -> BuiltinResult<(Vec<f64>, Vec<f64>, Vec<usize>)> {
-    let plan = crate::builtins::common::broadcast::BroadcastPlan::new(&lhs.shape, &rhs.shape)
+    let plan = crate::builtins::common::broadcast::BroadcastPlan::new(lhs.shape(), rhs.shape())
         .map_err(|err| duration_error(DurationErrorKind::ShapeMismatch, err))?;
     let lhs_values = tensor::tensor_values_f64_cow(lhs);
     let rhs_values = tensor::tensor_values_f64_cow(rhs);
@@ -232,10 +234,10 @@ pub(super) fn tensor_from_numeric(value: Value, context: &str) -> BuiltinResult<
 
 pub(super) fn component_tensor(value: Value, context: &str) -> BuiltinResult<Tensor> {
     let tensor = tensor_from_numeric(value, context)?;
-    let shape = if tensor.shape.is_empty() {
+    let shape = if tensor.shape().is_empty() {
         vec![1, 1]
     } else {
-        tensor.shape.clone()
+        tensor.shape().to_vec()
     };
     let values = tensor::tensor_into_values_f64(tensor);
     Tensor::new(values, shape)
@@ -320,18 +322,18 @@ pub(super) async fn duration_unit_value(
             .iter()
             .map(|day| day / days_per_unit)
             .collect::<Vec<_>>();
-        return if days.shape.iter().product::<usize>() == 1 {
+        return if days.shape().iter().product::<usize>() == 1 {
             Ok(Value::Num(data[0]))
         } else {
             Ok(Value::Tensor(
-                Tensor::new(data, days.shape.clone()).map_err(|err| {
+                Tensor::new(data, days.shape().to_vec()).map_err(|err| {
                     duration_error(DurationErrorKind::Internal, format!("{unit_name}: {err}"))
                 })?,
             ))
         };
     }
     let numeric = duration_days_operand(&value, true).await?;
-    let shape = numeric.shape.clone();
+    let shape = numeric.shape().to_vec();
     let values = tensor::tensor_into_values_f64(numeric);
     let days = values
         .iter()
@@ -359,7 +361,7 @@ pub(super) fn broadcast_component_data(
     for array in arrays {
         let len = array.len();
         if len != 1 {
-            let shape = array.shape.clone();
+            let shape = array.shape().to_vec();
             if let Some(existing) = &target_shape {
                 if existing != &shape {
                     return Err(duration_error(
@@ -382,7 +384,7 @@ pub(super) fn broadcast_component_data(
             .expect("duration components are normalized to double storage");
         if values.len() == 1 {
             broadcasted.push(vec![values[0]; target_len]);
-        } else if values.len() == target_len && array.shape == target_shape {
+        } else if values.len() == target_len && array.shape() == target_shape {
             broadcasted.push(values.to_vec());
         } else {
             return Err(duration_error(
@@ -431,7 +433,7 @@ pub(super) fn build_from_components(
 
 pub(super) fn is_public_duration_matrix(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.shape.len() <= 2 && tensor.cols() == 3,
+        Value::Tensor(tensor) => tensor.shape().len() <= 2 && tensor.cols() == 3,
         Value::LogicalArray(array) => {
             array.shape.len() <= 2 && array.shape.get(1).copied().unwrap_or(1) == 3
         }
@@ -451,7 +453,7 @@ pub(super) fn is_numeric_duration_input(value: &Value) -> bool {
 
 pub(super) fn build_from_matrix(value: Value, format: Option<String>) -> BuiltinResult<Value> {
     let matrix = component_tensor(value, "X")?;
-    if matrix.shape.len() > 2 || matrix.cols() != 3 {
+    if matrix.shape().len() > 2 || matrix.cols() != 3 {
         return Err(duration_error(
             DurationErrorKind::InvalidArgument,
             "duration: X must be a numeric matrix with exactly three columns",
