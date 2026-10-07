@@ -55,7 +55,7 @@ fn tensor_data(value: &Value) -> (Vec<f64>, Vec<usize>) {
     let Value::Tensor(tensor) = value else {
         panic!("expected tensor");
     };
-    (tensor.materialize_f64(), tensor.shape.clone())
+    (tensor.materialize_f64(), tensor.shape().to_vec())
 }
 
 fn cell_text(value: &Value, row: usize, col: usize) -> String {

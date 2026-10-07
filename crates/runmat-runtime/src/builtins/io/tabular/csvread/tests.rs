@@ -78,7 +78,7 @@ fn csvread_basic_csv_roundtrip() {
         .expect("csvread");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 3]);
+            assert_eq!(t.shape(), &[2, 3]);
             assert_eq!(t.materialize_f64(), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -95,7 +95,7 @@ fn csvread_with_offsets() {
         csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("csv");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![4.0, 7.0, 5.0, 8.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -116,7 +116,7 @@ fn csvread_with_numeric_range() {
         csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("csv");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![5.0, 8.0, 6.0, 9.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -138,7 +138,7 @@ fn csvread_with_string_range() {
         csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("csv");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![5.0, 8.0, 6.0, 9.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -206,7 +206,7 @@ fn csvread_empty_fields_become_zero() {
         csvread_builtin(Value::from(path.to_string_lossy().to_string()), Vec::new()).expect("csv");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![3, 3]);
+            assert_eq!(t.shape(), &[3, 3]);
             assert_eq!(
                 t.materialize_f64(),
                 vec![1.0, 0.0, 7.0, 0.0, 5.0, 8.0, 3.0, 0.0, 0.0]
@@ -242,7 +242,7 @@ fn csvread_accepts_char_array_filename() {
     let result = csvread_builtin(Value::CharArray(chars), Vec::new()).expect("csv");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), &[1, 2]);
             assert_eq!(t.materialize_f64(), vec![1.0, 2.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -259,7 +259,7 @@ fn csvread_with_header_and_row_labels_using_offsets() {
         csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("csv");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -277,7 +277,7 @@ fn csvread_skips_non_utf8_bytes_outside_requested_numeric_block() {
         csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("csv");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 1]);
+            assert_eq!(t.shape(), &[2, 1]);
             assert_eq!(t.materialize_f64(), vec![21.5, 22.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -304,7 +304,7 @@ fn csvread_numeric_range_ignores_bytes_and_text_outside_rectangle() {
         csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("csv");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 1]);
+            assert_eq!(t.shape(), &[2, 1]);
             assert_eq!(t.materialize_f64(), vec![21.5, 22.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -331,7 +331,7 @@ fn csvread_a1_range_ignores_bytes_and_text_outside_rectangle() {
         csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("csv");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 1]);
+            assert_eq!(t.shape(), &[2, 1]);
             assert_eq!(t.materialize_f64(), vec![21.5, 22.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -348,7 +348,7 @@ fn csvread_public_dotdot_range_and_complex_tokens() {
     else {
         panic!("expected complex double result");
     };
-    assert_eq!(result.shape, vec![2, 3]);
+    assert_eq!(result.shape(), &[2, 3]);
     assert_eq!(
         result.materialize_f64(),
         vec![

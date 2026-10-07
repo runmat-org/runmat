@@ -1759,7 +1759,7 @@ pub(crate) mod tests {
             let weights_handle = provider
                 .upload(&runmat_accelerate_api::HostTensorView {
                     data: &weights.materialize_f64(),
-                    shape: &weights.shape,
+                    shape: weights.shape(),
                 })
                 .expect("weights upload");
             let result = median_builtin(

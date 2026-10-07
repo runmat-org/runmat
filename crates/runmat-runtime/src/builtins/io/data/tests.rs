@@ -325,7 +325,7 @@ fn data_create_uses_exact_all_class_schema_controls_and_integer_payloads() {
         else {
             panic!("{dtype}: expected tensor");
         };
-        assert_eq!(values.shape, vec![2, 3], "{dtype}");
+        assert_eq!(values.shape(), &[2, 3], "{dtype}");
         assert_eq!(values.integer_storage(), Some(&expected), "{dtype}");
     }
 }
@@ -1155,7 +1155,7 @@ fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
     else {
         panic!("DataArray.read must return a tensor");
     };
-    assert_eq!(resized.shape, vec![1, 2]);
+    assert_eq!(resized.shape(), &[1, 2]);
     assert_eq!(
         resized.integer_storage(),
         Some(&runmat_value::IntegerStorage::U64(vec![0, 0]))
@@ -1264,7 +1264,7 @@ fn create_open_write_read_dataset() {
     let Value::Tensor(t) = read_back else {
         panic!("expected tensor");
     };
-    assert_eq!(t.shape, vec![2, 2]);
+    assert_eq!(t.shape(), &[2, 2]);
     assert_eq!(tensor_values(&t), vec![1.0, 2.0, 3.0, 4.0]);
 }
 
@@ -1323,7 +1323,7 @@ fn write_and_read_slice_payload() {
     let Value::Tensor(t) = read_back else {
         panic!("expected tensor");
     };
-    assert_eq!(t.shape, vec![2, 3]);
+    assert_eq!(t.shape(), &[2, 3]);
     assert_eq!(tensor_values(&t), vec![10.0, 11.0, 12.0, 13.0, 14.0, 15.0]);
 }
 
@@ -1774,7 +1774,7 @@ fn tx_create_resize_fill_and_delete_array() {
     let Value::Tensor(t) = read_back else {
         panic!("expected tensor");
     };
-    assert_eq!(t.shape, vec![3, 1]);
+    assert_eq!(t.shape(), &[3, 1]);
     assert_eq!(tensor_values(&t), vec![7.0, 7.0, 7.0]);
 }
 

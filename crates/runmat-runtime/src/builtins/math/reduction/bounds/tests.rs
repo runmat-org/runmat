@@ -67,7 +67,7 @@ async fn integer_empty_shape_and_logical_output_class_are_explicit() {
         let Value::Tensor(value) = value else {
             panic!("expected empty integer tensor")
         };
-        assert_eq!(value.shape, vec![0, 3]);
+        assert_eq!(value.shape(), vec![0, 3]);
         assert_eq!(value.integer_storage(), Some(&IntegerStorage::U64(vec![])));
     }
     let result = evaluate_bounds(Value::Bool(true), &[]).await.unwrap();
@@ -83,12 +83,11 @@ async fn empty_float_and_complex_bounds_preserve_shape_for_all_selection() {
     ] {
         let result = evaluate_bounds(input, &[Value::from("all")]).await.unwrap();
         for output in [result.smallest, result.largest] {
-            let shape = match output {
-                Value::Tensor(value) => value.shape,
-                Value::ComplexTensor(value) => value.shape,
+            match output {
+                Value::Tensor(value) => assert_eq!(value.shape(), &[0, 3]),
+                Value::ComplexTensor(value) => assert_eq!(value.shape(), &[0, 3]),
                 _ => panic!("expected empty tensor"),
-            };
-            assert_eq!(shape, vec![0, 3]);
+            }
         }
     }
 }

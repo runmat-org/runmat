@@ -301,7 +301,7 @@ fn xlsread_reads_numeric_range_as_default_output() {
     let value = direct_xlsread(&path, vec![Value::from("A2:B4")], None);
     match value {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![3, 2]);
+            assert_eq!(tensor.shape(), &[3, 2]);
             assert_eq!(
                 tensor.materialize_f64(),
                 vec![1.5, 2.5, 3.5, 10.0, 20.0, 30.0]
@@ -319,7 +319,7 @@ fn xlsread_accepts_sheet_and_range() {
     let value = direct_xlsread(&path, vec![Value::from("Data"), Value::from("B2:B3")], None);
     match value {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 1]);
+            assert_eq!(tensor.shape(), &[2, 1]);
             assert_eq!(tensor.materialize_f64(), vec![10.0, 20.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -334,7 +334,7 @@ fn string_sheet_selector_is_not_numeric_index() {
     let value = direct_xlsread(&path, vec![Value::from("1"), Value::from("A2:A2")], None);
     match value {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 1]);
+            assert_eq!(tensor.shape(), &[1, 1]);
             assert_eq!(tensor.materialize_f64(), vec![1.5]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -563,7 +563,7 @@ fn xlsread_returns_text_and_raw_outputs() {
     assert_eq!(outputs.len(), 3);
     match &outputs[0] {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.shape(), &[2, 2]);
             assert_eq!(tensor.materialize_f64(), vec![1.5, 2.5, 10.0, 20.0]);
         }
         other => panic!("expected numeric tensor, got {other:?}"),

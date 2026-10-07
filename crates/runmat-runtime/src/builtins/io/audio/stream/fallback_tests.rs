@@ -167,7 +167,7 @@ fn run(
 fn unsupported_seek_falls_back_once_after_handle_retirement() {
     let (result, evidence) = run(io::ErrorKind::Unsupported, false);
     let decoded = result.expect("read-only provider fallback");
-    assert_eq!(decoded.samples.shape, vec![1, 1]);
+    assert_eq!(decoded.samples.shape(), &[1, 1]);
     assert_eq!(decoded.samples.materialize_f64(), vec![16384.0]);
     assert_eq!(evidence.opens.load(Ordering::SeqCst), 1);
     assert_eq!(evidence.reads.load(Ordering::SeqCst), 1);

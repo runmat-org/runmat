@@ -51,7 +51,7 @@ fn jsondecode_matrix_to_tensor() {
         block_on(jsondecode_builtin(char_row("[[1,2,3],[4,5,6]]"))).expect("jsondecode matrix");
     match result {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 3]);
+            assert_eq!(tensor.shape(), &[2, 3]);
             assert_eq!(tensor.materialize_f64(), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
         }
         other => panic!("expected tensor, got {:?}", other),
@@ -65,7 +65,7 @@ fn jsondecode_numeric_tensor_3d() {
     let result = block_on(jsondecode_builtin(char_row(json))).expect("jsondecode 3d tensor");
     match result {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 2, 2]);
+            assert_eq!(tensor.shape(), &[2, 2, 2]);
             assert_eq!(
                 tensor.materialize_f64(),
                 vec![1.0, 5.0, 3.0, 7.0, 2.0, 6.0, 4.0, 8.0]
@@ -82,7 +82,7 @@ fn jsondecode_numeric_singleton_array_retains_tensor() {
         block_on(jsondecode_builtin(char_row("[42]"))).expect("jsondecode singleton numeric array");
     match result {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1]);
+            assert_eq!(tensor.shape(), &[1]);
             assert_eq!(tensor.rows(), 1);
             assert_eq!(tensor.cols(), 1);
             assert_eq!(tensor.materialize_f64(), vec![42.0]);
@@ -174,7 +174,7 @@ fn jsondecode_rectangular_cell_array_preserves_layout() {
             assert_eq!(cell.get(1, 0).unwrap(), Value::Bool(false));
             match cell.get(1, 1).unwrap() {
                 Value::Tensor(t) => {
-                    assert_eq!(t.shape, vec![0, 0]);
+                    assert_eq!(t.shape(), &[0, 0]);
                     assert!(t.materialize_f64().is_empty());
                 }
                 other => panic!("expected empty tensor, got {:?}", other),
@@ -305,7 +305,7 @@ fn jsondecode_null_returns_empty_double() {
     let result = block_on(jsondecode_builtin(char_row("null"))).expect("jsondecode null");
     match result {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![0, 0]);
+            assert_eq!(tensor.shape(), &[0, 0]);
             assert!(tensor.materialize_f64().is_empty());
         }
         other => panic!("expected empty tensor, got {:?}", other),
@@ -339,7 +339,7 @@ fn jsondecode_accepts_string_input() {
         block_on(jsondecode_builtin(Value::String("[1,2]".to_string()))).expect("jsondecode");
     match result {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2]);
+            assert_eq!(tensor.shape(), &[2]);
             assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]);
         }
         other => panic!("expected tensor, got {:?}", other),
@@ -353,7 +353,7 @@ fn jsondecode_accepts_string_array_scalar_input() {
     let result = block_on(jsondecode_builtin(Value::StringArray(array))).expect("jsondecode");
     match result {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2]);
+            assert_eq!(tensor.shape(), &[2]);
             assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]);
         }
         other => panic!("expected tensor, got {:?}", other),

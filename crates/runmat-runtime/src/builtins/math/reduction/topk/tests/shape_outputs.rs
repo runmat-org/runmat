@@ -10,16 +10,15 @@ async fn zero_k_on_trailing_dimension_creates_an_empty_axis() {
             let result = evaluate_topk(kind, input, &[Value::Num(0.), Value::Num(3.)])
                 .await
                 .unwrap();
-            let shape = match result.values {
-                Value::Tensor(value) => value.shape,
-                Value::ComplexTensor(value) => value.shape,
+            match result.values {
+                Value::Tensor(value) => assert_eq!(value.shape(), &[2, 1, 0]),
+                Value::ComplexTensor(value) => assert_eq!(value.shape(), &[2, 1, 0]),
                 _ => panic!("expected empty tensor"),
-            };
-            assert_eq!(shape, vec![2, 1, 0]);
+            }
             let Value::Tensor(indices) = result.indices else {
                 panic!("expected empty indices")
             };
-            assert_eq!(indices.shape, vec![2, 1, 0]);
+            assert_eq!(indices.shape(), vec![2, 1, 0]);
         }
     }
 }
@@ -75,7 +74,7 @@ async fn maxk_defaults_to_first_nonsingleton_dimension() {
     let Value::Tensor(values) = eval.values else {
         panic!("expected tensor");
     };
-    assert_eq!(values.shape, vec![2, 2]);
+    assert_eq!(values.shape(), vec![2, 2]);
     assert_eq!(self::values(&values), vec![4.0, 3.0, 6.0, 5.0]);
     let Value::Tensor(indices) = eval.indices else {
         panic!("expected indices");
@@ -92,7 +91,7 @@ async fn mink_supports_explicit_row_dimension() {
     let Value::Tensor(values) = eval.values else {
         panic!("expected tensor");
     };
-    assert_eq!(values.shape, vec![2, 2]);
+    assert_eq!(values.shape(), vec![2, 2]);
     assert_eq!(self::values(&values), vec![1.0, 2.0, 3.0, 4.0]);
     let Value::Tensor(indices) = eval.indices else {
         panic!("expected indices");
@@ -109,7 +108,7 @@ async fn maxk_clamps_k_to_dimension_length() {
     let Value::Tensor(values) = eval.values else {
         panic!("expected tensor");
     };
-    assert_eq!(values.shape, vec![3, 1]);
+    assert_eq!(values.shape(), vec![3, 1]);
     assert_eq!(self::values(&values), vec![3.0, 2.0, 1.0]);
 }
 
@@ -122,7 +121,7 @@ async fn topk_dimension_greater_than_rank_returns_input_and_one_indices() {
     let Value::Tensor(values) = eval.values else {
         panic!("expected tensor");
     };
-    assert_eq!(values.shape, vec![3, 1]);
+    assert_eq!(values.shape(), vec![3, 1]);
     assert_eq!(self::values(&values), vec![2.0, 1.0, 3.0]);
     let Value::Tensor(indices) = eval.indices else {
         panic!("expected indices");
@@ -148,7 +147,7 @@ async fn topk_allows_zero_k() {
     let Value::Tensor(values) = eval.values else {
         panic!("expected tensor");
     };
-    assert_eq!(values.shape, vec![0, 1]);
+    assert_eq!(values.shape(), vec![0, 1]);
     assert!(values.is_empty());
 }
 

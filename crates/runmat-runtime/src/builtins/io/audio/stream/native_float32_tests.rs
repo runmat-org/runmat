@@ -69,7 +69,7 @@ fn decode(
 fn native_float32_preserves_bits_and_column_major_channels() {
     with_input(|input| {
         let decoded = decode(input, None, AudioReadDataType::Native);
-        assert_eq!(decoded.samples.shape, vec![3, 2]);
+        assert_eq!(decoded.samples.shape(), &[3, 2]);
         assert_eq!(decoded.samples.numeric_dtype(), NumericDType::F32);
         assert_eq!(decoded.sample_rate, 8000.0);
         let actual: Vec<u32> = decoded
@@ -102,7 +102,7 @@ fn native_float32_range_and_double_representation_remain_distinct() {
             last: Some(3),
         });
         let native = decode(input, range, AudioReadDataType::Native);
-        assert_eq!(native.samples.shape, vec![2, 2]);
+        assert_eq!(native.samples.shape(), &[2, 2]);
         let actual: Vec<u32> = native
             .samples
             .as_f32_slice()
@@ -121,7 +121,7 @@ fn native_float32_range_and_double_representation_remain_distinct() {
         );
 
         let double = decode(input, range, AudioReadDataType::Double);
-        assert_eq!(double.samples.shape, vec![2, 2]);
+        assert_eq!(double.samples.shape(), &[2, 2]);
         assert_eq!(double.samples.numeric_dtype(), NumericDType::F64);
         assert!(double.samples.as_f64_slice().expect("double storage")[0].is_nan());
         assert_eq!(

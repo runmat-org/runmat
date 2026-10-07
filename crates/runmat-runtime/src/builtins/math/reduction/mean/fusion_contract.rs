@@ -267,7 +267,7 @@ mod tests {
         else {
             panic!("Single one-element mean is republished as a tensor");
         };
-        assert_eq!(one_actual.shape, one[0].output_shape);
+        assert_eq!(one_actual.shape(), one[0].output_shape);
         let pair = stages(&input, &[axes(vec![3.0, 4.0])]).unwrap();
         assert_eq!(pair[0].output_shape, vec![1, 1, 1]);
         assert_eq!(pair[0].output_class, NumericClass::Double);
@@ -280,7 +280,7 @@ mod tests {
         else {
             panic!("Single vecdim publication remains a tensor");
         };
-        assert_eq!(pair_actual.shape, pair[1].output_shape);
+        assert_eq!(pair_actual.shape(), pair[1].output_shape);
         let double = stages(
             &input,
             &[axes(vec![3.0, 4.0]), Value::String("double".into())],

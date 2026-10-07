@@ -83,7 +83,7 @@ fn fgets_reads_line_with_newline() {
     match ltout {
         Value::Tensor(t) => {
             assert_eq!(t.materialize_f64(), vec![10.0]);
-            assert_eq!(t.shape, vec![1, 1]);
+            assert_eq!(t.shape(), &[1, 1]);
         }
         other => panic!("expected numeric tensor, got {other:?}"),
     }

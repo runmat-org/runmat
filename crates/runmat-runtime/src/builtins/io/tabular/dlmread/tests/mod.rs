@@ -89,7 +89,7 @@ fn dlmread_default_delimiter() {
         .expect("dlmread");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 3]);
+            assert_eq!(t.shape(), &[2, 3]);
             assert_eq!(t.materialize_f64(), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -106,7 +106,7 @@ fn dlmread_semicolon_roundtrip() {
         dlmread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("dlmread");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 3]);
+            assert_eq!(t.shape(), &[2, 3]);
             assert_eq!(t.materialize_f64(), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -124,7 +124,7 @@ fn dlmread_ascii_code_delimiter() {
         dlmread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("dlmread");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 3]);
+            assert_eq!(t.shape(), &[2, 3]);
             assert_eq!(t.materialize_f64(), vec![5.0, 8.0, 6.0, 9.0, 7.0, 10.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -142,7 +142,7 @@ fn dlmread_char_array_filename() {
     let result = dlmread_builtin(Value::CharArray(char_array), Vec::new()).expect("dlmread");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -159,7 +159,7 @@ fn dlmread_handles_utf8_bom() {
         .expect("dlmread");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -175,7 +175,7 @@ fn dlmread_empty_file_returns_empty_tensor() {
         .expect("dlmread");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![0, 0]);
+            assert_eq!(t.shape(), &[0, 0]);
             assert!(t.materialize_f64().is_empty());
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -193,7 +193,7 @@ fn dlmread_with_offsets() {
         dlmread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("dlmread");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![4.0, 7.0, 5.0, 8.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -219,7 +219,7 @@ fn dlmread_empty_delimiter_placeholders_are_documented_strict_forms() {
     let Value::Tensor(comma) = comma else {
         panic!("expected comma tensor")
     };
-    assert_eq!(comma.shape, vec![2, 2]);
+    assert_eq!(comma.shape(), &[2, 2]);
     assert_eq!(comma.materialize_f64(), vec![4.0, 7.0, 5.0, 8.0]);
 
     let whitespace_path = write_temp_file(&["0 1 2", "3 4 5", "6 7 8"]);
@@ -236,7 +236,7 @@ fn dlmread_empty_delimiter_placeholders_are_documented_strict_forms() {
     let Value::Tensor(whitespace) = whitespace else {
         panic!("expected whitespace tensor")
     };
-    assert_eq!(whitespace.shape, vec![2, 2]);
+    assert_eq!(whitespace.shape(), &[2, 2]);
     assert_eq!(whitespace.materialize_f64(), vec![4.0, 7.0, 5.0, 8.0]);
 
     fs::remove_file(comma_path).ok();
@@ -363,7 +363,7 @@ fn dlmread_offsets_skip_nonnumeric_header_row_and_column() {
         dlmread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("dlmread");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -382,7 +382,7 @@ fn dlmread_space_delimiter() {
         dlmread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("dlmread");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![3, 4]);
+            assert_eq!(t.shape(), &[3, 4]);
             assert_eq!(
                 t.materialize_f64(),
                 vec![

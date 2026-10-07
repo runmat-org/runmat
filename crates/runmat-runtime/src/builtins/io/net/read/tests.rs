@@ -183,7 +183,7 @@ fn read_reads_requested_uint8_values() {
         Value::Tensor(t) => t,
         other => panic!("expected tensor result, got {other:?}"),
     };
-    assert_eq!(tensor.shape, vec![1, 6]);
+    assert_eq!(tensor.shape(), &[1, 6]);
     assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
 
     handle.join().expect("server thread");
@@ -307,7 +307,7 @@ fn read_without_count_drains_available_bytes() {
         Value::Tensor(t) => t,
         other => panic!("expected tensor result, got {other:?}"),
     };
-    assert_eq!(tensor.shape, vec![1, 3]);
+    assert_eq!(tensor.shape(), &[1, 3]);
     assert_eq!(tensor.materialize_f64(), vec![42.0, 43.0, 44.0]);
 
     handle.join().expect("server thread");

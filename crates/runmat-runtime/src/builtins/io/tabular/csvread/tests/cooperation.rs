@@ -145,7 +145,7 @@ fn actual_csvread_future_abandons_during_output_selection_without_publication() 
     let Value::Tensor(matrix) = value else {
         panic!("matrix output")
     };
-    assert_eq!(matrix.shape, vec![1, 1000]);
+    assert_eq!(matrix.shape(), &[1, 1000]);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -195,5 +195,5 @@ fn long_unterminated_csv_line_suspends_during_bounded_acquisition() {
     let Value::Tensor(matrix) = value else {
         panic!("matrix output")
     };
-    assert_eq!(matrix.shape, vec![1, 6001]);
+    assert_eq!(matrix.shape(), &[1, 6001]);
 }

@@ -59,8 +59,8 @@ fn matrix_literal_parses_without_eval_hook() {
     let value = input_with_empty_prompt().expect("input");
     match value {
         Value::Tensor(t) => {
-            assert_eq!(t.rows, 1);
-            assert_eq!(t.cols, 3);
+            assert_eq!(t.rows(), 1);
+            assert_eq!(t.cols(), 3);
             assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
         }
         other => panic!("expected 1×3 tensor, got {other:?}"),
@@ -123,8 +123,8 @@ fn column_vector_parses_without_eval_hook() {
     let value = input_with_empty_prompt().expect("input");
     match value {
         Value::Tensor(t) => {
-            assert_eq!(t.rows, 3);
-            assert_eq!(t.cols, 1);
+            assert_eq!(t.rows(), 3);
+            assert_eq!(t.cols(), 1);
             assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0]);
         }
         other => panic!("expected 3×1 tensor, got {other:?}"),
@@ -166,8 +166,8 @@ fn mixed_logical_and_numeric_coerces_to_double_tensor() {
     let value = input_with_empty_prompt().expect("input");
     match value {
         Value::Tensor(t) => {
-            assert_eq!(t.rows, 1);
-            assert_eq!(t.cols, 2);
+            assert_eq!(t.rows(), 1);
+            assert_eq!(t.cols(), 2);
             assert_eq!(t.materialize_f64(), vec![1.0, 2.0]);
         }
         other => panic!("expected Tensor, got {other:?}"),
@@ -183,8 +183,8 @@ fn matrix_2x2_column_major_layout() {
     let value = input_with_empty_prompt().expect("input");
     match value {
         Value::Tensor(t) => {
-            assert_eq!(t.rows, 2);
-            assert_eq!(t.cols, 2);
+            assert_eq!(t.rows(), 2);
+            assert_eq!(t.cols(), 2);
             assert_eq!(t.get2(0, 0).unwrap(), 1.0, "(0,0) should be 1");
             assert_eq!(t.get2(0, 1).unwrap(), 2.0, "(0,1) should be 2");
             assert_eq!(t.get2(1, 0).unwrap(), 3.0, "(1,0) should be 3");

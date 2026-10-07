@@ -137,7 +137,7 @@ fn invocation_retains_selected_provider_and_cwd_across_pending_open() {
     let Value::Tensor(numeric) = block_on(call).expect("selected workbook result") else {
         panic!("numeric worksheet result")
     };
-    assert_eq!(numeric.shape, vec![3, 2]);
+    assert_eq!(numeric.shape(), &[3, 2]);
     assert_eq!(
         numeric.materialize_f64(),
         vec![1.5, 2.5, 3.5, 10.0, 20.0, 30.0]

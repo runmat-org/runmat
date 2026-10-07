@@ -228,7 +228,7 @@ pub(crate) mod tests {
         let value = run_readline(&host, client.clone(), Vec::new()).expect("readline");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 0]);
+                assert_eq!(t.shape(), &[0, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected empty 0x0 double, got {other:?}"),
@@ -261,7 +261,7 @@ pub(crate) mod tests {
         let first = run_readline(&host, client.clone(), Vec::new()).expect("readline");
         match first {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 0]);
+                assert_eq!(t.shape(), &[0, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected timeout as empty 0x0 double, got {other:?}"),

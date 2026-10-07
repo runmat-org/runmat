@@ -283,7 +283,7 @@ fn all_gpu_provider_roundtrip() {
         let tensor = Tensor::new(vec![1.0, 1.0, 2.0, 0.0], vec![2, 2]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = all_builtin(Value::GpuTensor(handle), Vec::new()).expect("all");
@@ -305,7 +305,7 @@ fn all_gpu_provider_omitnan_roundtrip() {
         let tensor = Tensor::new(vec![f64::NAN, f64::NAN, 1.0, 0.0], vec![2, 2]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result =
@@ -346,7 +346,7 @@ fn all_wgpu_default_matches_cpu() {
     .unwrap();
     let view = HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
@@ -399,7 +399,7 @@ fn all_wgpu_omitnan_matches_cpu() {
     .unwrap();
     let view = HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,

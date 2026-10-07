@@ -40,7 +40,7 @@ mod tests {
         let Value::Tensor(empty) = result else {
             panic!("expected empty tensor")
         };
-        assert_eq!(empty.shape, vec![0, 0]);
+        assert_eq!(empty.shape(), &[0, 0]);
         let entries = console::take_thread_buffer();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].stream, ConsoleStream::ClearScreen);

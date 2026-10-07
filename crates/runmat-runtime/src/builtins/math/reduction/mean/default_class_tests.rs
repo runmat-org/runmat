@@ -199,5 +199,5 @@ fn host_default_integer_identity_dimensions_still_return_double() {
         panic!("expected non-scalar tensor")
     };
     assert_eq!(output.numeric_dtype(), NumericDType::F64);
-    assert_eq!(output.shape, vec![2, 1]);
+    assert_eq!(output.shape(), vec![2, 1]);
 }

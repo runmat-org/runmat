@@ -69,7 +69,7 @@ fn audioread_reads_mono_pcm16_as_normalized_double() {
         .expect("audioread"),
     );
 
-    assert_eq!(y.shape, vec![3, 1]);
+    assert_eq!(y.shape(), &[3, 1]);
     assert_eq!(y.numeric_dtype(), NumericDType::F64);
     assert_eq!(y.materialize_f64()[0], -1.0);
     assert_eq!(y.materialize_f64()[1], 0.0);
@@ -101,7 +101,7 @@ fn audioread_stereo_output_is_column_major_by_channel() {
         .expect("audioread"),
     );
 
-    assert_eq!(y.shape, vec![2, 2]);
+    assert_eq!(y.shape(), &[2, 2]);
     assert!((y.materialize_f64()[0] - (32767.0 / 32768.0)).abs() < 1e-12);
     assert_eq!(y.materialize_f64()[1], 0.0);
     assert_eq!(y.materialize_f64()[2], -1.0);
@@ -128,7 +128,7 @@ fn audioread_sample_range_is_one_based_inclusive_and_returns_fs() {
 
     let y = tensor(outputs[0].clone());
     assert_eq!(outputs[1], Value::Num(22_050.0));
-    assert_eq!(y.shape, vec![2, 1]);
+    assert_eq!(y.shape(), &[2, 1]);
     assert_eq!(y.materialize_f64(), vec![-0.5, 0.0]);
 }
 
@@ -214,7 +214,7 @@ fn audioread_infinite_endpoint_reads_through_last_frame() {
         .expect("audioread"),
     );
 
-    assert_eq!(y.shape, vec![2, 1]);
+    assert_eq!(y.shape(), &[2, 1]);
     assert_eq!(
         y.integer_storage(),
         Some(&IntegerStorage::I16(vec![5, i16::MAX]))
@@ -258,7 +258,7 @@ fn audioread_native_pcm16_preserves_exact_storage_and_channel_order() {
         .expect("audioread"),
     );
 
-    assert_eq!(y.shape, vec![2, 2]);
+    assert_eq!(y.shape(), &[2, 2]);
     assert_eq!(
         y.integer_storage(),
         Some(&IntegerStorage::I16(vec![i16::MIN, -2, i16::MAX, 3]))
@@ -283,7 +283,7 @@ fn audioread_native_pcm16_preserves_exact_storage_for_sample_ranges() {
         .expect("audioread"),
     );
 
-    assert_eq!(y.shape, vec![2, 1]);
+    assert_eq!(y.shape(), &[2, 1]);
     assert_eq!(y.integer_storage(), Some(&IntegerStorage::I16(vec![-4, 5])));
 }
 
@@ -344,7 +344,7 @@ fn audioread_reads_float32_wave() {
         .expect("audioread"),
     );
 
-    assert_eq!(y.shape, vec![3, 1]);
+    assert_eq!(y.shape(), &[3, 1]);
     assert_eq!(y.materialize_f64(), vec![-0.25, 0.0, 0.5]);
 }
 
@@ -408,7 +408,7 @@ fn audioread_reads_rf64_data_size_from_ds64() {
 
     let y = tensor(outputs[0].clone());
     assert_eq!(outputs[1], Value::Num(32_000.0));
-    assert_eq!(y.shape, vec![2, 1]);
+    assert_eq!(y.shape(), &[2, 1]);
     assert_eq!(y.materialize_f64(), vec![0.0, 0.5]);
 }
 
@@ -440,6 +440,6 @@ fn audioread_reads_via_active_filesystem_provider() {
 
     let y = tensor(outputs[0].clone());
     assert_eq!(outputs[1], Value::Num(16_000.0));
-    assert_eq!(y.shape, vec![2, 1]);
+    assert_eq!(y.shape(), &[2, 1]);
     assert_eq!(y.materialize_f64(), vec![0.0, 0.5]);
 }

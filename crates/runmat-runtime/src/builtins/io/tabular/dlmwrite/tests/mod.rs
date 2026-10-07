@@ -116,7 +116,7 @@ fn dlmwrite_handles_gpu_tensors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).unwrap();
         let path = temp_path("csv");

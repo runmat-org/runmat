@@ -53,7 +53,7 @@ fn stream_decodes_inclusive_open_ended_range() {
         datatype: AudioReadDataType::Double,
     };
     let decoded = block_on(decode_wave_stream(&input, options, &mut cooperation)).expect("range");
-    assert_eq!(decoded.samples.shape, vec![1, 1]);
+    assert_eq!(decoded.samples.shape(), &[1, 1]);
     assert_eq!(decoded.samples.materialize_f64(), vec![0.5]);
     assert_eq!(decoded.sample_rate, 8000.0);
 }
@@ -105,7 +105,7 @@ fn native_sparse_large_wave_decodes_a_small_requested_range() {
         &mut cooperation,
     ))
     .expect("one-frame decode");
-    assert_eq!(decoded.samples.shape, vec![1, 1]);
+    assert_eq!(decoded.samples.shape(), &[1, 1]);
     assert_eq!(decoded.samples.materialize_f64(), vec![0.0]);
     drop(writer);
     std_fs::remove_file(path).expect("remove isolated WAV");

@@ -31,7 +31,7 @@ fn legacy_read_write_and_info_share_exact_native_dataset_semantics() {
     let Value::Tensor(read) = read else {
         panic!("expected typed tensor")
     };
-    assert_eq!(read.shape, vec![1, 2]);
+    assert_eq!(read.shape(), &[1, 2]);
     assert_eq!(
         read.integer_storage(),
         Some(&IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]))

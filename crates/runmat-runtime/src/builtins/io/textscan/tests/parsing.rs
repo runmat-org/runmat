@@ -239,7 +239,7 @@ fn textscan_collect_output_groups_only_adjacent_same_class_columns() {
     let Value::Tensor(signed) = output_value(&out, 0) else {
         panic!("expected collected signed tensor");
     };
-    assert_eq!(signed.shape, vec![2, 2]);
+    assert_eq!(signed.shape(), &[2, 2]);
     assert_eq!(
         signed.integer_storage(),
         Some(&IntegerStorage::I16(vec![1, 4, 2, 5]))
@@ -302,7 +302,7 @@ fn textscan_supports_repeat_skip_collect_and_quotes() {
     let Value::Tensor(group) = output_value(&out, 0) else {
         panic!("expected collected numeric group");
     };
-    assert_eq!(group.shape, vec![1, 2]);
+    assert_eq!(group.shape(), &[1, 2]);
     assert_eq!(group.materialize_f64(), vec![1.0, 2.0]);
     assert_eq!(text_column(&out, 1), vec!["hello, world".to_string()]);
 }
@@ -372,6 +372,6 @@ fn textscan_collect_output_preserves_column_major_numeric_group() {
     let Value::Tensor(group) = output_value(&out, 0) else {
         panic!("expected collected numeric group");
     };
-    assert_eq!(group.shape, vec![2, 2]);
+    assert_eq!(group.shape(), &[2, 2]);
     assert_eq!(group.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
 }

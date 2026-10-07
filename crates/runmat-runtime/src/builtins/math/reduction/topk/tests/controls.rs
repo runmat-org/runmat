@@ -49,7 +49,7 @@ async fn topk_dimension_uses_exact_storage_for_every_integer_class() {
         let Value::Tensor(values) = evaluation.values else {
             panic!("expected tensor");
         };
-        assert_eq!(values.shape, vec![2, 1]);
+        assert_eq!(values.shape(), vec![2, 1]);
         assert_eq!(self::values(&values), vec![1.0, 2.0]);
     }
 }

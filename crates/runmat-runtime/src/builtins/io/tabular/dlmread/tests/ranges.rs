@@ -10,7 +10,7 @@ fn dlmread_with_numeric_range() {
         dlmread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("dlmread");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![5.0, 8.0, 6.0, 9.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -28,7 +28,7 @@ fn dlmread_range_skips_nonnumeric_header_column() {
         dlmread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("dlmread");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -47,7 +47,7 @@ fn dlmread_numeric_range_two_elements() {
         dlmread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("dlmread");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![5.0, 8.0, 6.0, 9.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -65,7 +65,7 @@ fn dlmread_excel_style_range_string() {
         dlmread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("dlmread");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![6.0, 10.0, 7.0, 11.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -84,7 +84,7 @@ fn dlmread_range_without_delimiter() {
         dlmread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("dlmread");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![4.0, 7.0, 5.0, 8.0]);
         }
         other => panic!("expected tensor, got {other:?}"),

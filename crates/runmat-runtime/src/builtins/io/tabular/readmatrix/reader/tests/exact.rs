@@ -44,7 +44,7 @@ fn exact_float_replay_preserves_ragged_empty_values_and_retained_claim() {
             },
         ))
         .expect("exact ragged output");
-        assert_eq!(tensor.shape, [2, 3]);
+        assert_eq!(tensor.shape(), &[2, 3]);
         assert_eq!(tensor.numeric_dtype(), dtype);
         let bytes = runmat_value::ExactHostTensor2dAllocation::requested_bytes(dtype, 2, 3)
             .expect("same physical output owner requested layout");
@@ -74,14 +74,14 @@ fn exact_float_replay_preserves_ragged_empty_values_and_retained_claim() {
                 assert_eq!(*actual, expected);
             }
         }
-        let shape_pointer = tensor.shape.as_ptr();
+        let shape_pointer = tensor.shape().as_ptr();
         let payload_pointer = unsafe { tensor.host_buffer().foreign_data_pointer() };
         let output = super::super::super::output::finalize_output(tensor, &options)
             .expect("same-class final presentation");
         let Value::Tensor(output) = output else {
             panic!("numeric output remains a tensor")
         };
-        assert_eq!(output.shape.as_ptr(), shape_pointer);
+        assert_eq!(output.shape().as_ptr(), shape_pointer);
         assert_eq!(
             unsafe { output.host_buffer().foreign_data_pointer() },
             payload_pointer

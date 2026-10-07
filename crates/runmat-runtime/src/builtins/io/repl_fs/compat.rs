@@ -958,7 +958,7 @@ mod tests {
         let Some(Value::Tensor(samples)) = data.fields.get("samples") else {
             panic!("expected samples tensor");
         };
-        assert_eq!(samples.shape, vec![2, 1]);
+        assert_eq!(samples.shape(), &[2, 1]);
         assert_eq!(
             samples.integer_storage(),
             Some(&IntegerStorage::U16(vec![1, 2]))
@@ -1366,7 +1366,7 @@ mod tests {
             let Value::Tensor(tensor) = mapped else {
                 panic!("expected tensor");
             };
-            assert_eq!(tensor.shape, vec![1, 2], "{dtype}");
+            assert_eq!(tensor.shape(), &[1, 2], "{dtype}");
             assert_eq!(tensor.integer_storage(), Some(&expected), "{dtype}");
         }
     }
@@ -1392,7 +1392,7 @@ mod tests {
         let Value::Tensor(tensor) = mapped else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.shape, vec![2, 1, 2]);
+        assert_eq!(tensor.shape(), &[2, 1, 2]);
         assert_eq!(
             tensor.integer_storage(),
             Some(&IntegerStorage::U32(vec![1, u32::MAX, 3, 4]))
