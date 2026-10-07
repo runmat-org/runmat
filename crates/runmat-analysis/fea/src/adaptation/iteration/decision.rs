@@ -1,94 +1,64 @@
+//! Execution choice from the shared accuracy verdict; no adaptive tolerance model.
 use super::{
-    SolverFieldTransferErrorEvidence, StructuralAdaptationConvergenceDecision,
-    StructuralAdaptationDecisionStatus, StructuralAdaptationIterationError,
-    StructuralAdaptationPolicy, StructuralAdaptationSolverResult,
+    StructuralAdaptationConvergenceDecision, StructuralAdaptationDecisionStatus as Status,
+    StructuralAdaptationIterationError as Error,
 };
+use crate::results::accuracy::{AccuracyEvaluation, AccuracyStatus};
+use runmat_analysis_core::{AccuracyLimitAction, AccuracyPlan};
+
+pub(super) fn changes(
+    source_estimator: f64,
+    target_estimator: f64,
+    source_quantity: f64,
+    target_quantity: f64,
+) -> Result<(Option<f64>, f64, f64), Error> {
+    let absolute = (target_quantity - source_quantity).abs();
+    let scale = source_quantity.abs().max(target_quantity.abs());
+    let relative = if scale == 0.0 { 0.0 } else { absolute / scale };
+    let reduction = if source_estimator == 0.0 {
+        (target_estimator == 0.0).then_some(0.0)
+    } else {
+        Some(1.0 - target_estimator / source_estimator)
+    };
+    if !absolute.is_finite() || !relative.is_finite() || reduction.is_some_and(|v| !v.is_finite()) {
+        return Err(Error::InvalidTargetQuantity);
+    }
+    Ok((reduction, absolute, relative))
+}
 
 pub(super) fn decide(
-    estimator_error: f64,
-    transfer_errors: &[SolverFieldTransferErrorEvidence],
-    solver: &StructuralAdaptationSolverResult,
-    target_value: f64,
-    previous_estimator: Option<f64>,
-    previous_target: Option<f64>,
-    policy: StructuralAdaptationPolicy,
+    plan: &AccuracyPlan,
+    evaluation: &AccuracyEvaluation,
+    iteration_index: u64,
+    solvers_converged: bool,
+    metrics: (Option<f64>, f64, f64),
 ) -> StructuralAdaptationConvergenceDecision {
-    let estimator_reduction = previous_estimator.map(|previous| {
-        if previous == 0.0 {
-            if estimator_error == 0.0 {
-                0.0
-            } else {
-                -1.0
-            }
-        } else {
-            (previous - estimator_error) / previous
-        }
-    });
-    let target_absolute_change = previous_target.map(|previous| (target_value - previous).abs());
-    let target_relative_change = previous_target.map(|previous| {
-        let scale = previous.abs().max(target_value.abs());
-        if scale == 0.0 {
-            0.0
-        } else {
-            (target_value - previous).abs() / scale
-        }
-    });
-    let transfer_accepted = transfer_errors.iter().all(|error| {
-        error
-            .relative_l2_error
-            .is_some_and(|value| value <= policy.maximum_transfer_relative_error)
-    });
-    let estimator_reduction_accepted = estimator_reduction
-        .is_some_and(|reduction| reduction >= policy.minimum_estimator_reduction);
-    let estimator_target_met = estimator_error <= policy.estimator_tolerance;
-    let target_quantity_converged = target_absolute_change
-        .zip(target_relative_change)
-        .is_some_and(|(absolute, relative)| {
-            absolute <= policy.target_absolute_tolerance
-                || relative <= policy.target_relative_tolerance
-        });
-    let status = if !solver.converged
-        || !transfer_accepted
-        || (previous_estimator.is_some() && !estimator_reduction_accepted)
-    {
-        StructuralAdaptationDecisionStatus::Rejected
-    } else if estimator_reduction_accepted && estimator_target_met && target_quantity_converged {
-        StructuralAdaptationDecisionStatus::Converged
+    let completed = iteration_index.checked_add(1);
+    let ceiling = u64::try_from(plan.resources.maximum_refinement_cycles).ok();
+    let exhausted = completed
+        .zip(ceiling)
+        .is_none_or(|(done, limit)| done >= limit);
+    let exceeds = completed
+        .zip(ceiling)
+        .is_none_or(|(done, limit)| done > limit);
+    let status = if !solvers_converged || exceeds {
+        Status::Rejected
     } else {
-        StructuralAdaptationDecisionStatus::Continue
+        match evaluation.report().status {
+            AccuracyStatus::Satisfied => Status::Converged,
+            AccuracyStatus::NotSatisfied
+                if plan.exceeded_limit == AccuracyLimitAction::Refine && !exhausted =>
+            {
+                Status::Continue
+            }
+            AccuracyStatus::NotSatisfied | AccuracyStatus::Indeterminate => Status::Rejected,
+        }
     };
     StructuralAdaptationConvergenceDecision {
         status,
-        estimator_reduction,
-        target_absolute_change,
-        target_relative_change,
-        solver_converged: solver.converged,
-        transfer_accepted,
-        estimator_reduction_accepted,
-        estimator_target_met,
-        target_quantity_converged,
+        estimator_reduction: metrics.0,
+        target_absolute_change: metrics.1,
+        target_relative_change: metrics.2,
+        refinement_ceiling_exhausted: exhausted,
     }
-}
-
-pub(super) fn validate_policy(
-    policy: StructuralAdaptationPolicy,
-) -> Result<(), StructuralAdaptationIterationError> {
-    let values = [
-        policy.estimator_tolerance,
-        policy.minimum_estimator_reduction,
-        policy.target_absolute_tolerance,
-        policy.target_relative_tolerance,
-        policy.maximum_transfer_relative_error,
-    ];
-    if values
-        .iter()
-        .any(|value| !value.is_finite() || *value < 0.0)
-        || policy.minimum_estimator_reduction == 0.0
-        || policy.minimum_estimator_reduction > 1.0
-        || policy.target_absolute_tolerance == 0.0
-        || policy.target_relative_tolerance == 0.0
-    {
-        return Err(StructuralAdaptationIterationError::InvalidPolicy);
-    }
-    Ok(())
 }

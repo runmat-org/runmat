@@ -106,6 +106,7 @@ pub fn estimate_structural_recovery_error(
         }
     }
 
+    let mut reference_squared_total = 0.0;
     let mut indicators = Vec::with_capacity(artifact.topology.volume_elements.len());
     for element in &artifact.topology.volume_elements {
         checkpoint(&mut work, options)?;
@@ -124,6 +125,11 @@ pub fn estimate_structural_recovery_error(
         let original = stress_by_element
             .get(&element.element_id)
             .ok_or(StructuralRecoveryEstimatorError::InvalidStressField)?;
+        reference_squared_total += stress_norm_squared(std::array::from_fn(|i| original[i]))
+            * element_volumes[&element.element_id];
+        if !reference_squared_total.is_finite() {
+            return Err(StructuralRecoveryEstimatorError::InvalidStressField);
+        }
         let error_squared = stress_norm_squared(std::array::from_fn(|component| {
             original[component] - recovered[component]
         })) * element_volumes
@@ -142,6 +148,7 @@ pub fn estimate_structural_recovery_error(
         artifact.canonical_digest,
         stress_topology_id,
         indicators,
+        reference_squared_total.sqrt(),
         options,
     )
 }
@@ -160,6 +167,7 @@ fn finish_estimate(
     solver_artifact_digest: StableDigest,
     stress_topology_id: &str,
     mut indicators: Vec<StructuralRecoveryIndicator>,
+    reference_norm: f64,
     options: StructuralRecoveryEstimatorOptions,
 ) -> Result<StructuralRecoveryEstimate, StructuralRecoveryEstimatorError> {
     indicators.sort_by_key(|indicator| indicator.element_stable_identity);
@@ -193,6 +201,7 @@ fn finish_estimate(
         solver_artifact_digest,
         stress_topology_id: stress_topology_id.to_owned(),
         total_error: total_squared.sqrt(),
+        reference_norm,
         indicators,
         marked_element_identities,
         statistics,
@@ -261,6 +270,7 @@ fn estimate_integration_point_recovery_error(
         }
     }
 
+    let mut reference_squared_total = 0.0;
     let mut indicators = Vec::with_capacity(artifact.topology.volume_elements.len());
     for element in &artifact.topology.volume_elements {
         checkpoint(&mut work, options)?;
@@ -342,6 +352,10 @@ fn estimate_integration_point_recovery_error(
         if !error_squared.is_finite() || !reference_squared.is_finite() {
             return Err(StructuralRecoveryEstimatorError::InvalidStressField);
         }
+        reference_squared_total += reference_squared;
+        if !reference_squared_total.is_finite() {
+            return Err(StructuralRecoveryEstimatorError::InvalidStressField);
+        }
         let noise_floor = RECOVERY_ROUNDOFF_RELATIVE_TOLERANCE.powi(2) * reference_squared;
         let error = if error_squared <= noise_floor {
             0.0
@@ -360,6 +374,7 @@ fn estimate_integration_point_recovery_error(
         artifact.canonical_digest,
         stress_topology_id,
         indicators,
+        reference_squared_total.sqrt(),
         options,
     )
 }

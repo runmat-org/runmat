@@ -8,10 +8,10 @@ pub use field_transfer::{
     SolverFieldTransferResult,
 };
 pub use iteration::{
-    build_structural_adaptation_iteration, StructuralAdaptationConvergenceDecision,
-    StructuralAdaptationDecisionStatus, StructuralAdaptationIteration,
-    StructuralAdaptationIterationError, StructuralAdaptationIterationInput,
-    StructuralAdaptationPolicy, StructuralAdaptationSolverResult, StructuralTargetQuantity,
+    build_structural_adaptation_iteration, StructuralAdaptationConstraintLineage,
+    StructuralAdaptationConvergenceDecision, StructuralAdaptationDecisionStatus,
+    StructuralAdaptationIteration, StructuralAdaptationIterationError,
+    StructuralAdaptationIterationInput, StructuralAdaptationSolverResult, StructuralTargetQuantity,
     STRUCTURAL_ADAPTATION_ITERATION_SCHEMA_VERSION,
 };
 pub use structural_recovery::{

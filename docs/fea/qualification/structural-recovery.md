@@ -65,7 +65,9 @@ all three coordinate planes, Tet4/Tet10, both layouts, indicators and marking.
 
 The raw total/indicators have units `Pa * m^(3/2)`; they are neither strain energy
 nor a dimensionless error. Required `StressTensorFrobeniusL2` metadata names the
-norm. Adaptation iteration schema/domain V2 binds it; old schema, missing norm
+norm. Required `reference_norm` retains the original physical stress norm; relative
+recovery is the discrepancy divided by that norm. Adaptation iteration schema/domain
+V3 binds the norm and shared accuracy plan; old schema, missing norm
 and unknown norm records reject. Cold metadata validation is not mathematical
 reverification of imported stress fields. Finite source values whose squared
 norms overflow reject rather than acquiring a zero-error verdict through an

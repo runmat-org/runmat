@@ -51,12 +51,23 @@ pub struct StructuralRecoveryEstimate {
     pub solver_artifact_digest: StableDigest,
     pub stress_topology_id: String,
     pub total_error: f64,
+    /// Original physical stress Frobenius volume-L2 norm, in the same units.
+    pub reference_norm: f64,
     pub indicators: Vec<StructuralRecoveryIndicator>,
     pub marked_element_identities: Vec<StableDigest>,
     pub statistics: StructuralRecoveryStatistics,
 }
 
 impl StructuralRecoveryEstimate {
+    /// Dimensionless discrepancy relative to the original solved stress field.
+    pub fn relative_error(&self) -> Option<f64> {
+        if self.reference_norm == 0.0 {
+            (self.total_error == 0.0).then_some(0.0)
+        } else {
+            Some(self.total_error / self.reference_norm)
+        }
+    }
+
     pub fn validate(&self) -> Result<(), StructuralRecoveryEstimatorError> {
         if self.solver_artifact_digest == StableDigest::ZERO
             || self.stress_topology_id.is_empty()
@@ -67,6 +78,12 @@ impl StructuralRecoveryEstimate {
             || self.statistics.element_count != self.indicators.len() as u64
             || !self.total_error.is_finite()
             || self.total_error < 0.0
+            || !self.reference_norm.is_finite()
+            || self.reference_norm < 0.0
+            || (self.reference_norm == 0.0 && self.total_error != 0.0)
+            || self
+                .relative_error()
+                .is_some_and(|value| !value.is_finite())
             || [
                 self.statistics.minimum_error,
                 self.statistics.maximum_error,

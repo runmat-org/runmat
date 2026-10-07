@@ -64,6 +64,14 @@ fn recovery_indicators_and_marking_preserve_stress_under_rotation() {
                 assert!(before.total_error > 0.0);
                 assert!((after.total_error-before.total_error).abs()<1.0e-12*before.total_error,
                     "quadratic={quadratic} points={integration_points} axis={axis} original={} rotated={}",before.total_error,after.total_error);
+                assert!(
+                    (before.reference_norm - after.reference_norm).abs()
+                        < 1e-12 * before.reference_norm
+                );
+                assert!(
+                    (before.relative_error().unwrap() - after.relative_error().unwrap()).abs()
+                        < 1e-12
+                );
                 assert_eq!(
                     before.marked_element_identities,
                     after.marked_element_identities
@@ -93,6 +101,7 @@ fn physical_shear_and_cold_norm_identity_are_explicit() {
         // The original scalar-normal discrepancy is0.5. Physical shear appears
         // twice in the symmetric3x3 tensor, giving sqrt(2)*0.5.
         assert!((estimate.total_error - 0.5 * 2.0_f64.sqrt()).abs() < 1.0e-12);
+        assert!((estimate.reference_norm - (8.0 / 3.0_f64).sqrt()).abs() < 1e-12);
         assert_eq!(
             estimate.norm,
             StructuralRecoveryNorm::StressTensorFrobeniusL2
@@ -130,4 +139,38 @@ fn finite_stress_overflow_cannot_become_zero_recovery_error() {
         ),
         Err(StructuralRecoveryEstimatorError::InvalidStressField)
     );
+}
+
+#[test]
+fn recovery_reference_norm_integrates_original_tensor_in_both_layouts_and_orders() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = artifact(order);
+        for points in [1, 4] {
+            for scale in [1.0e-5, 1.0, 1.0e5] {
+                let row = [2.0 * scale, 0.0, 0.0, 0.0, 0.0, 3.0 * scale];
+                let field = AnalysisField::host_f64(
+                    if points == 1 {
+                        FEA_FIELD_STRUCTURAL_STRESS
+                    } else {
+                        FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS
+                    },
+                    vec![points, 6],
+                    (0..points).flat_map(|_| row).collect(),
+                );
+                let estimate = estimate_structural_recovery_error(
+                    &mesh,
+                    "elements",
+                    &field,
+                    StructuralRecoveryEstimatorOptions::default(),
+                )
+                .unwrap();
+                let expected = scale * (22.0 / 6.0_f64).sqrt();
+                assert!((estimate.reference_norm / expected - 1.0).abs() < 1.0e-12);
+                assert!(estimate.relative_error().unwrap() < 1.0e-14);
+                let mut missing = serde_json::to_value(&estimate).unwrap();
+                missing.as_object_mut().unwrap().remove("reference_norm");
+                assert!(serde_json::from_value::<StructuralRecoveryEstimate>(missing).is_err());
+            }
+        }
+    }
 }
