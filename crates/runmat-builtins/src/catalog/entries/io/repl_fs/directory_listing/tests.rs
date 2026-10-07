@@ -33,10 +33,20 @@ fn entries_are_identity_local_catalog_authorities_with_reviewed_maturity() {
 
 #[test]
 fn directory_listing_requires_installed_filesystem_service() {
-    assert_eq!(
-        DIR_CATALOG_ENTRY.contract.capabilities,
-        &[runmat_types::CapabilityRequirement::Filesystem]
-    );
+    for entry in [&DIR_CATALOG_ENTRY, &LS_CATALOG_ENTRY] {
+        assert_eq!(
+            entry.contract.capabilities,
+            &[runmat_types::CapabilityRequirement::Filesystem]
+        );
+        let inference = crate::infer_catalog_call(
+            entry,
+            &request(vec![ValueFact::scalar(ValueKindFact::String)]),
+        );
+        assert!(inference
+            .capabilities
+            .0
+            .contains(&runmat_types::CapabilityRequirement::Filesystem));
+    }
 }
 
 #[test]

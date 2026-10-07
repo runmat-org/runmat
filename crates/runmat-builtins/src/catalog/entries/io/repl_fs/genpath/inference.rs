@@ -36,6 +36,7 @@ pub(in crate::catalog::entries::io::repl_fs) fn infer(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_types::CapabilityRequirement;
     use runmat_types::{
         LiteralContext, OutputSelection, RequestedOutputCount, ValueFact, ValueKindFact,
     };
@@ -56,6 +57,14 @@ mod tests {
             entry,
         );
         assert!(result.diagnostics.is_empty());
+        assert_eq!(
+            entry.contract.capabilities,
+            &[CapabilityRequirement::Filesystem]
+        );
+        assert!(result
+            .capabilities
+            .0
+            .contains(&CapabilityRequirement::Filesystem));
         assert_eq!(result.outputs[0].kind, ValueKindFact::Character);
     }
 

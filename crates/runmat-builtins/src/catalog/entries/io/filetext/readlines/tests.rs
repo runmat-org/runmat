@@ -19,6 +19,14 @@ fn unknown_inputs_preserve_output_representation_and_effects() {
         ShapeFact::from(vec![None, Some(1)])
     );
     assert!(matches!(result.outputs[0].kind, ValueKindFact::String));
+    assert_eq!(
+        READLINES_CATALOG_ENTRY.contract.capabilities,
+        &[CapabilityRequirement::Filesystem]
+    );
+    assert!(result
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::Filesystem));
     assert!(result.effects.0.contains(&EffectKind::FilesystemRead));
     assert!(result.effects.0.contains(&EffectKind::MaySuspend));
 }

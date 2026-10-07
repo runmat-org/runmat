@@ -48,7 +48,9 @@ fn character_row() -> ValueFact {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_types::{LiteralContext, OutputSelection, RequestedOutputCount};
+    use runmat_types::{
+        CapabilityRequirement, LiteralContext, OutputSelection, RequestedOutputCount,
+    };
 
     #[test]
     fn unknown_row_count_remains_possible_but_known_nd_folder_is_rejected() {
@@ -68,6 +70,16 @@ mod tests {
                 outputs: OutputSelection::new(RequestedOutputCount::One),
             };
             let result = infer(&request, &super::super::TEMPNAME_CATALOG_ENTRY);
+            assert_eq!(
+                super::super::TEMPNAME_CATALOG_ENTRY
+                    .contract
+                    .capabilities,
+                &[CapabilityRequirement::Filesystem]
+            );
+            assert!(result
+                .capabilities
+                .0
+                .contains(&CapabilityRequirement::Filesystem));
             assert_eq!(!result.diagnostics.is_empty(), rejected);
         }
     }

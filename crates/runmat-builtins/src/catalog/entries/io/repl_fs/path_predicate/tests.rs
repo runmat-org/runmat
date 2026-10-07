@@ -1,8 +1,8 @@
 use super::*;
 use crate::{BuiltinInferenceRule, IoInferenceRule, IoReplFsInferenceRule, PathInferenceRule};
 use runmat_types::{
-    CallRequest, LiteralContext, OutputSelection, RequestedOutputCount, ShapeFact, ValueFact,
-    ValueKindFact,
+    CallRequest, CapabilityRequirement, LiteralContext, OutputSelection, RequestedOutputCount,
+    ShapeFact, ValueFact, ValueKindFact,
 };
 
 #[test]
@@ -17,6 +17,10 @@ fn entries_are_identity_local_and_use_typed_rules() {
                 IoReplFsInferenceRule::Path(PathInferenceRule::Predicate(rule))
             )) if rule == expected
         ));
+        assert_eq!(
+            entry.contract.capabilities,
+            &[CapabilityRequirement::Filesystem]
+        );
         assert_eq!(entry.documentation.examples.len(), 4);
     }
 }
@@ -35,6 +39,10 @@ fn inference_preserves_container_shape() {
         };
         let inferred = crate::infer_catalog_call(entry, &request);
         assert!(inferred.diagnostics.is_empty());
+        assert!(inferred
+            .capabilities
+            .0
+            .contains(&CapabilityRequirement::Filesystem));
         assert_eq!(inferred.outputs[0].shape, request.arguments[0].shape);
         assert!(matches!(inferred.outputs[0].kind, ValueKindFact::Logical));
     }

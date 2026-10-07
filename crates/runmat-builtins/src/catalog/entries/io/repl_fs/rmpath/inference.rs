@@ -39,8 +39,8 @@ pub(in crate::catalog::entries::io::repl_fs) fn infer(
 mod tests {
     use super::*;
     use runmat_types::{
-        LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection,
-        RequestedOutputCount, ValueFact, ValueKindFact,
+        CapabilityRequirement, LiteralContext, NumericClass, NumericDomain, NumericFact,
+        OutputSelection, RequestedOutputCount, ValueFact, ValueKindFact,
     };
 
     fn request(arguments: Vec<ValueFact>) -> CallRequest {
@@ -59,6 +59,19 @@ mod tests {
             domain: NumericDomain::Real,
         }));
         let invalid = infer(&request(vec![numeric]), entry);
+        let valid = infer(
+            &request(vec![ValueFact::scalar(ValueKindFact::String)]),
+            entry,
+        );
+        assert_eq!(
+            entry.contract.capabilities,
+            &[CapabilityRequirement::Filesystem]
+        );
+        assert!(valid
+            .capabilities
+            .0
+            .contains(&CapabilityRequirement::Filesystem));
+        assert!(valid.diagnostics.is_empty());
         assert_eq!(invalid.diagnostics.len(), 1);
         assert_eq!(invalid.outputs[0].kind, ValueKindFact::Character);
     }

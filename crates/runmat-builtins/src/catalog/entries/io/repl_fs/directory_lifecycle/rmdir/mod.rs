@@ -35,7 +35,7 @@ pub const RMDIR_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: EFFECTS,
-        capabilities: &[],
+        capabilities: &[runmat_types::CapabilityRequirement::Filesystem],
     },
     placement: BuiltinPlacementContract {
         preparation: crate::BuiltinOperandPreparation::RuntimeOwned,

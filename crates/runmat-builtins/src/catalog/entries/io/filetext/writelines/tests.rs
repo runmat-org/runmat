@@ -21,6 +21,14 @@ fn unknown_inputs_preserve_output_representation_and_effects() {
             domain: NumericDomain::Real
         })
     ));
+    assert_eq!(
+        WRITELINES_CATALOG_ENTRY.contract.capabilities,
+        &[CapabilityRequirement::Filesystem]
+    );
+    assert!(result
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::Filesystem));
     assert!(result.effects.0.contains(&EffectKind::FilesystemWrite));
     assert!(result.effects.0.contains(&EffectKind::MaySuspend));
 }

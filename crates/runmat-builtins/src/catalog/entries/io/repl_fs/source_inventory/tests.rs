@@ -1,6 +1,7 @@
 use super::*;
 use runmat_types::{
-    CallRequest, LiteralContext, OutputSelection, RequestedOutputCount, ValueFact, ValueKindFact,
+    CallRequest, CapabilityRequirement, LiteralContext, OutputSelection, RequestedOutputCount,
+    ValueFact, ValueKindFact,
 };
 
 fn request(arguments: Vec<ValueFact>) -> CallRequest {
@@ -28,6 +29,14 @@ fn what_is_a_complete_identity_local_authority() {
 fn inference_reports_the_complete_result_structure() {
     let inference = crate::infer_catalog_call(&WHAT_CATALOG_ENTRY, &request(Vec::new()));
     assert!(inference.diagnostics.is_empty());
+    assert_eq!(
+        WHAT_CATALOG_ENTRY.contract.capabilities,
+        &[CapabilityRequirement::Filesystem]
+    );
+    assert!(inference
+        .capabilities
+        .0
+        .contains(&CapabilityRequirement::Filesystem));
     let ValueKindFact::Struct(result) = &inference.outputs[0].kind else {
         panic!("expected structure fact")
     };

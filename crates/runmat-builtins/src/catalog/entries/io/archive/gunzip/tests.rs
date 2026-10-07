@@ -19,6 +19,19 @@ fn unknown_inputs_preserve_output_representation_and_effects() {
         ShapeFact::from(vec![None, Some(1)])
     );
     assert!(matches!(result.outputs[0].kind, ValueKindFact::Cell(_)));
+    assert_eq!(
+        GUNZIP_CATALOG_ENTRY.contract.capabilities,
+        &[
+            CapabilityRequirement::Filesystem,
+            CapabilityRequirement::Network,
+        ]
+    );
+    for capability in [
+        CapabilityRequirement::Filesystem,
+        CapabilityRequirement::Network,
+    ] {
+        assert!(result.capabilities.0.contains(&capability));
+    }
     assert!(result.effects.0.contains(&EffectKind::FilesystemWrite));
     assert!(result.effects.0.contains(&EffectKind::MaySuspend));
 }

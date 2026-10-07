@@ -30,7 +30,10 @@ pub const GUNZIP_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             runmat_types::EffectKind::MaySuspend,
             runmat_types::EffectKind::MayThrow,
         ],
-        capabilities: &[],
+        capabilities: &[
+            runmat_types::CapabilityRequirement::Filesystem,
+            runmat_types::CapabilityRequirement::Network,
+        ],
     },
     placement: BuiltinPlacementContract {
         preparation: BuiltinOperandPreparation::RuntimeOwned,

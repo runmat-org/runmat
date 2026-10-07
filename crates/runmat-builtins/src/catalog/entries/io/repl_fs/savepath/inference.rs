@@ -48,7 +48,8 @@ pub(in crate::catalog::entries::io::repl_fs) fn infer(
 mod tests {
     use super::*;
     use runmat_types::{
-        LiteralContext, OutputSelection, RequestedOutputCount, ShapeFact, StorageFact,
+        CapabilityRequirement, LiteralContext, OutputSelection, RequestedOutputCount, ShapeFact,
+        StorageFact,
     };
 
     fn request(arguments: Vec<ValueFact>, outputs: RequestedOutputCount) -> CallRequest {
@@ -70,6 +71,14 @@ mod tests {
             entry,
         );
         assert!(inferred.diagnostics.is_empty());
+        assert_eq!(
+            entry.contract.capabilities,
+            &[CapabilityRequirement::Filesystem]
+        );
+        assert!(inferred
+            .capabilities
+            .0
+            .contains(&CapabilityRequirement::Filesystem));
         assert_eq!(
             inferred.outputs[0].numeric().unwrap().class,
             NumericClass::Double

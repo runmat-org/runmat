@@ -1,7 +1,8 @@
 use super::*;
 use crate::{builtin_catalog_entry_by_name, BuiltinInferenceRule};
 use runmat_types::{
-    CallRequest, LiteralContext, OutputSelection, RequestedOutputCount, ValueFact, ValueKindFact,
+    CallRequest, CapabilityRequirement, LiteralContext, OutputSelection, RequestedOutputCount,
+    ValueFact, ValueKindFact,
 };
 
 #[test]
@@ -31,12 +32,20 @@ fn entries_are_canonical_and_use_typed_family_rules() {
 #[test]
 fn inference_returns_logical_status_and_character_diagnostics() {
     for entry in [&MKDIR_CATALOG_ENTRY, &RMDIR_CATALOG_ENTRY] {
+        assert_eq!(
+            entry.contract.capabilities,
+            &[CapabilityRequirement::Filesystem]
+        );
         let request = CallRequest {
             arguments: vec![ValueFact::scalar(ValueKindFact::String)],
             literals: LiteralContext::default(),
             outputs: OutputSelection::new(RequestedOutputCount::Exactly(3)),
         };
         let inference = crate::infer_catalog_call(entry, &request);
+        assert!(inference
+            .capabilities
+            .0
+            .contains(&CapabilityRequirement::Filesystem));
         assert_eq!(inference.outputs.len(), 3);
         assert!(matches!(inference.outputs[0].kind, ValueKindFact::Logical));
         assert!(matches!(

@@ -28,7 +28,7 @@ pub const WRITELINES_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             runmat_types::EffectKind::MaySuspend,
             runmat_types::EffectKind::MayThrow,
         ],
-        capabilities: &[],
+        capabilities: &[runmat_types::CapabilityRequirement::Filesystem],
     },
     placement: BuiltinPlacementContract {
         preparation: BuiltinOperandPreparation::RuntimeOwned,
