@@ -189,7 +189,7 @@ pub(crate) fn value_to_mx_for_interface_in_context(
         }
         Value::CharArray(value) => char_to_mx(value),
         Value::Tensor(value) => {
-            MxArray::numeric_buffer(value.host_buffer().clone(), value.shape.clone(), None)
+            MxArray::numeric_buffer(value.host_buffer().clone(), value.shape().to_vec(), None)
                 .map_err(MxConversionError::new)
         }
         Value::ComplexTensor(value) => complex_tensor_to_mx(value, mode),
@@ -357,14 +357,15 @@ fn complex_tensor_to_mx(
             ComplexStorage::F32(values) => MxInterleavedStorage::F32(values.clone()),
             ComplexStorage::Integer(_) => {
                 let (real, imag) = complex_components(value)?;
-                return complex_to_mx(real, imag, value.shape.clone(), mode);
+                return complex_to_mx(real, imag, value.shape().to_vec(), mode);
             }
         };
-        return MxArray::interleaved(values, value.shape.clone()).map_err(MxConversionError::new);
+        return MxArray::interleaved(values, value.shape().to_vec())
+            .map_err(MxConversionError::new);
     }
 
     let (real, imag) = complex_components(value)?;
-    complex_to_mx(real, imag, value.shape.clone(), mode)
+    complex_to_mx(real, imag, value.shape().to_vec(), mode)
 }
 
 fn complex_components(

@@ -415,7 +415,7 @@ fn fortran_compatible_array_dims_keeps_pointer_and_dimension_widths_distinct() {
     let Value::Tensor(output) = &result.outputs[0] else {
         panic!("compatible-dimension Fortran output must be numeric");
     };
-    assert_eq!(output.shape, vec![2, 3]);
+    assert_eq!(output.shape(), [2, 3]);
     assert_eq!(output.materialize_f64(), vec![0.0; 6]);
 }
 
@@ -806,7 +806,7 @@ public:
     let Value::Tensor(row_major) = &result.outputs[3] else {
         panic!("row-major C++ buffer output must remain a tensor");
     };
-    assert_eq!(row_major.shape, vec![2, 3]);
+    assert_eq!(row_major.shape(), [2, 3]);
     assert_eq!(
         row_major.materialize_f64(),
         vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]
@@ -1873,7 +1873,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         let Value::Tensor(indices) = &result.outputs[0] else {
             panic!("typed N-D result must remain a tensor");
         };
-        assert_eq!(indices.shape, vec![2, 3, 4]);
+        assert_eq!(indices.shape(), [2, 3, 4]);
         assert_eq!(
             indices.numeric_value_at(23),
             Some(runmat_value::NumericScalar::U64(u64::MAX))
