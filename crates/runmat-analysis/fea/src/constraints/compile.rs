@@ -19,8 +19,9 @@ use super::frame::{
 use super::normal::boundary_node_normals;
 use super::pairing::{pair_targets, pairing_rows};
 use super::plan::reference_point_identity;
+use super::prepared::PreparedTargets;
 use super::row;
-use super::target::{node_coordinates, resolve_nodal_target};
+use super::target::node_coordinates;
 use super::workspace::{check_cancelled, reserve};
 
 use super::compilation::CompiledConstraint;
@@ -37,14 +38,15 @@ pub(super) fn compile_constraint(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     constraint: &StructuralConstraint,
+    prepared: &mut PreparedTargets<'_>,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
     match &constraint.kind {
-        StructuralConstraintKind::Fixed { target } => compile_fixed(mesh, constraint, target),
+        StructuralConstraintKind::Fixed { target } => compile_fixed(constraint, prepared, target),
         StructuralConstraintKind::Prescribed(values) => {
-            compile_prescribed(model, mesh, constraint, values)
+            compile_prescribed(model, mesh, constraint, prepared, values)
         }
         StructuralConstraintKind::PrescribedMotion(values) => {
-            compile_prescribed_motion(mesh, constraint, values)
+            compile_prescribed_motion(constraint, prepared, values)
         }
         StructuralConstraintKind::Equation(equation) => {
             require_global(constraint)?;
@@ -55,7 +57,9 @@ pub(super) fn compile_constraint(
                 )));
             }
             let mut targets = reserve(equation.terms.len())?;
-            let mut terms = Vec::new();
+            let term_count = prepared.remaining_node_count()?;
+            let mut rows = lowering::rows(1, term_count, &constraint.constraint_id)?;
+            let mut terms = reserve(term_count)?;
             for term in &equation.terms {
                 if !term.coefficient.is_finite() || term.coefficient == 0.0 {
                     return Err(ConstraintPlanError::Invalid(format!(
@@ -63,10 +67,7 @@ pub(super) fn compile_constraint(
                         constraint.constraint_id
                     )));
                 }
-                let resolved = resolve_nodal_target(mesh, &term.target, &constraint.constraint_id)?;
-                terms
-                    .try_reserve_exact(resolved.matched_node_identities.len())
-                    .map_err(|_| super::workspace::overflow())?;
+                let resolved = prepared.take(&term.target)?.0;
                 terms.extend(
                     resolved
                         .matched_node_identities
@@ -85,7 +86,6 @@ pub(super) fn compile_constraint(
                     constraint_id: constraint.constraint_id.clone(),
                 });
             }
-            let mut rows = lowering::rows(1, terms.len(), &constraint.constraint_id)?;
             rows.push(row::new_sparse(
                 &constraint.constraint_id,
                 terms,
@@ -95,7 +95,7 @@ pub(super) fn compile_constraint(
         }
         StructuralConstraintKind::NormalDisplacement { target, value } => {
             require_normal_capable(constraint)?;
-            let resolved = resolve_nodal_target(mesh, target, &constraint.constraint_id)?;
+            let resolved = prepared.take(target)?.0;
             let normals = boundary_node_normals(mesh, &resolved, &constraint.constraint_id)?;
             let right_hand_side =
                 study_constant_displacement(value, model, &constraint.constraint_id)?;
@@ -118,35 +118,45 @@ pub(super) fn compile_constraint(
             ))
         }
         StructuralConstraintKind::Symmetry { target } => {
-            compile_boundary_directions(mesh, constraint, target, false)
+            compile_boundary_directions(mesh, constraint, prepared, target, false)
         }
         StructuralConstraintKind::Antisymmetry { target } => {
-            compile_boundary_directions(mesh, constraint, target, true)
+            compile_boundary_directions(mesh, constraint, prepared, target, true)
         }
-        StructuralConstraintKind::RigidCoupling(coupling) => {
-            compile_coupling(mesh, constraint, coupling, ConstraintCouplingKind::Rigid)
-        }
+        StructuralConstraintKind::RigidCoupling(coupling) => compile_coupling(
+            mesh,
+            constraint,
+            prepared,
+            coupling,
+            ConstraintCouplingKind::Rigid,
+        ),
         StructuralConstraintKind::DistributingCoupling(coupling) => compile_coupling(
             mesh,
             constraint,
+            prepared,
             coupling,
             ConstraintCouplingKind::Distributing,
         ),
-        StructuralConstraintKind::Tie(pair) => {
-            compile_pair(mesh, constraint, pair, &PeriodicTransform::Identity, false)
-        }
+        StructuralConstraintKind::Tie(pair) => compile_pair(
+            mesh,
+            constraint,
+            prepared,
+            pair,
+            &PeriodicTransform::Identity,
+            false,
+        ),
         StructuralConstraintKind::Periodic(periodic) => {
-            compile_periodic(mesh, constraint, periodic)
+            compile_periodic(mesh, constraint, prepared, periodic)
         }
     }
 }
 
 fn compile_fixed(
-    mesh: &SolverMeshArtifact,
     constraint: &StructuralConstraint,
+    prepared: &mut PreparedTargets<'_>,
     target: &runmat_analysis_core::RegionTarget,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
-    let resolved = resolve_nodal_target(mesh, target, &constraint.constraint_id)?;
+    let resolved = prepared.take(target)?.0;
     let mut rows = lowering::rows(
         multiply(resolved.matched_node_identities.len(), 3)?,
         1,
@@ -173,6 +183,7 @@ fn compile_prescribed(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     constraint: &StructuralConstraint,
+    prepared: &mut PreparedTargets<'_>,
     values: &PrescribedStructuralDofs,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
     if !values.rotations.is_empty() {
@@ -187,7 +198,7 @@ fn compile_prescribed(
             study_constant_displacement(&value.value, model, &constraint.constraint_id)?,
         ));
     }
-    let resolved = resolve_nodal_target(mesh, &values.target, &constraint.constraint_id)?;
+    let resolved = prepared.take(&values.target)?.0;
     let normals = if constraint.frame == CoordinateFrame::BoundaryNormalTangent {
         Some(boundary_node_normals(
             mesh,
@@ -226,12 +237,12 @@ fn compile_prescribed(
 }
 
 fn compile_prescribed_motion(
-    mesh: &SolverMeshArtifact,
     constraint: &StructuralConstraint,
+    prepared: &mut PreparedTargets<'_>,
     motion: &PrescribedStructuralMotion,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
     require_global(constraint)?;
-    let resolved = resolve_nodal_target(mesh, &motion.target, &constraint.constraint_id)?;
+    let resolved = prepared.take(&motion.target)?.0;
     let mut rows = lowering::rows(
         multiply(
             resolved.matched_node_identities.len(),
@@ -260,11 +271,12 @@ fn compile_prescribed_motion(
 fn compile_boundary_directions(
     mesh: &SolverMeshArtifact,
     constraint: &StructuralConstraint,
+    prepared: &mut PreparedTargets<'_>,
     target: &runmat_analysis_core::RegionTarget,
     tangential: bool,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
     require_normal_capable(constraint)?;
-    let resolved = resolve_nodal_target(mesh, target, &constraint.constraint_id)?;
+    let resolved = prepared.take(target)?.0;
     let normals = boundary_node_normals(mesh, &resolved, &constraint.constraint_id)?;
     let count = multiply(
         resolved.matched_node_identities.len(),
@@ -296,21 +308,30 @@ fn compile_boundary_directions(
 fn compile_periodic(
     mesh: &SolverMeshArtifact,
     constraint: &StructuralConstraint,
+    prepared: &mut PreparedTargets<'_>,
     periodic: &PeriodicConstraint,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
-    compile_pair(mesh, constraint, &periodic.pair, &periodic.transform, true)
+    compile_pair(
+        mesh,
+        constraint,
+        prepared,
+        &periodic.pair,
+        &periodic.transform,
+        true,
+    )
 }
 
 fn compile_pair(
     mesh: &SolverMeshArtifact,
     constraint: &StructuralConstraint,
+    prepared: &mut PreparedTargets<'_>,
     pair: &PairedConstraint,
     transform: &PeriodicTransform,
     transform_displacement: bool,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
     require_global(constraint)?;
-    let primary = resolve_nodal_target(mesh, &pair.primary, &constraint.constraint_id)?;
-    let secondary = resolve_nodal_target(mesh, &pair.secondary, &constraint.constraint_id)?;
+    let primary = prepared.take(&pair.primary)?.0;
+    let secondary = prepared.take(&pair.secondary)?.0;
     let pairings = pair_targets(
         mesh,
         &primary,
@@ -336,11 +357,12 @@ fn compile_pair(
 fn compile_coupling(
     mesh: &SolverMeshArtifact,
     constraint: &StructuralConstraint,
+    prepared: &mut PreparedTargets<'_>,
     coupling: &runmat_analysis_core::ReferencePointCoupling,
     kind: ConstraintCouplingKind,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
     require_global(constraint)?;
-    let target = resolve_nodal_target(mesh, &coupling.target, &constraint.constraint_id)?;
+    let target = prepared.take(&coupling.target)?.0;
     let identity = reference_point_identity(
         &coupling.reference_point.reference_point_id,
         coupling.reference_point.position.meters,

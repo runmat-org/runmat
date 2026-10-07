@@ -288,8 +288,8 @@ Solid, explicit and mixed lowering now return one shared compiled-constraint car
 the solid-only tuple conversion is removed. Ordinary fixed, prescribed, motion, normal,
 symmetry and antisymmetry rows derive checked row/term/identifier inventories before
 allocating their row buffers. Motion counts use checked multiplication instead of
-saturation. Equation target storage and incremental term expansion use fallible exact
-reservations. Existing pairing/coupling owners retain their separate counted inventories.
+saturation. Equation target storage uses fallible exact reservations. Prepared target
+occurrences now supply the complete term count before equation expansion. Existing pairing/coupling owners retain their separate counted inventories.
 
 Singleton and directional term vectors reserve their actual nonzero term counts.
 Row/group identifier copies and group reference-point identity vectors are fallible;
@@ -308,9 +308,35 @@ wrench and accepted nonlinear kinematics tests remain mandatory.
 
 The row expansion profile counts retained row/term slots and identifier payloads. It
 excludes targets, geometry, separate row identity/sorting/compaction, plan accumulation/
-classification, allocator overhead and RSS. Equation profiles include retained terms but
-run after their progressive construction, so they do not prove admission before every
-term allocation. Group/evidence construction is additional to this row inventory.
+classification, allocator overhead and RSS. Equation profiles now derive retained term counts from prepared selections before
+allocating the equation term buffer. Target preparation itself is still additional
+construction work and is not covered by this row-only inventory. Group/evidence construction is additional to this row inventory.
 It is a component inventory, not whole-compilation policy admission. Full pre-expansion
 composition and retained-output overlap remain required for the scheduled adaptive path;
 no original scientific gate, resource cap or production envelope is promoted here.
+
+
+## Prepared constraint target occurrences
+
+The shared compiler now prepares each authored target occurrence before family dispatch.
+Its owned selection carries resolved provenance and canonical node indexes into lowering;
+solid, explicit, shared and mixed routing consume that same ownership evidence. The old
+resolve-and-discard routing pass is deleted. The existing mixed-topology ownership and
+constraint-selection resolvers retain their separate semantics; this change removes
+repeated calls across routing/lowering, not their distinct checks during preparation.
+
+Lowering moves the original selection buffers, retains authored equation occurrence order,
+and rejects exhausted, reordered or unused occurrences. Prepared selections remain scoped
+to one constraint; there is no global duplicate target cache. Equation terms count all
+selected node occurrences before expansion, including duplicates which the existing row
+owner subsequently combines in its original order. Empty explicit equations reject at
+the original typed lowering gate without dispatching to an absent solid mesh.
+
+Original plan byte goldens and analytic constraint tests remain mandatory. Invalid inputs
+can report a later target failure during preparation before an earlier coefficient or
+value failure; supported valid equations and transfer provenance are unchanged. Preparing
+all occurrences introduces target-buffer overlap which must be composed into the full
+compilation demand. Fallible counted reservations and pre-term row sizing are not a whole
+compilation budget receipt. Complete admission, adaptive output overlap, scheduled execution,
+atomic semantic publication, measured resources and the original scientific failures remain
+open; resource revision stays81 and no tolerance or cap changes.

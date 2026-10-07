@@ -3,7 +3,6 @@
 use runmat_analysis_core::{
     AnalysisModel, CoordinateFrame, PrescribedStructuralDofs, StructuralConstraint,
 };
-use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace;
 
@@ -16,8 +15,8 @@ use super::{
         translation_direction,
     },
     lowering,
-    mixed::resolve_target,
     plan::reference_point_identity,
+    prepared::PreparedTargets,
     row,
     workspace::{count_add, multiply},
     CanonicalStructuralDof, ConstraintCouplingKind, ConstraintPlanError,
@@ -25,13 +24,13 @@ use super::{
 
 pub(super) fn compile_prescribed(
     model: &AnalysisModel,
-    mesh: Option<&SolverMeshArtifact>,
     structural: &runmat_analysis_core::StructuralModel,
     topology: &CanonicalStructuralNodeSpace,
     constraint: &StructuralConstraint,
+    prepared: &mut PreparedTargets<'_>,
     values: &PrescribedStructuralDofs,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
-    let (resolved, nodes) = resolve_target(mesh, structural, topology, constraint, &values.target)?;
+    let (resolved, nodes) = prepared.take(&values.target)?;
     let boundary_normals = if constraint.frame == CoordinateFrame::BoundaryNormalTangent {
         Some(
             resolve_explicit_surface(structural, topology, &resolved, &constraint.constraint_id)?
@@ -107,15 +106,15 @@ pub(super) fn compile_prescribed(
 
 pub(super) fn compile_normal(
     model: &AnalysisModel,
-    mesh: Option<&SolverMeshArtifact>,
     structural: &runmat_analysis_core::StructuralModel,
     topology: &CanonicalStructuralNodeSpace,
     constraint: &StructuralConstraint,
+    prepared: &mut PreparedTargets<'_>,
     target: &runmat_analysis_core::RegionTarget,
     value: &runmat_analysis_core::PrescribedValue<runmat_analysis_core::Displacement>,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
     require_normal_capable(constraint)?;
-    let (resolved, _) = resolve_target(mesh, structural, topology, constraint, target)?;
+    let (resolved, _) = prepared.take(target)?;
     let surface =
         resolve_explicit_surface(structural, topology, &resolved, &constraint.constraint_id)?;
     let right_hand_side =
@@ -140,15 +139,15 @@ pub(super) fn compile_normal(
 }
 
 pub(super) fn compile_directions(
-    mesh: Option<&SolverMeshArtifact>,
     structural: &runmat_analysis_core::StructuralModel,
     topology: &CanonicalStructuralNodeSpace,
     constraint: &StructuralConstraint,
+    prepared: &mut PreparedTargets<'_>,
     target: &runmat_analysis_core::RegionTarget,
     tangential: bool,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
     require_normal_capable(constraint)?;
-    let (resolved, _) = resolve_target(mesh, structural, topology, constraint, target)?;
+    let (resolved, _) = prepared.take(target)?;
     let surface =
         resolve_explicit_surface(structural, topology, &resolved, &constraint.constraint_id)?;
     let count = multiply(
@@ -181,15 +180,15 @@ pub(super) fn compile_directions(
 }
 
 pub(super) fn compile_coupling(
-    mesh: Option<&SolverMeshArtifact>,
     structural: &runmat_analysis_core::StructuralModel,
     topology: &CanonicalStructuralNodeSpace,
     constraint: &StructuralConstraint,
+    prepared: &mut PreparedTargets<'_>,
     coupling: &runmat_analysis_core::ReferencePointCoupling,
     kind: ConstraintCouplingKind,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
     require_global(constraint)?;
-    let (target, _) = resolve_target(mesh, structural, topology, constraint, &coupling.target)?;
+    let (target, _) = prepared.take(&coupling.target)?;
     let surface =
         resolve_explicit_surface(structural, topology, &target, &constraint.constraint_id)?;
     let identity = reference_point_identity(

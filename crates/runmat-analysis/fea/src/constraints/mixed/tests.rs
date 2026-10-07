@@ -384,16 +384,19 @@ fn mixed_dispatch_preserves_target_failure_and_cancellation_instead_of_falling_t
             target: runmat_analysis_core::RegionTarget::boundary("absent"),
         },
     };
-    let direct = resolve_target(
-        Some(&mesh),
-        structural,
-        &topology,
+    let direct = super::super::prepared::PreparedTargets::derive(
         &constraint,
-        constraint.kind.target().unwrap(),
+        Some(&mesh),
+        Some((structural, &topology)),
     )
-    .unwrap_err();
+    .err()
+    .unwrap();
+    let mut invalid = model.clone();
+    invalid
+        .constraints
+        .push(AnalysisConstraint::Structural(constraint.clone()));
     assert_eq!(
-        requires_mixed_compilation(&constraint, &mesh, structural, &topology).unwrap_err(),
+        CanonicalStructuralConstraintPlan::compile(&invalid, &mesh).unwrap_err(),
         direct
     );
     let token = crate::progress::FeaCancellationToken::new();
@@ -404,7 +407,13 @@ fn mixed_dispatch_preserves_target_failure_and_cancellation_instead_of_falling_t
             ..Default::default()
         });
     assert_eq!(
-        requires_mixed_compilation(&constraint, &mesh, structural, &topology).unwrap_err(),
+        super::super::prepared::PreparedTargets::derive(
+            &constraint,
+            Some(&mesh),
+            Some((structural, &topology))
+        )
+        .err()
+        .unwrap(),
         ConstraintPlanError::Cancelled
     );
 }

@@ -24,6 +24,7 @@ mod normal;
 mod pairing;
 mod phase;
 mod plan;
+mod prepared;
 mod rank;
 mod reaction;
 mod result;

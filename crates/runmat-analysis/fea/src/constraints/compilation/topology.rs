@@ -71,38 +71,50 @@ impl<'a> CompilationTopology<'a> {
         constraint: &StructuralConstraint,
     ) -> Result<(CompiledConstraint, BoundaryTransferImplementation), ConstraintPlanError> {
         use super::super::{compile, mixed};
-        let solid = match self {
-            Self::Solid(mesh) => Some(*mesh),
+        let (mesh, mixed_topology) = match self {
+            Self::Solid(mesh) => (Some(*mesh), None),
+            Self::Explicit { structural, nodes } => (None, Some((*structural, nodes))),
             Self::Mixed {
                 mesh,
                 structural,
                 nodes,
-            } if !mixed::requires_mixed_compilation(constraint, mesh, structural, nodes)? => {
-                Some(*mesh)
-            }
-            _ => None,
+            } => (Some(*mesh), Some((*structural, nodes))),
         };
-        if let Some(mesh) = solid {
-            return Ok((
-                compile::compile_constraint(model, mesh, constraint)?,
-                BoundaryTransferImplementation::CanonicalBoundaryProjection,
-            ));
+        if matches!(
+            constraint.kind,
+            runmat_analysis_core::StructuralConstraintKind::Equation(_)
+        ) {
+            super::super::frame::require_global(constraint)?;
         }
-        let compiled = match self {
-            Self::Explicit { structural, nodes } => {
-                mixed::compile_node_constraint(model, None, structural, nodes, constraint)?
-            }
-            Self::Mixed {
-                mesh,
-                structural,
-                nodes,
-            } => mixed::compile_node_constraint(model, Some(mesh), structural, nodes, constraint)?,
-            Self::Solid(_) => unreachable!("solid topology was lowered above"),
+        let mut prepared =
+            super::super::prepared::PreparedTargets::derive(constraint, mesh, mixed_topology)?;
+        let (compiled, implementation) = if !prepared.requires_mixed() {
+            (
+                compile::compile_constraint(
+                    model,
+                    mesh.expect("solid preparation requires a mesh"),
+                    constraint,
+                    &mut prepared,
+                )?,
+                BoundaryTransferImplementation::CanonicalBoundaryProjection,
+            )
+        } else {
+            let (structural, nodes) =
+                mixed_topology.expect("mixed preparation requires node space");
+            (
+                mixed::compile_node_constraint(
+                    model,
+                    mesh,
+                    structural,
+                    nodes,
+                    constraint,
+                    &mut prepared,
+                )?,
+                BoundaryTransferImplementation::ExplicitRegionConnectivity,
+            )
         };
-        Ok((
-            compiled,
-            BoundaryTransferImplementation::ExplicitRegionConnectivity,
-        ))
+        prepared.finish()?;
+        Ok((compiled, implementation))
     }
 }
 

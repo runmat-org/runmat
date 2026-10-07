@@ -1,51 +1,23 @@
 use runmat_analysis_core::{
     AnalysisModel, StructuralConstraint, StructuralConstraintKind, StructuralRotationDof,
-    TargetCardinality,
 };
 use runmat_meshing_core::SolverMeshArtifact;
 
-use crate::physics::structural::topology::{
-    explicit_target_node_indices,
-    node_space::CanonicalStructuralNodeSpace,
-    target::{resolve_mixed_structural_target, MixedStructuralTargetOwnership},
-};
+use crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace;
 
 use super::{
     compilation::CompiledConstraint,
     contract::{
         CanonicalStructuralConstraintTerm, CanonicalStructuralDof, CanonicalStructuralDofOwner,
-        ConstraintCouplingKind, ConstraintPlanError, ResolvedConstraintTarget,
+        ConstraintCouplingKind, ConstraintPlanError,
     },
     frame::require_global,
     lowering, mixed_surface,
     pairing::{pair_mixed_targets, pairing_rows},
+    prepared::PreparedTargets,
     row,
-    target::resolve_nodal_target,
     workspace::{count_add, multiply, reserve},
 };
-
-pub(super) fn requires_mixed_compilation(
-    constraint: &StructuralConstraint,
-    mesh: &SolverMeshArtifact,
-    structural: &runmat_analysis_core::StructuralModel,
-    topology: &CanonicalStructuralNodeSpace,
-) -> Result<bool, ConstraintPlanError> {
-    super::workspace::check_cancelled()?;
-    if matches!(constraint.kind, StructuralConstraintKind::Equation(_)) {
-        require_global(constraint)?;
-    }
-    let mut mixed = false;
-    visit_targets(&constraint.kind, |target| {
-        if mixed {
-            return Ok(());
-        }
-        let ownership = resolve_mixed_structural_target(target, mesh, structural, topology)
-            .map_err(|error| target_error(error, constraint))?;
-        mixed = !matches!(ownership, MixedStructuralTargetOwnership::Solid { .. });
-        Ok(())
-    })?;
-    Ok(mixed)
-}
 
 pub(super) fn compile_node_constraint(
     model: &AnalysisModel,
@@ -53,11 +25,12 @@ pub(super) fn compile_node_constraint(
     structural: &runmat_analysis_core::StructuralModel,
     topology: &CanonicalStructuralNodeSpace,
     constraint: &StructuralConstraint,
+    prepared: &mut PreparedTargets<'_>,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
     match &constraint.kind {
         StructuralConstraintKind::Fixed { target } => {
             require_global(constraint)?;
-            let (resolved, nodes) = resolve_target(mesh, structural, topology, constraint, target)?;
+            let (resolved, nodes) = prepared.take(target)?;
             let count = nodes.iter().try_fold(0usize, |sum, node| {
                 count_add(
                     sum,
@@ -87,13 +60,12 @@ pub(super) fn compile_node_constraint(
                 coupling: None,
             })
         }
-        StructuralConstraintKind::Prescribed(values) => {
-            mixed_surface::compile_prescribed(model, mesh, structural, topology, constraint, values)
-        }
+        StructuralConstraintKind::Prescribed(values) => mixed_surface::compile_prescribed(
+            model, structural, topology, constraint, prepared, values,
+        ),
         StructuralConstraintKind::PrescribedMotion(motion) => {
             require_global(constraint)?;
-            let (resolved, nodes) =
-                resolve_target(mesh, structural, topology, constraint, &motion.target)?;
+            let (resolved, nodes) = prepared.take(&motion.target)?;
             let mut rows = lowering::rows(
                 multiply(nodes.len(), motion.translations.len())?,
                 1,
@@ -132,7 +104,9 @@ pub(super) fn compile_node_constraint(
                 )));
             }
             let mut targets = reserve(equation.terms.len())?;
-            let mut terms = Vec::new();
+            let term_count = prepared.remaining_node_count()?;
+            let mut rows = lowering::rows(1, term_count, &constraint.constraint_id)?;
+            let mut terms = reserve(term_count)?;
             for term in &equation.terms {
                 if !term.coefficient.is_finite() || term.coefficient == 0.0 {
                     return Err(ConstraintPlanError::Invalid(format!(
@@ -140,11 +114,7 @@ pub(super) fn compile_node_constraint(
                         constraint.constraint_id
                     )));
                 }
-                let (resolved, nodes) =
-                    resolve_target(mesh, structural, topology, constraint, &term.target)?;
-                terms
-                    .try_reserve_exact(nodes.len())
-                    .map_err(|_| super::workspace::overflow())?;
+                let (resolved, nodes) = prepared.take(&term.target)?;
                 for node in nodes {
                     let dof = CanonicalStructuralDof::from(term.dof);
                     if !available_dofs(topology, node).any(|candidate| candidate == dof) {
@@ -167,7 +137,6 @@ pub(super) fn compile_node_constraint(
                     constraint_id: constraint.constraint_id.clone(),
                 });
             }
-            let mut rows = lowering::rows(1, terms.len(), &constraint.constraint_id)?;
             rows.push(row::new_sparse(
                 &constraint.constraint_id,
                 terms,
@@ -177,47 +146,47 @@ pub(super) fn compile_node_constraint(
         }
         StructuralConstraintKind::Tie(pair) => compile_pair(
             mesh,
-            structural,
             topology,
             constraint,
+            prepared,
             pair,
             &runmat_analysis_core::PeriodicTransform::Identity,
             false,
         ),
         StructuralConstraintKind::Periodic(periodic) => compile_pair(
             mesh,
-            structural,
             topology,
             constraint,
+            prepared,
             &periodic.pair,
             &periodic.transform,
             true,
         ),
         StructuralConstraintKind::NormalDisplacement { target, value } => {
             mixed_surface::compile_normal(
-                model, mesh, structural, topology, constraint, target, value,
+                model, structural, topology, constraint, prepared, target, value,
             )
         }
-        StructuralConstraintKind::Symmetry { target } => {
-            mixed_surface::compile_directions(mesh, structural, topology, constraint, target, false)
-        }
-        StructuralConstraintKind::Antisymmetry { target } => {
-            mixed_surface::compile_directions(mesh, structural, topology, constraint, target, true)
-        }
+        StructuralConstraintKind::Symmetry { target } => mixed_surface::compile_directions(
+            structural, topology, constraint, prepared, target, false,
+        ),
+        StructuralConstraintKind::Antisymmetry { target } => mixed_surface::compile_directions(
+            structural, topology, constraint, prepared, target, true,
+        ),
         StructuralConstraintKind::RigidCoupling(coupling) => mixed_surface::compile_coupling(
-            mesh,
             structural,
             topology,
             constraint,
+            prepared,
             coupling,
             ConstraintCouplingKind::Rigid,
         ),
         StructuralConstraintKind::DistributingCoupling(coupling) => {
             mixed_surface::compile_coupling(
-                mesh,
                 structural,
                 topology,
                 constraint,
+                prepared,
                 coupling,
                 ConstraintCouplingKind::Distributing,
             )
@@ -227,9 +196,9 @@ pub(super) fn compile_node_constraint(
 
 fn compile_pair(
     mesh: Option<&SolverMeshArtifact>,
-    structural: &runmat_analysis_core::StructuralModel,
     topology: &CanonicalStructuralNodeSpace,
     constraint: &StructuralConstraint,
+    prepared: &mut PreparedTargets<'_>,
     pair: &runmat_analysis_core::PairedConstraint,
     transform: &runmat_analysis_core::PeriodicTransform,
     transform_displacement: bool,
@@ -242,14 +211,8 @@ fn compile_pair(
                 "explicit-only tie and periodic pairing requires a qualified geometric topology",
         });
     };
-    let (primary, _) = resolve_target(Some(mesh), structural, topology, constraint, &pair.primary)?;
-    let (secondary, _) = resolve_target(
-        Some(mesh),
-        structural,
-        topology,
-        constraint,
-        &pair.secondary,
-    )?;
+    let (primary, _) = prepared.take(&pair.primary)?;
+    let (secondary, _) = prepared.take(&pair.secondary)?;
     let pairings = pair_mixed_targets(
         mesh,
         topology,
@@ -273,66 +236,6 @@ fn compile_pair(
     })
 }
 
-pub(super) fn resolve_target(
-    mesh: Option<&SolverMeshArtifact>,
-    structural: &runmat_analysis_core::StructuralModel,
-    topology: &CanonicalStructuralNodeSpace,
-    constraint: &StructuralConstraint,
-    target: &runmat_analysis_core::RegionTarget,
-) -> Result<(ResolvedConstraintTarget, Vec<usize>), ConstraintPlanError> {
-    let ownership = if let Some(mesh) = mesh {
-        resolve_mixed_structural_target(target, mesh, structural, topology)
-            .map_err(|error| target_error(error, constraint))?
-    } else {
-        let mut canonical_nodes = explicit_target_node_indices(structural, &target.region_id)?;
-        for node in &mut canonical_nodes {
-            *node = topology.explicit_node_indices[*node];
-        }
-        if canonical_nodes.is_empty() {
-            return Err(ConstraintPlanError::EmptyTarget {
-                constraint_id: constraint.constraint_id.clone(),
-                region_id: target.region_id.clone(),
-            });
-        }
-        MixedStructuralTargetOwnership::Explicit { canonical_nodes }
-    };
-    let explicit_ownership = matches!(ownership, MixedStructuralTargetOwnership::Explicit { .. });
-    let nodes = ownership.into_canonical_nodes();
-    let resolved = if !explicit_ownership {
-        resolve_nodal_target(
-            mesh.expect("solid target ownership requires a solver mesh"),
-            target,
-            &constraint.constraint_id,
-        )?
-    } else {
-        let mut identities = super::workspace::reserve(nodes.len())?;
-        identities.extend(nodes.iter().map(|node| topology.nodes[*node].identity));
-        identities.sort_unstable();
-        identities.dedup();
-        if target.cardinality == TargetCardinality::One && identities.len() != 1 {
-            return Err(ConstraintPlanError::Cardinality {
-                constraint_id: constraint.constraint_id.clone(),
-                actual: identities.len(),
-            });
-        }
-        let selection_digest = super::plan::canonical_digest(
-            "resolved-constraint-target",
-            &(
-                target,
-                Vec::<runmat_meshing_core::PersistentEntityId>::new(),
-                &identities,
-            ),
-        )?;
-        ResolvedConstraintTarget {
-            authored: target.clone(),
-            matched_entities: Vec::new(),
-            matched_node_identities: identities,
-            selection_digest,
-        }
-    };
-    Ok((resolved, nodes))
-}
-
 fn available_dofs(
     topology: &CanonicalStructuralNodeSpace,
     node: usize,
@@ -347,51 +250,6 @@ fn available_dofs(
         .into_iter()
         .filter(move |_| rotations),
     )
-}
-
-fn target_error(
-    error: crate::physics::structural::topology::target::MixedStructuralTargetError,
-    constraint: &StructuralConstraint,
-) -> ConstraintPlanError {
-    match error {
-        crate::physics::structural::topology::target::MixedStructuralTargetError::Storage(
-            error,
-        ) => error.into(),
-        other => ConstraintPlanError::Invalid(format!(
-            "constraint `{}` target resolution failed: {other}",
-            constraint.constraint_id
-        )),
-    }
-}
-
-fn visit_targets(
-    kind: &StructuralConstraintKind,
-    mut visit: impl FnMut(&runmat_analysis_core::RegionTarget) -> Result<(), ConstraintPlanError>,
-) -> Result<(), ConstraintPlanError> {
-    match kind {
-        StructuralConstraintKind::Fixed { target }
-        | StructuralConstraintKind::NormalDisplacement { target, .. }
-        | StructuralConstraintKind::Symmetry { target }
-        | StructuralConstraintKind::Antisymmetry { target } => visit(target),
-        StructuralConstraintKind::Prescribed(values) => visit(&values.target),
-        StructuralConstraintKind::PrescribedMotion(values) => visit(&values.target),
-        StructuralConstraintKind::RigidCoupling(coupling)
-        | StructuralConstraintKind::DistributingCoupling(coupling) => visit(&coupling.target),
-        StructuralConstraintKind::Tie(pair) => {
-            visit(&pair.primary)?;
-            visit(&pair.secondary)
-        }
-        StructuralConstraintKind::Periodic(periodic) => {
-            visit(&periodic.pair.primary)?;
-            visit(&periodic.pair.secondary)
-        }
-        StructuralConstraintKind::Equation(equation) => {
-            for term in &equation.terms {
-                visit(&term.target)?;
-            }
-            Ok(())
-        }
-    }
 }
 
 #[cfg(test)]
