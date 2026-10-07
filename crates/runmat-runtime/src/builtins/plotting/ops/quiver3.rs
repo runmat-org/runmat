@@ -772,6 +772,14 @@ fn default_quiver3_grid_from_value(value: &Value) -> crate::BuiltinResult<(Tenso
     ))
 }
 
+fn quiver3_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 fn tensor_shape_from_value(value: &Value) -> crate::BuiltinResult<(usize, usize, usize)> {
     match value {
         Value::GpuTensor(handle) => {
@@ -783,9 +791,10 @@ fn tensor_shape_from_value(value: &Value) -> crate::BuiltinResult<(usize, usize,
         _ => {
             let tensor = Tensor::try_from(value)
                 .map_err(|err| plotting_error(BUILTIN_NAME, format!("quiver3: {err}")))?;
+            let (rows, cols) = quiver3_matrix_dimensions(&tensor);
             Ok((
-                tensor.rows.max(1),
-                tensor.cols.max(1),
+                rows.max(1),
+                cols.max(1),
                 tensor_helpers::tensor_element_len(&tensor),
             ))
         }
@@ -806,18 +815,14 @@ fn materialize_quiver3_components(
     let u_len = tensor_helpers::tensor_element_len(&u);
     let v_len = tensor_helpers::tensor_element_len(&v);
     let w_len = tensor_helpers::tensor_element_len(&w);
-    let z_rows = z.rows;
-    let z_cols = z.cols;
-    let z_shape = z.shape.clone();
-    let u_rows = u.rows;
-    let u_cols = u.cols;
-    let u_shape = u.shape.clone();
-    let v_rows = v.rows;
-    let v_cols = v.cols;
-    let v_shape = v.shape.clone();
-    let w_rows = w.rows;
-    let w_cols = w.cols;
-    let w_shape = w.shape.clone();
+    let (z_rows, z_cols) = quiver3_matrix_dimensions(&z);
+    let z_shape = z.shape();
+    let (u_rows, u_cols) = quiver3_matrix_dimensions(&u);
+    let u_shape = u.shape();
+    let (v_rows, v_cols) = quiver3_matrix_dimensions(&v);
+    let v_shape = v.shape();
+    let (w_rows, w_cols) = quiver3_matrix_dimensions(&w);
+    let w_shape = w.shape();
     if u_rows != v_rows
         || u_cols != v_cols
         || u_len != v_len
@@ -944,6 +949,20 @@ mod tests {
 
     fn nd_tensor(shape: Vec<usize>, data: &[f64]) -> Tensor {
         Tensor::new(data.to_vec(), shape).expect("quiver3 test tensor")
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn quiver3_default_grid_preserves_dense_rank_boundaries() {
+        let scalar = Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap());
+        let (x, y) = default_quiver3_grid_from_value(&scalar).unwrap();
+        assert_eq!(x.materialize_f64(), vec![1.0]);
+        assert_eq!(y.materialize_f64(), vec![1.0]);
+
+        let vector = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap());
+        let (x, y) = default_quiver3_grid_from_value(&vector).unwrap();
+        assert_eq!(x.materialize_f64(), vec![1.0, 2.0, 3.0]);
+        assert_eq!(y.materialize_f64(), vec![1.0, 1.0, 1.0]);
     }
 
     #[test]
