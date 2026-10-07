@@ -2,6 +2,16 @@
 use super::*;
 use runmat_accelerate_api::GpuTensorStorage;
 
+/// Boxplot's dense matrix projection treats rank zero as 0-by-0 and rank one
+/// as a single row, unlike the general Tensor row/column getters.
+pub(super) fn boxplot_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 pub(super) async fn admit_host_visible(
     x: &Value,
     group: Option<&Value>,
@@ -9,7 +19,7 @@ pub(super) async fn admit_host_visible(
 ) -> BuiltinResult<()> {
     let (shape, count) = match x {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => (None, 1),
-        Value::Tensor(tensor) => (Some(tensor.shape.as_slice()), tensor.len()),
+        Value::Tensor(tensor) => (Some(tensor.shape()), tensor.len()),
         Value::LogicalArray(array) => (Some(array.shape.as_slice()), array.len()),
         Value::GpuTensor(handle) => {
             if handle.physical().storage() != GpuTensorStorage::Real {

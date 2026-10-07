@@ -13,6 +13,24 @@ fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
     Value::Tensor(tensor)
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn colors_rgb_rank_one_is_a_row_and_rank_zero_has_no_columns() {
+    let colors = options::parse_colors(&tensor(vec![0.0, 0.5, 1.0], vec![3]))
+        .expect("rank-one RGB input is one row with three columns");
+    assert_eq!(colors, vec![Vec4::new(0.0, 0.5, 1.0, 1.0)]);
+
+    let error = options::parse_colors(&tensor(vec![0.5], vec![]))
+        .expect_err("rank-zero input has no RGB columns");
+    assert_eq!(
+        error.identifier(),
+        BOXPLOT_ERROR_INVALID_ARGUMENT.identifier
+    );
+    assert!(error
+        .message()
+        .contains("Colors RGB matrix must have three columns"));
+}
+
 #[test]
 fn heterogeneous_cell_group_keys_do_not_collapse_into_display_text() {
     let wide = 9_007_199_254_740_993_u64;

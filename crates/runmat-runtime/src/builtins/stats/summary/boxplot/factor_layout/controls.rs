@@ -1,4 +1,5 @@
 //! Public spelling is decoded once here; planning uses only these identities.
+use super::super::admission::boxplot_matrix_dimensions;
 use super::*;
 use crate::builtins::common::grouping_keys::KeyAtom;
 
@@ -195,7 +196,8 @@ pub(in crate::builtins::stats::summary::boxplot) fn parse_separator(
 }
 
 fn ensure_vector(tensor: &Tensor, option: &str) -> BuiltinResult<()> {
-    if tensor.shape.len() > 2 || (tensor.rows > 1 && tensor.cols > 1) {
+    let (rows, cols) = boxplot_matrix_dimensions(tensor);
+    if tensor.shape().len() > 2 || (rows > 1 && cols > 1) {
         Err(invalid(format!(
             "boxplot: {option} must be a scalar or vector"
         )))

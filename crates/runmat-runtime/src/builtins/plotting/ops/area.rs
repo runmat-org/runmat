@@ -1126,7 +1126,7 @@ fn area_numeric_input(value: Value, name: &str) -> crate::BuiltinResult<NumericI
 }
 
 fn vector_from_tensor(tensor: &Tensor) -> crate::BuiltinResult<Vec<f64>> {
-    if !(tensor.rows == 1 || tensor.cols == 1 || tensor.shape.len() <= 1) {
+    if !area_tensor_is_vector(tensor) {
         return Err(area_error_with_detail(
             &AREA_ERROR_INVALID_ARGUMENT,
             "X input must be a vector matching the row count of Y",
@@ -1136,7 +1136,7 @@ fn vector_from_tensor(tensor: &Tensor) -> crate::BuiltinResult<Vec<f64>> {
 }
 
 fn host_x_is_nondecreasing_vector(tensor: &Tensor) -> bool {
-    if !(tensor.rows == 1 || tensor.cols == 1 || tensor.shape.len() <= 1) {
+    if !area_tensor_is_vector(tensor) {
         return false;
     }
     (1..tensor.len()).all(|index| {
@@ -1150,11 +1150,17 @@ fn host_x_is_nondecreasing_vector(tensor: &Tensor) -> bool {
     })
 }
 
+fn area_tensor_is_vector(tensor: &Tensor) -> bool {
+    let shape = tensor.shape();
+    shape.len() <= 1 || shape[0] == 1 || shape[1] == 1
+}
+
 fn area_shape_from_tensor(tensor: &Tensor) -> (usize, usize) {
-    if tensor.shape.len() <= 1 || tensor.rows == 1 || tensor.cols == 1 {
+    let shape = tensor.shape();
+    if area_tensor_is_vector(tensor) {
         (tensor_utils::tensor_element_len(tensor).max(1), 1)
     } else {
-        (tensor.rows.max(1), tensor.cols.max(1))
+        (shape[0].max(1), shape[1].max(1))
     }
 }
 
@@ -1200,7 +1206,7 @@ fn area_x_columns(
     rows: usize,
     cols: usize,
 ) -> crate::BuiltinResult<Vec<Vec<NumericScalar>>> {
-    if x.rows == 1 || x.cols == 1 || x.shape.len() <= 1 {
+    if area_tensor_is_vector(x) {
         if x.len() != rows {
             return Err(area_error_with_detail(
                 &AREA_ERROR_INVALID_ARGUMENT,
@@ -1212,7 +1218,10 @@ fn area_x_columns(
             .collect::<Vec<_>>();
         return Ok(vec![column; cols]);
     }
-    if x.shape.len() > 2 || x.rows != rows || x.cols != cols {
+    // This branch admits a matrix, not the normalized series extent. Keep
+    // zero-sized axes intact when comparing X with Y's plotting dimensions.
+    let shape = x.shape();
+    if shape.len() > 2 || shape[0] != rows || shape[1] != cols {
         return Err(area_error_with_detail(
             &AREA_ERROR_INVALID_ARGUMENT,
             "matrix X must have the same size as matrix Y",
@@ -1286,6 +1295,30 @@ mod tests {
 
     fn matrix_tensor(data: Vec<f64>, rows: usize, cols: usize) -> Tensor {
         Tensor::new(data, vec![rows, cols]).expect("area test matrix")
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn area_series_preserves_dense_rank_zero_and_rank_one_policy() {
+        let scalar_x = Tensor::new(vec![3.0], Vec::new()).expect("scalar X");
+        let scalar_y = Tensor::new(vec![5.0], Vec::new()).expect("scalar Y");
+        let scalar = area_series_from_tensors(&scalar_x, &scalar_y).expect("scalar area series");
+        assert_eq!(scalar, vec![(vec![3.0], vec![5.0], None)]);
+
+        let vector_x = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).expect("rank-one X");
+        let vector_y = Tensor::new(vec![4.0, 5.0, 6.0], vec![3]).expect("rank-one Y");
+        let vector = area_series_from_tensors(&vector_x, &vector_y).expect("vector area series");
+        assert_eq!(
+            vector,
+            vec![(vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0], None)]
+        );
+
+        let empty_matrix = Tensor::new(Vec::new(), vec![0, 0]).expect("empty matrix");
+        assert!(vector_from_tensor(&empty_matrix).is_err());
+        assert_eq!(area_shape_from_tensor(&empty_matrix), (1, 1));
+        let error = area_series_from_tensors(&empty_matrix, &scalar_y)
+            .expect_err("empty matrix X must not become a normalized one-element series");
+        assert_eq!(error.identifier(), AREA_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     fn first_handle(value: &Value) -> Value {
@@ -1418,7 +1451,7 @@ mod tests {
         let Value::Tensor(handles) = &handle else {
             panic!("matrix Y should return a handle row vector")
         };
-        assert_eq!(handles.shape, vec![1, 2]);
+        assert_eq!(handles.shape(), [1, 2]);
         assert_eq!(
             get_builtin(vec![first_handle(&handle), Value::String("Type".into())]).unwrap(),
             Value::String("area".into())
@@ -1460,7 +1493,7 @@ mod tests {
         let Value::Tensor(handles) = &handle else {
             panic!("matrix Y should return a handle row vector")
         };
-        assert_eq!(handles.shape, vec![1, 3]);
+        assert_eq!(handles.shape(), [1, 3]);
         assert_eq!(
             get_builtin(vec![first_handle(&handle), Value::String("Type".into())]).unwrap(),
             Value::String("area".into())

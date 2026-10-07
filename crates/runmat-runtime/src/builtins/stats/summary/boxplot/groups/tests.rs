@@ -7,6 +7,25 @@ use std::cell::Cell;
 use std::num::NonZeroU64;
 use std::rc::Rc;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rank_one_data_is_one_box_and_rank_zero_has_no_observations() {
+    let rank_one = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap());
+    let boxes = build_box_stats(rank_one, None, &BoxplotOptions::default()).expect("one box");
+    assert_eq!(boxes.len(), 1);
+    assert_eq!(boxes[0].observation_count, 3);
+    assert_eq!(boxes[0].median, 2.0);
+
+    let rank_zero = Value::Tensor(Tensor::new(vec![7.0], vec![]).unwrap());
+    let error = build_box_stats(rank_zero, None, &BoxplotOptions::default())
+        .expect_err("rank-zero tensor has no matrix observations");
+    assert_eq!(
+        error.identifier(),
+        BOXPLOT_ERROR_INVALID_ARGUMENT.identifier
+    );
+    assert!(error.message().contains("at least one non-NaN"));
+}
+
 #[test]
 fn ungrouped_matrix_preserves_column_order_and_numerics_with_cooperation() {
     let source = CancellationSource::new();

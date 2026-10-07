@@ -1,4 +1,5 @@
 //! Group identity, sample grouping, and box statistics.
+use super::admission::boxplot_matrix_dimensions;
 use super::plot::color_for;
 use super::statistics::stats_for_values_cooperative;
 use super::*;
@@ -66,7 +67,7 @@ pub(super) async fn build_box_layout_cooperative(
 ) -> BuiltinResult<super::factor_layout::BoxLayout> {
     let tensor =
         tensor::value_into_tensor_for(NAME, x).map_err(|err| invalid(format!("{NAME}: {err}")))?;
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(invalid("boxplot: X must be a vector or matrix"));
     }
     let tensor_len = tensor::tensor_element_len(&tensor);
@@ -77,11 +78,12 @@ pub(super) async fn build_box_layout_cooperative(
         Some(group) => grouped_series(&tensor, group, options, cooperation).await?,
         None => ungrouped_series(&tensor, cooperation).await?,
     };
+    let (tensor_rows, tensor_cols) = boxplot_matrix_dimensions(&tensor);
     if let Some(color_group) = &options.color_group {
         match group_labels_cooperative(color_group, tensor_len, cooperation).await {
             Ok(_) => {}
-            Err(CooperativeLabelError::Semantic(err)) if tensor.rows > 1 && tensor.cols > 1 => {
-                group_labels_cooperative(color_group, tensor.rows, cooperation)
+            Err(CooperativeLabelError::Semantic(err)) if tensor_rows > 1 && tensor_cols > 1 => {
+                group_labels_cooperative(color_group, tensor_rows, cooperation)
                     .await
                     .map(|_| ())
                     .map_err(|second| match second {
@@ -133,7 +135,8 @@ async fn ungrouped_series(
     tensor: &Tensor,
     cooperation: &mut super::cooperation::BoxplotCooperation,
 ) -> BuiltinResult<Vec<(GroupLabel, Vec<f64>)>> {
-    if tensor.rows == 1 || tensor.cols == 1 {
+    let (rows, cols) = boxplot_matrix_dimensions(tensor);
+    if rows == 1 || cols == 1 {
         let mut values = Vec::new();
         values
             .try_reserve_exact(tensor::tensor_element_len(tensor))
@@ -146,15 +149,15 @@ async fn ungrouped_series(
     }
     let mut groups = Vec::new();
     groups
-        .try_reserve_exact(tensor.cols)
+        .try_reserve_exact(cols)
         .map_err(|error| allocation_failure("boxplot: groups exceed available memory", error))?;
-    for col in 0..tensor.cols {
+    for col in 0..cols {
         let mut values = Vec::new();
         values
-            .try_reserve_exact(tensor.rows)
+            .try_reserve_exact(rows)
             .map_err(|error| allocation_failure("boxplot: data exceeds available memory", error))?;
-        for row in 0..tensor.rows {
-            values.push(tensor::tensor_value_f64(tensor, col * tensor.rows + row));
+        for row in 0..rows {
+            values.push(tensor::tensor_value_f64(tensor, col * rows + row));
             cooperation.completed(1).await?;
         }
         groups.push((vec![KeyAtom::Text((col + 1).to_string())], values));
@@ -170,10 +173,11 @@ async fn grouped_series(
     cooperation: &mut super::cooperation::BoxplotCooperation,
 ) -> BuiltinResult<Vec<(GroupLabel, Vec<f64>)>> {
     let tensor_len = tensor::tensor_element_len(tensor);
+    let (tensor_rows, tensor_cols) = boxplot_matrix_dimensions(tensor);
     let labels = match group_labels_cooperative(&group, tensor_len, cooperation).await {
         Ok(labels) => labels,
-        Err(CooperativeLabelError::Semantic(err)) if tensor.rows > 1 && tensor.cols > 1 => {
-            let row_labels = group_labels_cooperative(&group, tensor.rows, cooperation)
+        Err(CooperativeLabelError::Semantic(err)) if tensor_rows > 1 && tensor_cols > 1 => {
+            let row_labels = group_labels_cooperative(&group, tensor_rows, cooperation)
                 .await
                 .map_err(|second| match second {
                     CooperativeLabelError::Semantic(_) => err,
@@ -183,7 +187,7 @@ async fn grouped_series(
             labels.try_reserve_exact(tensor_len).map_err(|error| {
                 allocation_failure("boxplot: grouping labels exceed available memory", error)
             })?;
-            for _col in 0..tensor.cols {
+            for _col in 0..tensor_cols {
                 for label in &row_labels {
                     cooperation
                         .completed(label.as_ref().map_or(1, |key| group_key_work_units(key)))

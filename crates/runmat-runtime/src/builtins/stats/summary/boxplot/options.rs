@@ -1,4 +1,5 @@
 //! Typed boxplot option admission and value decoding.
+use super::admission::boxplot_matrix_dimensions;
 use super::groups::{char_rows, number_label, numeric_scalar_label};
 use super::*;
 use crate::builtins::common::grouping_keys::format_integer;
@@ -146,17 +147,18 @@ pub(super) fn parse_colors(value: &Value) -> BuiltinResult<Vec<Vec4>> {
             "boxplot: Colors must be text or RGB matrix ({err})"
         ))
     })?;
-    if tensor.cols != 3 || tensor.rows == 0 {
+    let (rows, cols) = boxplot_matrix_dimensions(&tensor);
+    if cols != 3 || rows == 0 {
         return Err(invalid(
             "boxplot: Colors RGB matrix must have three columns",
         ));
     }
     let values = tensor::tensor_values_f64_cow(&tensor);
-    let mut colors = Vec::with_capacity(tensor.rows);
-    for row in 0..tensor.rows {
+    let mut colors = Vec::with_capacity(rows);
+    for row in 0..rows {
         let r = values[row];
-        let g = values[tensor.rows + row];
-        let b = values[2 * tensor.rows + row];
+        let g = values[rows + row];
+        let b = values[2 * rows + row];
         if !(0.0..=1.0).contains(&r) || !(0.0..=1.0).contains(&g) || !(0.0..=1.0).contains(&b) {
             return Err(invalid("boxplot: RGB values must be in the range [0,1]"));
         }

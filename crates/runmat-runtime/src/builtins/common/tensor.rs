@@ -145,7 +145,7 @@ pub fn tensor_into_values_f64(tensor: Tensor) -> Vec<f64> {
 
 /// Consume a tensor at a provider API boundary that currently accepts only owned f64 storage.
 pub fn tensor_into_host_f64_owned(tensor: Tensor) -> HostTensorOwned {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     HostTensorOwned {
         data: tensor_into_values_f64(tensor),
         shape,
@@ -234,7 +234,7 @@ pub fn integer_tensor_to_f64(tensor: Tensor) -> Result<Tensor, String> {
     if tensor.integer_storage().is_none() {
         return Ok(tensor);
     }
-    Tensor::new(tensor_values_f64(&tensor), tensor.shape.clone())
+    Tensor::new(tensor_values_f64(&tensor), tensor.shape().to_vec())
         .map_err(|e| format!("integer tensor conversion: {e}"))
 }
 
@@ -609,8 +609,8 @@ pub async fn dims_from_value_async_typed(
         Value::Num(n) => parse_numeric_dimension(*n).map(|dim| Some(vec![dim])),
         Value::Int(i) => parse_integer_shape_dimension(i).map(|dim| Some(vec![dim])),
         Value::Tensor(t) => match t.integer_storage() {
-            Some(storage) => dims_from_integer_tensor_values(storage, &t.shape),
-            None => dims_from_tensor_values(tensor_values_f64_cow(t).as_ref(), &t.shape),
+            Some(storage) => dims_from_integer_tensor_values(storage, t.shape()),
+            None => dims_from_tensor_values(tensor_values_f64_cow(t).as_ref(), t.shape()),
         },
         Value::LogicalArray(la) => {
             let values: Vec<f64> = la
@@ -635,20 +635,20 @@ pub async fn dims_from_value_async_typed(
                     tracing::trace!(
                         "dims_from_value_async: GPU tensor values gpu_shape={:?} host_shape={:?} class={} elements={}",
                         handle.shape(),
-                        t.shape,
+                        t.shape(),
                         t.numeric_dtype().class_name(),
                         t.len()
                     );
                     let dims = match t.integer_storage() {
-                        Some(storage) => dims_from_integer_tensor_values(storage, &t.shape)?,
+                        Some(storage) => dims_from_integer_tensor_values(storage, t.shape())?,
                         None => {
-                            dims_from_tensor_values(tensor_values_f64_cow(&t).as_ref(), &t.shape)?
+                            dims_from_tensor_values(tensor_values_f64_cow(&t).as_ref(), t.shape())?
                         }
                     };
                     if dims.is_none() {
                         tracing::debug!(
                             gpu_shape = ?handle.shape(),
-                            host_shape = ?t.shape,
+                            host_shape = ?t.shape(),
                             "dims_from_value_async: GPU tensor not interpretable as dims"
                         );
                     }
@@ -750,7 +750,7 @@ pub fn coerce_tensor_dtype(tensor: Tensor, dtype: NumericDType) -> Tensor {
     if tensor.numeric_dtype() == dtype {
         return tensor;
     }
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .expect("validated tensor storage");
@@ -820,12 +820,12 @@ mod dtype_tests {
         for storage in cases {
             let input = Tensor::from_numeric_storage(storage, vec![1, 2]).expect("typed input");
             let dtype = input.numeric_dtype();
-            let shape_pointer = input.shape.as_ptr();
+            let shape_pointer = input.shape().as_ptr();
             let payload_pointer = unsafe { input.host_buffer().foreign_data_pointer() };
             let output = coerce_tensor_dtype(input, dtype);
             assert_eq!(output.numeric_dtype(), dtype);
-            assert_eq!(output.shape, [1, 2]);
-            assert_eq!(output.shape.as_ptr(), shape_pointer);
+            assert_eq!(output.shape(), [1, 2]);
+            assert_eq!(output.shape().as_ptr(), shape_pointer);
             assert_eq!(
                 unsafe { output.host_buffer().foreign_data_pointer() },
                 payload_pointer
@@ -947,7 +947,7 @@ mod dtype_tests {
             Tensor::new_integer(IntegerStorage::I64(Vec::new()), vec![0, 3]).expect("empty input");
         let output = coerce_tensor_dtype(input, NumericDType::U64);
 
-        assert_eq!(output.shape, vec![0, 3]);
+        assert_eq!(output.shape(), [0, 3]);
         assert_eq!(output.numeric_dtype(), NumericDType::U64);
         assert_eq!(
             output.integer_storage(),
@@ -1147,7 +1147,7 @@ mod dimension_tests {
 
         let normalized = integer_tensor_to_f64(tensor).expect("normalize");
         assert!(normalized.integer_storage().is_none());
-        assert_eq!(normalized.shape, vec![1, 2]);
+        assert_eq!(normalized.shape(), [1, 2]);
         assert_eq!(
             normalized.materialize_f64(),
             vec![
@@ -1289,8 +1289,8 @@ pub fn binary_numeric_tensors(
 ) -> crate::BuiltinResult<(Vec<f64>, Vec<f64>, Vec<usize>)> {
     let lhs_values = tensor_values_f64_cow(lhs);
     let rhs_values = tensor_values_f64_cow(rhs);
-    let lhs_shape = default_shape_for(&lhs.shape, lhs_values.len());
-    let rhs_shape = default_shape_for(&rhs.shape, rhs_values.len());
+    let lhs_shape = default_shape_for(lhs.shape(), lhs_values.len());
+    let rhs_shape = default_shape_for(rhs.shape(), rhs_values.len());
     match (lhs_values.len(), rhs_values.len()) {
         (1, 1) => Ok((vec![lhs_values[0]], vec![rhs_values[0]], vec![1, 1])),
         (1, len) => Ok((vec![lhs_values[0]; len], rhs_values.into_owned(), rhs_shape)),
