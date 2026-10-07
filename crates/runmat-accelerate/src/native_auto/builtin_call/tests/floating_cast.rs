@@ -152,7 +152,7 @@ fn actual_single_like_adaptation_has_no_plain_cast_candidate_or_completion_recei
         .unwrap();
         let actual = match result {
             Value::Tensor(value) if !device_like => {
-                assert_eq!(value.shape, [1, 2, 2]);
+                assert_eq!(value.shape(), [1, 2, 2]);
                 value.as_f32_slice().unwrap().to_vec()
             }
             Value::GpuTensor(value) if device_like => {

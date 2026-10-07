@@ -2758,6 +2758,10 @@ fn collect_scalar_constant(graph: &AccelGraph, vid: ValueId) -> Option<ConstantT
     let mut current = vid;
     let mut nodes: Vec<NodeId> = Vec::new();
     let mut sign = 1.0f64;
+    // A folded unary output carries its represented value, which may differ
+    // from its source literal. Keep the outermost conversion's result while
+    // tracing back to an actual constant and accounting for every node.
+    let mut represented = None;
     let mut visited: HashSet<NodeId> = HashSet::new();
 
     loop {
@@ -2766,15 +2770,39 @@ fn collect_scalar_constant(graph: &AccelGraph, vid: ValueId) -> Option<ConstantT
             ValueOrigin::Constant => {
                 let base = value_info_scalar(info)?;
                 return Some(ConstantTrace {
-                    value: sign * base,
+                    value: represented.unwrap_or(sign * base),
                     nodes,
                 });
             }
-            ValueOrigin::NodeOutput { node, .. } => {
+            ValueOrigin::NodeOutput { node, output } => {
                 if !visited.insert(*node) {
                     return None;
                 }
                 let node_ref = graph.node(*node)?;
+                if node_ref.outputs.get(*output) != Some(&current) {
+                    return None;
+                }
+                if node_ref
+                    .tags
+                    .contains(&crate::graph::AccelGraphTag::UnaryScalarFold)
+                {
+                    let [input] = node_ref.inputs.as_slice() else {
+                        return None;
+                    };
+                    // The graph builder owns both the conversion and its
+                    // represented result. A shape/type hint alone is not a
+                    // constant, and native integer mirrors are not evidence.
+                    if !matches!(&info.constant, Some(Value::Num(_))) {
+                        return None;
+                    }
+                    // Capture only sign changes outside this proved result.
+                    // We still trace its source nodes for ownership, but any
+                    // inner negation is already included in the folded value.
+                    represented.get_or_insert(sign * value_info_scalar(info)?);
+                    nodes.push(*node);
+                    current = *input;
+                    continue;
+                }
                 match &node_ref.label {
                     AccelNodeLabel::Builtin { name, .. }
                         if name.eq_ignore_ascii_case("gpuarray") =>
@@ -3888,6 +3916,185 @@ mod tests {
         graph.values.push(info);
         assert!(!value_is_placeholder(&graph, 99));
         assert_eq!(resolve_numeric_vector_constant(&graph, 99), None);
+    }
+
+    fn folded_single_clamp_graph(input: Value, folded: Option<Value>) -> AccelGraph {
+        AccelGraph {
+            values: vec![
+                ValueInfo {
+                    id: 0,
+                    origin: ValueOrigin::Variable {
+                        kind: VarKind::Global,
+                        index: 0,
+                    },
+                    ty: Type::tensor(),
+                    shape: ShapeInfo::Tensor(vec![Some(2)]),
+                    constant: None,
+                },
+                ValueInfo {
+                    id: 1,
+                    origin: ValueOrigin::Constant,
+                    ty: Type::Num,
+                    shape: ShapeInfo::Scalar,
+                    constant: Some(input),
+                },
+                ValueInfo {
+                    id: 2,
+                    origin: ValueOrigin::NodeOutput { node: 0, output: 0 },
+                    ty: Type::Num,
+                    shape: ShapeInfo::Scalar,
+                    constant: folded,
+                },
+                ValueInfo {
+                    id: 3,
+                    origin: ValueOrigin::NodeOutput { node: 1, output: 0 },
+                    ty: Type::tensor(),
+                    shape: ShapeInfo::Tensor(vec![Some(2)]),
+                    constant: None,
+                },
+            ],
+            nodes: vec![
+                AccelNode {
+                    id: 0,
+                    label: AccelNodeLabel::Builtin {
+                        origin: Default::default(),
+                        name: "single".into(),
+                    },
+                    category: AccelOpCategory::Elementwise,
+                    inputs: vec![1],
+                    outputs: vec![2],
+                    span: InstrSpan { start: 0, end: 0 },
+                    tags: vec![AccelGraphTag::Elementwise, AccelGraphTag::UnaryScalarFold],
+                },
+                AccelNode {
+                    id: 1,
+                    label: AccelNodeLabel::Builtin {
+                        origin: Default::default(),
+                        name: "max".into(),
+                    },
+                    category: AccelOpCategory::Elementwise,
+                    inputs: vec![0, 2],
+                    outputs: vec![3],
+                    span: InstrSpan { start: 1, end: 1 },
+                    tags: vec![AccelGraphTag::Elementwise],
+                },
+            ],
+            var_bindings: StdHashMap::new(),
+            node_bindings: StdHashMap::new(),
+        }
+    }
+
+    #[test]
+    fn image_clamp_accepts_only_a_certified_folded_single_zero() {
+        let graph = folded_single_clamp_graph(Value::Num(0.0), Some(Value::Num(0.0)));
+        let trace = collect_scalar_constant(&graph, 2).expect("certified single zero");
+        assert_eq!(trace.value.to_bits(), 0.0f64.to_bits());
+        assert_eq!(trace.nodes, vec![0]);
+        assert_eq!(
+            split_max_with_zero_scalar(&graph, 3, &HashSet::new(), &mut Vec::new()),
+            Some((1, 0))
+        );
+
+        let assigned = HashSet::from([0]);
+        assert_eq!(
+            split_max_with_zero_scalar(&graph, 3, &assigned, &mut Vec::new()),
+            None,
+            "a conversion already owned by another group cannot certify the clamp"
+        );
+
+        let serialized = serde_json::to_string(&graph).expect("serialize graph");
+        let restored: AccelGraph = serde_json::from_str(&serialized).expect("deserialize graph");
+        assert!(collect_scalar_constant(&restored, 2).is_none());
+    }
+
+    #[test]
+    fn image_clamp_rejects_nonzero_unknown_and_unsafe_integer_controls() {
+        let mut untagged = folded_single_clamp_graph(Value::Num(0.0), Some(Value::Num(0.0)));
+        untagged.nodes[0]
+            .tags
+            .retain(|tag| *tag != AccelGraphTag::UnaryScalarFold);
+        let mut wrong_output = folded_single_clamp_graph(Value::Num(0.0), Some(Value::Num(0.0)));
+        wrong_output.nodes[0].outputs.clear();
+        let mut wrong_arity = folded_single_clamp_graph(Value::Num(0.0), Some(Value::Num(0.0)));
+        wrong_arity.nodes[0].inputs.push(1);
+        for graph in [
+            folded_single_clamp_graph(Value::Num(0.25), Some(Value::Num(0.25))),
+            folded_single_clamp_graph(Value::Num(0.0), None),
+            folded_single_clamp_graph(Value::Int(IntValue::U64(u64::MAX)), None),
+            folded_single_clamp_graph(Value::Int(IntValue::U64(u64::MAX)), Some(Value::Num(0.0))),
+            untagged,
+            wrong_output,
+            wrong_arity,
+        ] {
+            assert_eq!(
+                split_max_with_zero_scalar(&graph, 3, &HashSet::new(), &mut Vec::new()),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn image_scalar_trace_preserves_single_rounding_and_unclamped_source() {
+        let graph =
+            folded_single_clamp_graph(Value::Num(0.1), Some(Value::Num((0.1f64 as f32) as f64)));
+        let trace = collect_scalar_constant(&graph, 2).expect("rounded single constant");
+        assert_eq!(trace.value.to_bits(), ((0.1f64 as f32) as f64).to_bits());
+        assert_eq!(trace.nodes, vec![0]);
+        assert_eq!(collect_scalar_constant(&graph, 1).unwrap().value, 0.1);
+        assert_eq!(
+            split_max_with_zero_scalar(&graph, 3, &HashSet::new(), &mut Vec::new()),
+            None,
+            "nonzero max is not an image-normalize clamp"
+        );
+    }
+
+    #[test]
+    fn certified_fold_sign_counts_outer_but_not_inner_negation() {
+        // The current graph owner folds literal single calls. This exercises
+        // the generic proof tag if a later owner folds a unary expression
+        // whose source itself contains a negation.
+        let mut graph = folded_single_clamp_graph(Value::Num(2.0), Some(Value::Num(-2.0)));
+        graph.values.push(ValueInfo {
+            id: 4,
+            origin: ValueOrigin::NodeOutput { node: 2, output: 0 },
+            ty: Type::Num,
+            shape: ShapeInfo::Scalar,
+            constant: None,
+        });
+        graph.values.push(ValueInfo {
+            id: 5,
+            origin: ValueOrigin::NodeOutput { node: 3, output: 0 },
+            ty: Type::Num,
+            shape: ShapeInfo::Scalar,
+            constant: None,
+        });
+        graph.nodes[0].inputs = vec![4];
+        graph.nodes.push(AccelNode {
+            id: 2,
+            label: AccelNodeLabel::Primitive(PrimitiveOp::Neg),
+            category: AccelOpCategory::Elementwise,
+            inputs: vec![1],
+            outputs: vec![4],
+            span: InstrSpan { start: 2, end: 2 },
+            tags: vec![AccelGraphTag::Unary, AccelGraphTag::Elementwise],
+        });
+        graph.nodes.push(AccelNode {
+            id: 3,
+            label: AccelNodeLabel::Primitive(PrimitiveOp::Neg),
+            category: AccelOpCategory::Elementwise,
+            inputs: vec![2],
+            outputs: vec![5],
+            span: InstrSpan { start: 3, end: 3 },
+            tags: vec![AccelGraphTag::Unary, AccelGraphTag::Elementwise],
+        });
+
+        let inner = collect_scalar_constant(&graph, 2).expect("certified folded inner negation");
+        assert_eq!(inner.value, -2.0);
+        assert_eq!(inner.nodes, vec![0, 2]);
+
+        let outer = collect_scalar_constant(&graph, 5).expect("outer negation of folded value");
+        assert_eq!(outer.value, 2.0);
+        assert_eq!(outer.nodes, vec![3, 0, 2]);
     }
 
     #[test]

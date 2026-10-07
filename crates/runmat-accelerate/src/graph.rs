@@ -146,6 +146,9 @@ pub enum AccelGraphTag {
     MatMul,
     Transpose,
     ArrayConstruct,
+    /// The graph builder computed this unary output from an exact scalar
+    /// constant. Consumers must still read the represented output value.
+    UnaryScalarFold,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -4,7 +4,10 @@ use runmat_accelerate::graph::{
     AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, NodeId,
     PrimitiveOp, ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding, VarKind,
 };
-use runmat_builtins::{builtin_functions, shape_rules::element_count_if_known, AccelTag, Type};
+use runmat_builtins::{
+    builtin_functions, shape_rules::element_count_if_known, AccelTag, ArrayCreationInferenceRule,
+    ArrayInferenceRule, BuiltinInferenceRule, Type,
+};
 use runmat_value::Value;
 
 use crate::instr::Instr;
@@ -67,6 +70,12 @@ impl<'a> GraphBuilder<'a> {
                 category: AccelOpCategory::Other,
                 tags: Vec::new(),
             };
+            // Constructor shape provenance is independent of executable
+            // fusion admission. The canonical inference rule, not a legacy
+            // acceleration tag, owns this structural analysis hint.
+            if canonical_array_constructor_shape_tag(entry.contract.inference_rule) {
+                info.tags.push(AccelGraphTag::ArrayConstruct);
+            }
             match super::fusion_declaration::canonical_kind(entry, None) {
                 Some(crate::bytecode::FusionInstructionKind::Elementwise) => {
                     info.category = AccelOpCategory::Elementwise;
@@ -794,14 +803,17 @@ impl<'a> GraphBuilder<'a> {
                 category: AccelOpCategory::Other,
                 tags: Vec::new(),
             });
-        if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(name) {
+        if outputs != 1 {
+            info.category = AccelOpCategory::Other;
+            info.tags.clear();
+        } else if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(name) {
             // Cached identity-level candidates do not admit a particular call's
-            // controls. Reuse the compiler's canonical declaration authority.
-            if outputs != 1
-                || super::fusion_declaration::canonical_kind(entry, Some(argc)).is_none()
-            {
+            // controls. Structural constructor shape evidence is not an
+            // executable fusion claim, so retain only that tag on rejection.
+            if super::fusion_declaration::canonical_kind(entry, Some(argc)).is_none() {
                 info.category = AccelOpCategory::Other;
-                info.tags.clear();
+                info.tags
+                    .retain(|tag| matches!(tag, AccelGraphTag::ArrayConstruct));
             }
         }
         let category = self.call_category(name, &inputs, info.category.clone());
@@ -819,58 +831,27 @@ impl<'a> GraphBuilder<'a> {
             span,
             tags: info.tags.clone(),
         };
-        let mut out_type = match category {
-            AccelOpCategory::Elementwise => self.infer_elementwise_shape(&inputs).to_type(),
-            AccelOpCategory::Reduction => Type::Num,
-            AccelOpCategory::MatMul => self.infer_matmul_type(&inputs),
-            AccelOpCategory::Transpose => Type::Unknown,
-            AccelOpCategory::Other => {
-                // Prefer tag-driven array construct inference over name-based
-                if info
-                    .tags
-                    .iter()
-                    .any(|t| matches!(t, AccelGraphTag::ArrayConstruct))
-                {
-                    self.infer_array_constructor_from_tags(&inputs)
-                        .unwrap_or(Type::Unknown)
-                } else {
-                    Type::Unknown
-                }
+        // Array constructors derive geometry from admitted structural controls,
+        // even when their canonical expression declaration is elementwise.
+        // Broadcasting those controls would describe the inputs, not the result.
+        let out_type = if info.tags.contains(&AccelGraphTag::ArrayConstruct) {
+            self.infer_array_constructor_from_tags(&inputs)
+                .unwrap_or(Type::Unknown)
+        } else {
+            match category {
+                AccelOpCategory::Elementwise => self.infer_elementwise_shape(&inputs).to_type(),
+                AccelOpCategory::Reduction => Type::Num,
+                AccelOpCategory::MatMul => self.infer_matmul_type(&inputs),
+                AccelOpCategory::Transpose | AccelOpCategory::Other => Type::Unknown,
             }
         };
-        // If still unknown for an ArrayConstruct-tagged builtin, try a constant size-vector inference
-        if matches!(out_type, Type::Unknown)
-            && info
-                .tags
-                .iter()
-                .any(|t| matches!(t, AccelGraphTag::ArrayConstruct))
-            && inputs.len() == 1
-        {
-            if let Some(info0) = self.values.get(inputs[0] as usize) {
-                if let Some(Value::Tensor(t)) = &info0.constant {
-                    let rows = t.rows();
-                    let cols = t.cols();
-                    if rows == 1 && cols > 0 {
-                        let mut dims: Vec<Option<usize>> = Vec::with_capacity(cols);
-                        for j in 0..cols {
-                            dims.push(tensor_dimension_at(t, j));
-                        }
-                        out_type = Type::Tensor { shape: Some(dims) };
-                    } else if cols == 1 && rows > 0 {
-                        let mut dims: Vec<Option<usize>> = Vec::with_capacity(rows);
-                        for i in 0..rows {
-                            dims.push(tensor_dimension_at(t, i));
-                        }
-                        out_type = Type::Tensor { shape: Some(dims) };
-                    }
-                }
-            }
-        }
         let out_value = self.new_node_output(node_id, 0, out_type);
         node.outputs.push(out_value);
         self.nodes.push(node);
         self.stack.push(out_value);
-        self.maybe_fold_builtin_constant(name, &inputs, out_value);
+        if outputs == 1 {
+            self.maybe_fold_builtin_constant(name, &inputs, out_value);
+        }
     }
 
     fn call_category(
@@ -1123,12 +1104,30 @@ impl<'a> GraphBuilder<'a> {
             Value::Bool(flag) => Some(Value::Num(if *flag { 1.0f32 } else { 0.0f32 } as f64)),
             _ => None,
         };
-        if let Some(value) = folded {
-            if let Some(out_info) = self.values.get_mut(out_value as usize) {
-                out_info.update_type(&Type::Num);
-                out_info.constant = Some(value);
-            }
+        let Some(value) = folded else {
+            return;
+        };
+        let Some(ValueOrigin::NodeOutput { node, output }) =
+            self.values.get(out_value as usize).map(|info| &info.origin)
+        else {
+            return;
+        };
+        let (node, output) = (*node, *output);
+        if self
+            .nodes
+            .get(node as usize)
+            .and_then(|entry| entry.outputs.get(output))
+            != Some(&out_value)
+        {
+            return;
         }
+        if let Some(out_info) = self.values.get_mut(out_value as usize) {
+            out_info.update_type(&Type::Num);
+            out_info.constant = Some(value);
+        }
+        self.nodes[node as usize]
+            .tags
+            .push(AccelGraphTag::UnaryScalarFold);
     }
 }
 
@@ -1147,6 +1146,19 @@ fn tensor_dimension_at(tensor: &runmat_value::Tensor, index: usize) -> Option<us
     ((rounded - value).abs() <= f64::EPSILON)
         .then_some(rounded)
         .and_then(|value| usize::try_from(value as u128).ok())
+}
+
+fn canonical_array_constructor_shape_tag(rule: BuiltinInferenceRule) -> bool {
+    match rule {
+        BuiltinInferenceRule::Array(ArrayInferenceRule::Creation(creation)) => match creation {
+            // Zeros takes structural dimensions or a prototype. Full instead
+            // materializes its input; treating that input as dimensions would
+            // fabricate output geometry.
+            ArrayCreationInferenceRule::Zeros => true,
+            ArrayCreationInferenceRule::Full => false,
+        },
+        _ => false,
+    }
 }
 
 fn categorize_builtin(tags: &[AccelGraphTag]) -> AccelOpCategory {
@@ -1205,6 +1217,99 @@ mod tests {
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     #[test]
+    fn catalog_constructor_shape_is_analysis_only_across_nonfusion_calls() {
+        let like = build_accel_graph(
+            &[
+                Instr::LoadConst(3.0),
+                Instr::LoadConst(4.0),
+                Instr::CallBuiltinMulti("rand".into(), 2, 1),
+                Instr::StoreVar(0),
+                Instr::LoadString("like".into()),
+                Instr::LoadVar(0),
+                Instr::CallBuiltinMulti("zeros".into(), 2, 1),
+            ],
+            &[Type::Unknown],
+        );
+        let like_node = like.nodes.last().expect("zeros graph node");
+        assert_eq!(like_node.category, AccelOpCategory::Elementwise);
+        assert!(like_node.tags.contains(&AccelGraphTag::ArrayConstruct));
+        assert!(like_node.tags.contains(&AccelGraphTag::Elementwise));
+        assert_eq!(
+            like.value(like_node.outputs[0])
+                .expect("zeros output")
+                .shape,
+            ShapeInfo::Tensor(vec![Some(3), Some(4)])
+        );
+
+        let size_vector = build_accel_graph(
+            &[
+                Instr::LoadConst(5.0),
+                Instr::LoadConst(6.0),
+                Instr::CreateMatrix(1, 2),
+                Instr::StoreVar(0),
+                Instr::LoadVar(0),
+                Instr::CallBuiltinMulti("zeros".into(), 1, 1),
+            ],
+            &[Type::Unknown],
+        );
+        let vector_node = size_vector.nodes.last().expect("size-vector zeros node");
+        assert_eq!(vector_node.category, AccelOpCategory::Elementwise);
+        assert!(vector_node.tags.contains(&AccelGraphTag::ArrayConstruct));
+        assert_eq!(
+            size_vector
+                .value(vector_node.outputs[0])
+                .expect("size-vector output")
+                .shape,
+            ShapeInfo::Tensor(vec![Some(5), Some(6)])
+        );
+    }
+
+    #[test]
+    fn constructor_shape_does_not_fabricate_unknown_or_multioutput_geometry() {
+        let unknown = build_accel_graph(
+            &[
+                Instr::LoadVar(0),
+                Instr::CallBuiltinMulti("zeros".into(), 1, 1),
+            ],
+            &[Type::Unknown],
+        );
+        let unknown_node = unknown.nodes.last().expect("unknown zeros node");
+        assert_eq!(unknown_node.category, AccelOpCategory::Elementwise);
+        assert!(unknown_node.tags.contains(&AccelGraphTag::ArrayConstruct));
+        assert_eq!(
+            unknown.value(unknown_node.outputs[0]).unwrap().shape,
+            ShapeInfo::Unknown
+        );
+
+        let multi = build_accel_graph(
+            &[
+                Instr::LoadConst(3.0),
+                Instr::CallBuiltinMulti("zeros".into(), 1, 2),
+            ],
+            &[],
+        );
+        let multi_node = multi.nodes.last().expect("multi-output zeros node");
+        assert_eq!(multi_node.category, AccelOpCategory::Other);
+        assert!(multi_node.tags.is_empty());
+        assert_eq!(
+            multi.value(multi_node.outputs[0]).unwrap().shape,
+            ShapeInfo::Unknown
+        );
+
+        let full = GraphBuilder::new(&[], &[]);
+        let full_entry = runmat_builtins::builtin_catalog_entry_by_name("full").unwrap();
+        assert!(!canonical_array_constructor_shape_tag(
+            full_entry.contract.inference_rule
+        ));
+        assert!(!full
+            .builtin_cache
+            .get("full")
+            .unwrap()
+            .tags
+            .contains(&AccelGraphTag::ArrayConstruct));
+    }
+
+    #[test]
     fn structural_tensor_dimensions_read_all_integer_classes_exactly() {
         macro_rules! assert_dimensions {
             ($storage:expr) => {{
@@ -1236,6 +1341,46 @@ mod tests {
 
             builder.maybe_fold_builtin_constant("single", &[input], output);
             assert!(builder.values[output as usize].constant.is_none());
+        }
+    }
+
+    #[test]
+    fn graph_builder_tags_only_actual_unary_scalar_folds() {
+        for source in [0.0, 0.1] {
+            let graph = build_accel_graph(
+                &[
+                    Instr::LoadConst(source),
+                    Instr::CallBuiltinMulti("single".into(), 1, 1),
+                ],
+                &[],
+            );
+            let node = &graph.nodes[0];
+            assert!(node.tags.contains(&AccelGraphTag::UnaryScalarFold));
+            let output = graph.value(node.outputs[0]).expect("folded output");
+            assert!(matches!(
+                &output.constant,
+                Some(Value::Num(value)) if value.to_bits() == ((source as f32) as f64).to_bits()
+            ));
+        }
+
+        for instructions in [
+            vec![
+                Instr::LoadInt(IntValue::U64(u64::MAX)),
+                Instr::CallBuiltinMulti("single".into(), 1, 1),
+            ],
+            vec![
+                Instr::LoadVar(0),
+                Instr::CallBuiltinMulti("single".into(), 1, 1),
+            ],
+            vec![
+                Instr::LoadConst(0.0),
+                Instr::CallBuiltinMulti("single".into(), 1, 2),
+            ],
+        ] {
+            let graph = build_accel_graph(&instructions, &[Type::Unknown]);
+            let node = &graph.nodes[0];
+            assert!(!node.tags.contains(&AccelGraphTag::UnaryScalarFold));
+            assert!(graph.value(node.outputs[0]).unwrap().constant.is_none());
         }
     }
 

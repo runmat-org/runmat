@@ -2,7 +2,44 @@
 mod test_helpers;
 
 use runmat_value::{IntValue, IntegerStorage, Value};
-use test_helpers::execute_source;
+use test_helpers::{compile_source, execute_source, interpret};
+
+#[test]
+fn empty_string_index_assignment_validates_rhs_and_keeps_values() {
+    for source in [
+        r#"S = ["a" "b"]; S([]) = "z"; T = S;"#,
+        r#"S = ["a" "b"]; E = strings(0,1); S([]) = E; T = S;"#,
+    ] {
+        let bytecode = compile_source(source).expect("compile empty string assignment");
+        let t_slot = bytecode
+            .var_names
+            .iter()
+            .find_map(|(&slot, name)| (name == "T").then_some(slot))
+            .expect("named T output slot");
+        let vars = interpret(&bytecode).expect("scalar or compatible empty RHS");
+        let Value::StringArray(output) = vars.get(t_slot).expect("assigned T string array") else {
+            panic!(
+                "T must retain string-array class, got {:?}",
+                vars.get(t_slot)
+            );
+        };
+        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.data, vec!["a", "b"]);
+    }
+    for (source, expected) in [
+        (
+            r#"S = ["a" "b"]; S([]) = ["x" "y"];"#,
+            "RunMat:ShapeMismatch",
+        ),
+        (
+            r#"S = ["a" "b"]; S([]) = {42};"#,
+            "RunMat:InvalidSliceAssignmentRhs",
+        ),
+    ] {
+        let error = execute_source(source).expect_err("incompatible empty-selection RHS");
+        assert_eq!(error.identifier(), Some(expected));
+    }
+}
 
 #[test]
 fn linear_index_and_end_keyword() {

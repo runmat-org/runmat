@@ -3663,7 +3663,7 @@ mod tests {
             input.release().unwrap();
             coordinates.release().unwrap();
             output.release().unwrap();
-            assert_eq!(gathered.shape, expected.shape);
+            assert_eq!(gathered.shape.as_slice(), expected.shape());
             let tol = match provider.precision() {
                 runmat_accelerate_api::ProviderPrecision::F64 => 1.0e-10,
                 runmat_accelerate_api::ProviderPrecision::F32 => 2.0e-6,

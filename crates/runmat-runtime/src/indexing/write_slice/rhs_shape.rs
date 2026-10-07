@@ -17,10 +17,23 @@ pub(super) fn validated_assignment_rhs_shape(
     rhs_len: usize,
     selection_lengths: &[usize],
 ) -> Result<Vec<usize>, RuntimeError> {
-    let dims = selection_lengths.len();
+    validate_assignment_rhs_shape(rhs_shape, rhs_len, selection_lengths)?;
     if rhs_len == 1 {
-        return Ok(vec![1; dims]);
+        Ok(vec![1; selection_lengths.len()])
+    } else {
+        Ok(selection_lengths.to_vec())
     }
+}
+
+fn validate_assignment_rhs_shape(
+    rhs_shape: &[usize],
+    rhs_len: usize,
+    selection_lengths: &[usize],
+) -> Result<(), RuntimeError> {
+    if rhs_len == 1 {
+        return Ok(());
+    }
+    let dims = selection_lengths.len();
     let matches = if dims == 1 {
         rhs_len == selection_lengths[0]
     } else {
@@ -33,7 +46,15 @@ pub(super) fn validated_assignment_rhs_shape(
     if !matches || expected != rhs_len {
         return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
     }
-    Ok(selection_lengths.to_vec())
+    Ok(())
+}
+
+pub(super) fn validate_empty_selection_rhs_shape(
+    rhs_shape: &[usize],
+    rhs_len: usize,
+    selection_lengths: &[usize],
+) -> Result<(), RuntimeError> {
+    validate_assignment_rhs_shape(rhs_shape, rhs_len, selection_lengths)
 }
 
 #[cfg(test)]

@@ -50,6 +50,7 @@ pub async fn assign_gpu_slice_with_plan(
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
     if plan.indices.is_empty() {
+        super::empty_rhs::validate_resident_rhs(target, rhs, plan)?;
         return Ok(Value::GpuTensor(target.clone()));
     }
     let mut indices = plan.indices.clone();

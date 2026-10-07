@@ -9,7 +9,7 @@ use crate::indexing::plan::IndexPlan;
 use crate::runtime_error::semantic_error as mex;
 use crate::RuntimeError;
 use runmat_value::{
-    ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType,
+    CharArray, ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType,
     NumericScalar, NumericStorage, SparseTensor, StringArray, Tensor, Value,
 };
 
@@ -133,6 +133,7 @@ pub(crate) fn delete_integer_complex_storage_positions(
     .expect("paired integer complex storage must retain matching classes and lengths")
 }
 
+mod empty_rhs;
 mod rhs_shape;
 use rhs_shape::{checked_assignment_element_count, validated_assignment_rhs_shape};
 
@@ -306,6 +307,62 @@ pub enum StringRhsView {
     },
 }
 
+enum CellStringElement<'a> {
+    Text(&'a str),
+    Chars(&'a CharArray),
+}
+
+fn cell_string_element(value: &Value) -> Result<CellStringElement<'_>, RuntimeError> {
+    match value {
+        Value::String(text) => Ok(CellStringElement::Text(text)),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(CellStringElement::Chars(chars)),
+        Value::CharArray(_) => Err(mex(
+            "InvalidSliceAssignmentRhs",
+            "rhs cell character arrays must be row vectors",
+        )),
+        Value::StringArray(strings) if strings.data.len() == 1 => {
+            Ok(CellStringElement::Text(&strings.data[0]))
+        }
+        other => Err(mex(
+            "InvalidSliceAssignmentRhs",
+            format!("rhs cell elements must be string scalars or character vectors, got {other:?}"),
+        )),
+    }
+}
+
+pub fn validate_string_rhs_for_plan(
+    rhs: &Value,
+    selection_lengths: &[usize],
+) -> Result<(), RuntimeError> {
+    match rhs {
+        Value::String(_) => Ok(()),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(()),
+        Value::CharArray(_) => Err(mex(
+            "InvalidSliceAssignmentRhs",
+            "rhs character array must be a row vector",
+        )),
+        Value::StringArray(strings) => rhs_shape::validate_empty_selection_rhs_shape(
+            &strings.shape,
+            strings.data.len(),
+            selection_lengths,
+        ),
+        Value::Cell(cell) => {
+            for value in &cell.data {
+                cell_string_element(value)?;
+            }
+            rhs_shape::validate_empty_selection_rhs_shape(
+                &cell.shape,
+                cell.data.len(),
+                selection_lengths,
+            )
+        }
+        _ => Err(mex(
+            "InvalidSliceAssignmentRhs",
+            "rhs must be string, string array, or cellstr",
+        )),
+    }
+}
+
 pub fn build_string_rhs_view(
     rhs: &Value,
     selection_lengths: &[usize],
@@ -341,26 +398,16 @@ pub fn build_string_rhs_view(
     if let Value::Cell(cell) = rhs {
         let dims = selection_lengths.len();
         let mut data = Vec::with_capacity(cell.data.len());
-        for handle in &cell.data {
-            let value = handle;
-            match value {
-                Value::String(text) => data.push(text.clone()),
-                Value::CharArray(chars) => data.push(chars.row_string().ok_or_else(|| {
-                    mex(
-                        "InvalidSliceAssignmentRhs",
-                        "rhs cell character arrays must be row vectors",
-                    )
-                })?),
-                Value::StringArray(strings) if strings.data.len() == 1 => {
-                    data.push(strings.data[0].clone())
-                }
-                other => {
-                    return Err(mex(
-                        "InvalidSliceAssignmentRhs",
-                        format!(
-                            "rhs cell elements must be string scalars or character vectors, got {other:?}"
-                        ),
-                    ))
+        for value in &cell.data {
+            match cell_string_element(value)? {
+                CellStringElement::Text(text) => data.push(text.to_owned()),
+                CellStringElement::Chars(chars) => {
+                    data.push(chars.row_string().ok_or_else(|| {
+                        mex(
+                            "InvalidSliceAssignmentRhs",
+                            "rhs cell character arrays must be row vectors",
+                        )
+                    })?)
                 }
             }
         }
@@ -649,11 +696,16 @@ pub async fn assign_sparse_with_plan(
     if sparse.integer_storage().is_some() {
         crate::compatibility::ensure_sparse_integer_extension_enabled("indexed assignment")?;
     }
-    if is_empty_delete_rhs(rhs) {
+    // Deletion is a distinct compiler-selected operation. A computed empty RHS
+    // may still assign to an empty selection when its shape is compatible.
+    if !plan.indices.is_empty() && is_empty_delete_rhs(rhs) {
         return Err(mex(
             "SparseAssignmentUnsupported",
             "Sparse indexed deletion is not yet supported",
         ));
+    }
+    if plan.indices.is_empty() {
+        empty_rhs::validate_sparse_rhs(&sparse, rhs, plan)?;
     }
     let target_rows = plan.base_shape.first().copied().unwrap_or(sparse.rows);
     let target_cols = plan.base_shape.get(1).copied().unwrap_or(sparse.cols);
@@ -827,6 +879,7 @@ pub async fn assign_tensor_with_plan(
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
     if plan.indices.is_empty() {
+        empty_rhs::validate_real_or_host_complex_rhs(rhs, plan)?;
         return Ok(Value::Tensor(t));
     }
     if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
@@ -874,6 +927,7 @@ pub async fn assign_complex_with_plan(
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
     if plan.indices.is_empty() {
+        empty_rhs::validate_complex_rhs(rhs, plan, tensor.integer_storage().is_some())?;
         return Ok(Value::ComplexTensor(tensor));
     }
     if tensor.integer_storage().is_some() {
@@ -1214,11 +1268,12 @@ mod tests {
     use super::{
         assign_complex_with_plan, assign_gpu_slice_with_plan, assign_sparse_with_plan,
         assign_tensor_with_plan, build_complex_rhs_view, build_string_rhs_view,
-        delete_complex_with_plan, delete_gpu_slice_with_plan, delete_tensor_with_plan,
-        integer_gpu_rhs_indices_for_plan, materialize_rhs_linear_real, materialize_rhs_nd_real,
-        validated_assignment_rhs_shape, ComplexRhsView, StringRhsView,
+        delete_complex_with_plan, delete_gpu_slice_with_plan, delete_sparse_with_plan,
+        delete_tensor_with_plan, integer_gpu_rhs_indices_for_plan, materialize_rhs_linear_real,
+        materialize_rhs_nd_real, validated_assignment_rhs_shape, ComplexRhsView, StringRhsView,
     };
-    use crate::indexing::plan::IndexPlan;
+    use crate::indexing::plan::{build_sparse_assignment_plan, IndexPlan};
+    use crate::indexing::selectors::SliceSelector;
     use futures::executor::block_on;
     use runmat_value::{
         CellArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType,
@@ -1554,6 +1609,99 @@ mod tests {
     }
 
     #[test]
+    fn empty_numeric_assignment_validates_rhs_without_mutating_exact_storage() {
+        let plan = IndexPlan::new(vec![], vec![0], vec![0], 1, vec![1, 2]);
+        let target = Tensor::new_integer(
+            IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
+            vec![1, 2],
+        )
+        .unwrap();
+        for rhs in [
+            Value::Int(runmat_value::IntValue::U64(7)),
+            Value::Tensor(Tensor::new_integer(IntegerStorage::U64(vec![]), vec![0, 1]).unwrap()),
+        ] {
+            let Value::Tensor(output) =
+                block_on(assign_tensor_with_plan(target.clone(), &plan, &rhs)).unwrap()
+            else {
+                panic!("integer target");
+            };
+            assert_eq!(output.shape(), &[1, 2]);
+            assert_eq!(output.integer_storage(), target.integer_storage());
+        }
+        for (rhs, expected) in [
+            (
+                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+                "RunMat:ShapeMismatch",
+            ),
+            (
+                Value::String("invalid".into()),
+                "RunMat:InvalidSliceAssignmentRhs",
+            ),
+        ] {
+            let error = block_on(assign_tensor_with_plan(target.clone(), &plan, &rhs))
+                .expect_err("empty selection still validates RHS");
+            assert_eq!(error.identifier(), Some(expected));
+            assert_eq!(
+                target.integer_storage(),
+                Some(&IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]))
+            );
+        }
+    }
+
+    #[test]
+    fn empty_complex_assignment_preserves_class_specific_rhs_admission() {
+        let plan = IndexPlan::new(vec![], vec![0], vec![0], 1, vec![1, 2]);
+        let floating = ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![1, 2]).unwrap();
+        let Value::ComplexTensor(output) = block_on(assign_complex_with_plan(
+            floating.clone(),
+            &plan,
+            &Value::Complex(7.0, 8.0),
+        ))
+        .unwrap() else {
+            panic!("complex target");
+        };
+        assert_eq!(output, floating);
+        let empty = Value::ComplexTensor(ComplexTensor::new(vec![], vec![0, 1]).unwrap());
+        assert!(block_on(assign_complex_with_plan(floating.clone(), &plan, &empty)).is_ok());
+        let incompatible = Value::ComplexTensor(
+            ComplexTensor::new(vec![(1.0, 0.0), (2.0, 0.0)], vec![1, 2]).unwrap(),
+        );
+        let error = block_on(assign_complex_with_plan(
+            floating.clone(),
+            &plan,
+            &incompatible,
+        ))
+        .expect_err("nonempty nonscalar complex RHS");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+        let error = block_on(assign_complex_with_plan(
+            floating,
+            &plan,
+            &Value::Int(runmat_value::IntValue::U64(1)),
+        ))
+        .expect_err("floating complex RHS class admission");
+        assert_eq!(error.identifier(), Some("RunMat:InvalidSliceAssignmentRhs"));
+
+        let integer = ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX, 3]),
+                IntegerStorage::U64(vec![2, 4]),
+            )
+            .unwrap(),
+            vec![1, 2],
+        )
+        .unwrap();
+        let Value::ComplexTensor(output) = block_on(assign_complex_with_plan(
+            integer.clone(),
+            &plan,
+            &Value::Int(runmat_value::IntValue::U64(7)),
+        ))
+        .unwrap() else {
+            panic!("integer complex target");
+        };
+        assert_eq!(output, integer);
+    }
+
+    #[test]
     fn floating_logical_complex_and_string_rhs_reject_singleton_expansion() {
         let floating = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("floating"));
         let error = block_on(materialize_rhs_nd_real(&floating, &[2, 2]))
@@ -1882,6 +2030,89 @@ mod tests {
         let error = block_on(assign_sparse_with_plan(sparse, &plan, &rhs))
             .expect_err("sparse nonscalar singleton expansion must reject");
         assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn sparse_empty_assignment_admits_compatible_computed_empty_rhs_only() {
+        let sparse = SparseTensor::new(1, 2, vec![0, 1, 2], vec![0, 0], vec![5.0, 7.0])
+            .expect("sparse target");
+        let plan = IndexPlan::new(vec![], vec![0, 2], vec![0, 2], 2, vec![1, 2]);
+        let compatible = Value::Tensor(Tensor::new(vec![], vec![0, 2]).unwrap());
+        let Value::SparseTensor(output) =
+            block_on(assign_sparse_with_plan(sparse.clone(), &plan, &compatible))
+                .expect("computed empty RHS matches empty selection")
+        else {
+            panic!("sparse target");
+        };
+        assert_eq!(output, sparse);
+
+        let incompatible = Value::Tensor(Tensor::new(vec![], vec![2, 0]).unwrap());
+        let error = block_on(assign_sparse_with_plan(
+            sparse.clone(),
+            &plan,
+            &incompatible,
+        ))
+        .expect_err("empty RHS dimensions must align with empty selection");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+
+        let occupied = IndexPlan::new(vec![0], vec![1, 1], vec![1, 1], 2, vec![1, 2]);
+        let error = block_on(assign_sparse_with_plan(
+            sparse.clone(),
+            &occupied,
+            &compatible,
+        ))
+        .expect_err("nonempty sparse assignment cannot treat empty RHS as deletion");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:SparseAssignmentUnsupported")
+        );
+        let Value::SparseTensor(deleted) =
+            delete_sparse_with_plan(sparse.clone(), &plan, &compatible)
+                .expect("compiler-selected empty deletion remains separate")
+        else {
+            panic!("sparse deletion");
+        };
+        assert_eq!(deleted, sparse);
+    }
+
+    #[test]
+    fn sparse_empty_selector_growing_plan_retains_current_runmat_shape_behavior() {
+        let sparse = SparseTensor::new(1, 2, vec![0, 1, 2], vec![0, 0], vec![5.0, 7.0])
+            .expect("sparse target");
+        let plan = build_sparse_assignment_plan(
+            &[SliceSelector::Indices(vec![]), SliceSelector::Scalar(5)],
+            2,
+            &[1, 2],
+        )
+        .expect("empty selector may still produce a growing plan");
+        assert!(plan.indices.is_empty());
+        assert_eq!(plan.selection_lengths, vec![0, 1]);
+        assert_eq!(plan.base_shape, vec![1, 5]);
+
+        // This records RunMat's existing sparse growth policy, not verified MATLAB parity.
+        let Value::SparseTensor(output) = block_on(assign_sparse_with_plan(
+            sparse.clone(),
+            &plan,
+            &Value::Num(9.0),
+        ))
+        .expect("scalar RHS is compatible with an empty selection") else {
+            panic!("sparse output");
+        };
+        assert_eq!((output.rows, output.cols), (1, 5));
+        assert_eq!(output.col_ptrs, vec![0, 1, 2, 2, 2, 2]);
+        assert_eq!(output.row_indices, vec![0, 0]);
+        assert_eq!(output.as_f64_slice(), Some(&[5.0, 7.0][..]));
+
+        let incompatible = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
+        let error = block_on(assign_sparse_with_plan(
+            sparse.clone(),
+            &plan,
+            &incompatible,
+        ))
+        .expect_err("invalid RHS rejects before sparse expansion");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+        assert_eq!((sparse.rows, sparse.cols), (1, 2));
+        assert_eq!(sparse.as_f64_slice(), Some(&[5.0, 7.0][..]));
     }
 
     #[test]

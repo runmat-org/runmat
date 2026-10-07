@@ -90,16 +90,25 @@ fn compile_with_bound_analysis(
     fusion_metadata.instruction_window_count = instruction_windows.len();
     fusion_metadata.instruction_windows = instruction_windows.clone();
     #[cfg(feature = "native-accel")]
-    let (accel_graph, fusion_groups) = if fusion_metadata.mir_fusion_candidate_group_count == 0
-        || instruction_windows.is_empty()
-    {
+    let has_admitted_analysis_signal = fusion_metadata.mir_fusion_signal_count > 0
+        && admitted_analysis_signal_touches_instruction(
+            mir,
+            entrypoint_target,
+            &c.instructions,
+            &c.instr_spans,
+        );
+    #[cfg(feature = "native-accel")]
+    let (accel_graph, fusion_groups) = if !has_admitted_analysis_signal {
         (None, Vec::new())
     } else {
         let accel_graph = build_accel_graph(&c.instructions, &c.var_types);
         // Compile-time ownership is semantic-window scaffolding only; runtime fusion plan
         // preparation performs node reconciliation against the accel graph.
-        let mut fusion_groups =
-            derive_semantic_fusion_groups_from_instruction_windows(&instruction_windows);
+        let mut fusion_groups = if fusion_metadata.mir_fusion_candidate_group_count > 0 {
+            derive_semantic_fusion_groups_from_instruction_windows(&instruction_windows)
+        } else {
+            Vec::new()
+        };
         if !fusion_groups.is_empty() {
             annotate_fusion_groups_with_stack_layout(
                 &c.instructions,
@@ -114,9 +123,8 @@ fn compile_with_bound_analysis(
                 )
             });
         }
-        // Preserve accel graph whenever semantic candidate/window scaffolds exist.
-        // Runtime planning owns final executable-group reconciliation and may still
-        // recover groups from semantic windows when compile groups are empty.
+        // Analysis needs a graph for even one admitted operation. Runtime
+        // execution still requires independently scoped candidate windows.
         (Some(accel_graph), fusion_groups)
     };
     let async_metadata = derive_semantic_async_metadata(mir, entrypoint_target);
@@ -335,6 +343,64 @@ fn merge_stmt_run_span(
 #[cfg(feature = "native-accel")]
 fn source_span_contains(outer: runmat_hir::Span, inner: runmat_hir::Span) -> bool {
     outer.start <= inner.start && inner.end <= outer.end
+}
+
+#[cfg(feature = "native-accel")]
+fn admitted_analysis_signal_touches_instruction(
+    mir: &MirAssembly,
+    entrypoint_target: Option<FunctionId>,
+    instructions: &[Instr],
+    instr_spans: &[runmat_hir::Span],
+) -> bool {
+    let Some(body) = entrypoint_target.and_then(|target| mir.bodies.get(&target)) else {
+        return false;
+    };
+    let signal_spans = body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .filter_map(|stmt| {
+            let value = match &stmt.kind {
+                MirStmtKind::Assign { value, .. }
+                | MirStmtKind::MultiAssign { value, .. }
+                | MirStmtKind::SequenceAssign { value, .. }
+                | MirStmtKind::Expr(value) => value,
+                _ => return None,
+            };
+            rvalue_has_fusion_signal(value).then_some(stmt.span)
+        })
+        .collect::<Vec<_>>();
+    admitted_signal_spans_touch_instruction(&signal_spans, instructions, instr_spans)
+}
+
+#[cfg(feature = "native-accel")]
+fn admitted_signal_spans_touch_instruction(
+    signal_spans: &[runmat_hir::Span],
+    instructions: &[Instr],
+    instr_spans: &[runmat_hir::Span],
+) -> bool {
+    if signal_spans.is_empty() {
+        return false;
+    }
+    // Sort once; the prefix maximum answers whether any earlier-starting
+    // semantic signal also contains the instruction's end boundary.
+    let mut sorted = signal_spans.to_vec();
+    sorted.sort_unstable_by_key(|span| span.start);
+    let mut maximum_end = 0;
+    for span in &mut sorted {
+        maximum_end = maximum_end.max(span.end);
+        span.end = maximum_end;
+    }
+    instructions
+        .iter()
+        .zip(instr_spans)
+        .any(|(instruction, span)| {
+            if instr_fusion_signal_kind(instruction).is_none() {
+                return false;
+            }
+            let preceding = sorted.partition_point(|signal| signal.start <= span.start);
+            preceding > 0 && sorted[preceding - 1].end >= span.end
+        })
 }
 
 #[cfg(all(feature = "native-accel", test))]
@@ -1386,7 +1452,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn compile_omits_accel_graph_when_signals_exist_but_no_candidate_group() {
+    fn compile_keeps_analysis_graph_for_single_admitted_signal_without_execution_group() {
         let ast = runmat_parser::parse("x = 1 + 2;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -1404,13 +1470,59 @@ mod tests {
             "expected no semantic candidate groups for a single-operation run"
         );
         assert!(
+            bytecode.accel_graph.is_some(),
+            "one admitted arithmetic signal still needs a typed analysis graph"
+        );
+        assert!(
             runtime_graph.is_none(),
-            "expected runtime accel graph omission to follow semantic candidate-group gating"
+            "runtime fusion graph still requires semantic candidate groups"
         );
         assert!(
             bytecode.fusion_groups.is_empty(),
             "expected no executable bytecode fusion groups without semantic candidates"
         );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn standalone_zeros_forms_keep_analysis_graph_without_executable_groups() {
+        for source in [
+            "A = rand(3,4); B = zeros('like', A);",
+            "sz = [5,6]; B = zeros(sz);",
+        ] {
+            let ast = runmat_parser::parse(source).expect("parse");
+            let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+            let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+            let entrypoint = hir.assembly.entrypoints[0].id;
+            let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+            assert!(
+                bytecode.fusion_metadata.mir_fusion_signal_count > 0,
+                "{source}"
+            );
+            assert!(bytecode.accel_graph.is_some(), "{source} analysis graph");
+            assert!(
+                bytecode.fusion_groups.is_empty(),
+                "{source} execution groups"
+            );
+            assert!(
+                bytecode.runtime_fusion_groups().is_empty(),
+                "{source} runtime groups"
+            );
+        }
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn unadmitted_random_call_does_not_materialize_analysis_or_execution_groups() {
+        let ast = runmat_parser::parse("x = rand(2,2);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        assert_eq!(bytecode.fusion_metadata.mir_fusion_signal_count, 0);
+        assert!(bytecode.accel_graph.is_none());
+        assert!(bytecode.fusion_groups.is_empty());
+        assert!(bytecode.runtime_fusion_groups().is_empty());
     }
 
     #[cfg(feature = "native-accel")]
@@ -1433,6 +1545,7 @@ mod tests {
             runtime_graph.is_none(),
             "expected runtime accel graph omission when candidate overlap is non-accelerable logical ops"
         );
+        assert!(bytecode.accel_graph.is_none());
         assert!(
             bytecode.fusion_groups.is_empty(),
             "expected no executable fusion groups for logical-only candidate overlap"
@@ -1615,10 +1728,65 @@ mod tests {
             runtime_graph.is_none(),
             "entrypoint with no semantic candidates should omit runtime accel graph even if helper bodies are fusible"
         );
+        assert!(bytecode.accel_graph.is_none());
         assert!(
             bytecode.fusion_groups.is_empty(),
             "entrypoint with no semantic candidates should not emit executable fusion groups"
         );
+        let helper_span = mir
+            .bodies
+            .iter()
+            .find(|(id, _)| **id != hir.assembly.entrypoints[0].target)
+            .and_then(|(_, body)| {
+                body.blocks
+                    .iter()
+                    .flat_map(|block| &block.statements)
+                    .next()
+            })
+            .expect("helper statement")
+            .span;
+        assert!(!super::admitted_analysis_signal_touches_instruction(
+            &mir,
+            Some(hir.assembly.entrypoints[0].target),
+            &[Instr::Add],
+            &[helper_span],
+        ));
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn analysis_signal_interval_index_checks_both_boundaries_for_many_unordered_instructions() {
+        let spans = (0..4096)
+            .map(|index| runmat_hir::Span {
+                start: index * 10,
+                end: index * 10 + 4,
+            })
+            .collect::<Vec<_>>();
+        let mut reversed = spans
+            .iter()
+            .rev()
+            .map(|span| runmat_hir::Span {
+                start: span.start,
+                end: span.end + 1,
+            })
+            .collect::<Vec<_>>();
+        reversed.push(spans[0]);
+        let instructions = vec![Instr::Add; reversed.len()];
+        assert!(super::admitted_signal_spans_touch_instruction(
+            &spans,
+            &instructions,
+            &reversed,
+        ));
+        assert!(!super::admitted_signal_spans_touch_instruction(
+            &spans,
+            &[Instr::Add],
+            &[runmat_hir::Span { start: 10, end: 15 }],
+        ));
+        assert!(!super::admitted_signal_spans_touch_instruction(
+            &spans,
+            &[Instr::Add],
+            &[runmat_hir::Span { start: 5, end: 14 }],
+        ));
     }
 
     #[cfg(feature = "native-accel")]

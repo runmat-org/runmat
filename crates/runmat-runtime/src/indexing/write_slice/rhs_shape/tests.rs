@@ -1,13 +1,51 @@
 use super::super::{
     assign_tensor_with_plan, build_complex_rhs_view, build_string_rhs_view,
-    integer_gpu_rhs_indices_for_plan, materialize_rhs_nd_real, ComplexRhsView, StringRhsView,
+    integer_gpu_rhs_indices_for_plan, materialize_rhs_nd_real, validate_string_rhs_for_plan,
+    ComplexRhsView, StringRhsView,
 };
 use super::validated_assignment_rhs_shape;
 use crate::indexing::plan::IndexPlan;
 use futures::executor::block_on;
 use runmat_value::{
-    CellArray, ComplexTensor, IntegerStorage, LogicalArray, StringArray, Tensor, Value,
+    CellArray, CharArray, ComplexTensor, IntegerStorage, LogicalArray, StringArray, Tensor, Value,
 };
+
+#[test]
+fn empty_string_selection_validates_text_and_cellstr_without_copying_payloads() {
+    let selected = [0];
+    for rhs in [
+        Value::String("scalar".into()),
+        Value::CharArray(CharArray::new_row("scalar")),
+        Value::StringArray(StringArray::new(vec![], vec![0, 1]).unwrap()),
+        Value::Cell(CellArray::new_with_shape(vec![], vec![0, 1]).unwrap()),
+    ] {
+        validate_string_rhs_for_plan(&rhs, &selected).expect("scalar or compatible empty RHS");
+    }
+    for (rhs, expected) in [
+        (
+            Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
+            "RunMat:ShapeMismatch",
+        ),
+        (
+            Value::Cell(
+                CellArray::new_with_shape(
+                    vec![Value::String("a".into()), Value::String("b".into())],
+                    vec![1, 2],
+                )
+                .unwrap(),
+            ),
+            "RunMat:ShapeMismatch",
+        ),
+        (
+            Value::Cell(CellArray::new_with_shape(vec![Value::Num(1.0)], vec![1, 1]).unwrap()),
+            "RunMat:InvalidSliceAssignmentRhs",
+        ),
+    ] {
+        let error = validate_string_rhs_for_plan(&rhs, &selected)
+            .expect_err("incompatible empty-selection RHS");
+        assert_eq!(error.identifier(), Some(expected));
+    }
+}
 
 #[test]
 fn singleton_dimensions_align_without_nonscalar_expansion() {

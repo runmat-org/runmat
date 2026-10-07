@@ -247,6 +247,11 @@ pub(super) async fn dispatch(
                     let plan = build_index_plan(&selectors, *dims, &sa.shape)
                         .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     if plan.indices.is_empty() {
+                        idx_write_slice::validate_string_rhs_for_plan(
+                            &rhs,
+                            &plan.selection_lengths,
+                        )
+                        .map_err(|e| map_slice_plan_error("slice assign", e))?;
                         stack.push(Value::StringArray(sa));
                         return Ok(true);
                     }
