@@ -22,7 +22,10 @@ fn host_and_gpu_admission_share_low_rank_operand_geometry() {
         for input in inputs {
             let host = ArrayData::from_value(input.clone()).unwrap();
             assert_eq!(host.shape_vec(), expected);
-            assert_eq!(shape(&[input.clone()]).unwrap(), Some(expected.clone()));
+            assert_eq!(
+                shape(std::slice::from_ref(&input)).unwrap(),
+                Some(expected.clone())
+            );
             assert_eq!(
                 shape(&[input, Value::Num(1.0)]).unwrap(),
                 Some(expanded.clone())

@@ -11,8 +11,11 @@ fn fitlm_dense_matrix_projection_preserves_rank_zero_and_rank_one_policy() {
     assert_eq!(fitlm_matrix_dimensions(&vector), (1, 3));
 
     let one_response = Value::Tensor(Tensor::new(vec![4.0], vec![1, 1]).expect("one response"));
-    preflight_response_shape(&Value::Tensor(vector.clone()), &[one_response.clone()])
-        .expect("rank-one predictors have one observation at preflight");
+    preflight_response_shape(
+        &Value::Tensor(vector.clone()),
+        std::slice::from_ref(&one_response),
+    )
+    .expect("rank-one predictors have one observation at preflight");
     let rank_zero_error = preflight_response_shape(&Value::Tensor(scalar.clone()), &[one_response])
         .expect_err("rank-zero predictors have no observation at preflight");
     assert!(rank_zero_error.message().contains("length(y)"));
