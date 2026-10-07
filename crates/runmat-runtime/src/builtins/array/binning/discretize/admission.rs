@@ -87,7 +87,7 @@ fn real_numeric(value: &Value, role: &str) -> BuiltinResult<()> {
 
 pub(super) fn shape(value: &Value) -> Vec<usize> {
     match value {
-        Value::Tensor(value) => value.shape.clone(),
+        Value::Tensor(value) => value.shape().to_vec(),
         Value::LogicalArray(value) => value.shape.clone(),
         Value::SparseTensor(value) => vec![value.rows, value.cols],
         Value::GpuTensor(value) => value.shape().to_vec(),

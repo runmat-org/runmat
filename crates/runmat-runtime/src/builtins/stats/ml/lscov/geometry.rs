@@ -1,5 +1,13 @@
 use super::*;
 
+fn lscov_dense_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [cols] => (1, *cols),
+        [rows, cols, ..] => (*rows, *cols),
+    }
+}
+
 pub(super) fn real_rhs_matrix(
     tensor: &Tensor,
     rows: usize,
@@ -8,7 +16,7 @@ pub(super) fn real_rhs_matrix(
     let values = tensor::tensor_values_f64_cow(tensor);
     if is_vector(tensor) && tensor::tensor_element_len(tensor) == rows {
         Ok(DMatrix::from_column_slice(rows, 1, values.as_ref()))
-    } else if tensor.rows == rows && tensor.cols == rhs_cols {
+    } else if lscov_dense_dimensions(tensor) == (rows, rhs_cols) {
         Ok(DMatrix::from_column_slice(rows, rhs_cols, values.as_ref()))
     } else {
         Err(invalid(
@@ -24,15 +32,12 @@ pub(super) fn complex_matrix(value: &NumericMatrix) -> BuiltinResult<DMatrix<Com
                 .into_iter()
                 .map(|value| Complex64::new(value, 0.0))
                 .collect::<Vec<_>>();
-            Ok(DMatrix::from_column_slice(
-                tensor.rows,
-                tensor.cols,
-                &values,
-            ))
+            let (rows, cols) = lscov_dense_dimensions(tensor);
+            Ok(DMatrix::from_column_slice(rows, cols, &values))
         }
         NumericMatrix::Complex(tensor) => Ok(DMatrix::from_column_slice(
-            tensor.rows,
-            tensor.cols,
+            tensor.rows(),
+            tensor.cols(),
             &tensor::complex_tensor_values_complex64(tensor),
         )),
     }
@@ -59,13 +64,14 @@ pub(super) fn complex_rhs_matrix(
 pub(super) fn rhs_columns(value: &NumericMatrix, rows: usize) -> BuiltinResult<usize> {
     match value {
         NumericMatrix::Real(tensor) => {
-            rhs_columns_from_shape(tensor.rows, tensor.cols, tensor, rows)
+            let (tensor_rows, tensor_cols) = lscov_dense_dimensions(tensor);
+            rhs_columns_from_shape(tensor_rows, tensor_cols, tensor, rows)
         }
         NumericMatrix::Complex(tensor) => {
             if is_complex_vector(tensor) && tensor::complex_tensor_element_len(tensor) == rows {
                 Ok(1)
-            } else if tensor.rows == rows {
-                Ok(tensor.cols)
+            } else if tensor.rows() == rows {
+                Ok(tensor.cols())
             } else {
                 Err(invalid(
                     "lscov: B must have one row per observation or be an observation vector",
@@ -94,15 +100,15 @@ pub(super) fn rhs_columns_from_shape(
 
 pub(super) fn matrix_rows(value: &NumericMatrix) -> usize {
     match value {
-        NumericMatrix::Real(tensor) => tensor.rows,
-        NumericMatrix::Complex(tensor) => tensor.rows,
+        NumericMatrix::Real(tensor) => lscov_dense_dimensions(tensor).0,
+        NumericMatrix::Complex(tensor) => tensor.rows(),
     }
 }
 
 pub(super) fn matrix_cols(value: &NumericMatrix) -> usize {
     match value {
-        NumericMatrix::Real(tensor) => tensor.cols,
-        NumericMatrix::Complex(tensor) => tensor.cols,
+        NumericMatrix::Real(tensor) => lscov_dense_dimensions(tensor).1,
+        NumericMatrix::Complex(tensor) => tensor.cols(),
     }
 }
 
@@ -122,8 +128,8 @@ pub(super) fn is_numeric_vector(value: &NumericMatrix) -> bool {
 
 pub(super) fn ensure_2d(value: &NumericMatrix, label: &str) -> BuiltinResult<()> {
     let shape_len = match value {
-        NumericMatrix::Real(tensor) => tensor.shape.len(),
-        NumericMatrix::Complex(tensor) => tensor.shape.len(),
+        NumericMatrix::Real(tensor) => tensor.shape().len(),
+        NumericMatrix::Complex(tensor) => tensor.shape().len(),
     };
     if shape_len > 2 {
         return Err(invalid(format!("lscov: {label} must be a 2-D matrix")));
@@ -132,9 +138,36 @@ pub(super) fn ensure_2d(value: &NumericMatrix, label: &str) -> BuiltinResult<()>
 }
 
 pub(super) fn is_vector(tensor: &Tensor) -> bool {
-    tensor.shape.len() <= 2 && (tensor.rows == 1 || tensor.cols == 1)
+    let (rows, cols) = lscov_dense_dimensions(tensor);
+    tensor.shape().len() <= 2 && (rows == 1 || cols == 1)
 }
 
 pub(super) fn is_complex_vector(tensor: &ComplexTensor) -> bool {
-    tensor.shape.len() <= 2 && (tensor.rows == 1 || tensor.cols == 1)
+    tensor.shape().len() <= 2 && (tensor.rows() == 1 || tensor.cols() == 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn response_geometry_preserves_cached_rank_zero_and_rank_one_admission() {
+        let rank_zero = Tensor::new(vec![7.0], vec![]).expect("rank-zero response");
+        assert_eq!(lscov_dense_dimensions(&rank_zero), (0, 0));
+        assert!(!is_vector(&rank_zero));
+        assert_eq!(matrix_rows(&NumericMatrix::Real(rank_zero.clone())), 0);
+        assert!(real_rhs_matrix(&rank_zero, 1, 1).is_err());
+
+        let rank_one = Tensor::new(vec![1.0, 3.0, 5.0], vec![3]).expect("rank-one response");
+        assert_eq!(lscov_dense_dimensions(&rank_one), (1, 3));
+        assert!(is_vector(&rank_one));
+        assert_eq!(
+            rhs_columns(&NumericMatrix::Real(rank_one.clone()), 3).unwrap(),
+            1
+        );
+        let rhs = real_rhs_matrix(&rank_one, 3, 1).expect("rank-one vector response");
+        assert_eq!((rhs.nrows(), rhs.ncols()), (3, 1));
+        assert_eq!(rhs.as_slice(), &[1.0, 3.0, 5.0]);
+    }
 }
