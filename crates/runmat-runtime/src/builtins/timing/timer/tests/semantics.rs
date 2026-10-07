@@ -1,19 +1,39 @@
 use super::super::setter::set_timer_property_object;
 use super::*;
+use crate::workspace::{BaseWorkspaceOwner, BaseWorkspaceService};
+
 #[test]
 fn text_callback_uses_executor_source_port_and_missing_port_rejects_before_running() {
     let _lock = TIMER_TEST_LOCK.lock().unwrap();
     reset_timer_state_for_tests();
+    let missing_runtime = test_runtime();
+    let missing_ports = missing_runtime
+        .service_ports()
+        .clone()
+        .with_base_workspace(Rc::new(
+            BaseWorkspaceService::new(BaseWorkspaceOwner::new()),
+        ));
+    set_test_session(
+        missing_runtime.with_service_ports(missing_ports),
+        test_supervisor(),
+    );
     let unsupported = block_on(timer_builtin(vec![
         Value::String("TimerFcn".into()),
         Value::String("answer = 42;".into()),
     ]))
     .expect("text timer");
-    block_on(timer_start_builtin(unsupported.clone())).expect_err("missing source service");
+    let missing_source =
+        block_on(timer_start_builtin(unsupported.clone())).expect_err("missing source service");
+    assert_eq!(
+        missing_source.identifier(),
+        Some(crate::context::RuntimeCapabilityError::IDENTIFIER)
+    );
+    assert!(missing_source.message().contains("source_evaluation"));
     let Value::HandleObject(handle) = unsupported else {
         panic!("timer handle");
     };
     assert_eq!(string_property(&handle, "Running").unwrap(), "off");
+    assert_eq!(numeric_property(&handle, "TasksExecuted").unwrap(), 0.0);
 
     let supervisor = Rc::new(RuntimeLocalTaskSupervisor::new());
     let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
@@ -21,6 +41,9 @@ fn text_callback_uses_executor_source_port_and_missing_port_rejects_before_runni
     let recorded = Arc::new(Mutex::new(Vec::new()));
     let ports = RuntimeServicePorts::default()
         .with_local_tasks(supervisor.submission_port(owner))
+        .with_base_workspace(Rc::new(
+            BaseWorkspaceService::new(BaseWorkspaceOwner::new()),
+        ))
         .with_source_evaluation(Rc::new(RecordingSourceEvaluator(recorded.clone())));
     let runtime = runtime.with_service_ports(ports);
     set_test_session(runtime, supervisor);
