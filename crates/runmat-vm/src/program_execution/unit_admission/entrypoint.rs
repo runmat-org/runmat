@@ -1,5 +1,12 @@
 use super::ExecutableUnitAdmissionError;
 
+pub(super) struct AdmittedEntrypoint {
+    pub origin: runmat_execution::FunctionBindingOrigin,
+    /// Registry-local identity selected by the validated manifest entrypoint.
+    /// The manifest's portable ordinal is not a registry lookup key.
+    pub local_function: Option<runmat_hir::FunctionId>,
+}
+
 pub(super) fn admit(
     envelope: &runmat_execution::ExecutableUnitEnvelope,
     mir: &runmat_mir::MirAssembly,
@@ -7,26 +14,27 @@ pub(super) fn admit(
     registry: &crate::FunctionRegistry,
     layout: &crate::VmAssemblyLayout,
     source_map: &runmat_execution::ExecutableSourceMapV2,
-) -> Result<runmat_execution::FunctionBindingOrigin, ExecutableUnitAdmissionError> {
+) -> Result<AdmittedEntrypoint, ExecutableUnitAdmissionError> {
     match envelope.manifest.identity.entrypoint_kind {
         runmat_execution::ExecutableEntrypointKind::Function => function_origin(envelope, registry),
-        runmat_execution::ExecutableEntrypointKind::Script => {
-            script_origin(envelope, mir, bytecode, layout, source_map)
-        }
+        runmat_execution::ExecutableEntrypointKind::Script => Ok(AdmittedEntrypoint {
+            origin: script_origin(envelope, mir, bytecode, layout, source_map)?,
+            local_function: None,
+        }),
     }
 }
 
 fn function_origin(
     envelope: &runmat_execution::ExecutableUnitEnvelope,
     registry: &crate::FunctionRegistry,
-) -> Result<runmat_execution::FunctionBindingOrigin, ExecutableUnitAdmissionError> {
+) -> Result<AdmittedEntrypoint, ExecutableUnitAdmissionError> {
     let identity = &envelope.manifest.identity;
-    let function = registry
-        .resolve_name(&identity.entrypoint)
-        .and_then(|function| registry.get(function))
-        .ok_or_else(|| {
-            source_binding("executable entrypoint is absent from its admitted function registry")
-        })?;
+    let local_function = registry.resolve_name(&identity.entrypoint).ok_or_else(|| {
+        source_binding("executable entrypoint is absent from its admitted function registry")
+    })?;
+    let function = registry.get(local_function).ok_or_else(|| {
+        source_binding("executable entrypoint is absent from its admitted function registry")
+    })?;
     if function.portable_function != identity.entrypoint_function {
         return Err(source_binding(
             "executable entrypoint identity disagrees with its admitted function body",
@@ -38,7 +46,10 @@ fn function_origin(
             "executable entrypoint lies outside its admitted revision",
         ));
     }
-    Ok(expected)
+    Ok(AdmittedEntrypoint {
+        origin: expected,
+        local_function: Some(local_function),
+    })
 }
 
 fn script_origin(

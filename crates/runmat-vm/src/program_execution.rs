@@ -329,7 +329,7 @@ async fn execute_program_request_in_context(
                 .into(),
         };
     }
-    execute_function_request(&request, &registry, &runtime).await
+    execute_function_request(&request, &registry, &runtime, None).await
 }
 
 fn recipe_supports_capabilities(
@@ -666,6 +666,18 @@ async fn execute_unit_request(
             }
         }
     };
+    // An executable unit names one exact semantic entrypoint. In particular,
+    // a structured region sharing its numeric function ordinal is not that
+    // entrypoint and must not reach the script or function body by accident.
+    if !matches!(
+        &request.callable,
+        ProgramCallable::Semantic { function, .. }
+            if *function == admitted.envelope().manifest.identity.entrypoint_function
+    ) {
+        return ProgramExecutionResponse::Failure {
+            message: "worker rejected executable callable outside its admitted entrypoint".into(),
+        };
+    }
     let entrypoint_kind = admitted.envelope().manifest.identity.entrypoint_kind;
     let bound = match admitted.bind_runtime_sources(runtime) {
         Ok(bound) => bound,
@@ -675,6 +687,7 @@ async fn execute_unit_request(
             }
         }
     };
+    let selected_function = bound.entrypoint_function();
     let (bytecode, registry, _layout, runtime) = bound.into_parts();
 
     match entrypoint_kind {
@@ -682,7 +695,15 @@ async fn execute_unit_request(
             execute_unit_script(bytecode, runtime).await
         }
         runmat_execution::ExecutableEntrypointKind::Function => {
-            execute_function_request(&request, &registry, &runtime).await
+            // Admission resolved the portable ordinal and immutable origin to
+            // this unit's local registry key. Never use the wire ordinal as a
+            // registry key: Core may remap local identities during publication.
+            let Some(selected_function) = selected_function else {
+                return ProgramExecutionResponse::Failure {
+                    message: "worker rejected function entrypoint without a selected body".into(),
+                };
+            };
+            execute_function_request(&request, &registry, &runtime, Some(selected_function)).await
         }
     }
 }
@@ -724,6 +745,7 @@ async fn execute_function_request(
     request: &ProgramExecutionRequest,
     registry: &crate::FunctionRegistry,
     runtime: &runmat_runtime::context::RuntimeContext,
+    selected_function: Option<runmat_hir::FunctionId>,
 ) -> ProgramExecutionResponse {
     let arguments = match request
         .arguments
@@ -742,7 +764,9 @@ async fn execute_function_request(
     let result = match &request.callable {
         runmat_execution::ProgramCallable::Semantic { function, .. } => {
             crate::invoke_semantic_function_value_in_context(
-                function.0 as usize,
+                selected_function
+                    .map(|selected| selected.0)
+                    .unwrap_or(function.0 as usize),
                 &arguments,
                 requested_outputs,
                 registry,

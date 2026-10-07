@@ -72,6 +72,7 @@ impl ExecutableUnit {
         Ok(bytecode)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn runtime_functions(
         &self,
         runtime: &runmat_runtime::context::RuntimeContext,

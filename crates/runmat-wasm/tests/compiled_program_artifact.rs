@@ -15,10 +15,19 @@ async fn request_with_contract(
     interop: runmat_types::InteropManifest,
     capabilities: BTreeSet<runmat_types::CapabilityRequirement>,
 ) -> ProgramExecutionRequest {
+    request_for_source(interop, capabilities, "answer.m", "ans = 42").await
+}
+
+async fn request_for_source(
+    interop: runmat_types::InteropManifest,
+    capabilities: BTreeSet<runmat_types::CapabilityRequirement>,
+    filename: &str,
+    source: &str,
+) -> ProgramExecutionRequest {
     let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
     let unit = session
         .compile_executable_unit(
-            runmat_core::ExecutableSource::new("root", "answer.m", "ans = 42"),
+            runmat_core::ExecutableSource::new("root", filename, source),
             None,
         )
         .await
@@ -100,6 +109,75 @@ async fn browser_executes_the_exact_portable_artifact_without_a_project() {
         panic!("browser returned an invalid output vector");
     };
     assert_eq!(**value, InlineValue::F64Bits(42.0_f64.to_bits()));
+}
+
+#[wasm_bindgen_test]
+async fn browser_executes_a_named_function_portable_artifact() {
+    let request = request_for_source(
+        runmat_types::InteropManifest::empty(),
+        BTreeSet::new(),
+        "portableFunctionSmoke.m",
+        "function result = portableFunctionSmoke()\nresult = 42;\nend\n",
+    )
+    .await;
+    let response =
+        runmat_wasm::execute_program_artifact(serde_wasm_bindgen::to_value(&request).unwrap())
+            .await
+            .expect("execute exact browser function artifact");
+    let response: ProgramExecutionResponse = serde_wasm_bindgen::from_value(response).unwrap();
+    let ProgramExecutionResponse::Success { outputs } = response else {
+        panic!("browser rejected the named function artifact: {response:?}");
+    };
+    let [ValuePayload::Inline(value)] = outputs.as_slice() else {
+        panic!("browser returned an invalid function output");
+    };
+    assert_eq!(**value, InlineValue::F64Bits(42.0_f64.to_bits()));
+}
+
+#[wasm_bindgen_test]
+async fn browser_executes_deal_requested_discarded_and_zero_outputs_exactly() {
+    let request = request_for_source(
+        runmat_types::InteropManifest::empty(),
+        BTreeSet::new(),
+        "dealPortable.m",
+        "function result = dealPortable()\nwide = uint64(9007199254740992) + uint64(1);\n[left, right] = deal(wide);\n[~, selected] = deal(uint8(3), wide);\ndeal(wide);\nassert(isa(left, 'uint64') && isa(right, 'uint64') && isa(selected, 'uint64'));\nassert(left == wide && right == wide && selected == wide);\nresult = selected;\nend\n",
+    )
+    .await;
+    let response =
+        runmat_wasm::execute_program_artifact(serde_wasm_bindgen::to_value(&request).unwrap())
+            .await
+            .expect("execute exact browser deal artifact");
+    let response: ProgramExecutionResponse = serde_wasm_bindgen::from_value(response).unwrap();
+    let ProgramExecutionResponse::Success { outputs } = response else {
+        panic!("browser rejected the deal artifact: {response:?}");
+    };
+    let [ValuePayload::Inline(value)] = outputs.as_slice() else {
+        panic!("browser returned an invalid deal output");
+    };
+    assert_eq!(**value, InlineValue::U64(9_007_199_254_740_993));
+}
+
+#[wasm_bindgen_test]
+async fn browser_deal_count_error_keeps_identifier_and_evaluates_input_once() {
+    let request = request_for_source(
+        runmat_types::InteropManifest::empty(),
+        BTreeSet::new(),
+        "dealCountProbe.m",
+        "function result = dealCountProbe()\nglobal dealCalls; dealCalls = 0; caught = false;\ntry\n operation = @deal;\n [a,b,c] = operation(nextDealInput(), uint16(8));\ncatch failure\n caught = strcmp(failure.identifier, 'RunMat:deal:InputOutputCountMismatch');\nend\nassert(caught);\nresult = dealCalls;\nend\nfunction value = nextDealInput()\nglobal dealCalls; dealCalls = dealCalls + 1;\nvalue = uint64(9007199254740992) + uint64(1);\nend\n",
+    )
+    .await;
+    let response =
+        runmat_wasm::execute_program_artifact(serde_wasm_bindgen::to_value(&request).unwrap())
+            .await
+            .expect("execute exact browser count-error artifact");
+    let response: ProgramExecutionResponse = serde_wasm_bindgen::from_value(response).unwrap();
+    let ProgramExecutionResponse::Success { outputs } = response else {
+        panic!("browser failed to catch the typed deal error: {response:?}");
+    };
+    let [ValuePayload::Inline(value)] = outputs.as_slice() else {
+        panic!("browser returned an invalid effect-count output");
+    };
+    assert_eq!(**value, InlineValue::F64Bits(1.0_f64.to_bits()));
 }
 
 #[wasm_bindgen_test]

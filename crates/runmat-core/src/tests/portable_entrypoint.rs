@@ -1,5 +1,102 @@
 use super::*;
 
+#[test]
+fn portable_function_request_invokes_the_admitted_local_registry_body() {
+    use runmat_execution::{OutputContract, ProgramCallable, ProgramInvocationContext};
+    use runmat_execution_artifact::{
+        ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
+        ProgramExecutionResponse, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+        PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+    };
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let unit = block_on(session.compile_executable_unit(
+        ExecutableSource::new(
+            "portable-function-dispatch@1",
+            "portableFunctionDispatch.m",
+            "function result = portableFunctionDispatch()\nresult = 42;\nend\n",
+        ),
+        None,
+    ))
+    .expect("compile function unit");
+    let envelope = unit.portable_envelope().expect("portable function product");
+    assert_eq!(
+        envelope.manifest.identity.entrypoint_kind,
+        runmat_execution::ExecutableEntrypointKind::Function
+    );
+    let registry_payload = envelope
+        .component(runmat_execution::ExecutableComponentKind::FunctionRegistry)
+        .expect("function registry component");
+    let registry: runmat_vm::FunctionRegistry =
+        serde_json::from_slice(&registry_payload.bytes).expect("decode function registry");
+    let local_function = registry
+        .resolve_name("portableFunctionDispatch")
+        .expect("selected local body");
+    let portable_function = envelope.manifest.identity.entrypoint_function;
+    assert_eq!(
+        registry.get(local_function).unwrap().portable_function,
+        portable_function
+    );
+    assert_ne!(
+        local_function.0, portable_function.0 as usize,
+        "the round trip must exercise distinct local and portable IDs"
+    );
+
+    let recipe = ProgramBuildRecipe {
+        schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
+        program_revision: envelope.manifest.identity.program.clone(),
+        entrypoint: envelope.manifest.identity.entrypoint.clone(),
+        outputs: OutputContract {
+            requested_outputs: 1,
+        },
+        execution_mode: "interpreter".into(),
+        target: ProgramTarget::portable("portable-function-dispatch-test"),
+        interop: envelope.manifest.interop.clone(),
+        accelerators: Vec::new(),
+        features: Default::default(),
+        compile_options: Default::default(),
+        source_objects: Vec::new(),
+        expected_artifact_id: None,
+    };
+    let artifact = ProgramArtifact::materialize(
+        &recipe,
+        ExecutableForm::ExecutableUnitV3,
+        envelope.canonical_bytes().expect("canonical unit"),
+    )
+    .expect("program artifact");
+    let request = ProgramExecutionRequest {
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+        recipe,
+        artifact,
+        callable: ProgramCallable::semantic(portable_function, None),
+        context: ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
+        arguments: Vec::new(),
+        requested_outputs: 1,
+    };
+    let mut wrong_callable = request.clone();
+    wrong_callable.callable = ProgramCallable::semantic(
+        runmat_types::ProgramFunctionId(portable_function.0 + 1),
+        None,
+    );
+    assert!(matches!(
+        block_on(runmat_vm::execute_program_request(wrong_callable)),
+        ProgramExecutionResponse::Failure { .. }
+    ));
+
+    let response = block_on(runmat_vm::execute_program_request(request));
+    let ProgramExecutionResponse::Success { outputs } = response else {
+        panic!("exact function unit must execute: {response:?}");
+    };
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(
+        runmat_runtime::execution::value_codec::decode_inline_value(&outputs[0])
+            .expect("inline function result"),
+        runmat_value::Value::Num(42.0)
+    );
+}
+
 fn replace_component(
     envelope: &mut runmat_execution::ExecutableUnitEnvelope,
     kind: runmat_execution::ExecutableComponentKind,

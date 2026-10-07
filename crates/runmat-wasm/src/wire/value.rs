@@ -126,9 +126,9 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             };
             json!({
                 "kind": "tensor",
-                "shape": t.shape,
-                "rows": t.rows,
-                "cols": t.cols,
+                "shape": t.shape(),
+                "rows": t.rows(),
+                "cols": t.cols(),
                 "dtype": t.numeric_dtype().class_name(),
                 "preview": preview,
                 "length": length,
@@ -177,9 +177,9 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             };
             json!({
                 "kind": "complex-tensor",
-                "shape": t.shape,
-                "rows": t.rows,
-                "cols": t.cols,
+                "shape": t.shape(),
+                "rows": t.rows(),
+                "cols": t.cols(),
                 "dtype": dtype,
                 "preview": preview,
                 "length": length,

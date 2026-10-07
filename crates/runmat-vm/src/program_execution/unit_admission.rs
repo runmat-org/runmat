@@ -16,6 +16,7 @@ pub struct AdmittedExecutableUnit {
     layout: VmAssemblyLayout,
     source_map: runmat_execution::ExecutableSourceMapV2,
     entrypoint_origin: runmat_execution::FunctionBindingOrigin,
+    entrypoint_function: Option<runmat_hir::FunctionId>,
 }
 
 /// Executable unit bound to one exact runtime source owner. The runtime must
@@ -26,6 +27,7 @@ pub struct RuntimeBoundExecutableUnit {
     registry: FunctionRegistry,
     layout: VmAssemblyLayout,
     runtime: runmat_runtime::context::RuntimeContext,
+    entrypoint_function: Option<runmat_hir::FunctionId>,
 }
 
 impl AdmittedExecutableUnit {
@@ -79,6 +81,7 @@ impl AdmittedExecutableUnit {
             registry: self.registry,
             layout: self.layout,
             runtime,
+            entrypoint_function: self.entrypoint_function,
         })
     }
 }
@@ -123,6 +126,11 @@ impl RuntimeBoundExecutableUnit {
         &self.runtime
     }
 
+    /// Exact registry key selected while admitting the function entrypoint.
+    pub fn entrypoint_function(&self) -> Option<runmat_hir::FunctionId> {
+        self.entrypoint_function
+    }
+
     pub fn into_parts(
         self,
     ) -> (
@@ -148,6 +156,7 @@ impl RuntimeBoundExecutableUnit {
                 storage_bindings: Default::default(),
             },
             runtime,
+            entrypoint_function: None,
         }
     }
 }
@@ -287,7 +296,7 @@ pub fn admit_executable_unit(
         .ok_or(ExecutableUnitAdmissionError::MissingComponent("source map"))?;
     let source_map = runmat_execution::ExecutableSourceMapV2::decode(&source_map_payload.bytes)
         .map_err(ExecutableUnitAdmissionError::InvalidSourceMap)?;
-    let entrypoint_origin =
+    let entrypoint =
         entrypoint::admit(&envelope, &mir, &bytecode, &registry, &layout, &source_map)?;
     Ok(AdmittedExecutableUnit {
         envelope,
@@ -295,6 +304,7 @@ pub fn admit_executable_unit(
         registry,
         layout,
         source_map,
-        entrypoint_origin,
+        entrypoint_origin: entrypoint.origin,
+        entrypoint_function: entrypoint.local_function,
     })
 }
