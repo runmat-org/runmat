@@ -65,7 +65,7 @@ impl CoeffInput {
                         ),
                     ));
                 }
-                ensure_vector_shape(role, &tensor.shape)?;
+                ensure_vector_shape(role, tensor.shape())?;
                 let data = preparation::complex_tensor(&tensor, cooperation).await?;
                 Ok(Self {
                     data,
@@ -122,7 +122,7 @@ impl CoeffInput {
         tensor: Tensor,
         cooperation: &mut SignalCooperation,
     ) -> BuiltinResult<Self> {
-        ensure_vector_shape(role, &tensor.shape)?;
+        ensure_vector_shape(role, tensor.shape())?;
         let len = tensor.len();
         if len == 0 {
             return Err(filter_error_with_detail(
@@ -178,7 +178,7 @@ impl SignalInput {
             }
             Value::Tensor(tensor) => {
                 let output_single = tensor.numeric_dtype() == NumericDType::F32;
-                let shape = tensor.shape.clone();
+                let shape = tensor.shape().to_vec();
                 let data = preparation::real_tensor(&tensor, cooperation).await?;
                 Ok(Self {
                     payload: SignalPayload::Host(data),
@@ -189,7 +189,7 @@ impl SignalInput {
             }
             Value::ComplexTensor(tensor) => {
                 let output_single = tensor.numeric_dtype() == NumericDType::F32;
-                let shape = tensor.shape.clone();
+                let shape = tensor.shape().to_vec();
                 let data = preparation::complex_tensor(&tensor, cooperation).await?;
                 Ok(Self {
                     payload: SignalPayload::Host(data),

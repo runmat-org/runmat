@@ -27,8 +27,8 @@ pub(super) fn preflight_signal_carrier(value: &Value) -> BuiltinResult<bool> {
             return Ok(runmat_accelerate_api::handle_storage(handle)
                 == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
         }
-        Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
-        Value::ComplexTensor(tensor) => Some(tensor.shape.as_slice()),
+        Value::Tensor(tensor) => Some(tensor.shape()),
+        Value::ComplexTensor(tensor) => Some(tensor.shape()),
         Value::LogicalArray(array) => Some(array.shape.as_slice()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => None,
         _ => return Err(pwelch_error(&PWELCH_ERROR_INVALID_SIGNAL)),
@@ -151,7 +151,7 @@ pub(super) async fn tensor_to_signal_columns(
     tensor: Tensor,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<SignalColumns> {
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(pwelch_error_with_detail(
             &PWELCH_ERROR_INVALID_SIGNAL,
             "x must be a vector or 2-D matrix",
@@ -210,14 +210,14 @@ pub(super) async fn complex_tensor_to_signal_columns(
     tensor: runmat_value::ComplexTensor,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<SignalColumns> {
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(pwelch_error_with_detail(
             &PWELCH_ERROR_INVALID_SIGNAL,
             "x must be a vector or 2-D matrix",
         ));
     }
-    let rows = tensor.rows;
-    let cols = tensor.cols;
+    let rows = tensor.rows();
+    let cols = tensor.cols();
     let output_precision = SignalPrecision::from_numeric_dtype(tensor.numeric_dtype());
     let is_complex = true;
     let mut work = CompletedWork::default();

@@ -112,7 +112,7 @@ impl InitialState {
                     );
                     let detail = match other {
                         Value::Tensor(t)
-                            if t.is_empty() && !shapes_compatible(expected_shape, &t.shape) =>
+                            if t.is_empty() && !shapes_compatible(expected_shape, t.shape()) =>
                         {
                             msg.clone()
                         }
@@ -141,7 +141,7 @@ impl InitialState {
                 )
             }
             Value::Tensor(tensor) => {
-                let shape = tensor.shape.clone();
+                let shape = tensor.shape().to_vec();
                 (
                     preparation::real_tensor(&tensor, cooperation).await?,
                     shape,
@@ -151,7 +151,7 @@ impl InitialState {
             }
             Value::ComplexTensor(tensor) => (
                 preparation::complex_tensor(&tensor, cooperation).await?,
-                tensor.shape.clone(),
+                tensor.shape().to_vec(),
                 true,
                 None,
             ),

@@ -294,7 +294,7 @@ async fn output_host_hold_from_frames(
     let Value::Tensor(tensor) = downloaded else {
         return Err(pwelch_error(&PWELCH_ERROR_INTERNAL));
     };
-    if tensor.shape != [rows, segments, columns] {
+    if tensor.shape() != [rows, segments, columns] {
         return Err(pwelch_error(&PWELCH_ERROR_INTERNAL));
     }
     let values = tensor.materialize_f64();
