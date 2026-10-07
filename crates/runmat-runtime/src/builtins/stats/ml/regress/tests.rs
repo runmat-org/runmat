@@ -12,9 +12,23 @@ fn rank_one_response_is_admitted_as_a_vector() {
     let Value::Tensor(beta) = output else {
         panic!("expected numeric coefficient vector")
     };
-    assert_eq!(beta.shape, vec![2, 1]);
+    assert_eq!(beta.shape(), [2, 1]);
     assert_close(beta.materialize_f64()[0], 1.0);
     assert_close(beta.materialize_f64()[1], 2.0);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rank_zero_design_preserves_cached_matrix_geometry_at_entry() {
+    let y = Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap());
+    let design = Tensor::new(vec![2.0], Vec::new()).unwrap();
+    assert_eq!(regress_matrix_dimensions(design.shape()), (0, 0));
+    let x = Value::Tensor(design);
+    let error = block_on(regress_builtin(y, x, Vec::new()))
+        .expect_err("rank-zero design has no observation row");
+    assert!(error
+        .message()
+        .contains("length(y) must match the number of rows in X"));
 }
 
 #[test]
@@ -91,14 +105,14 @@ fn regress_fits_coefficients_and_requested_outputs() {
     let x = tensor(vec![1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 2.0, 3.0], 4, 2);
     let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
     let b = tensor_ref(&out[0]);
-    assert_eq!(b.shape, vec![2, 1]);
+    assert_eq!(b.shape(), [2, 1]);
     assert_close(b.materialize_f64()[0], 1.0);
     assert_close(b.materialize_f64()[1], 2.0);
-    assert_eq!(tensor_ref(&out[1]).shape, vec![2, 2]);
-    assert_eq!(tensor_ref(&out[2]).shape, vec![4, 1]);
-    assert_eq!(tensor_ref(&out[3]).shape, vec![4, 2]);
+    assert_eq!(tensor_ref(&out[1]).shape(), [2, 2]);
+    assert_eq!(tensor_ref(&out[2]).shape(), [4, 1]);
+    assert_eq!(tensor_ref(&out[3]).shape(), [4, 2]);
     let stats = tensor_ref(&out[4]);
-    assert_eq!(stats.shape, vec![1, 4]);
+    assert_eq!(stats.shape(), [1, 4]);
     assert_close(stats.materialize_f64()[0], 1.0);
     assert_close(stats.materialize_f64()[3], 0.0);
 }
@@ -116,7 +130,7 @@ fn regress_accepts_typed_integer_design_and_response() {
     );
     let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
     let b = tensor_ref(&out[0]);
-    assert_eq!(b.shape, vec![2, 1]);
+    assert_eq!(b.shape(), [2, 1]);
     assert_close(b.materialize_f64()[0], 1.0);
     assert_close(b.materialize_f64()[1], 2.0);
 }
@@ -140,8 +154,8 @@ fn regress_omits_nan_rows_and_uses_alpha() {
     let b = tensor_ref(&out[0]);
     assert_close(b.materialize_f64()[0], 1.0);
     assert_close(b.materialize_f64()[1], 2.0);
-    assert_eq!(tensor_ref(&out[2]).shape, vec![3, 1]);
-    assert_eq!(tensor_ref(&out[3]).shape, vec![3, 2]);
+    assert_eq!(tensor_ref(&out[2]).shape(), [3, 1]);
+    assert_eq!(tensor_ref(&out[3]).shape(), [3, 2]);
 }
 
 #[test]
@@ -151,9 +165,9 @@ fn regress_supports_partial_outputs() {
     let x = tensor(vec![1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 2.0, 3.0], 4, 2);
     let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
     assert_eq!(out.len(), 3);
-    assert_eq!(tensor_ref(&out[0]).shape, vec![2, 1]);
-    assert_eq!(tensor_ref(&out[1]).shape, vec![2, 2]);
-    assert_eq!(tensor_ref(&out[2]).shape, vec![4, 1]);
+    assert_eq!(tensor_ref(&out[0]).shape(), [2, 1]);
+    assert_eq!(tensor_ref(&out[1]).shape(), [2, 2]);
+    assert_eq!(tensor_ref(&out[2]).shape(), [4, 1]);
 }
 
 #[test]

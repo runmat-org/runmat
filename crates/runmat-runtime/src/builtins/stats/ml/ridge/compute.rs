@@ -16,6 +16,14 @@ struct PreparedRidge {
     predictors: usize,
 }
 
+fn ridge_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 pub(super) fn ridge_compute(
     y: Tensor,
     x: Tensor,
@@ -23,10 +31,11 @@ pub(super) fn ridge_compute(
     scaled: bool,
 ) -> BuiltinResult<Tensor> {
     let y_values = vector_values(&y, "y")?;
-    if x.shape.len() > 2 {
+    if x.shape().len() > 2 {
         return Err(invalid_argument("ridge: X must be a 2-D numeric matrix"));
     }
-    if x.rows != y_values.len() {
+    let (x_rows, _) = ridge_matrix_dimensions(&x);
+    if x_rows != y_values.len() {
         return Err(invalid_argument(
             "ridge: length(y) must match the number of rows in X",
         ));
@@ -73,7 +82,8 @@ pub(super) fn ridge_compute(
 }
 
 fn vector_values(tensor: &Tensor, label: &str) -> BuiltinResult<Vec<f64>> {
-    if tensor.shape.len() > 2 || !(tensor.rows == 1 || tensor.cols == 1) {
+    let (rows, cols) = ridge_matrix_dimensions(tensor);
+    if tensor.shape().len() > 2 || !(rows == 1 || cols == 1) {
         return Err(invalid_argument(format!("ridge: {label} must be a vector")));
     }
     Ok(tensor::tensor_values_f64(tensor))
@@ -97,8 +107,7 @@ fn ridge_parameters(tensor: &Tensor) -> BuiltinResult<Vec<f64>> {
 }
 
 fn prepare_data(x: &Tensor, y: &[f64]) -> BuiltinResult<PreparedRidge> {
-    let rows = x.rows;
-    let cols = x.cols;
+    let (rows, cols) = ridge_matrix_dimensions(x);
     let x_values = tensor::tensor_values_f64_cow(x);
     let mut clean_rows = Vec::with_capacity(rows);
     for row in 0..rows {

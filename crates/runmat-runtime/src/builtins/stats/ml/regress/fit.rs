@@ -7,21 +7,22 @@ pub(super) fn regress_compute(
     requested_outputs: usize,
 ) -> BuiltinResult<Vec<Value>> {
     let y_values = vector_values(&y)?;
-    if x.shape.len() > 2 {
+    if x.shape().len() > 2 {
         return Err(invalid("regress: X must be a 2-D numeric matrix"));
     }
-    if x.rows != y_values.len() {
+    let (x_rows, x_cols) = regress_matrix_dimensions(x.shape());
+    if x_rows != y_values.len() {
         return Err(invalid(
             "regress: length(y) must match the number of rows in X",
         ));
     }
-    if x.cols == 0 {
+    if x_cols == 0 {
         return Err(invalid("regress: X must contain at least one column"));
     }
-    ensure_input_budget(x.rows, x.cols)?;
+    ensure_input_budget(x_rows, x_cols)?;
     let prepared = complete_rows(&x, &y_values)?;
     let rows = prepared.y.len();
-    let cols = x.cols;
+    let cols = x_cols;
     if rows == 0 {
         return Err(invalid(
             "regress: at least one complete observation is required",

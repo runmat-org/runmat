@@ -12,7 +12,7 @@ pub(super) async fn value_to_tensor(value: Value) -> BuiltinResult<Tensor> {
 
 fn visible_shape(value: &Value) -> Option<(usize, usize, usize, usize)> {
     let shape: &[usize] = match value {
-        Value::Tensor(tensor) => &tensor.shape,
+        Value::Tensor(tensor) => tensor.shape(),
         Value::LogicalArray(array) => &array.shape,
         Value::GpuTensor(handle) => handle.shape(),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => return Some((1, 1, 2, 1)),

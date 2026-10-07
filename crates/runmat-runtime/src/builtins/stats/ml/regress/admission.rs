@@ -44,7 +44,7 @@ impl PreparedAlpha {
 
 fn visible_shape(value: &Value) -> BuiltinResult<(usize, usize, usize, usize)> {
     let shape: &[usize] = match value {
-        Value::Tensor(value) => &value.shape,
+        Value::Tensor(value) => value.shape(),
         Value::LogicalArray(value) => &value.shape,
         Value::GpuTensor(handle)
             if handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real =>
@@ -58,12 +58,16 @@ fn visible_shape(value: &Value) -> BuiltinResult<(usize, usize, usize, usize)> {
         .iter()
         .try_fold(1usize, |count, &extent| count.checked_mul(extent))
         .ok_or_else(|| invalid("regress: input dimensions overflow"))?;
-    let (rows, columns) = match shape {
+    let (rows, columns) = regress_matrix_dimensions(shape);
+    Ok((rows, columns, shape.len(), count))
+}
+
+pub(super) fn regress_matrix_dimensions(shape: &[usize]) -> (usize, usize) {
+    match shape {
+        [] => (0, 0),
         [columns] => (1, *columns),
         [rows, columns, ..] => (*rows, *columns),
-        [] => (0, 0),
-    };
-    Ok((rows, columns, shape.len(), count))
+    }
 }
 
 pub(super) fn preflight_data(y: &Value, x: &Value, outputs: Option<usize>) -> BuiltinResult<()> {

@@ -70,7 +70,7 @@ fn scaled_false_restores_intercept_and_original_scale() {
     let x = tensor(vec![0.0, 1.0, 2.0, 3.0], 4, 1);
     let out = block_on(ridge_builtin(y, x, Value::Num(0.0), vec![Value::Num(0.0)])).unwrap();
     let out = tensor_out(out);
-    assert_eq!(out.shape, vec![2, 1]);
+    assert_eq!(out.shape(), [2, 1]);
     assert!((out.materialize_f64()[0] - 1.0).abs() < 1.0e-10);
     assert!((out.materialize_f64()[1] - 2.0).abs() < 1.0e-10);
 }
@@ -84,7 +84,7 @@ fn ridge_accepts_typed_integer_response_design_and_k() {
     let scaled = poisoned_int_tensor(IntegerStorage::U8(vec![0]), 1, 1, 1.0);
     let out = block_on(ridge_builtin(y, x, k, vec![scaled])).unwrap();
     let out = tensor_out(out);
-    assert_eq!(out.shape, vec![2, 2]);
+    assert_eq!(out.shape(), [2, 2]);
     assert!((out.materialize_f64()[0] - 1.0).abs() < 1.0e-10);
     assert!((out.materialize_f64()[1] - 2.0).abs() < 1.0e-10);
 }
@@ -101,7 +101,7 @@ fn scaled_true_returns_standardized_coefficients_for_each_k() {
     ))
     .unwrap();
     let out = tensor_out(out);
-    assert_eq!(out.shape, vec![1, 2]);
+    assert_eq!(out.shape(), [1, 2]);
     assert!(out.materialize_f64()[0] > out.materialize_f64()[1]);
     assert!((out.materialize_f64()[0] - 2.581_988_897).abs() < 1.0e-8);
 }
@@ -163,6 +163,30 @@ fn host_visible_geometry_and_flag_are_rejected_at_admission() {
     .is_err());
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn ridge_preserves_preflight_and_cached_compute_rank_boundaries() {
+    let scalar = Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap());
+    assert!(super::admission::preflight_data(&scalar, &scalar, &Value::Num(0.0)).is_ok());
+    let error = block_on(ridge_builtin(
+        scalar.clone(),
+        scalar,
+        Value::Num(0.0),
+        Vec::new(),
+    ))
+    .expect_err("cached 0-by-0 response is not a vector");
+    assert!(error.message().contains("y must be a vector"));
+
+    let response = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap());
+    let design = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap());
+    assert!(super::admission::preflight_data(&response, &design, &Value::Num(0.0)).is_ok());
+    let error = block_on(ridge_builtin(response, design, Value::Num(0.0), Vec::new()))
+        .expect_err("cached rank-one design has one row");
+    assert!(error
+        .message()
+        .contains("length(y) must match the number of rows in X"));
+}
+
 #[test]
 fn invalid_host_flag_precedes_resident_integer_download() {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
@@ -190,7 +214,7 @@ fn logical_response_design_and_parameter_are_admitted() {
     let x = tensor(vec![0.0, 1.0, 2.0, 3.0], 4, 1);
     let out = block_on(ridge_builtin(y, x, Value::Bool(false), Vec::new())).unwrap();
     let out = tensor_out(out);
-    assert_eq!(out.shape, vec![1, 1]);
+    assert_eq!(out.shape(), [1, 1]);
     assert!(out.materialize_f64()[0].is_finite());
 }
 
@@ -200,7 +224,7 @@ fn rank_deficient_k_zero_uses_minimum_norm_solution() {
     let x = tensor(vec![1.0, 2.0, 3.0, 2.0, 4.0, 6.0], 3, 2);
     let out = block_on(ridge_builtin(y, x, Value::Num(0.0), vec![Value::Num(0.0)])).unwrap();
     let out = tensor_out(out);
-    assert_eq!(out.shape, vec![3, 1]);
+    assert_eq!(out.shape(), [3, 1]);
     assert!(out.materialize_f64()[0].abs() < 1.0e-10);
     assert!((out.materialize_f64()[1] - 1.0).abs() < 1.0e-10);
     assert!((out.materialize_f64()[2] - 0.5).abs() < 1.0e-10);
