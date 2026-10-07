@@ -1,5 +1,5 @@
 use super::*;
-use runmat_value::{CellArray, StructValue};
+use runmat_value::{StructArray, StructValue};
 
 pub(super) struct PairwiseCoefficients {
     constant: f64,
@@ -11,13 +11,14 @@ pub(super) fn coeff_value(model: &PreparedModel) -> BuiltinResult<Value> {
     let k = model.classes.len();
     let entry_count = k
         .checked_mul(k)
-        .ok_or_else(|| internal_error("classify: coefficient cell shape overflows"))?;
+        .ok_or_else(|| internal_error("classify: coefficient structure shape overflows"))?;
     let mut entries = Vec::new();
     entries
         .try_reserve_exact(entry_count)
         .map_err(|err| internal_error(format!("classify: cannot allocate coefficients: {err}")))?;
-    for row in 0..k {
-        for col in 0..k {
+    // Structure arrays store elements in column-major order: row + col * k.
+    for col in 0..k {
+        for row in 0..k {
             let coeff = pairwise_coeff(model, row, col)?;
             let mut st = StructValue::new();
             st.insert(
@@ -43,12 +44,13 @@ pub(super) fn coeff_value(model: &PreparedModel) -> BuiltinResult<Value> {
                     ),
                 );
             }
-            entries.push(Value::Struct(st));
+            entries.push(st);
         }
     }
-    Ok(Value::Cell(CellArray::new(entries, k, k).map_err(
-        |err| internal_error(format!("classify: {err}")),
-    )?))
+    Ok(Value::StructArray(
+        StructArray::new(entries, vec![k, k])
+            .map_err(|err| internal_error(format!("classify: {err}")))?,
+    ))
 }
 
 pub(super) fn pairwise_coeff(

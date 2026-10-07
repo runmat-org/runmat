@@ -55,10 +55,15 @@ fn classify_quadratic_preserves_text_labels() {
             panic!("labels");
         };
         assert_eq!(labels.data, vec!["low", "high"]);
-        let Value::Cell(coeff) = &values[4] else {
+        let Value::StructArray(coeff) = &values[4] else {
             panic!("coeff");
         };
-        assert!(matches!(&coeff.data[1], Value::Struct(st) if st.fields.contains_key("quadratic")));
+        assert_eq!(coeff.shape(), &[2, 2]);
+        assert!(coeff
+            .get_linear(1)
+            .expect("pairwise coefficient")
+            .fields
+            .contains_key("quadratic"));
     });
 }
 

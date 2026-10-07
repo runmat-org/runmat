@@ -272,6 +272,19 @@ fn classify_surface_executes_from_scripts() {
     assert!(has_num(&vars, 1.0));
     assert!(has_num(&vars, 2.0));
     assert!(has_num(&vars, 0.0));
+    let coeff = vars
+        .iter()
+        .find_map(|value| match value {
+            Value::StructArray(array) if array.shape() == [2, 2] => Some(array),
+            _ => None,
+        })
+        .expect("classify must return a 2-by-2 coefficient structure array");
+    let boundary = coeff.get_linear(2).expect("coeff(1,2)");
+    assert!(boundary.fields.contains_key("type"));
+    assert!(boundary.fields.contains_key("name1"));
+    assert!(boundary.fields.contains_key("name2"));
+    assert!(boundary.fields.contains_key("const"));
+    assert!(boundary.fields.contains_key("linear"));
 }
 
 #[test]

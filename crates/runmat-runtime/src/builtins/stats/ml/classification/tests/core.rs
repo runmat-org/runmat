@@ -46,12 +46,71 @@ fn classify_linear_predicts_numeric_groups() {
         let posterior = posterior.as_f64_slice().expect("double posterior");
         assert!(posterior[0] > posterior[2]);
         assert!(posterior[3] > posterior[1]);
-        let Value::Cell(coeff) = &values[4] else {
+        let Value::StructArray(coeff) = &values[4] else {
             panic!("coeff");
         };
-        assert_eq!(coeff.rows, 2);
-        assert_eq!(coeff.cols, 2);
-        assert!(matches!(&coeff.data[1], Value::Struct(st) if st.fields.contains_key("linear")));
+        assert_eq!(coeff.shape(), &[2, 2]);
+        assert!(coeff
+            .get_linear(1)
+            .expect("pairwise coefficient")
+            .fields
+            .contains_key("linear"));
+    });
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn classify_coefficients_preserve_three_class_column_major_pair_orientation() {
+    with_outputs(5, || {
+        let values = classify(
+            tensor(vec![0.2, 2.2, 4.2], vec![3, 1]),
+            tensor(vec![0.0, 0.4, 2.0, 2.4, 4.0, 4.4], vec![6, 1]),
+            tensor(vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0], vec![6, 1]),
+            Vec::new(),
+        );
+        let Value::StructArray(coeff) = &values[4] else {
+            panic!("coefficients must be a structure array");
+        };
+        assert_eq!(coeff.shape(), &[3, 3]);
+        for col in 0..3 {
+            for row in 0..3 {
+                let element = coeff.get_linear(row + col * 3).expect("pairwise entry");
+                let expected_name1 = tensor(vec![(row + 1) as f64], vec![1, 1]);
+                let expected_name2 = tensor(vec![(col + 1) as f64], vec![1, 1]);
+                assert_eq!(element.fields.get("name1"), Some(&expected_name1));
+                assert_eq!(element.fields.get("name2"), Some(&expected_name2));
+                assert!(element.fields.contains_key("const"));
+                assert!(element.fields.contains_key("linear"));
+                assert!(!element.fields.contains_key("quadratic"));
+            }
+        }
+        let forward = coeff.get_linear(3).expect("class 1 versus 2");
+        let reverse = coeff.get_linear(1).expect("class 2 versus 1");
+        let (Some(Value::Num(forward_const)), Some(Value::Num(reverse_const))) =
+            (forward.fields.get("const"), reverse.fields.get("const"))
+        else {
+            panic!("pairwise constants");
+        };
+        // Each class has mean 0.2, 2.2, or 4.2 and unbiased variance 0.08.
+        // The pooled linear boundary for class 1 versus 2 is 30 - 25*x;
+        // the numerical core adds only its 1e-9 covariance regularizer.
+        assert!((*forward_const - 30.0).abs() < 1e-6);
+        assert!((*reverse_const + 30.0).abs() < 1e-6);
+        assert!((*forward_const + *reverse_const).abs() < 1e-10);
+        let (Some(Value::Tensor(forward_linear)), Some(Value::Tensor(reverse_linear))) =
+            (forward.fields.get("linear"), reverse.fields.get("linear"))
+        else {
+            panic!("pairwise linear coefficients");
+        };
+        assert_eq!(forward_linear.shape(), &[1, 1]);
+        assert_eq!(reverse_linear.shape(), &[1, 1]);
+        assert!((forward_linear.as_f64_slice().unwrap()[0] + 25.0).abs() < 1e-6);
+        assert!((reverse_linear.as_f64_slice().unwrap()[0] - 25.0).abs() < 1e-6);
+        assert!(
+            (forward_linear.as_f64_slice().unwrap()[0] + reverse_linear.as_f64_slice().unwrap()[0])
+                .abs()
+                < 1e-10
+        );
     });
 }
 

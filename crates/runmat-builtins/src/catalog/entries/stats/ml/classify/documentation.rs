@@ -44,7 +44,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             "Typed-integer predictors and prior probabilities are separately gated RunMat extensions and cross a checked exact-binary64 statistical boundary. Typed-integer labels remain exact and may exceed `flintmax`. Logical predictors and resident input are separate RunMat-only extensions; logical priors are rejected.",
         ] },
         BuiltinDocumentationSection { heading: "Outputs and execution", paragraphs: &[
-            "Request `[class,err,posterior,logp,coeff]` for predicted labels, prior-weighted apparent training error, posterior probabilities, unconditional log densities, and pairwise discriminant coefficients. The current coefficient output is a square cell array of structs with type, class-name, constant, linear, and where applicable quadratic fields.",
+            "Request `[class,err,posterior,logp,coeff]` for predicted labels, prior-weighted apparent training error, posterior probabilities, unconditional log densities, and pairwise discriminant coefficients. `coeff` is a k-by-k structure array indexed as `coeff(i,j)`, with type, class-name, constant, linear, and where applicable quadratic fields for the boundary between classes i and j.",
             "Resident inputs are recursively gathered after compatibility admission; fitting and prediction run on the host. No provider-resident discriminant kernel or fusion route is claimed.",
         ] },
     ],

@@ -4,8 +4,9 @@ use crate::BuiltinCatalogEntry;
 use runmat_types::{
     infer_call, CallContract, CallInference, CallRequest, CellFact, DimensionFact, DynamicReason,
     InferenceDiagnostic, LiteralValue, NumericClass, NumericDomain, NumericFact, ShapeFact,
-    StorageFact, ValueFact, ValueKindFact,
+    StorageFact, StructFact, ValueFact, ValueKindFact,
 };
+use std::collections::BTreeMap;
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
@@ -155,9 +156,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         numerical(ShapeFact::from(vec![sample_rows, None])),
         numerical(ShapeFact::from(vec![sample_rows, Some(1)])),
         ValueFact::proven(
-            cell_kind(),
+            coefficient_kind(request, &mut diagnostics),
             ShapeFact::from(vec![None, None]),
-            StorageFact::Unknown,
+            StorageFact::Dense,
         ),
     ]);
     contract.effects = entry.contract.effect_set();
@@ -341,4 +342,83 @@ fn cell_kind() -> ValueKindFact {
         elements: Vec::new(),
         elements_complete: false,
     })
+}
+
+fn coefficient_kind(
+    request: &CallRequest,
+    diagnostics: &mut Vec<InferenceDiagnostic>,
+) -> ValueKindFact {
+    let mut fields = BTreeMap::new();
+    fields.insert("type".into(), ValueFact::scalar(ValueKindFact::String));
+    let name = request.arguments.get(2).map_or_else(
+        || ValueFact::unknown(DynamicReason::RuntimeValue),
+        |group| {
+            if matches!(
+                group.kind,
+                ValueKindFact::Numeric(NumericFact {
+                    domain: NumericDomain::Real,
+                    ..
+                }) | ValueKindFact::Logical
+                    | ValueKindFact::String
+                    | ValueKindFact::Character
+                    | ValueKindFact::Cell(_)
+                    | ValueKindFact::Unknown
+            ) {
+                label_output(group, Some(1), diagnostics)
+            } else {
+                // The predicted-label path already owns the invalid-group
+                // diagnostic; do not emit a second one for each name field.
+                ValueFact::unknown(DynamicReason::RuntimeValue)
+            }
+        },
+    );
+    fields.insert("name1".into(), name.clone());
+    fields.insert("name2".into(), name);
+    fields.insert(
+        "const".into(),
+        ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })),
+    );
+    let columns = request
+        .arguments
+        .get(1)
+        .and_then(|training| columns(&training.shape));
+    let double_tensor = |shape| {
+        ValueFact::proven(
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            }),
+            shape,
+            StorageFact::Dense,
+        )
+    };
+    fields.insert(
+        "linear".into(),
+        double_tensor(ShapeFact::from(vec![columns, Some(1)])),
+    );
+    let known_type = request
+        .literals
+        .literal_args
+        .get(3)
+        .and_then(|literal| match literal {
+            LiteralValue::String(text)
+            | LiteralValue::Character(text)
+            | LiteralValue::Keyword(text) => DiscriminantType::from_public(text),
+            _ => None,
+        });
+    if known_type.is_some_and(DiscriminantType::has_quadratic_coefficient) {
+        fields.insert(
+            "quadratic".into(),
+            double_tensor(ShapeFact::from(vec![columns, columns])),
+        );
+    }
+    ValueKindFact::Struct(StructFact::array(
+        fields,
+        known_type.is_some() || request.arguments.len() == 3,
+        Vec::new(),
+        false,
+    ))
 }

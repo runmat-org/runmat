@@ -57,7 +57,88 @@ fn exact_integer_labels_and_numerical_outputs_have_distinct_facts() {
         result.outputs[2].shape,
         ShapeFact::from(vec![Some(2), None])
     );
-    assert!(matches!(result.outputs[4].kind, ValueKindFact::Cell(_)));
+    assert_eq!(result.outputs[4].shape, ShapeFact::from(vec![None, None]));
+    let ValueKindFact::Struct(coeff) = &result.outputs[4].kind else {
+        panic!("coefficient output must be a structure array");
+    };
+    assert!(coeff.fields_complete);
+    assert!(coeff.fields.contains_key("const"));
+    assert!(coeff.fields.contains_key("linear"));
+    assert!(!coeff.fields.contains_key("quadratic"));
+    for name in ["name1", "name2"] {
+        assert_eq!(
+            coeff.fields[name].numeric().unwrap().class,
+            NumericClass::UInt64
+        );
+        assert_eq!(
+            coeff.fields[name].shape,
+            ShapeFact::from(vec![Some(1), Some(1)])
+        );
+    }
+}
+
+#[test]
+fn coefficient_structure_name_fields_retain_string_label_class() {
+    let result = inference::infer(
+        &request(
+            numeric(NumericClass::Double, 2, 1),
+            numeric(NumericClass::Double, 4, 1),
+            ValueFact::proven(
+                ValueKindFact::String,
+                ShapeFact::from(vec![Some(4), Some(1)]),
+                StorageFact::Dense,
+            ),
+            5,
+        ),
+        &CLASSIFY_CATALOG_ENTRY,
+    );
+    assert!(result.diagnostics.is_empty());
+    let ValueKindFact::Struct(coeff) = &result.outputs[4].kind else {
+        panic!("coefficient output must be a structure array");
+    };
+    for name in ["name1", "name2"] {
+        assert_eq!(coeff.fields[name].kind, ValueKindFact::String);
+        assert_eq!(
+            coeff.fields[name].shape,
+            ShapeFact::from(vec![Some(1), Some(1)])
+        );
+    }
+}
+
+#[test]
+fn coefficient_structure_fact_tracks_conditional_quadratic_field() {
+    let mut quadratic = request(
+        numeric(NumericClass::Double, 2, 1),
+        numeric(NumericClass::Double, 6, 1),
+        numeric(NumericClass::Double, 6, 1),
+        5,
+    );
+    quadratic
+        .arguments
+        .push(ValueFact::scalar(ValueKindFact::String));
+    quadratic
+        .literals
+        .literal_args
+        .push(LiteralValue::String("quadratic".into()));
+    let result = inference::infer(&quadratic, &CLASSIFY_CATALOG_ENTRY);
+    assert!(result.diagnostics.is_empty());
+    let ValueKindFact::Struct(coeff) = &result.outputs[4].kind else {
+        panic!("quadratic coefficients must be structure arrays");
+    };
+    assert!(coeff.fields_complete);
+    assert!(coeff.fields.contains_key("quadratic"));
+    assert_eq!(
+        coeff.fields["quadratic"].shape,
+        ShapeFact::from(vec![Some(1), Some(1)])
+    );
+
+    quadratic.literals.literal_args[3] = LiteralValue::Unknown;
+    let dynamic = inference::infer(&quadratic, &CLASSIFY_CATALOG_ENTRY);
+    let ValueKindFact::Struct(coeff) = &dynamic.outputs[4].kind else {
+        panic!("dynamic type retains structure class");
+    };
+    assert!(!coeff.fields_complete);
+    assert!(!coeff.fields.contains_key("quadratic"));
 }
 
 #[test]
