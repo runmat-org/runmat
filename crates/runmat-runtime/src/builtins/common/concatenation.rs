@@ -117,7 +117,7 @@ fn symbolic_block_from_value(value: &Value) -> BuiltinResult<Option<SymbolicConc
             SymbolicConcatBlock::new(array.data.clone(), shape).map(Some)
         }
         Value::Tensor(tensor) => {
-            let shape = normalize_symbolic_concat_shape(&tensor.shape);
+            let shape = normalize_symbolic_concat_shape(tensor.shape());
             if shape[0] == 0 && shape[1] == 0 {
                 return Ok(None);
             }
@@ -335,7 +335,8 @@ pub fn hcat_matrices(a: &Tensor, b: &Tensor) -> BuiltinResult<Tensor> {
     if a.rows() != b.rows() {
         return Err(concat_error(format!(
             "Cannot horizontally concatenate matrices with different row counts: {} vs {}",
-            a.rows, b.rows
+            a.rows(),
+            b.rows()
         )));
     }
 
@@ -378,7 +379,8 @@ pub fn vcat_matrices(a: &Tensor, b: &Tensor) -> BuiltinResult<Tensor> {
     if a.cols() != b.cols() {
         return Err(concat_error(format!(
             "Cannot vertically concatenate matrices with different column counts: {} vs {}",
-            a.cols, b.cols
+            a.cols(),
+            b.cols()
         )));
     }
 
@@ -1192,7 +1194,8 @@ fn integer_matrix_from_value(target: IntegerClass, value: &Value) -> BuiltinResu
                     })
                     .collect::<BuiltinResult<Vec<_>>>()?,
             };
-            Tensor::new_integer(target.storage(values), tensor.shape.clone()).map_err(concat_error)
+            Tensor::new_integer(target.storage(values), tensor.shape().to_vec())
+                .map_err(concat_error)
         }
         other => Err(concat_error(format!(
             "Cannot concatenate integer value with type {other:?}"
@@ -1235,6 +1238,19 @@ pub async fn create_matrix_from_values(rows: &[Vec<Value>]) -> BuiltinResult<Val
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn concatenation_errors_use_admitted_matrix_geometry() {
+        let vector = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
+        let row = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
+        assert!(hcat_matrices(&vector, &row)
+            .unwrap_err()
+            .contains("row counts: 2 vs 1"));
+        assert!(vcat_matrices(&vector, &row)
+            .unwrap_err()
+            .contains("column counts: 1 vs 2"));
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

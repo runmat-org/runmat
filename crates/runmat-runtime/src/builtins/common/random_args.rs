@@ -140,9 +140,10 @@ pub(crate) async fn extract_constructor_dimensions(
                 }));
             }
             let scalar = len == 1;
-            let row = tensor.shape.len() >= 2 && tensor.shape[0] == 1;
-            let column = tensor.shape.len() >= 2 && tensor.shape[1] == 1;
-            if !(scalar || row || column || tensor.shape.len() == 1) {
+            let shape = tensor.shape();
+            let row = shape.len() >= 2 && shape[0] == 1;
+            let column = shape.len() >= 2 && shape[1] == 1;
+            if !(scalar || row || column || shape.len() == 1) {
                 return Ok(None);
             }
             let values = (0..len)
@@ -269,8 +270,8 @@ pub(crate) async fn extract_dims(value: &Value, label: &str) -> Result<Option<Ve
 /// Determine the output shape encoded by a runtime value.
 pub(crate) fn shape_from_value(value: &Value, label: &str) -> Result<Vec<usize>, String> {
     match value {
-        Value::Tensor(t) => Ok(t.shape.clone()),
-        Value::ComplexTensor(t) => Ok(t.shape.clone()),
+        Value::Tensor(t) => Ok(t.shape().to_vec()),
+        Value::ComplexTensor(t) => Ok(t.shape().to_vec()),
         Value::LogicalArray(l) => Ok(l.shape.clone()),
         Value::GpuTensor(h) => Ok(h.shape().to_vec()),
         Value::CharArray(ca) => Ok(ca.shape.clone()),
@@ -414,6 +415,23 @@ mod constructor_dimension_tests {
             .expect("dimensions");
             assert_eq!(parsed.values, vec![2, 3]);
             assert!(!parsed.is_column_vector);
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn constructor_dimensions_preserve_scalar_and_rank_one_shapes() {
+        for (shape, values) in [(vec![], vec![3.0]), (vec![2], vec![2.0, 3.0])] {
+            let value = Value::Tensor(Tensor::new(values.clone(), shape.clone()).unwrap());
+            let parsed = block_on(extract_constructor_dimensions(&value, "constructor"))
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                parsed.values,
+                values.iter().map(|v| *v as usize).collect::<Vec<_>>()
+            );
+            assert!(!parsed.is_column_vector);
+            assert_eq!(shape_from_value(&value, "constructor").unwrap(), shape);
         }
     }
 

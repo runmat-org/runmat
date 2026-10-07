@@ -1065,7 +1065,7 @@ fn ints_equal(a: &IntValue, b: &IntValue) -> bool {
 }
 
 fn tensors_equal(a: &Tensor, b: &Tensor) -> bool {
-    if a.shape != b.shape || a.numeric_dtype() != b.numeric_dtype() || a.len() != b.len() {
+    if a.shape() != b.shape() || a.numeric_dtype() != b.numeric_dtype() || a.len() != b.len() {
         return false;
     }
     (0..a.len()).all(|index| {
@@ -1117,7 +1117,7 @@ fn sparse_tensors_equal(a: &SparseTensor, b: &SparseTensor) -> bool {
 
 fn complex_tensors_equal(a: &ComplexTensor, b: &ComplexTensor) -> bool {
     let len = tensor::complex_tensor_element_len(a);
-    if a.shape != b.shape || len != tensor::complex_tensor_element_len(b) {
+    if a.shape() != b.shape() || len != tensor::complex_tensor_element_len(b) {
         return false;
     }
     (0..len).all(|index| {
@@ -1211,7 +1211,7 @@ fn value_fingerprint(value: &Value) -> String {
             format!(
                 "tensor:{:?}:{:?}:{values:?}",
                 tensor.numeric_dtype(),
-                tensor.shape
+                tensor.shape()
             )
         }
         Value::SparseTensor(tensor) => match tensor.integer_storage() {
@@ -1248,7 +1248,7 @@ fn value_fingerprint(value: &Value) -> String {
                         .expect("validated complex tensor storage length")
                 })
                 .collect::<Vec<_>>();
-            format!("complex:{:?}:{values:?}", tensor.shape)
+            format!("complex:{:?}:{values:?}", tensor.shape())
         }
         Value::Cell(cell) => format!("cell:{:?}:{}", cell.shape, values_fingerprint(&cell.data)),
         Value::Struct(struct_value) => format!(
@@ -1307,6 +1307,22 @@ pub(crate) fn reset_memoize_registry_for_test() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn cache_keys_distinguish_scalar_vector_and_matrix_shapes() {
+        let values = [vec![], vec![1], vec![1, 1]]
+            .into_iter()
+            .map(|shape| Value::Tensor(Tensor::new(vec![7.0], shape).unwrap()))
+            .collect::<Vec<_>>();
+        for (index, left) in values.iter().enumerate() {
+            assert!(value_equal_for_cache(left, &left.clone()));
+            for right in &values[index + 1..] {
+                assert!(!value_equal_for_cache(left, right));
+                assert_ne!(value_fingerprint(left), value_fingerprint(right));
+            }
+        }
+    }
 
     async fn memoized_subsref_builtin(
         receiver: Value,
