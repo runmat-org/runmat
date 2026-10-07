@@ -17,7 +17,7 @@ pub(super) fn execute(value: Value) -> BuiltinResult<Value> {
 }
 
 pub(super) fn apply(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor.into_numeric_storage().map_err(errors::internal)?;
     let output = match storage {
         NumericStorage::F64(values) => {

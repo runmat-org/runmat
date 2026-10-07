@@ -509,7 +509,7 @@ impl LogicalBuffer {
                 )
             })
             .collect();
-        let shape = canonical_shape(&tensor.shape, bits.len());
+        let shape = canonical_shape(tensor.shape(), bits.len());
         Self { bits, shape }
     }
 

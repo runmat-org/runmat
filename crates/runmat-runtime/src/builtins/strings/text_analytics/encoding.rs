@@ -529,7 +529,7 @@ fn is_typed_integer_value(value: &Value) -> bool {
 
 fn value_shape(value: &Value) -> Option<&[usize]> {
     match value {
-        Value::Tensor(tensor) => Some(&tensor.shape),
+        Value::Tensor(tensor) => Some(tensor.shape()),
         Value::GpuTensor(handle) => Some(handle.shape()),
         Value::Num(_) | Value::Int(_) => Some(&[1, 1]),
         _ => None,
@@ -1014,7 +1014,7 @@ fn numeric_input_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Numer
             };
             Ok(NumericInput {
                 values,
-                shape: tensor.shape.clone(),
+                shape: tensor.shape().to_vec(),
             })
         }
         other => Err(encoding_error(
@@ -1388,7 +1388,7 @@ mod tests {
         let Value::Tensor(indices) = out else {
             panic!("expected tensor");
         };
-        assert_eq!(indices.shape, vec![2, 2]);
+        assert_eq!(indices.shape(), &[2, 2]);
         assert_eq!(indices.materialize_f64()[0], 2.0);
         assert!(indices.materialize_f64()[1].is_nan());
         assert_eq!(indices.materialize_f64()[2], 1.0);
@@ -1433,6 +1433,39 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("exceeds vocabulary"), "{err}");
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn ind2word_preserves_rank_zero_and_rank_one_numeric_shapes() {
+        let enc = futures::executor::block_on(word_encoding_builtin(vec![Value::StringArray(
+            StringArray::new(vec!["red".into(), "blue".into()], vec![1, 2]).unwrap(),
+        )]))
+        .unwrap();
+
+        for (indices, expected_shape, expected_words) in [
+            (
+                Tensor::new(vec![2.0], vec![]).unwrap(),
+                Vec::new(),
+                vec!["blue".to_string()],
+            ),
+            (
+                Tensor::new(vec![1.0, 2.0], vec![2]).unwrap(),
+                vec![2],
+                vec!["red".to_string(), "blue".to_string()],
+            ),
+        ] {
+            let value = futures::executor::block_on(ind2word_builtin(vec![
+                enc.clone(),
+                Value::Tensor(indices),
+            ]))
+            .expect("ind2word low-rank input");
+            let Value::StringArray(words) = value else {
+                panic!("expected string array")
+            };
+            assert_eq!(words.shape, expected_shape);
+            assert_eq!(words.data, expected_words);
+        }
     }
 
     #[test]

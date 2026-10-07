@@ -728,7 +728,7 @@ pub async fn evaluate_async(data: Value, rest: &[Value]) -> BuiltinResult<HistEv
                 HistInput::Host(tensor) => tensor,
                 HistInput::Gpu(handle) => gather_tensor_from_gpu_async(handle, "hist").await?,
             };
-            let tensor_shape = tensor.shape.clone();
+            let tensor_shape = tensor.shape().to_vec();
             let samples = numeric_vector(tensor);
             let (weight_values, total_weight) = weights_input
                 .resolve_for_cpu_async("hist weights", sample_len)
@@ -2161,9 +2161,9 @@ pub(crate) mod tests {
         let eval = block_on(evaluate_async(data, &bins)).expect("matrix hist evaluation");
         let counts = Tensor::try_from(&eval.counts_value()).expect("matrix counts");
         let centers = Tensor::try_from(&eval.centers_value()).expect("matrix centers");
-        assert_eq!(counts.shape, vec![2, 2]);
+        assert_eq!(counts.shape(), &[2, 2]);
         assert_eq!(counts.materialize_f64(), vec![3.0, 0.0, 0.0, 3.0]);
-        assert_eq!(centers.shape, vec![2, 2]);
+        assert_eq!(centers.shape(), &[2, 2]);
         assert_eq!(centers.materialize_f64(), vec![1.0, 10.0, 1.0, 10.0]);
         assert_eq!(eval.charts.len(), 2);
         assert_eq!(
@@ -2184,7 +2184,7 @@ pub(crate) mod tests {
         );
         let eval = block_on(evaluate_async(data, &[])).expect("matrix hist evaluation");
         let centers = Tensor::try_from(&eval.centers_value()).expect("matrix centers");
-        assert_eq!(centers.shape, vec![10, 2]);
+        assert_eq!(centers.shape(), &[10, 2]);
         let values = centers.materialize_f64();
         assert!(values[0] < 1.0);
         assert!(values[10] > 100.0);

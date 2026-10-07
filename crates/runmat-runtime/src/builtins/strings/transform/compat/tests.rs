@@ -332,6 +332,38 @@ fn text_boundary_positions_read_typed_integer_storage_exactly() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn numeric_boundary_positions_preserve_rank_zero_and_rank_one_shapes() {
+    assert_eq!(
+        block(insert_after_builtin(
+            Value::String("ab".into()),
+            vec![
+                Value::Tensor(Tensor::new(vec![1.0], vec![]).unwrap()),
+                Value::String("X".into()),
+            ],
+        ))
+        .expect("rank-zero scalar boundary"),
+        Value::String("aXb".into())
+    );
+
+    let text =
+        Value::StringArray(StringArray::new(vec!["ab".into(), "cd".into()], vec![2]).unwrap());
+    let value = block(insert_after_builtin(
+        text,
+        vec![
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap()),
+            Value::String("X".into()),
+        ],
+    ))
+    .expect("rank-one matching boundaries");
+    let Value::StringArray(output) = value else {
+        panic!("expected string array")
+    };
+    assert_eq!(output.shape, vec![2]);
+    assert_eq!(output.data, vec!["aXb", "cdX"]);
+}
+
 #[test]
 fn replace_between_accepts_all_integer_position_classes_and_same_size_arrays() {
     for position in [

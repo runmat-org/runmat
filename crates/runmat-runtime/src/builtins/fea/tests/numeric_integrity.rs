@@ -1,5 +1,39 @@
 use super::*;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn low_rank_integer_promotion_and_selector_decode_preserve_exact_values() {
+    for (shape, values) in [
+        (Vec::new(), vec![u64::MAX]),
+        (vec![2], vec![9_007_199_254_740_993_u64, u64::MAX]),
+    ] {
+        let mut value = Value::Tensor(Tensor::new(vec![0.0; values.len()], shape.clone()).unwrap());
+        let json = serde_json::json!(values);
+        super::super::integer_serialization::promote_json_integer_kinds(
+            RUN_OPTIONS_NAME,
+            &ERROR_INTERNAL,
+            &mut value,
+            &json,
+        )
+        .unwrap();
+        let Value::Tensor(output) = value else {
+            panic!("integer promotion must retain the tensor representation");
+        };
+        assert_eq!(output.shape(), shape);
+        assert_eq!(output.integer_storage(), Some(&IntegerStorage::U64(values)));
+    }
+    for (shape, values, expected) in [
+        (Vec::new(), vec![1_u16], vec![0]),
+        (vec![2], vec![3_u16, 1], vec![2, 0]),
+    ] {
+        let input = Tensor::new_integer(IntegerStorage::U16(values), shape).unwrap();
+        assert_eq!(
+            one_based_usize_vec_from_value(RESULTS_NAME, &Value::Tensor(input)).unwrap(),
+            expected
+        );
+    }
+}
+
 #[test]
 fn fea_usize_parsers_preserve_typed_bounds_and_reject_invalid_values() {
     use runmat_value::{IntValue, IntegerStorage};

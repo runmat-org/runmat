@@ -10,7 +10,7 @@ fn try_tensor_char_row_as_string(value: &Value) -> Option<Result<String, String>
     match value {
         Value::Tensor(t) => {
             let len = tensor::tensor_element_len(t);
-            let is_row = numeric_format_row_width(&t.shape) == Some(len);
+            let is_row = numeric_format_row_width(t.shape()) == Some(len);
             if is_row {
                 let mut out = String::with_capacity(len);
                 for index in 0..len {

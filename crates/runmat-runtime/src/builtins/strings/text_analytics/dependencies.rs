@@ -21,6 +21,14 @@ pub(in crate::builtins::strings::text_analytics) const HEAD_DETAILS_PROPERTY: &s
 pub(in crate::builtins::strings::text_analytics) const DEPENDENCY_DETAILS_PROPERTY: &str =
     "DependencyDetails";
 
+fn dependency_row_vector(tensor: &Tensor) -> bool {
+    match tensor.shape() {
+        [] => false,
+        [_] => true,
+        [rows, ..] => *rows == 1,
+    }
+}
+
 const OUT_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "updatedDocuments",
     ty: BuiltinParamType::Any,
@@ -454,7 +462,7 @@ pub(in crate::builtins::strings::text_analytics) fn dependency_heads_from_object
                 format!("{fn_name}: tokenizedDocument object has invalid HeadDetails entry"),
             ));
         };
-        if tensor.rows != 1 {
+        if !dependency_row_vector(tensor) {
             return Err(text_analytics_error(
                 fn_name,
                 format!("{fn_name}: tokenizedDocument object has invalid HeadDetails entry shape"),
@@ -532,7 +540,7 @@ fn sentence_numbers_from_object(
                 format!("{fn_name}: tokenizedDocument object has invalid SentenceNumbers entry"),
             ));
         };
-        if tensor.rows != 1 {
+        if !dependency_row_vector(tensor) {
             return Err(text_analytics_error(
                 fn_name,
                 format!(
@@ -638,6 +646,46 @@ mod tests {
                 .expect("stored"),
             vec![vec![1.0, 2.0]]
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn dependency_numeric_properties_preserve_row_vector_projection() {
+        let row = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap());
+        let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
+        object.properties.insert(
+            HEAD_DETAILS_PROPERTY.to_string(),
+            Value::Cell(CellArray::new(vec![row.clone()], 1, 1).unwrap()),
+        );
+        object.properties.insert(
+            "SentenceNumbers".to_string(),
+            Value::Cell(CellArray::new(vec![row], 1, 1).unwrap()),
+        );
+
+        assert_eq!(
+            dependency_heads_from_object(&object, "tokenDetails")
+                .expect("heads")
+                .expect("stored"),
+            vec![vec![1.0, 2.0]]
+        );
+        assert_eq!(
+            sentence_numbers_from_object(&object, "addDependencyDetails")
+                .expect("numbers")
+                .expect("stored"),
+            vec![vec![1.0, 2.0]]
+        );
+
+        let scalar = Value::Tensor(Tensor::new(vec![1.0], vec![]).unwrap());
+        object.properties.insert(
+            HEAD_DETAILS_PROPERTY.to_string(),
+            Value::Cell(CellArray::new(vec![scalar.clone()], 1, 1).unwrap()),
+        );
+        object.properties.insert(
+            "SentenceNumbers".to_string(),
+            Value::Cell(CellArray::new(vec![scalar], 1, 1).unwrap()),
+        );
+        assert!(dependency_heads_from_object(&object, "tokenDetails").is_err());
+        assert!(sentence_numbers_from_object(&object, "addDependencyDetails").is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

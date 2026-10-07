@@ -41,7 +41,7 @@ impl Operand {
 
 impl Buffer<f64> {
     fn from_tensor(value: Tensor) -> Self {
-        let shape = value.shape.clone();
+        let shape = value.shape().to_vec();
         Self {
             data: tensor::tensor_into_values_f64(value),
             shape,
@@ -74,7 +74,7 @@ impl Buffer<f64> {
 
 impl Buffer<(f64, f64)> {
     fn from_complex(value: ComplexTensor) -> Self {
-        let shape = value.shape.clone();
+        let shape = value.shape().to_vec();
         Self {
             data: value.materialize_f64(),
             shape,

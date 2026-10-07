@@ -442,8 +442,8 @@ fn ensure_hilbert_extensions(value: &Value, args: &[Value]) -> BuiltinResult<()>
         )?;
     }
     let rank = match value {
-        Value::Tensor(tensor) => tensor.shape.len(),
-        Value::ComplexTensor(tensor) => tensor.shape.len(),
+        Value::Tensor(tensor) => tensor.shape().len(),
+        Value::ComplexTensor(tensor) => tensor.shape().len(),
         Value::LogicalArray(array) => array.shape.len(),
         Value::GpuTensor(handle) => handle.shape().len(),
         _ => 2,
@@ -767,9 +767,37 @@ pub(crate) mod tests {
     fn hilbert_row_cosine_returns_quadrature_signal() {
         let input = Tensor::new(vec![1.0, 0.0, -1.0, 0.0], vec![1, 4]).unwrap();
         let out = as_complex_tensor(hilbert_call(Value::Tensor(input), Vec::new()).unwrap());
-        assert_eq!(out.shape, vec![1, 4]);
+        assert_eq!(out.shape(), &[1, 4]);
         let expected = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
         for (actual, expected) in out.materialize_f64().iter().copied().zip(expected) {
+            assert_complex_close(actual, expected);
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn hilbert_low_rank_real_inputs_follow_scalar_and_vector_output_policies() {
+        let scalar = Tensor::new(vec![1.0], Vec::new()).expect("rank-zero signal");
+        let Value::Complex(real, imaginary) =
+            hilbert_call(Value::Tensor(scalar), Vec::new()).expect("scalar Hilbert signal")
+        else {
+            panic!("double scalar analytic signal must scalarize");
+        };
+        assert_complex_close((real, imaginary), (1.0, 0.0));
+
+        let vector = Tensor::new(vec![1.0, 0.0], vec![2]).expect("rank-one signal");
+        let Value::ComplexTensor(output) =
+            hilbert_call(Value::Tensor(vector), Vec::new()).expect("vector Hilbert signal")
+        else {
+            panic!("rank-one analytic signal must remain complex tensor");
+        };
+        assert_eq!(output.shape(), &[2]);
+        for (actual, expected) in output
+            .materialize_f64()
+            .iter()
+            .copied()
+            .zip([(1.0, 0.0), (0.0, 0.0)])
+        {
             assert_complex_close(actual, expected);
         }
     }
@@ -778,7 +806,7 @@ pub(crate) mod tests {
     fn hilbert_column_cosine_operates_down_columns() {
         let input = Tensor::new(vec![1.0, 0.0, -1.0, 0.0], vec![4, 1]).unwrap();
         let out = as_complex_tensor(hilbert_call(Value::Tensor(input), Vec::new()).unwrap());
-        assert_eq!(out.shape, vec![4, 1]);
+        assert_eq!(out.shape(), &[4, 1]);
         let expected = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
         for (actual, expected) in out.materialize_f64().iter().copied().zip(expected) {
             assert_complex_close(actual, expected);
@@ -790,7 +818,7 @@ pub(crate) mod tests {
         let input =
             Tensor::new(vec![1.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, -1.0], vec![4, 2]).unwrap();
         let out = as_complex_tensor(hilbert_call(Value::Tensor(input), Vec::new()).unwrap());
-        assert_eq!(out.shape, vec![4, 2]);
+        assert_eq!(out.shape(), &[4, 2]);
         let expected = [
             (1.0, 0.0),
             (0.0, 1.0),
@@ -811,7 +839,7 @@ pub(crate) mod tests {
         let input = Tensor::new(vec![1.0, 0.0, -1.0, 0.0], vec![1, 4]).unwrap();
         let out =
             as_complex_tensor(hilbert_call(Value::Tensor(input), vec![Value::Num(6.0)]).unwrap());
-        assert_eq!(out.shape, vec![1, 6]);
+        assert_eq!(out.shape(), &[1, 6]);
         assert_eq!(out.materialize_f64().len(), 6);
         assert_complex_close(out.materialize_f64()[0], (1.0, 0.0));
     }
@@ -823,7 +851,7 @@ pub(crate) mod tests {
         let out = as_complex_tensor(
             hilbert_call(Value::Tensor(input), vec![Value::Int(IntValue::I32(0))]).unwrap(),
         );
-        assert_eq!(out.shape, vec![1, 0]);
+        assert_eq!(out.shape(), &[1, 0]);
         assert!(out.materialize_f64().is_empty());
     }
 
@@ -832,7 +860,7 @@ pub(crate) mod tests {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = LogicalArray::new(vec![1, 0, 1, 0], vec![1, 4]).unwrap();
         let out = as_complex_tensor(hilbert_call(Value::LogicalArray(input), Vec::new()).unwrap());
-        assert_eq!(out.shape, vec![1, 4]);
+        assert_eq!(out.shape(), &[1, 4]);
     }
 
     #[test]
@@ -895,7 +923,7 @@ pub(crate) mod tests {
             let input = Tensor::new(vec![1.0, 0.0, -1.0, 0.0], vec![1, 4]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &input.materialize_f64(),
-                shape: &input.shape,
+                shape: input.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let metadata = hilbert_input_metadata(&handle);
@@ -904,7 +932,7 @@ pub(crate) mod tests {
             );
             assert!(runmat_accelerate_api::provider_for_handle(&handle).is_some());
             assert_eq!(hilbert_input_metadata(&handle), metadata);
-            assert_eq!(out.shape, vec![1, 4]);
+            assert_eq!(out.shape(), &[1, 4]);
             let expected = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
             for (actual, expected) in out.materialize_f64().iter().copied().zip(expected) {
                 assert_complex_close(actual, expected);
@@ -928,7 +956,7 @@ pub(crate) mod tests {
         let input = Tensor::new(vec![1.0, 0.0, -1.0, 0.0], vec![1, 4]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &input.materialize_f64(),
-            shape: &input.shape,
+            shape: input.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let out = hilbert_call(Value::GpuTensor(handle.clone()), Vec::new()).unwrap();
@@ -947,7 +975,7 @@ pub(crate) mod tests {
             ),
         )
         .expect("gather complex output");
-        assert_eq!(gathered.shape, vec![1, 4]);
+        assert_eq!(gathered.shape(), &[1, 4]);
         let expected = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
         for (actual, expected) in gathered.materialize_f64().iter().copied().zip(expected) {
             assert!((actual.0 - expected.0).abs() <= 1.0e-5);
@@ -976,7 +1004,7 @@ pub(crate) mod tests {
         );
         let view = runmat_accelerate_api::HostTensorView {
             data: &input.materialize_f64(),
-            shape: &input.shape,
+            shape: input.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let out = hilbert_call(Value::GpuTensor(handle.clone()), vec![Value::Num(6.0)]).unwrap();
@@ -995,7 +1023,7 @@ pub(crate) mod tests {
             ),
         )
         .expect("gather complex output");
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         for (idx, (actual, expected)) in gathered
             .materialize_f64()
             .iter()

@@ -45,7 +45,7 @@ impl ClassificationBoundary {
     }
 
     pub(super) fn classify_tensor(&self, value: Tensor) -> BuiltinResult<Value> {
-        let shape = value.shape.clone();
+        let shape = value.shape().to_vec();
         let bits = (0..value.len())
             .map(|index| {
                 value
@@ -194,7 +194,7 @@ impl ClassificationBoundary {
     }
 
     fn classify_complex_tensor(&self, value: ComplexTensor) -> BuiltinResult<Value> {
-        let shape = value.shape.clone();
+        let shape = value.shape().to_vec();
         let bits = (0..value.len())
             .map(|index| {
                 value

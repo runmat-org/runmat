@@ -749,7 +749,7 @@ fn is_contour_pair_option(token: &str) -> bool {
 }
 
 fn ensure_numeric_vector_shape(tensor: &Tensor, role: &str) -> BuiltinResult<()> {
-    let shape = &tensor.shape;
+    let shape = tensor.shape();
     if shape.len() != 2 || (shape[0] != 1 && shape[1] != 1) {
         return Err(fcontour_invalid(format!(
             "{role} must be a row or column vector"
@@ -1291,6 +1291,16 @@ mod tests {
         )
         .unwrap();
         assert!(parse_domain(&Value::Tensor(matrix)).is_err());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn fcontour_domain_rejects_low_rank_tensor_vectors() {
+        for (shape, data) in [(Vec::new(), vec![-2.0]), (vec![2], vec![-2.0, 2.0])] {
+            let value = Value::Tensor(Tensor::new(data, shape).expect("domain tensor"));
+            let error = parse_domain(&value).expect_err("low-rank domain tensor");
+            assert!(error.message().contains("row or column vector"));
+        }
     }
 
     #[test]

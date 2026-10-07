@@ -133,7 +133,7 @@ pub(in crate::builtins::fea) fn usize_vec_from_value(
     match value {
         Value::Tensor(tensor) => {
             if tensor
-                .shape
+                .shape()
                 .iter()
                 .filter(|&&dimension| dimension > 1)
                 .count()

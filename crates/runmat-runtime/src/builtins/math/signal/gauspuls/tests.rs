@@ -95,6 +95,21 @@ fn gauspuls_defaults_peak_at_one() {
     assert!(matches!(out, Value::Num(value) if (value - 1.0).abs() <= 1e-12));
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gauspuls_single_samples_keep_rank_zero_and_rank_one_shapes() {
+    for (shape, samples) in [(Vec::new(), vec![0.0_f32]), (vec![2], vec![0.0_f32, 0.0])] {
+        let input = Tensor::from_f32(samples, shape.clone()).expect("single samples");
+        let output = expect_tensor(call(Value::Tensor(input), Vec::new()).expect("gauspuls"));
+        assert_eq!(output.shape(), shape);
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        assert_eq!(
+            output.as_f32_slice(),
+            Some(vec![1.0_f32; output.len()].as_slice())
+        );
+    }
+}
+
 #[test]
 fn gauspuls_custom_parameters_preserve_shape() {
     let input = Tensor::new(vec![-0.001, 0.0, 0.001], vec![1, 3]).unwrap();
@@ -105,7 +120,7 @@ fn gauspuls_custom_parameters_preserve_shape() {
         )
         .expect("gauspuls"),
     );
-    assert_eq!(out.shape, vec![1, 3]);
+    assert_eq!(out.shape(), &[1, 3]);
     assert!(out.materialize_f64()[1] > out.materialize_f64()[0]);
     assert!(out.materialize_f64()[1] > out.materialize_f64()[2]);
 }
@@ -115,7 +130,7 @@ fn gauspuls_reads_typed_integer_storage_exactly() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let input = integer_tensor(vec![0, 1], vec![1, 2]);
     let out = expect_tensor(call(Value::Tensor(input), Vec::new()).expect("gauspuls"));
-    assert_eq!(out.shape, vec![1, 2]);
+    assert_eq!(out.shape(), &[1, 2]);
     assert!((out.materialize_f64()[0] - 1.0).abs() <= 1e-12);
     assert!(out.materialize_f64()[1].is_finite());
 }
@@ -162,7 +177,7 @@ fn gauspuls_preserves_native_single_time_shape_and_output_class() {
         Tensor::from_numeric_storage(NumericStorage::F32(vec![-0.001, 0.0, 0.001]), vec![1, 3])
             .unwrap();
     let output = expect_tensor(call(Value::Tensor(input), Vec::new()).expect("single T"));
-    assert_eq!(output.shape, vec![1, 3]);
+    assert_eq!(output.shape(), &[1, 3]);
     assert_eq!(output.numeric_dtype(), NumericDType::F32);
 
     let _count = crate::output_count::push_output_count(Some(3));
@@ -174,7 +189,7 @@ fn gauspuls_preserves_native_single_time_shape_and_output_class() {
     };
     for output in outputs {
         let output = expect_tensor(output);
-        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(output.shape(), &[2, 1]);
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
     }
 }
@@ -283,9 +298,9 @@ fn gauspuls_multi_output_returns_quadrature_and_envelope() {
     let in_phase = expect_tensor(outputs[0].clone());
     let quadrature = expect_tensor(outputs[1].clone());
     let envelope = expect_tensor(outputs[2].clone());
-    assert_eq!(in_phase.shape, vec![1, 2]);
-    assert_eq!(quadrature.shape, vec![1, 2]);
-    assert_eq!(envelope.shape, vec![1, 2]);
+    assert_eq!(in_phase.shape(), &[1, 2]);
+    assert_eq!(quadrature.shape(), &[1, 2]);
+    assert_eq!(envelope.shape(), &[1, 2]);
     assert!((in_phase.materialize_f64()[0] - 1.0).abs() <= 1e-12);
     assert!(quadrature.materialize_f64()[0].abs() <= 1e-12);
     assert!((envelope.materialize_f64()[0] - 1.0).abs() <= 1e-12);
@@ -306,9 +321,9 @@ fn gauspuls_multi_output_reads_typed_integer_storage_exactly() {
     let in_phase = expect_tensor(outputs[0].clone());
     let quadrature = expect_tensor(outputs[1].clone());
     let envelope = expect_tensor(outputs[2].clone());
-    assert_eq!(in_phase.shape, vec![1, 2]);
-    assert_eq!(quadrature.shape, vec![1, 2]);
-    assert_eq!(envelope.shape, vec![1, 2]);
+    assert_eq!(in_phase.shape(), &[1, 2]);
+    assert_eq!(quadrature.shape(), &[1, 2]);
+    assert_eq!(envelope.shape(), &[1, 2]);
     assert!((in_phase.materialize_f64()[0] - 1.0).abs() <= 1e-12);
     assert!(quadrature.materialize_f64()[0].abs() <= 1e-12);
     assert!((envelope.materialize_f64()[0] - 1.0).abs() <= 1e-12);

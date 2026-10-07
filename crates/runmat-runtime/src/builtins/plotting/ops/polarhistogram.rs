@@ -608,7 +608,7 @@ fn normalize_theta_tensor(tensor: Tensor, histcounts_args: &[Value]) -> BuiltinR
     if !period.is_finite() || period <= 0.0 {
         return Err(invalid_argument("angular bin range must be positive"));
     }
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let mut values = tensor_utils::tensor_into_values_f64(tensor);
     for value in &mut values {
         if value.is_finite() {
@@ -783,6 +783,17 @@ mod tests {
             numeric_vector(&Value::Tensor(edges), "BinEdges").expect("numeric vector"),
             vec![-3.0, 0.0, 3.0]
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn theta_normalization_preserves_low_rank_host_geometry() {
+        for (shape, samples) in [(Vec::new(), vec![0.0]), (vec![2], vec![0.0, 1.0])] {
+            let input = Tensor::new(samples.clone(), shape.clone()).expect("theta tensor");
+            let output = normalize_theta_tensor(input, &[]).expect("theta normalization");
+            assert_eq!(output.shape(), shape);
+            assert_eq!(output.materialize_f64(), samples);
+        }
     }
 
     #[test]

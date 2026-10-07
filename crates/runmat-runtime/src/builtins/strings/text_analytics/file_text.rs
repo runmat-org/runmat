@@ -410,7 +410,7 @@ fn parse_pages(value: &Value) -> BuiltinResult<Vec<usize>> {
     let values = match value {
         Value::Num(value) => vec![NumericScalar::F64(*value)],
         Value::Int(value) => vec![int_numeric_scalar(value.clone())],
-        Value::Tensor(tensor) if tensor_shape_is_vector(&tensor.shape) => (0..tensor.len())
+        Value::Tensor(tensor) if tensor_shape_is_vector(tensor.shape()) => (0..tensor.len())
             .map(|idx| {
                 tensor.numeric_value_at(idx).ok_or_else(|| {
                     extract_error(
@@ -723,15 +723,20 @@ mod tests {
         }
     }
 
-    #[test]
-    fn parse_pages_reads_typed_integer_storage_exactly() {
-        let tensor = Tensor::new_integer(IntegerStorage::U16(vec![2, 5]), vec![1, 2])
-            .expect("integer tensor");
-
-        assert_eq!(
-            parse_pages(&Value::Tensor(tensor)).expect("pages"),
-            vec![2, 5]
-        );
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn parse_pages_reads_typed_integer_storage_and_preserves_vector_grammar() {
+        for (storage, shape, expected) in [
+            (IntegerStorage::U16(vec![2]), vec![], vec![2]),
+            (IntegerStorage::U16(vec![2, 5]), vec![2], vec![2, 5]),
+            (IntegerStorage::U16(vec![2, 5]), vec![1, 2, 1], vec![2, 5]),
+        ] {
+            let tensor = Tensor::new_integer(storage, shape).expect("integer tensor");
+            assert_eq!(
+                parse_pages(&Value::Tensor(tensor)).expect("pages"),
+                expected
+            );
+        }
     }
 
     #[test]

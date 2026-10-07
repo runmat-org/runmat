@@ -999,7 +999,7 @@ impl BoundaryList {
                 }
                 Ok(Self {
                     data,
-                    shape: tensor.shape.clone(),
+                    shape: tensor.shape().to_vec(),
                 })
             }
             Value::String(text) => Ok(Self {

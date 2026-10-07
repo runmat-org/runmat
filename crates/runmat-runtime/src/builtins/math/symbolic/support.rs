@@ -143,7 +143,7 @@ impl SymbolicOperand {
                     .copied()
                     .map(SymbolicExpr::constant)
                     .collect(),
-                shape: normalize_symbolic_shape(&tensor.shape),
+                shape: normalize_symbolic_shape(tensor.shape()),
             }),
             Value::LogicalArray(array) => Some(Self {
                 data: array

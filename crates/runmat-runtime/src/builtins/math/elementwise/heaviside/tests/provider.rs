@@ -95,7 +95,7 @@ fn direct_provider_roundtrip_stays_resident() {
         let input = provider
             .upload(&HostTensorView {
                 data: &values,
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             })
             .unwrap();
         let result = execute(Value::GpuTensor(input)).unwrap();
@@ -167,7 +167,7 @@ fn wgpu_matches_host() {
     let input = provider
         .upload(&HostTensorView {
             data: &values,
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         })
         .unwrap();
     let result = block_on(super::super::provider::execute(input)).unwrap();

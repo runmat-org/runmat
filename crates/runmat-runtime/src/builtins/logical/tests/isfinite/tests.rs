@@ -33,6 +33,20 @@ fn classifies_scalars_dense_complex_and_integer_storage() {
     assert_eq!(logical_bits(run(Value::Tensor(integer))), vec![1, 1]);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn isfinite_scalarizes_one_element_tensor_but_keeps_rank_one_mask() {
+    let scalar = Tensor::new(vec![1.0], Vec::new()).expect("rank-zero tensor");
+    assert_eq!(run(Value::Tensor(scalar)), Value::Bool(true));
+
+    let vector = Tensor::new(vec![1.0, f64::NAN], vec![2]).expect("rank-one tensor");
+    let Value::LogicalArray(mask) = run(Value::Tensor(vector)) else {
+        panic!("rank-one result must be a logical array");
+    };
+    assert_eq!(mask.shape, vec![2]);
+    assert_eq!(mask.data, vec![1, 0]);
+}
+
 #[test]
 fn rejects_excess_outputs_with_catalog_error() {
     let _outputs = crate::output_count::push_output_count(Some(2));

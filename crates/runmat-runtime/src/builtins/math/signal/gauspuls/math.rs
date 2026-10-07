@@ -71,7 +71,7 @@ pub(crate) fn gauspuls_cutoff(params: GauspulsParams, tpe: f64) -> f64 {
 }
 
 pub(crate) fn gauspuls_tensor(tensor: Tensor, params: GauspulsParams) -> Result<Tensor, String> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     ensure_exact_integer_tensor_boundary(&tensor, "sample time")?;
     let storage = tensor
         .into_numeric_storage()
@@ -98,7 +98,7 @@ pub(crate) fn gauspuls_components_tensor(
     tensor: Tensor,
     params: GauspulsParams,
 ) -> Result<(Tensor, Tensor, Tensor), String> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     ensure_exact_integer_tensor_boundary(&tensor, "sample time")?;
     let storage = tensor
         .into_numeric_storage()

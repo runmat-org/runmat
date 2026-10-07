@@ -5,6 +5,20 @@ use runmat_value::{
 
 use super::execute;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn low_rank_single_host_kernel_retains_geometry_and_step_values() {
+    for (shape, values, expected) in [
+        (Vec::new(), vec![0.0_f32], vec![0.5_f32]),
+        (vec![3], vec![-1.0_f32, 0.0, 2.0], vec![0.0_f32, 0.5, 1.0]),
+    ] {
+        let input = Tensor::from_f32(values, shape.clone()).unwrap();
+        let output = super::super::host::apply(input).unwrap();
+        assert_eq!(output.shape(), shape);
+        assert_eq!(output.as_f32_slice(), Some(expected.as_slice()));
+    }
+}
+
 #[test]
 fn preserves_single_and_real_step_values() {
     let input = Tensor::from_f32(vec![-1.0, 0.0, 2.0], vec![1, 3]).unwrap();
@@ -31,7 +45,7 @@ fn preserves_dense_shape_and_handles_infinities() {
     let Value::Tensor(output) = execute(Value::Tensor(input)).unwrap() else {
         panic!("expected tensor")
     };
-    assert_eq!(output.shape, vec![2, 3]);
+    assert_eq!(output.shape(), &[2, 3]);
     assert_eq!(output.materialize_f64(), vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0]);
 }
 

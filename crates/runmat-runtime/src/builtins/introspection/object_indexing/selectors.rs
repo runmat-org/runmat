@@ -143,7 +143,7 @@ pub(super) fn single_subscript_count(
                     }
                 }
             }
-            checked_shape_element_count(&tensor.shape)
+            checked_shape_element_count(tensor.shape())
         }
         Value::LogicalArray(array) => Ok(array.data.iter().filter(|&&bit| bit != 0).count()),
         Value::StringArray(_) => Err(num_args_error(
@@ -208,8 +208,8 @@ pub(super) fn target_shape(target: &Value) -> Option<Vec<usize>> {
         Value::Cell(cell) => Some(cell.shape.clone()),
         Value::StructArray(array) => Some(array.shape().to_vec()),
         Value::ObjectArray(array) => Some(array.shape().to_vec()),
-        Value::Tensor(tensor) => Some(tensor.shape.clone()),
-        Value::ComplexTensor(tensor) => Some(tensor.shape.clone()),
+        Value::Tensor(tensor) => Some(tensor.shape().to_vec()),
+        Value::ComplexTensor(tensor) => Some(tensor.shape().to_vec()),
         Value::LogicalArray(array) => Some(array.shape.clone()),
         Value::StringArray(array) => Some(array.shape.clone()),
         Value::SparseTensor(sparse) => Some(sparse.shape()),

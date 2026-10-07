@@ -331,8 +331,8 @@ pub(in crate::builtins::fea) fn promote_json_integer_kinds(
             ));
         }
         (Value::Tensor(tensor), serde_json::Value::Array(_)) => {
-            if let Some(storage) = exact_json_integer_array(json, &tensor.shape) {
-                *tensor = Tensor::new_integer(storage, tensor.shape.clone())
+            if let Some(storage) = exact_json_integer_array(json, tensor.shape()) {
+                *tensor = Tensor::new_integer(storage, tensor.shape().to_vec())
                     .map_err(|message| builtin_error(builtin, error, message))?;
             }
         }
