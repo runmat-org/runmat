@@ -95,7 +95,7 @@ impl TruthTensor {
             })
             .collect();
         Self {
-            shape: normalized_shape(&tensor.shape, tensor.len()),
+            shape: normalized_shape(tensor.shape(), tensor.len()),
             data,
         }
     }
@@ -130,7 +130,7 @@ impl TruthTensor {
                 .collect()
         };
         Self {
-            shape: tensor.shape.clone(),
+            shape: tensor.shape().to_vec(),
             data,
         }
     }

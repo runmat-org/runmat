@@ -520,7 +520,7 @@ struct Mask {
 fn mask_from_value(value: &Value) -> BuiltinResult<Mask> {
     match value {
         Value::Tensor(tensor) => {
-            let shape = canonical_shape(&tensor.shape, tensor.len());
+            let shape = canonical_shape(tensor.shape(), tensor.len());
             let bits = if let Some(storage) = tensor.integer_storage() {
                 storage
                     .exact_values()
@@ -536,7 +536,7 @@ fn mask_from_value(value: &Value) -> BuiltinResult<Mask> {
             Ok(Mask { bits, shape })
         }
         Value::ComplexTensor(tensor) => {
-            let shape = canonical_shape(&tensor.shape, tensor.len());
+            let shape = canonical_shape(tensor.shape(), tensor.len());
             let bits = match tensor.complex_storage() {
                 runmat_value::ComplexStorage::Integer(storage) => (0..storage.len())
                     .map(|index| {
@@ -1059,7 +1059,7 @@ pub(crate) mod tests {
         let result = nnz_host_value(Value::Tensor(tensor), Some(1)).expect("nnz");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), [1, 2]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1073,7 +1073,7 @@ pub(crate) mod tests {
         let result = nnz_host_value(Value::Tensor(tensor), Some(1)).expect("nnz");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), [1, 2]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1087,7 +1087,7 @@ pub(crate) mod tests {
         let result = nnz_host_value(Value::Tensor(tensor), Some(2)).expect("nnz");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_eq!(out.materialize_f64(), vec![2.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1109,7 +1109,7 @@ pub(crate) mod tests {
         let per_column = nnz_host_value(Value::SparseTensor(sparse.clone()), Some(1)).expect("nnz");
         match per_column {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), [1, 2]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 1.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1118,7 +1118,7 @@ pub(crate) mod tests {
         let per_row = nnz_host_value(Value::SparseTensor(sparse), Some(2)).expect("nnz");
         match per_row {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), [3, 1]);
                 assert_eq!(out.materialize_f64(), vec![0.0, 0.0, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1133,7 +1133,7 @@ pub(crate) mod tests {
         let result = nnz_host_value(Value::SparseTensor(sparse), Some(1)).expect("nnz");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), [1, 2]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1147,7 +1147,7 @@ pub(crate) mod tests {
         let result = nnz_host_value(Value::Tensor(tensor), Some(1)).expect("nnz");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(out.materialize_f64(), vec![0.0, 0.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1170,7 +1170,7 @@ pub(crate) mod tests {
         let result = nnz_host_value(Value::Tensor(tensor), Some(3)).expect("nnz");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2, 1]);
+                assert_eq!(out.shape(), [2, 2, 1]);
                 assert_eq!(out.materialize_f64(), vec![2.0, 0.0, 0.0, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1184,7 +1184,7 @@ pub(crate) mod tests {
         let result = nnz_host_value(Value::Tensor(tensor), Some(3)).expect("nnz");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), [2, 2]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1250,7 +1250,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 0.0, 2.0, 0.0, 3.0], vec![5, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = futures::executor::block_on(nnz_gpu(handle, None)).expect("nnz");
@@ -1272,13 +1272,13 @@ pub(crate) mod tests {
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu = futures::executor::block_on(nnz_gpu(handle, Some(1))).expect("nnz");
         match (cpu, gpu) {
             (Value::Tensor(ct), Value::Tensor(gt)) => {
-                assert_eq!(gt.shape, ct.shape);
+                assert_eq!(gt.shape(), ct.shape());
                 assert_eq!(gt.materialize_f64(), ct.materialize_f64());
             }
             other => panic!("unexpected comparison result {other:?}"),

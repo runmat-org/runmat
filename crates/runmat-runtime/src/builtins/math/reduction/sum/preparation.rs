@@ -81,7 +81,7 @@ fn controls(value: &Value, parsed: &ParsedArguments) -> BuiltinResult<AdmittedSu
             NumericDomain::Real,
         ),
         Value::Tensor(tensor) => (
-            tensor.shape.as_slice(),
+            tensor.shape(),
             NumericClass::from_class_identity(&tensor.numeric_dtype().class_identity())
                 .expect("all numeric tensor dtypes have canonical classes"),
             NumericDomain::Real,

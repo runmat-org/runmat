@@ -185,7 +185,7 @@ fn integer_storage_and_shape(value: &Value) -> Option<(IntegerStorage, Vec<usize
         Value::Tensor(tensor) => tensor
             .integer_storage()
             .cloned()
-            .map(|storage| (storage, tensor.shape.clone())),
+            .map(|storage| (storage, tensor.shape().to_vec())),
         _ => None,
     }
 }

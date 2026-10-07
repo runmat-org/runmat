@@ -15,7 +15,7 @@ pub(super) async fn evaluate(
             .cloned()
             .ok_or_else(|| mean_internal_error("mean: expected gathered integer storage"))?;
         let dim = match &parsed.axes {
-            MeanAxes::Default => default_dimension_from_shape(&gathered.shape),
+            MeanAxes::Default => default_dimension_from_shape(gathered.shape()),
             MeanAxes::Dim(dim) => *dim,
             MeanAxes::Vec(_) | MeanAxes::All => {
                 return Err(mean_invalid_argument(
@@ -23,7 +23,7 @@ pub(super) async fn evaluate(
                 ));
             }
         };
-        let result = weighted_integer_mean(&storage, &gathered.shape, dim, weights)?;
+        let result = weighted_integer_mean(&storage, gathered.shape(), dim, weights)?;
         let mut uploaded = gpu_helpers::upload_tensor_protecting(provider, &result, &[&handle])
             .map_err(|source| {
                 let mut error = mean_internal_error(format!(

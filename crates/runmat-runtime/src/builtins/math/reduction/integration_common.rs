@@ -48,18 +48,20 @@ pub(crate) fn integration_error(name: &str, message: impl Into<String>) -> Runti
 }
 
 pub(crate) fn canonical_shape_tensor(tensor: &Tensor) -> Vec<usize> {
-    if tensor.shape.is_empty() {
-        vec![tensor.rows, tensor.cols]
+    if tensor.shape().is_empty() {
+        // Integration treats a rank-zero tensor as an empty 0-by-0 matrix;
+        // this domain projection is distinct from Tensor's scalar view.
+        vec![0, 0]
     } else {
-        tensor.shape.clone()
+        tensor.shape().to_vec()
     }
 }
 
 pub(crate) fn canonical_shape_complex(tensor: &ComplexTensor) -> Vec<usize> {
-    if tensor.shape.is_empty() {
-        vec![tensor.rows, tensor.cols]
+    if tensor.shape().is_empty() {
+        vec![tensor.rows(), tensor.cols()]
     } else {
-        tensor.shape.clone()
+        tensor.shape().to_vec()
     }
 }
 
@@ -174,7 +176,9 @@ pub(crate) fn spacing_from_value(
     let padded_y_shape = pad_shape_for_dim(y_shape, dim);
 
     if shapes_equal_with_trailing_ones(&tensor_shape, &padded_y_shape) {
-        tensor_value.shape = padded_y_shape;
+        tensor_value
+            .reshape_in_place(padded_y_shape)
+            .map_err(|error| integration_error(name, error))?;
         return Ok(SpacingSpec::Tensor(tensor_value));
     }
 
@@ -292,10 +296,10 @@ pub(crate) fn spacing_from_gpu_or_host_value_for_provider(
             let handle = provider
                 .upload(&HostTensorView {
                     data: &data,
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 })
                 .map_err(|source| provider_spacing_error(name, source))?;
-            let handle = admit_spacing_upload(name, provider, handle, &tensor.shape)?;
+            let handle = admit_spacing_upload(name, provider, handle, tensor.shape())?;
             Ok(GpuIntegrationSpacing::Tensor { handle })
         }
     }
@@ -396,7 +400,7 @@ pub(crate) fn promote_real_value_to_gpu(name: &str, value: Value) -> BuiltinResu
             let data = real_tensor_values(&tensor);
             let view = HostTensorView {
                 data: &data,
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             match provider.upload(&view) {
                 Ok(handle) => Ok(Value::GpuTensor(handle)),
@@ -465,6 +469,16 @@ fn shapes_equal_with_trailing_ones(lhs: &[usize], rhs: &[usize]) -> bool {
 mod tests {
     use super::*;
     use runmat_value::{ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor};
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn canonical_tensor_shape_preserves_rank_zero_as_zero_by_zero() {
+        let tensor = Tensor::new(vec![7.0], Vec::new()).expect("rank-zero tensor");
+
+        assert!(tensor.shape().is_empty());
+        assert_eq!(tensor.rows(), 1, "the general Tensor projection is scalar");
+        assert_eq!(canonical_shape_tensor(&tensor), [0, 0]);
+    }
 
     #[test]
     #[cfg(target_pointer_width = "64")]
@@ -538,7 +552,7 @@ mod tests {
 
         let complex = value_into_complex_tensor("trapz", Value::Tensor(real)).expect("complex");
 
-        assert_eq!(complex.shape, vec![1, 2]);
+        assert_eq!(complex.shape(), [1, 2]);
         assert_eq!(complex.materialize_f64(), vec![(-2.0, 0.0), (5.0, 0.0)]);
     }
 }

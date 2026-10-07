@@ -12,7 +12,7 @@ pub(super) fn evaluate_logical(
     let values = match evaluation.values {
         Value::Int(IntValue::U8(value)) => Value::Bool(value != 0),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let IntegerStorage::U8(values) = tensor
                 .into_numeric_storage()
                 .map_err(|error| topk_internal(kind, error))?
@@ -46,7 +46,7 @@ pub(super) fn evaluate_real(
     tensor: Tensor,
     args: &TopKArgs,
 ) -> BuiltinResult<TopKEvaluation> {
-    let shape = normalize_shape(tensor.shape.clone());
+    let shape = normalize_shape(tensor.shape().to_vec());
     let dim = selected_dim(&shape, args.dim);
     let axis = dim.saturating_sub(1);
     let axis_len = shape.get(axis).copied().unwrap_or(1);
@@ -130,7 +130,7 @@ pub(super) fn evaluate_complex(
     tensor: ComplexTensor,
     args: &TopKArgs,
 ) -> BuiltinResult<TopKEvaluation> {
-    let shape = normalize_shape(tensor.shape.clone());
+    let shape = normalize_shape(tensor.shape().to_vec());
     let storage = tensor.into_complex_storage();
     let comparison_values = storage.materialize_f64();
     let dim = selected_dim(&shape, args.dim);
