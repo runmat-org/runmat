@@ -88,8 +88,8 @@ fn check_operand(
     require_nonempty: bool,
 ) -> Result<usize, IirAdmissionFault> {
     let shape = match value {
-        Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
-        Value::ComplexTensor(tensor) => Some(tensor.shape.as_slice()),
+        Value::Tensor(tensor) => Some(tensor.shape()),
+        Value::ComplexTensor(tensor) => Some(tensor.shape()),
         Value::LogicalArray(logical) => Some(logical.shape.as_slice()),
         Value::GpuTensor(handle) => Some(handle.shape()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => None,

@@ -295,11 +295,11 @@ fn input_facts(value: &Value) -> InputFacts {
         },
         Value::Tensor(tensor) => InputFacts {
             class: InputClass::Dense(tensor.numeric_dtype()),
-            shape: tensor.shape.clone(),
+            shape: tensor.shape().to_vec(),
         },
         Value::ComplexTensor(tensor) => InputFacts {
             class: InputClass::ComplexDense(tensor.numeric_dtype()),
-            shape: tensor.shape.clone(),
+            shape: tensor.shape().to_vec(),
         },
         Value::LogicalArray(array) => InputFacts {
             class: InputClass::Logical,

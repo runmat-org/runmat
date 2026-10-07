@@ -690,7 +690,7 @@ mod tests {
         let Value::ComplexTensor(h) = h else {
             panic!("expected complex response");
         };
-        assert_eq!(h.shape, vec![4, 1]);
+        assert_eq!(h.shape(), [4, 1]);
         assert!((h.materialize_f64()[0].0 - 2.0).abs() < 1e-12);
         assert!((h.materialize_f64()[2].0 - 1.0).abs() < 1e-12);
         assert!((h.materialize_f64()[2].1 + 1.0).abs() < 1e-12);
@@ -715,7 +715,7 @@ mod tests {
             panic!("expected w");
         };
         assert!((h.materialize_f64()[0].0 - 1.0).abs() < 1e-12);
-        assert_eq!(w.shape, vec![8, 1]);
+        assert_eq!(w.shape(), [8, 1]);
         assert!((w.materialize_f64()[1] - 62.5).abs() < 1e-12);
     }
 
@@ -731,8 +731,8 @@ mod tests {
         let Value::Tensor(w) = &values[1] else {
             panic!("expected w");
         };
-        assert_eq!(h.shape, vec![512, 1]);
-        assert_eq!(w.shape, vec![512, 1]);
+        assert_eq!(h.shape(), [512, 1]);
+        assert_eq!(w.shape(), [512, 1]);
         let frequencies = w.materialize_f64();
         assert_eq!(frequencies[0], 0.0);
         assert!((frequencies[511] - std::f64::consts::PI * 511.0 / 512.0).abs() < 1e-12);
@@ -826,7 +826,7 @@ mod tests {
         let Value::ComplexTensor(output) = output else {
             panic!("expected response");
         };
-        assert_eq!(output.shape, vec![512, 1]);
+        assert_eq!(output.shape(), [512, 1]);
     }
 
     #[test]

@@ -687,7 +687,7 @@ mod tests {
     #[test]
     fn lowpass_has_expected_shape_symmetry_and_dc_gain() {
         let out = tensor(call(Value::Num(10.0), Value::Num(0.25), &[]).unwrap());
-        assert_eq!(out.shape, vec![1, 11]);
+        assert_eq!(out.shape(), [1, 11]);
         for idx in 0..out.materialize_f64().len() {
             let mirror = out.materialize_f64().len() - 1 - idx;
             assert!((out.materialize_f64()[idx] - out.materialize_f64()[mirror]).abs() < 1e-12);
@@ -706,7 +706,7 @@ mod tests {
     #[test]
     fn odd_order_highpass_is_adjusted_to_even_order() {
         let out = tensor(call(Value::Num(5.0), Value::Num(0.35), &[Value::from("high")]).unwrap());
-        assert_eq!(out.shape, vec![1, 7]);
+        assert_eq!(out.shape(), [1, 7]);
         let response = frequency_response(&out.materialize_f64(), std::f64::consts::PI).norm();
         assert!((response - 1.0).abs() < 1e-10);
     }
@@ -715,7 +715,7 @@ mod tests {
     fn bandpass_and_stop_accept_two_element_cutoff() {
         let wn = Tensor::new(vec![0.2, 0.4], vec![1, 2]).unwrap();
         let bandpass = tensor(call(Value::Num(20.0), Value::Tensor(wn.clone()), &[]).unwrap());
-        assert_eq!(bandpass.shape, vec![1, 21]);
+        assert_eq!(bandpass.shape(), [1, 21]);
 
         let stop =
             tensor(call(Value::Num(20.0), Value::Tensor(wn), &[Value::from("stop")]).unwrap());
@@ -734,7 +734,7 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(out.shape, vec![1, 5]);
+        assert_eq!(out.shape(), [1, 5]);
         assert!((out.materialize_f64().iter().sum::<f64>() - 1.0).abs() > 1e-3);
     }
 
@@ -796,7 +796,7 @@ mod tests {
             let output = tensor(
                 call(Value::Int(order), Value::Num(0.4), &[]).expect("all integer order classes"),
             );
-            assert_eq!(output.shape, vec![1, 5]);
+            assert_eq!(output.shape(), [1, 5]);
         }
         let window = Tensor::new_integer(IntegerStorage::I16(vec![1; 5]), vec![1, 5])
             .expect("integer window");
@@ -808,7 +808,7 @@ mod tests {
             )
             .expect("integer roles"),
         );
-        assert_eq!(output.shape, vec![1, 5]);
+        assert_eq!(output.shape(), [1, 5]);
         assert_eq!(output.numeric_dtype(), NumericDType::F64);
 
         let wide =

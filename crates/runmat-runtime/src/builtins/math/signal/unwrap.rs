@@ -423,7 +423,7 @@ fn unwrap_tensor(tensor: Tensor, options: UnwrapOptions) -> BuiltinResult<Tensor
         NumericDType::F32 => NumericDType::F32,
         _ => NumericDType::F64,
     };
-    let mut shape = tensor.shape.clone();
+    let mut shape = tensor.shape().to_vec();
     let data = tensor
         .into_numeric_storage()
         .map_err(|err| unwrap_error_with_detail(&UNWRAP_ERROR_INTERNAL, err))?
@@ -554,7 +554,7 @@ pub(crate) mod tests {
         let input =
             Tensor::new(vec![0.0, 1.0, 2.0, 2.0 - TWO_PI, 3.0 - TWO_PI], vec![1, 5]).unwrap();
         let out = as_tensor(unwrap_call(Value::Tensor(input), Vec::new()).unwrap());
-        assert_eq!(out.shape, vec![1, 5]);
+        assert_eq!(out.shape(), [1, 5]);
         assert_close(&out.materialize_f64(), &[0.0, 1.0, 2.0, 2.0, 3.0]);
     }
 
@@ -566,7 +566,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let out = as_tensor(unwrap_call(Value::Tensor(input), Vec::new()).unwrap());
-        assert_eq!(out.shape, vec![3, 2]);
+        assert_eq!(out.shape(), [3, 2]);
         assert_close(&out.materialize_f64(), &[0.0, 1.0, 1.0, 0.0, -1.0, -1.0]);
     }
 
@@ -587,7 +587,7 @@ pub(crate) mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(out.shape, vec![2, 3]);
+        assert_eq!(out.shape(), [2, 3]);
         assert_close(&out.materialize_f64(), &[0.0, 0.0, 1.0, -1.0, 1.0, -1.0]);
     }
 
@@ -595,7 +595,7 @@ pub(crate) mod tests {
     fn unwrap_high_tolerance_preserves_large_jump() {
         let input = Tensor::new(vec![0.0, 1.0, 1.0 - TWO_PI], vec![1, 3]).unwrap();
         let out = as_tensor(unwrap_call(Value::Tensor(input), vec![Value::Num(10.0)]).unwrap());
-        assert_eq!(out.shape, vec![1, 3]);
+        assert_eq!(out.shape(), [1, 3]);
         assert_close(&out.materialize_f64(), &[0.0, 1.0, 1.0 - TWO_PI]);
     }
 
@@ -604,7 +604,7 @@ pub(crate) mod tests {
         let input =
             Tensor::new(vec![0.0, f64::NAN, 1.0 - TWO_PI, 2.0 - TWO_PI], vec![1, 4]).unwrap();
         let out = as_tensor(unwrap_call(Value::Tensor(input), Vec::new()).unwrap());
-        assert_eq!(out.shape, vec![1, 4]);
+        assert_eq!(out.shape(), [1, 4]);
         assert_eq!(out.materialize_f64()[0], 0.0);
         assert!(out.materialize_f64()[1].is_nan());
         assert_close(&out.materialize_f64()[2..], &[1.0 - TWO_PI, 2.0 - TWO_PI]);
@@ -615,7 +615,7 @@ pub(crate) mod tests {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = LogicalArray::new(vec![0, 1, 0], vec![1, 3]).unwrap();
         let out = as_tensor(unwrap_call(Value::LogicalArray(input), Vec::new()).unwrap());
-        assert_eq!(out.shape, vec![1, 3]);
+        assert_eq!(out.shape(), [1, 3]);
         assert_close(&out.materialize_f64(), &[0.0, 1.0, 0.0]);
     }
 
@@ -657,7 +657,7 @@ pub(crate) mod tests {
             )
             .expect("typed dimension is documented"),
         );
-        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.shape(), [1, 2]);
         drop(compatibility);
     }
 
@@ -693,11 +693,11 @@ pub(crate) mod tests {
             let input = Tensor::new(vec![0.0, 1.0, 1.0 - TWO_PI], vec![1, 3]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &input.materialize_f64(),
-                shape: &input.shape,
+                shape: input.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let out = as_tensor(unwrap_call(Value::GpuTensor(handle), Vec::new()).unwrap());
-            assert_eq!(out.shape, vec![1, 3]);
+            assert_eq!(out.shape(), [1, 3]);
             assert_close(&out.materialize_f64(), &[0.0, 1.0, 1.0]);
         });
     }

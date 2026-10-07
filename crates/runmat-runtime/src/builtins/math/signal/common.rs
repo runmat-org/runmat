@@ -174,13 +174,14 @@ fn tensor_to_complex_vector(
     label: &str,
     tensor: Tensor,
 ) -> BuiltinResult<ComplexVectorInput> {
-    ensure_vector_shape(builtin, label, &tensor.shape)?;
+    ensure_vector_shape(builtin, label, tensor.shape())?;
+    let shape = tensor.shape().to_vec();
     Ok(ComplexVectorInput {
         data: tensor::tensor_values_f64(&tensor)
             .into_iter()
             .map(|re| Complex::new(re, 0.0))
             .collect(),
-        shape: tensor.shape,
+        shape,
         is_complex: false,
         gpu_handle: None,
     })
@@ -191,8 +192,8 @@ fn complex_tensor_to_complex_vector(
     label: &str,
     tensor: ComplexTensor,
 ) -> BuiltinResult<ComplexVectorInput> {
-    ensure_vector_shape(builtin, label, &tensor.shape)?;
-    let shape = tensor.shape.clone();
+    ensure_vector_shape(builtin, label, tensor.shape())?;
+    let shape = tensor.shape().to_vec();
     Ok(ComplexVectorInput {
         data: tensor::complex_tensor_into_values_complex64(tensor),
         shape,
@@ -532,7 +533,7 @@ mod tests {
         let Value::Tensor(tensor) = value else {
             panic!("expected real tensor");
         };
-        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(tensor.shape(), [1, 2]);
         assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]);
     }
 

@@ -134,7 +134,7 @@ impl SelectedConvolution {
                 let (element_type, shape) = match value {
                     Value::Tensor(tensor) if tensor.integer_storage().is_none() => {
                         let shape = tensor
-                            .shape
+                            .shape()
                             .iter()
                             .copied()
                             .map(u64::try_from)
