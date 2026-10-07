@@ -38,7 +38,7 @@ pub(crate) fn build_index(
 
 pub(super) fn validate_and_count(value: &Value) -> VariableResult<usize> {
     match value {
-        Value::Tensor(value) => ensure_vector(&value.shape, "numeric grouping variable")?,
+        Value::Tensor(value) => ensure_vector(value.shape(), "numeric grouping variable")?,
         Value::LogicalArray(value) => ensure_vector(&value.shape, "logical grouping variable")?,
         Value::StringArray(value) => ensure_vector(&value.shape, "string grouping variable")?,
         Value::Cell(value) => {
@@ -77,10 +77,10 @@ fn row_count(value: &Value) -> VariableResult<usize> {
     {
         let (months, days) = crate::builtins::datetime::calendar_duration_tensors_from_value(value)
             .map_err(|error| error.to_string())?;
-        if months.shape != days.shape {
+        if months.shape() != days.shape() {
             return Err("calendarDuration component shapes do not match".into());
         }
-        ensure_vector(&months.shape, "calendarDuration grouping variable")?;
+        ensure_vector(months.shape(), "calendarDuration grouping variable")?;
         return Ok(tensor_utils::tensor_element_len(&months));
     }
     value_row_count(value).map_err(|error| error.to_string())

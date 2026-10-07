@@ -72,7 +72,7 @@ fn numeric_values(value: &Value) -> BuiltinResult<(Vec<NumericScalar>, Vec<usize
                     })
                 })
                 .collect::<BuiltinResult<Vec<_>>>()?,
-            value.shape.clone(),
+            value.shape().to_vec(),
         )),
         other => Err(error::invalid(format!(
             "splitapply: G must be a real numeric vector, got {other:?}"

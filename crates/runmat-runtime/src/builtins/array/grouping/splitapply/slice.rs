@@ -32,8 +32,8 @@ pub(super) fn select(value: &Value, groups: &Groups, indices: &[usize]) -> Built
 
 fn column_count(value: &Value) -> BuiltinResult<usize> {
     match value {
-        Value::Tensor(value) => Ok(value.shape.get(1).copied().unwrap_or(1)),
-        Value::ComplexTensor(value) => Ok(value.shape.get(1).copied().unwrap_or(1)),
+        Value::Tensor(value) => Ok(value.shape().get(1).copied().unwrap_or(1)),
+        Value::ComplexTensor(value) => Ok(value.shape().get(1).copied().unwrap_or(1)),
         Value::LogicalArray(value) => Ok(value.shape.get(1).copied().unwrap_or(1)),
         Value::StringArray(value) => Ok(value.cols()),
         Value::Cell(value) => Ok(value.cols),
@@ -88,7 +88,7 @@ fn column_indices(shape: &[usize], selected: &[usize]) -> BuiltinResult<(Vec<usi
 }
 
 fn numeric_columns(value: &Tensor, columns: &[usize]) -> BuiltinResult<Value> {
-    let (indices, shape) = column_indices(&value.shape, columns)?;
+    let (indices, shape) = column_indices(value.shape(), columns)?;
     let storage = value
         .clone()
         .into_numeric_storage()
@@ -101,7 +101,7 @@ fn numeric_columns(value: &Tensor, columns: &[usize]) -> BuiltinResult<Value> {
 }
 
 fn complex_columns(value: &ComplexTensor, columns: &[usize]) -> BuiltinResult<Value> {
-    let (indices, shape) = column_indices(&value.shape, columns)?;
+    let (indices, shape) = column_indices(value.shape(), columns)?;
     let storage = value
         .complex_storage()
         .gather(&indices)

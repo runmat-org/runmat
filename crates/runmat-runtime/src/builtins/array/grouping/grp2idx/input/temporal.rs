@@ -22,7 +22,7 @@ fn prepare(
     tensor: runmat_value::Tensor,
     kind: &str,
 ) -> BuiltinResult<GroupingInput> {
-    ensure_vector(&tensor.shape, kind)?;
+    ensure_vector(tensor.shape(), kind)?;
     Ok(GroupingInput::new(
         Value::Object(value),
         numeric::rows(&tensor)?,

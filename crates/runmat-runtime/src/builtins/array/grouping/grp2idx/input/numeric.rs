@@ -8,7 +8,7 @@ use crate::builtins::array::grouping::grp2idx::error;
 use crate::builtins::common::grouping_keys::KeyOrder;
 
 pub(super) fn tensor(value: Tensor) -> BuiltinResult<GroupingInput> {
-    ensure_vector(&value.shape, "numeric")?;
+    ensure_vector(value.shape(), "numeric")?;
     let len = tensor_utils::tensor_element_len(&value);
     let rows = rows(&value)?;
     let value = value.reshape(vec![len, 1]).map_err(error::invalid)?;

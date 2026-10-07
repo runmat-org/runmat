@@ -35,7 +35,7 @@ fn require(extension: &runmat_builtins::BuiltinExtensionDescriptor) -> BuiltinRe
 
 fn is_matrix(value: &Value) -> bool {
     let shape: &[usize] = match value {
-        Value::Tensor(value) => &value.shape,
+        Value::Tensor(value) => value.shape(),
         Value::LogicalArray(value) => &value.shape,
         Value::StringArray(value) => &value.shape,
         Value::GpuTensor(value) => value.shape(),

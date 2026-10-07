@@ -92,26 +92,30 @@ fn table(values: Vec<Value>) -> BuiltinResult<FindGroupsInput> {
 
 fn vector_output_shape(value: &Value) -> BuiltinResult<Vec<usize>> {
     let shape = match value {
-        Value::Tensor(value) => value.shape.clone(),
+        Value::Tensor(value) => value.shape().to_vec(),
         Value::LogicalArray(value) => value.shape.clone(),
         Value::StringArray(value) => value.shape.clone(),
         Value::Cell(value) => vec![value.rows, value.cols],
         Value::GpuTensor(value) => value.shape().to_vec(),
         Value::Object(object) if object.is_class(runmat_types::standard::DATETIME) => {
-            crate::builtins::datetime::serials_from_datetime_value(value)?.shape
+            crate::builtins::datetime::serials_from_datetime_value(value)?
+                .shape()
+                .to_vec()
         }
         Value::Object(object) if object.is_class(runmat_types::standard::DURATION) => {
-            crate::builtins::duration::duration_tensor_from_duration_value(value)?.shape
+            crate::builtins::duration::duration_tensor_from_duration_value(value)?
+                .shape()
+                .to_vec()
         }
         Value::Object(object) if object.is_class(runmat_types::standard::CALENDAR_DURATION) => {
             let (months, days) =
                 crate::builtins::datetime::calendar_duration_tensors_from_value(value)?;
-            if months.shape != days.shape {
+            if months.shape() != days.shape() {
                 return Err(error::invalid(
                     "findgroups: calendarDuration component shapes do not match",
                 ));
             }
-            months.shape
+            months.shape().to_vec()
         }
         Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => {
             let rows = crate::builtins::table::categorical_observation_labels(object)?.len();
