@@ -1502,7 +1502,7 @@ fn forward_runs_softmax_gpu_dlarray_without_host_gather() {
 }
 
 #[test]
-fn forward_reports_invalid_gpu_softmax_without_host_gather() {
+fn forward_propagates_nonfinite_gpu_softmax_without_host_gather() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let net = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
         let values = [f64::INFINITY, 0.0, 0.0, 1.0];
@@ -1514,15 +1514,38 @@ fn forward_reports_invalid_gpu_softmax_without_host_gather() {
             })
             .expect("upload");
         provider.reset_telemetry();
-        let dl = block_on(dlarray_builtin(Value::GpuTensor(handle), vec![])).expect("gpu dlarray");
+        let dl = block_on(dlarray_builtin(Value::GpuTensor(handle.clone()), vec![]))
+            .expect("gpu dlarray");
 
-        let error = block_on(forward_builtin(net, dl, vec![]))
-            .expect_err("infinite Softmax input must not be normalized");
-
-        assert!(error
-            .to_string()
-            .contains("softmax produced invalid normalization"));
+        let output = block_on(forward_builtin(net, dl, vec![]))
+            .expect("nonfinite Softmax output remains resident");
+        let Value::Object(output) = output else {
+            panic!("expected GPU dlarray output");
+        };
+        let Some(Value::GpuTensor(result)) = output.properties.get("Data") else {
+            panic!("expected resident GPU output data");
+        };
+        assert_eq!(result.shape(), &shape);
+        assert_eq!(
+            handle_precision(result),
+            Some(runmat_accelerate_api::ProviderPrecision::F64)
+        );
+        assert_eq!(handle_storage(result), GpuTensorStorage::Real);
+        assert_eq!(result.device_id(), handle.device_id());
+        assert_ne!(result.view_identity(), handle.view_identity());
+        assert!(result.allocation_lease().validate_live().is_ok());
+        assert!(handle.allocation_lease().validate_live().is_ok());
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        let gathered =
+            crate::builtins::common::test_support::gather(Value::GpuTensor(result.clone()))
+                .expect("gather output for nonfinite oracle");
+        assert_eq!(gathered.shape(), &shape);
+        let values = gathered.materialize_f64();
+        assert!(values[0].is_nan());
+        assert!(values[2].is_nan());
+        let expected = 1.0 / (1.0 + std::f64::consts::E);
+        assert!((values[1] - expected).abs() < 1.0e-12);
+        assert!((values[3] - (1.0 - expected)).abs() < 1.0e-12);
     });
 }
 

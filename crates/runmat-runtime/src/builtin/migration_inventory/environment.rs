@@ -3,6 +3,7 @@ use super::schema::{BuildConfiguration, CrateFeatureInventory};
 const KNOWN_RUNTIME_FEATURES: &[&str] = &[
     "blas-lapack",
     "blas-only",
+    "fea-example-fixtures",
     "gui",
     "interaction-test-hooks",
     "occt-native",
@@ -17,6 +18,10 @@ pub(super) fn build_configuration() -> BuildConfiguration {
     let enabled_features = [
         (cfg!(feature = "blas-lapack"), "blas-lapack"),
         (cfg!(feature = "blas-only"), "blas-only"),
+        (
+            cfg!(feature = "fea-example-fixtures"),
+            "fea-example-fixtures",
+        ),
         (cfg!(feature = "gui"), "gui"),
         (
             cfg!(feature = "interaction-test-hooks"),

@@ -538,7 +538,7 @@ fn uninitialized_network_preserves_its_lifecycle_and_fresh_tapes_get_fresh_leave
 }
 
 #[test]
-fn resident_parameter_is_rejected_without_gather_or_partial_tape() {
+fn resident_parameter_becomes_a_tape_leaf_without_gather() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let resident = provider
             .upload(&runmat_accelerate_api::HostTensorView {
@@ -557,17 +557,93 @@ fn resident_parameter_is_rejected_without_gather_or_partial_tape() {
                 "dense",
                 &[
                     ("OutputSize", Value::Num(3.0)),
-                    ("Weights", Value::GpuTensor(resident)),
+                    ("Weights", Value::GpuTensor(resident.clone())),
                     ("Bias", tensor(&[3, 1], false)),
                 ],
             ),
         ]);
+        let initialized = network.properties.get("Initialized").cloned();
+        let tape = Rc::new(RefCell::new(Tape::new()));
+        let _activation = TapeActivation::enter(tape.clone());
+        provider.reset_telemetry();
+        annotate_network_object(&mut network).expect("resident parameter leaf");
+        assert_eq!(network.properties.get("Initialized"), initialized.as_ref());
+        let parameters = parameters::view(&network, "dlfeval").unwrap();
+        let Some(Value::Object(weights)) = parameters[0].value else {
+            panic!("annotated Weights dlarray");
+        };
+        let Some(Value::GpuTensor(data)) = weights.properties.get("Data") else {
+            panic!("resident Weights data");
+        };
+        assert_eq!(data.view_identity(), resident.view_identity());
+        assert_eq!(data.shape(), &[3, 2]);
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(data),
+            Some(runmat_accelerate_api::ProviderPrecision::F64)
+        );
+        assert_eq!(dlarray_object_node_id(weights), Some(0));
+        let Some(Value::Object(bias)) = parameters[1].value else {
+            panic!("annotated Bias dlarray");
+        };
+        let Some(Value::Tensor(bias_data)) = bias.properties.get("Data") else {
+            panic!("native Bias data");
+        };
+        assert_eq!(bias_data.shape(), &[3, 1]);
+        assert_eq!(bias_data.numeric_dtype(), NumericDType::F64);
+        assert_eq!(bias_data.materialize_f64(), vec![1.0; 3]);
+        assert_eq!(dlarray_object_node_id(bias), Some(1));
+        let nodes = tape.borrow();
+        assert_eq!(nodes.nodes.len(), 2);
+        let NodeValue::Resident(leaf) = &nodes.nodes[0].value else {
+            panic!("resident Weights tape leaf");
+        };
+        assert_eq!(leaf.view_identity(), resident.view_identity());
+        assert_eq!(leaf.shape(), &[3, 2]);
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert!(resident.allocation_lease().validate_live().is_ok());
+    });
+}
+
+#[test]
+fn resident_parameter_precedes_invalid_integer_without_gather_or_partial_tape() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let resident = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                shape: &[3, 2],
+            })
+            .unwrap();
+        let mut network = network(vec![
+            layer(
+                DeepLearningLayerKind::FeatureInput,
+                "input",
+                &[("InputSize", Value::Num(2.0))],
+            ),
+            layer(
+                DeepLearningLayerKind::FullyConnected,
+                "dense",
+                &[
+                    ("OutputSize", Value::Num(3.0)),
+                    ("Weights", Value::GpuTensor(resident.clone())),
+                    (
+                        "Bias",
+                        integer_tensor(IntegerStorage::U8(vec![1, 2, 3]), vec![3, 1]),
+                    ),
+                ],
+            ),
+        ]);
+        let before = network.clone();
         let tape = Rc::new(RefCell::new(Tape::new()));
         let _activation = TapeActivation::enter(tape.clone());
         provider.reset_telemetry();
         let error = annotate_network_object(&mut network).unwrap_err();
-        assert_eq!(error.identifier(), Some("RunMat:deepLearning:Unsupported"));
-        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert!(error
+            .to_string()
+            .contains("single or double parent storage"));
         assert!(tape.borrow().nodes.is_empty());
+        assert_eq!(network.properties, before.properties);
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert!(resident.allocation_lease().validate_live().is_ok());
     });
 }

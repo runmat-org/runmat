@@ -1,4 +1,4 @@
-use super::tape::{Tape, TapeActivation, TapeFuture};
+use super::tape::{NodeValue, Tape, TapeActivation, TapeFuture};
 use super::*;
 use runmat_value::{IntValue, IntegerStorage, LogicalArray, StructArray};
 use std::collections::HashMap;
@@ -294,7 +294,7 @@ fn repeated_target_gradients_share_cached_copy_on_write_allocation() {
 }
 
 #[test]
-fn dlarray_constructor_records_active_tape_and_rejects_resident_tape_input() {
+fn dlarray_constructor_records_host_and_resident_tape_sources_without_gather() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let resident = provider
             .upload(&runmat_accelerate_api::HostTensorView {
@@ -313,13 +313,59 @@ fn dlarray_constructor_records_active_tape_and_rejects_resident_tape_input() {
         assert_eq!(tape.borrow().nodes.len(), 1);
 
         provider.reset_telemetry();
-        let error = futures::executor::block_on(super::super::training::dlarray_builtin(
-            Value::GpuTensor(resident),
+        let traced = futures::executor::block_on(super::super::training::dlarray_builtin(
+            Value::GpuTensor(resident.clone()),
             vec![],
         ))
-        .expect_err("resident autodiff needs a tape kernel");
-        assert_eq!(error.identifier(), Some("RunMat:deepLearning:Unsupported"));
+        .expect("resident dlarray is tape-tracked");
+        assert_eq!(dlarray_node_id(&traced), Some(1));
+        let Value::Object(object) = &traced else {
+            panic!("resident dlarray object");
+        };
+        let Some(Value::GpuTensor(data)) = object.properties.get("Data") else {
+            panic!("resident Data");
+        };
+        assert_eq!(data.view_identity(), resident.view_identity());
+        assert_eq!(data.shape(), &[1, 1]);
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(data),
+            Some(runmat_accelerate_api::ProviderPrecision::F64)
+        );
+        let nodes = tape.borrow();
+        assert_eq!(nodes.nodes.len(), 2);
+        let NodeValue::Resident(leaf) = &nodes.nodes[1].value else {
+            panic!("resident tape leaf");
+        };
+        assert_eq!(leaf.view_identity(), resident.view_identity());
+        assert_eq!(leaf.shape(), &[1, 1]);
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert!(resident.allocation_lease().validate_live().is_ok());
+    });
+}
+
+#[test]
+fn dlarray_constructor_rejects_complex_resident_tape_source_before_publication() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let complex = provider
+            .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::F64(&[1.0, 2.0]),
+                shape: &[1, 1],
+                storage: runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            })
+            .expect("complex resident data");
+        let tape = Rc::new(RefCell::new(Tape::new()));
+        let _activation = TapeActivation::enter(tape.clone());
+        provider.reset_telemetry();
+        let error = futures::executor::block_on(super::super::training::dlarray_builtin(
+            Value::GpuTensor(complex.clone()),
+            vec![],
+        ))
+        .expect_err("complex resident tape source must be rejected");
+        assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
+        assert!(error.to_string().contains("real single or double storage"));
+        assert!(tape.borrow().nodes.is_empty());
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert!(complex.allocation_lease().validate_live().is_ok());
     });
 }
 
