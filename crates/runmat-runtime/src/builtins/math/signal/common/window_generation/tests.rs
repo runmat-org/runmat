@@ -60,7 +60,7 @@ fn forced_turn_preserves_coefficient_values_and_count() {
     let (Value::Tensor(expected), Value::Tensor(actual)) = (expected, actual) else {
         panic!("expected host tensors");
     };
-    assert_eq!(actual.shape, [8193, 1]);
+    assert_eq!(actual.shape(), [8193, 1]);
     assert_eq!(actual.materialize_f64(), expected.materialize_f64());
     assert_eq!(turns.get(), 3);
 }

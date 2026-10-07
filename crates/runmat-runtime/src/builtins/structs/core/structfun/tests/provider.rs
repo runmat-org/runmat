@@ -10,7 +10,7 @@ fn gathers_field_values_through_their_owner() {
         let handle = provider
             .upload(&HostTensorView {
                 data: &materialized,
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             })
             .unwrap();
         let mut structure = StructValue::new();

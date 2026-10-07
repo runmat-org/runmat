@@ -21,7 +21,7 @@ fn real_tensor_parts(value: Value, context: &str) -> (Vec<f64>, Vec<usize>) {
         Value::Tensor(tensor) => tensor,
         other => panic!("expected {context} tensor, got {other:?}"),
     };
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .unwrap_or_else(|err| panic!("invalid {context} tensor storage: {err}"));

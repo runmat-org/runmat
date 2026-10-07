@@ -22,7 +22,7 @@ fn resident_samples_gather_to_host_for_each_requested_component() {
             let Value::Tensor(tensor) = output else {
                 panic!("host result")
             };
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), vec![1, 2]);
         }
         assert!(
             block_on(provider.download(&handle)).is_ok(),

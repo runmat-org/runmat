@@ -108,7 +108,7 @@ fn tiny_nonzero_imaginary_coefficient_remains_complex() {
     let Value::ComplexTensor(output) = output else {
         panic!("complex coefficient must produce complex output");
     };
-    assert_eq!(output.shape, vec![1, 8]);
+    assert_eq!(output.shape(), vec![1, 8]);
     assert!(output.materialize_f64().iter().any(|&(_, im)| im != 0.0));
 }
 
@@ -155,7 +155,7 @@ fn resident_exact_wide_integer_uses_authoritative_gather_fallback() {
         .expect("exact resident wide integer");
         let gathered = test_support::gather(result).expect("gather result");
         assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
-        assert_eq!(gathered.shape, vec![1, 4]);
+        assert_eq!(gathered.shape(), vec![1, 4]);
     });
 }
 
@@ -225,6 +225,6 @@ fn complex_host_path() {
     let Value::ComplexTensor(out) = value else {
         panic!("expected complex output");
     };
-    assert_eq!(out.shape, vec![1, 2]);
+    assert_eq!(out.shape(), vec![1, 2]);
     assert_eq!(out.materialize_f64(), vec![(1.0, 1.0), (2.0, -1.0)]);
 }

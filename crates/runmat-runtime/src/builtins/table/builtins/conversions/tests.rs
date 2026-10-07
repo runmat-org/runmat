@@ -40,7 +40,7 @@ fn complex_single_columns_and_row_elements_keep_single_storage() {
             panic!("expected complex column")
         };
         assert_eq!(column.numeric_dtype(), runmat_value::NumericDType::F32);
-        assert_eq!(column.shape, vec![2, 1]);
+        assert_eq!(column.shape(), &[2, 1]);
     }
     let Value::Cell(cells) =
         futures::executor::block_on(table2cell_builtin(table.clone())).unwrap()

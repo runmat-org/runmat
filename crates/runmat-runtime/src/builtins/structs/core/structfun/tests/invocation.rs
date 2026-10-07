@@ -20,7 +20,7 @@ fn maps_fields_in_order_into_a_column() {
     .unwrap() else {
         panic!("expected tensor")
     };
-    assert_eq!(output.shape, vec![2, 1]);
+    assert_eq!(output.shape(), &[2, 1]);
     assert_eq!(output.materialize_f64(), vec![3.0, 2.0]);
 }
 
@@ -57,7 +57,7 @@ fn empty_structure_has_explicit_outputs() {
     .unwrap() else {
         panic!("expected tensor")
     };
-    assert_eq!(output.shape, vec![0, 1]);
+    assert_eq!(output.shape(), &[0, 1]);
     let Value::Struct(output) = call(
         Value::FunctionHandle("length".into()),
         StructValue::new(),

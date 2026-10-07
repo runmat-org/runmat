@@ -514,7 +514,7 @@ mod tests {
         let Value::Tensor(result) = concatenate_numeric_columns(&[&first, &second]).unwrap() else {
             panic!("expected tensor result");
         };
-        assert_eq!(result.shape, vec![2, 3]);
+        assert_eq!(result.shape(), &[2, 3]);
         assert_eq!(
             result.integer_storage(),
             Some(&IntegerStorage::U64(vec![large, u64::MAX, 7, 0, 9, 2]))
@@ -531,7 +531,7 @@ mod tests {
         else {
             panic!("expected tensor result");
         };
-        assert_eq!(result.shape, vec![2, 2]);
+        assert_eq!(result.shape(), &[2, 2]);
         assert_eq!(
             result.into_numeric_storage().expect("single storage"),
             NumericStorage::F32(vec![1.5, 2.5, 3.25, 4.25])
@@ -556,7 +556,7 @@ mod tests {
         else {
             panic!("expected exact integer tensor result");
         };
-        assert_eq!(result.shape, vec![2, 3]);
+        assert_eq!(result.shape(), &[2, 3]);
         assert_eq!(
             result.integer_storage(),
             Some(&IntegerStorage::I8(vec![

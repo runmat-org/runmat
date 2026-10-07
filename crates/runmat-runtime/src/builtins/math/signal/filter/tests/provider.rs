@@ -12,7 +12,7 @@ fn filter_gpu_matches_cpu() {
 
         let view = runmat_accelerate_api::HostTensorView {
             data: &x.materialize_f64(),
-            shape: &x.shape,
+            shape: x.shape(),
         };
         let x_gpu = provider.upload(&view).expect("upload signal");
 
@@ -191,7 +191,7 @@ fn filter_wgpu_matches_cpu() {
 
     let view = runmat_accelerate_api::HostTensorView {
         data: &x.materialize_f64(),
-        shape: &x.shape,
+        shape: x.shape(),
     };
     let x_gpu = provider.upload(&view).expect("upload signal");
     let borrowed_signal = x_gpu.clone();

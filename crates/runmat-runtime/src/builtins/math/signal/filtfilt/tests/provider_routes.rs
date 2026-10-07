@@ -139,7 +139,7 @@ fn resident_row_filter_uses_axis_aligned_multistate_geometry() {
             .expect("resident row signal with two filter states");
         assert!(matches!(result, Value::GpuTensor(_)));
         let gathered = test_support::gather(result).expect("resident result");
-        assert_eq!(gathered.shape, expected_shape);
+        assert_eq!(gathered.shape(), expected_shape);
         approx(&gathered.materialize_f64(), &expected, 1e-9);
     });
 }
@@ -287,7 +287,7 @@ fn gpu_matches_cpu() {
         let handle = provider
             .upload(&runmat_accelerate_api::HostTensorView {
                 data: &x.materialize_f64(),
-                shape: &x.shape,
+                shape: x.shape(),
             })
             .expect("upload");
         let gpu = call(Value::Tensor(b), Value::Tensor(a), Value::GpuTensor(handle)).unwrap();
@@ -321,7 +321,7 @@ fn wgpu_matches_cpu() {
     let handle = provider
         .upload(&runmat_accelerate_api::HostTensorView {
             data: &x.materialize_f64(),
-            shape: &x.shape,
+            shape: x.shape(),
         })
         .expect("upload");
     let borrowed_signal = handle.clone();

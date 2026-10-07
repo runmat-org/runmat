@@ -185,7 +185,7 @@ mod tests {
             0.09045342435412818,
             -1.3877787807814457e-17,
         ];
-        assert_eq!(t.shape, vec![8, 1]);
+        assert_eq!(t.shape(), vec![8, 1]);
         for (got, want) in t.materialize_f64().iter().zip(expected.iter()) {
             assert!((got - want).abs() < 1e-12, "got {got}, want {want}");
         }
@@ -218,14 +218,14 @@ mod tests {
             block_on(blackman_builtin(Value::Num(0.0), Vec::new())).expect("blackman(0)"),
         )
         .expect("gather blackman(0)");
-        assert_eq!(zero.shape, vec![0, 1]);
+        assert_eq!(zero.shape(), vec![0, 1]);
         assert!(zero.materialize_f64().is_empty());
 
         let one = test_support::gather(
             block_on(blackman_builtin(Value::Num(1.0), Vec::new())).expect("blackman(1)"),
         )
         .expect("gather blackman(1)");
-        assert_eq!(one.shape, vec![1, 1]);
+        assert_eq!(one.shape(), vec![1, 1]);
         assert_eq!(one.materialize_f64(), vec![1.0]);
     }
 
@@ -237,7 +237,7 @@ mod tests {
             block_on(blackman_builtin(Value::Num(2.5), Vec::new())).expect("blackman rounded"),
         )
         .expect("gather blackman rounded");
-        assert_eq!(rounded.shape, vec![3, 1]);
+        assert_eq!(rounded.shape(), vec![3, 1]);
         assert!(block_on(blackman_builtin(
             Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
             Vec::new()
@@ -263,7 +263,7 @@ mod tests {
                     .expect("integer length"),
             )
             .expect("gather default output");
-            assert_eq!(output.shape, vec![5, 1]);
+            assert_eq!(output.shape(), vec![5, 1]);
             assert_eq!(output.numeric_dtype(), NumericDType::F64);
 
             let single = test_support::gather(
@@ -274,7 +274,7 @@ mod tests {
                 .expect("integer length with single output"),
             )
             .expect("gather single output");
-            assert_eq!(single.shape, vec![5, 1]);
+            assert_eq!(single.shape(), vec![5, 1]);
             assert_eq!(single.numeric_dtype(), NumericDType::F32);
         }
     }
@@ -309,7 +309,7 @@ mod tests {
                     .expect("RunMat mode accepts logical length"),
             )
             .expect("gather logical-length output");
-            assert_eq!(output.shape, vec![1, 1]);
+            assert_eq!(output.shape(), vec![1, 1]);
             assert_eq!(output.numeric_dtype(), NumericDType::F64);
         }
     }
@@ -331,7 +331,7 @@ mod tests {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         for (bit, shape) in [(0, vec![0, 1]), (1, vec![1, 1])] {
             let result = block_on(blackman_builtin(logical(bit), Vec::new())).unwrap();
-            assert_eq!(test_support::gather(result).unwrap().shape, shape);
+            assert_eq!(test_support::gather(result).unwrap().shape(), shape);
         }
         let nonscalar =
             Value::LogicalArray(runmat_value::LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap());
@@ -388,7 +388,7 @@ mod tests {
             .expect("blackman periodic"),
         )
         .expect("gather blackman periodic");
-        assert_eq!(periodic.shape, vec![4, 1]);
+        assert_eq!(periodic.shape(), vec![4, 1]);
         assert!((periodic.materialize_f64()[1] - 0.34).abs() < 1e-12);
 
         let single = test_support::gather(
@@ -408,7 +408,7 @@ mod tests {
             let value =
                 block_on(blackman_builtin(Value::Num(8.0), Vec::new())).expect("blackman gpu");
             let tensor = test_support::gather(value).expect("gather");
-            assert_eq!(tensor.shape, vec![8, 1]);
+            assert_eq!(tensor.shape(), vec![8, 1]);
             assert!((tensor.materialize_f64()[3] - 0.9203636180999081).abs() < 1e-12);
 
             let periodic_one = block_on(blackman_builtin(
@@ -438,7 +438,7 @@ mod tests {
         ))
         .expect("WGPU Blackman window");
         let output = test_support::gather(result).expect("gather WGPU window");
-        assert_eq!(output.shape, vec![5, 1]);
+        assert_eq!(output.shape(), vec![5, 1]);
         let expected = 0.42 - 0.5 * cospi_real(2.0 / 5.0) + 0.08 * cospi_real(4.0 / 5.0);
         assert!((output.materialize_f64()[1] - expected).abs() < 1.0e-14);
     }

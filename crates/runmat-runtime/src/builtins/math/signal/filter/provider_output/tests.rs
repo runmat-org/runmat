@@ -83,7 +83,7 @@ fn default_no_hook_is_typed_unsupported_and_uses_host_reference() {
     let Value::Tensor(output) = output else {
         panic!("expected host reference output");
     };
-    assert_eq!(output.shape, vec![3, 1]);
+    assert_eq!(output.shape(), vec![3, 1]);
     assert_eq!(output.materialize_f64(), vec![1.0, 2.0, 3.0]);
 }
 

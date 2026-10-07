@@ -437,7 +437,7 @@ mod tests {
         let data: Vec<f64> = (0..n).map(|i| i as f64 * step).collect();
         let tensor = Tensor::new(data.clone(), vec![1, n]).unwrap();
         let result = expect_tensor(call(Value::Tensor(tensor)).unwrap());
-        assert_eq!(result.shape, vec![1, n]);
+        assert_eq!(result.shape(), vec![1, n]);
         let min = result
             .materialize_f64()
             .iter()
@@ -570,7 +570,7 @@ mod tests {
 
         let logical = LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap();
         let result = expect_tensor(call(Value::LogicalArray(logical)).unwrap());
-        assert_eq!(result.shape, vec![1, 2]);
+        assert_eq!(result.shape(), vec![1, 2]);
         assert_close(result.materialize_f64()[0], -1.0);
         assert_close(result.materialize_f64()[1], sawtooth_scalar(1.0, 1.0));
     }
@@ -671,7 +671,7 @@ mod tests {
     fn sawtooth_preserves_matrix_shape() {
         let tensor = Tensor::new(vec![0.0, PI / 2.0, PI, 3.0 * PI / 2.0], vec![2, 2]).unwrap();
         let result = expect_tensor(call(Value::Tensor(tensor)).unwrap());
-        assert_eq!(result.shape, vec![2, 2]);
+        assert_eq!(result.shape(), vec![2, 2]);
         let expected = [-1.0, -0.5, 0.0, 0.5];
         for (got, want) in result.materialize_f64().iter().zip(expected) {
             assert_close(*got, want);

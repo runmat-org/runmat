@@ -185,7 +185,7 @@ mod tests {
             Vec::new(),
         ))
         .expect("documented integer length");
-        assert_eq!(test_support::gather(integer).unwrap().shape, vec![4, 1]);
+        assert_eq!(test_support::gather(integer).unwrap().shape(), vec![4, 1]);
 
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let err = block_on(super::hann_builtin(Value::Bool(true), Vec::new()))
@@ -213,7 +213,7 @@ mod tests {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         for (bit, shape) in [(0, vec![0, 1]), (1, vec![1, 1])] {
             let result = block_on(hann_builtin(logical(bit), Vec::new())).unwrap();
-            assert_eq!(test_support::gather(result).unwrap().shape, shape);
+            assert_eq!(test_support::gather(result).unwrap().shape(), shape);
         }
         let nonscalar =
             Value::LogicalArray(runmat_value::LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap());
@@ -259,7 +259,7 @@ mod tests {
             0.1882550990706333,
             0.0,
         ];
-        assert_eq!(t.shape, vec![8, 1]);
+        assert_eq!(t.shape(), vec![8, 1]);
         for (got, want) in t.materialize_f64().iter().zip(expected.iter()) {
             assert!((got - want).abs() < 1e-12, "got {got}, want {want}");
         }
@@ -272,14 +272,14 @@ mod tests {
             block_on(hann_builtin(Value::Num(0.0), Vec::new())).expect("hann(0)"),
         )
         .expect("gather hann(0)");
-        assert_eq!(zero.shape, vec![0, 1]);
+        assert_eq!(zero.shape(), vec![0, 1]);
         assert!(zero.materialize_f64().is_empty());
 
         let one = test_support::gather(
             block_on(hann_builtin(Value::Num(1.0), Vec::new())).expect("hann(1)"),
         )
         .expect("gather hann(1)");
-        assert_eq!(one.shape, vec![1, 1]);
+        assert_eq!(one.shape(), vec![1, 1]);
         assert_eq!(one.materialize_f64(), vec![1.0]);
     }
 
@@ -291,7 +291,7 @@ mod tests {
             block_on(hann_builtin(Value::Num(2.5), Vec::new())).expect("hann rounded"),
         )
         .expect("gather hann rounded");
-        assert_eq!(rounded.shape, vec![3, 1]);
+        assert_eq!(rounded.shape(), vec![3, 1]);
         assert!(block_on(hann_builtin(
             Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
             Vec::new()
@@ -307,7 +307,7 @@ mod tests {
                 .expect("hann periodic"),
         )
         .expect("gather hann periodic");
-        assert_eq!(periodic.shape, vec![4, 1]);
+        assert_eq!(periodic.shape(), vec![4, 1]);
         assert!((periodic.materialize_f64()[1] - 0.5).abs() < 1e-12);
 
         let single = test_support::gather(
@@ -323,13 +323,13 @@ mod tests {
         test_support::with_test_provider(|_| {
             let value = block_on(hann_builtin(Value::Num(8.0), Vec::new())).expect("hann gpu");
             let tensor = test_support::gather(value).expect("gather");
-            assert_eq!(tensor.shape, vec![8, 1]);
+            assert_eq!(tensor.shape(), vec![8, 1]);
             assert!((tensor.materialize_f64()[3] - 0.9504844339512095).abs() < 1e-12);
 
             let periodic = block_on(hann_builtin(Value::Num(4.0), vec![Value::from("periodic")]))
                 .expect("hann periodic gpu");
             let periodic = test_support::gather(periodic).expect("gather periodic");
-            assert_eq!(periodic.shape, vec![4, 1]);
+            assert_eq!(periodic.shape(), vec![4, 1]);
             assert!((periodic.materialize_f64()[1] - 0.5).abs() < 1e-12);
 
             let periodic_one =

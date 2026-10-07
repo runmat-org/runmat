@@ -396,7 +396,7 @@ mod tests {
     fn tripuls_default_samples_triangle() {
         let input = Tensor::new(vec![-0.5, -0.25, 0.0, 0.25, 0.5], vec![1, 5]).unwrap();
         let out = expect_tensor(call(Value::Tensor(input), Vec::new()).expect("tripuls"));
-        assert_eq!(out.shape, vec![1, 5]);
+        assert_eq!(out.shape(), vec![1, 5]);
         assert_eq!(out.materialize_f64(), vec![0.0, 0.5, 1.0, 0.5, 0.0]);
     }
 
@@ -406,7 +406,7 @@ mod tests {
         let input = integer_tensor(vec![-1, 0, 1], vec![1, 3]);
         let out =
             expect_tensor(call(Value::Tensor(input), vec![Value::Num(2.0)]).expect("tripuls"));
-        assert_eq!(out.shape, vec![1, 3]);
+        assert_eq!(out.shape(), vec![1, 3]);
         assert_eq!(out.materialize_f64(), vec![0.0, 1.0, 0.0]);
     }
 

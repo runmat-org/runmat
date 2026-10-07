@@ -16,7 +16,7 @@ fn call(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
 
 fn tensor_data(value: Value) -> (Vec<f64>, Vec<usize>) {
     let tensor = test_support::gather(value).expect("gather tensor");
-    (tensor.materialize_f64(), tensor.shape)
+    (tensor.materialize_f64(), tensor.shape().to_vec())
 }
 
 fn approx(lhs: &[f64], rhs: &[f64], tol: f64) {

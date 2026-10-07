@@ -540,7 +540,7 @@ mod tests {
         let data: Vec<f64> = (0..n).map(|i| i as f64 * step).collect();
         let tensor = Tensor::new(data.clone(), vec![1, n]).unwrap();
         let result = expect_tensor(call(Value::Tensor(tensor)).unwrap());
-        assert_eq!(result.shape, vec![1, n]);
+        assert_eq!(result.shape(), vec![1, n]);
         for (idx, &value) in result.materialize_f64().iter().enumerate() {
             assert!(
                 value == 1.0 || value == -1.0,
@@ -640,7 +640,7 @@ mod tests {
 
         let logical = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();
         let result = expect_tensor(call(Value::LogicalArray(logical)).unwrap());
-        assert_eq!(result.shape, vec![1, 2]);
+        assert_eq!(result.shape(), vec![1, 2]);
         assert_eq!(result.materialize_f64(), vec![1.0, 1.0]);
     }
 
@@ -717,7 +717,7 @@ mod tests {
     fn square_preserves_matrix_shape() {
         let tensor = Tensor::new(vec![0.0, PI / 2.0, PI, 3.0 * PI / 2.0], vec![2, 2]).unwrap();
         let result = expect_tensor(call(Value::Tensor(tensor)).unwrap());
-        assert_eq!(result.shape, vec![2, 2]);
+        assert_eq!(result.shape(), vec![2, 2]);
         assert_eq!(result.materialize_f64(), vec![1.0, 1.0, -1.0, -1.0]);
     }
 }

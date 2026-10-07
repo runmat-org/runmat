@@ -326,7 +326,7 @@ mod tests {
     fn rectpuls_default_width_samples_rectangle() {
         let input = Tensor::new(vec![-0.5, -0.25, 0.0, 0.25, 0.5, 0.75], vec![1, 6]).unwrap();
         let out = expect_tensor(call(Value::Tensor(input), Vec::new()).expect("rectpuls"));
-        assert_eq!(out.shape, vec![1, 6]);
+        assert_eq!(out.shape(), vec![1, 6]);
         assert_eq!(out.materialize_f64(), vec![1.0, 1.0, 1.0, 1.0, 0.0, 0.0]);
     }
 
@@ -349,7 +349,7 @@ mod tests {
         let input = integer_tensor(vec![-1, 0, 1], vec![1, 3]);
         let out =
             expect_tensor(call(Value::Tensor(input), vec![Value::Num(2.0)]).expect("rectpuls"));
-        assert_eq!(out.shape, vec![1, 3]);
+        assert_eq!(out.shape(), vec![1, 3]);
         assert_eq!(out.materialize_f64(), vec![1.0, 1.0, 0.0]);
     }
 

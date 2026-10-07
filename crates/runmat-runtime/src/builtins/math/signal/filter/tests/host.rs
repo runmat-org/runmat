@@ -65,7 +65,7 @@ fn filter_preserves_single_signal_output_and_column_state_layout() {
     };
     assert_eq!(y.numeric_dtype(), NumericDType::F32);
     assert_eq!(zf.numeric_dtype(), NumericDType::F32);
-    assert_eq!(zf.shape, vec![1, 1]);
+    assert_eq!(zf.shape(), vec![1, 1]);
 }
 
 #[test]

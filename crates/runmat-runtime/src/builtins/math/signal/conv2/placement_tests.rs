@@ -39,7 +39,7 @@ fn actual_inprocess_matrix_host_and_provider_routes_report_completed_work() {
             panic!("both complete routes must publish a resident output")
         };
         let gathered = test_support::gather(result).unwrap();
-        assert_eq!(gathered.shape, vec![2, 2]);
+        assert_eq!(gathered.shape(), vec![2, 2]);
         assert_eq!(gathered.materialize_f64(), vec![5.0, 2.0, 3.0, 4.0]);
         assert_eq!(service.selections(), 1);
         assert_eq!(service.pending(), 0);

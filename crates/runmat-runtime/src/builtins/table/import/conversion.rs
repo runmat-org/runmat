@@ -751,7 +751,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor, got {out:?}");
         };
-        assert_eq!(tensor.shape, vec![4, 1]);
+        assert_eq!(tensor.shape(), &[4, 1]);
         assert_eq!(tensor.numeric_dtype(), NumericDType::U8);
         assert_eq!(
             tensor.integer_storage(),
@@ -772,7 +772,7 @@ mod tests {
         let Value::Tensor(tensor) = out else {
             panic!("expected tensor, got {out:?}");
         };
-        assert_eq!(tensor.shape, vec![4, 1]);
+        assert_eq!(tensor.shape(), &[4, 1]);
         assert_eq!(tensor.numeric_dtype(), NumericDType::I16);
         assert_eq!(
             tensor.integer_storage(),

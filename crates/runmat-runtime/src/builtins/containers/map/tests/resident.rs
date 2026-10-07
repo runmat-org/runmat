@@ -139,7 +139,7 @@ fn map_constructor_gathers_gpu_values() {
         let value = containers_map_subsref(map, "()".to_string(), payload).expect("lookup");
         match value {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, shape);
+                assert_eq!(t.shape(), shape);
                 assert_eq!(t.materialize_f64(), data);
             }
             other => panic!("expected tensor, got {:?}", other),

@@ -37,7 +37,7 @@ fn output_pair_with_pxx_shape(value: Value) -> (Vec<f64>, Vec<usize>, Vec<f64>) 
     };
     (
         pxx.materialize_f64().clone(),
-        pxx.shape.clone(),
+        pxx.shape().to_vec(),
         f.materialize_f64().clone(),
     )
 }
@@ -731,7 +731,7 @@ fn pwelch_automatic_integer_residency_restores_floating_outputs_to_exact_owner()
         let Value::Tensor(pxx) = gathered else {
             panic!("expected floating PSD")
         };
-        assert_eq!(pxx.shape, vec![5, 1]);
+        assert_eq!(pxx.shape(), vec![5, 1]);
     });
 }
 
@@ -1041,8 +1041,8 @@ fn pwelch_wgpu_keeps_uniform_outputs_resident_and_matches_cpu() {
         crate::builtins::common::test_support::gather(values[0].clone()).expect("gather pxx");
     let gpu_f = crate::builtins::common::test_support::gather(values[1].clone()).expect("gather f");
 
-    assert_eq!(gpu_pxx.shape, vec![17, 2]);
-    assert_eq!(gpu_f.shape, vec![17, 1]);
+    assert_eq!(gpu_pxx.shape(), vec![17, 2]);
+    assert_eq!(gpu_f.shape(), vec![17, 1]);
     assert_eq!(gpu_f.materialize_f64(), cpu_f);
     for (actual, expected) in gpu_pxx.materialize_f64().iter().zip(cpu_pxx.iter()) {
         assert!(
@@ -1233,7 +1233,7 @@ mod cooperation_tests {
         let (Value::Tensor(expected), Value::Tensor(actual)) = (expected, actual) else {
             panic!("expected real PSD tensors");
         };
-        assert_eq!(actual.shape, expected.shape);
+        assert_eq!(actual.shape(), expected.shape());
         assert_eq!(actual.materialize_f64(), expected.materialize_f64());
 
         let failure_budget = CpuCooperationBudget::with_test_turn(

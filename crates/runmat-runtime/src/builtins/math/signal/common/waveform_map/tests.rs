@@ -72,7 +72,7 @@ fn single_and_double_mapping_retain_class_shape_and_values() {
         &mut SignalCooperation::new(None, "tripuls"),
     ))
     .unwrap();
-    assert_eq!(single.shape, [1, 3]);
+    assert_eq!(single.shape(), [1, 3]);
     assert_eq!(
         single.into_numeric_storage().unwrap(),
         NumericStorage::F32(vec![-1.0, 1.0, 3.0])

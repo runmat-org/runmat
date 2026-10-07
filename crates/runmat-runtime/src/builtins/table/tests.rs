@@ -320,7 +320,7 @@ fn readtable_imports_headered_numeric_and_text_columns() {
     );
     match table_member_get(&table, &Value::from("Score")).unwrap() {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 1]);
+            assert_eq!(tensor.shape(), &[2, 1]);
             assert_eq!(tensor.materialize_f64(), vec![10.0, 12.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -372,7 +372,7 @@ fn parquetread_imports_common_column_types() {
     }
     match table_member_get(&table, &Value::from("Score")).unwrap() {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![3, 1]);
+            assert_eq!(tensor.shape(), &[3, 1]);
             assert_eq!(tensor.materialize_f64()[0], 10.0);
             assert_eq!(tensor.materialize_f64()[1], 12.5);
             assert!(tensor.materialize_f64()[2].is_nan());
@@ -385,7 +385,7 @@ fn parquetread_imports_common_column_types() {
     }
     match table_member_get(&table, &Value::from("Group")).unwrap() {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![3, 1]);
+            assert_eq!(tensor.shape(), &[3, 1]);
             assert_eq!(
                 tensor.integer_storage(),
                 Some(&IntegerStorage::I32(vec![1, 1, 2]))
@@ -425,7 +425,7 @@ fn parquetread_preserves_all_integer_physical_column_classes() {
         let Value::Tensor(column) = table_member_get(&table, &Value::from(name)).unwrap() else {
             panic!("expected tensor column for {name}");
         };
-        assert_eq!(column.shape, vec![2, 1], "{name}");
+        assert_eq!(column.shape(), &[2, 1], "{name}");
         assert_eq!(column.integer_storage(), Some(&expected), "{name}");
     }
 
@@ -458,7 +458,7 @@ fn parquetread_supports_selected_variables_and_row_groups() {
     );
     match table_member_get(&table, &Value::from("Group")).unwrap() {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 1]);
+            assert_eq!(tensor.shape(), &[1, 1]);
             assert_eq!(
                 tensor.integer_storage(),
                 Some(&IntegerStorage::I32(vec![2]))
@@ -1002,7 +1002,7 @@ fn detect_import_options_struct_can_drive_readmatrix() {
     .expect("readmatrix");
     match matrix {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.shape(), &[2, 2]);
             assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -1114,7 +1114,7 @@ fn detect_import_options_encoding_replays_through_readmatrix() {
     .expect("readmatrix");
     match matrix {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.shape(), &[2, 2]);
             assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -1171,7 +1171,7 @@ fn detect_import_options_replays_through_filesystem_provider() {
         .expect("readmatrix");
         match matrix {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, vec![2, 2]);
+                assert_eq!(tensor.shape(), &[2, 2]);
                 assert_eq!(tensor.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1278,7 +1278,7 @@ fn readtable_consumes_spreadsheet_import_options_struct() {
     );
     match table_member_get(&table, &Value::from("Amount")).unwrap() {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 1]);
+            assert_eq!(tensor.shape(), &[2, 1]);
             assert_eq!(tensor.materialize_f64(), vec![200.0, 90.0]);
             assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
         }
@@ -1838,7 +1838,7 @@ fn grpstats_matrix_returns_multiple_statistics_and_group_names() {
     assert_eq!(outputs.len(), 3);
     match &outputs[0] {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.shape(), &[2, 2]);
             assert_eq!(tensor.materialize_f64(), vec![3.5, 1.5, 35.0, 15.0]);
         }
         other => panic!("expected mean tensor, got {other:?}"),
@@ -1846,7 +1846,7 @@ fn grpstats_matrix_returns_multiple_statistics_and_group_names() {
     match &outputs[1] {
         Value::Tensor(tensor) => {
             let root_half = 0.5_f64.sqrt();
-            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.shape(), &[2, 2]);
             let expected = [root_half, root_half, 10.0 * root_half, 10.0 * root_half];
             for (value, expected) in tensor.materialize_f64().iter().zip(expected) {
                 assert!((*value - expected).abs() < 1.0e-12);
@@ -1871,7 +1871,7 @@ fn grpstats_matrix_handles_empty_group_missing_groups_and_output_count_contract(
     let result = grpstats_impl(x.clone(), empty_group, Vec::new()).unwrap();
     match result {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 1]);
+            assert_eq!(tensor.shape(), &[1, 1]);
             assert_eq!(tensor.materialize_f64(), vec![2.5]);
         }
         other => panic!("expected all-group mean tensor, got {other:?}"),
@@ -2043,7 +2043,7 @@ fn grpstats_table_supports_empty_group_and_interval_stats() {
     }
     match table_member_get(&summary, &Value::from("meanci_X")).unwrap() {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), &[1, 2]);
             assert!(tensor.materialize_f64()[0] < 4.0);
             assert!(tensor.materialize_f64()[1] > 4.0);
         }
@@ -2172,7 +2172,7 @@ fn array2table_preserves_every_integer_storage_class_exactly() {
             let Value::Tensor(column) = variables.fields.get(name).unwrap() else {
                 panic!("expected typed integer column");
             };
-            assert_eq!(column.shape, vec![2, 1]);
+            assert_eq!(column.shape(), &[2, 1]);
             assert_eq!(
                 column.integer_storage().unwrap().numeric_dtype(),
                 storage.numeric_dtype(),
@@ -2182,7 +2182,7 @@ fn array2table_preserves_every_integer_storage_class_exactly() {
         let Value::Tensor(round_trip) = block_on(table2array_builtin(table)).unwrap() else {
             panic!("expected typed integer array");
         };
-        assert_eq!(round_trip.shape, vec![2, 2]);
+        assert_eq!(round_trip.shape(), &[2, 2]);
         assert_eq!(round_trip.integer_storage(), Some(&storage));
     }
 }
@@ -2774,7 +2774,7 @@ fn head_preserves_exact_integer_rows_and_requires_positive_count() {
     let Value::Tensor(selected) = selected else {
         panic!("expected exact integer tensor")
     };
-    assert_eq!(selected.shape, vec![1, 2]);
+    assert_eq!(selected.shape(), &[1, 2]);
     assert_eq!(
         selected.into_numeric_storage().unwrap(),
         runmat_value::NumericStorage::U64(vec![9_007_199_254_740_993, 7])
@@ -2806,7 +2806,7 @@ fn head_host_preserves_every_integer_class() {
         else {
             panic!("expected exact integer tensor")
         };
-        assert_eq!(selected.shape, vec![1, 2]);
+        assert_eq!(selected.shape(), &[1, 2]);
         let expected = storage
             .from_exact_values_like(vec![
                 storage.value_at(0).unwrap(),
@@ -2825,7 +2825,7 @@ fn head_preserves_nd_real_complex_and_logical_pages() {
     else {
         panic!("expected double tensor")
     };
-    assert_eq!(real_f64.shape, vec![1, 2, 3]);
+    assert_eq!(real_f64.shape(), &[1, 2, 3]);
     assert_eq!(
         real_f64.materialize_f64(),
         vec![1.0, 3.0, 5.0, 7.0, 9.0, 11.0]
@@ -2838,7 +2838,7 @@ fn head_preserves_nd_real_complex_and_logical_pages() {
     else {
         panic!("expected single tensor");
     };
-    assert_eq!(real.shape, vec![1, 2, 3]);
+    assert_eq!(real.shape(), &[1, 2, 3]);
     assert_eq!(real.numeric_dtype(), runmat_value::NumericDType::F32);
     assert_eq!(real.materialize_f64(), vec![1.0, 3.0, 5.0, 7.0, 9.0, 11.0]);
 
@@ -2856,7 +2856,7 @@ fn head_preserves_nd_real_complex_and_logical_pages() {
     .unwrap() else {
         panic!("expected complex tensor");
     };
-    assert_eq!(complex.shape, vec![1, 2, 3]);
+    assert_eq!(complex.shape(), &[1, 2, 3]);
     assert_eq!(complex.numeric_dtype(), runmat_value::NumericDType::F32);
     assert_eq!(
         complex.materialize_f64(),
@@ -2884,7 +2884,7 @@ fn head_preserves_nd_real_complex_and_logical_pages() {
     .unwrap() else {
         panic!("expected double complex tensor")
     };
-    assert_eq!(complex_f64.shape, vec![1, 2, 3]);
+    assert_eq!(complex_f64.shape(), &[1, 2, 3]);
 
     let integer_complex = ComplexTensor::new_integer(
         runmat_value::IntegerComplexStorage::new(
@@ -2902,7 +2902,7 @@ fn head_preserves_nd_real_complex_and_logical_pages() {
     .unwrap() else {
         panic!("expected integer complex tensor")
     };
-    assert_eq!(integer_complex.shape, vec![1, 2, 3]);
+    assert_eq!(integer_complex.shape(), &[1, 2, 3]);
     assert!(integer_complex.integer_storage().is_some());
 
     let logical = LogicalArray::new(
@@ -4143,7 +4143,7 @@ fn ordinal_min_max_preserve_categorical_results_for_missing_dims_and_indices() {
     };
     match row_max.properties.get("Codes").unwrap() {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 1]);
+            assert_eq!(tensor.shape(), &[2, 1]);
             assert_eq!(tensor.materialize_f64(), vec![2.0, 3.0]);
         }
         other => panic!("expected row max codes, got {other:?}"),
@@ -4714,5 +4714,5 @@ fn uitable_data_property_preserves_wide_integer_class_and_values() {
         stored.integer_storage(),
         Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
     );
-    assert_eq!(stored.shape, vec![1, 2]);
+    assert_eq!(stored.shape(), &[1, 2]);
 }
