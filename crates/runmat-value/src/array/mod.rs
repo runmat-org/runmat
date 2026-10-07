@@ -24,7 +24,9 @@ mod string;
 mod symbolic;
 
 pub(crate) use admission::BorrowedShapeAdmission;
-pub(in crate::array) use admission::{admit_shape, admit_shape_for_resize, ValidatedShape};
+pub(in crate::array) use admission::{
+    admit_shape, admit_shape_for_resize, shape_dimensions, ValidatedShape,
+};
 pub use admission::{
     ComplexTensorAdmission, NumericTensorAdmission, ValidatedComplexTensorParts,
     ValidatedNumericTensorParts,

@@ -24,9 +24,7 @@ impl<T> From<ComplexElement<T>> for (T, T) {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComplexTensor {
     storage: ComplexStorage,
-    pub shape: Vec<usize>,
-    pub rows: usize,
-    pub cols: usize,
+    shape: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -129,13 +127,8 @@ impl ComplexTensor {
     }
 
     pub(super) fn from_validated_parts(parts: ValidatedComplexTensorParts) -> Self {
-        let (storage, shape, rows, cols) = parts.into_components();
-        Self {
-            storage,
-            shape,
-            rows,
-            cols,
-        }
+        let (storage, shape, _, _) = parts.into_components();
+        Self { storage, shape }
     }
     pub fn new_integer(storage: IntegerComplexStorage, shape: Vec<usize>) -> Result<Self, String> {
         Self::from_complex_storage(ComplexStorage::Integer(storage), shape)
@@ -160,7 +153,16 @@ impl ComplexTensor {
     }
 
     pub fn into_complex_storage(self) -> ComplexStorage {
-        self.storage
+        self.into_complex_storage_and_shape().0
+    }
+
+    /// Consumes this tensor into its native storage and authoritative shape.
+    ///
+    /// Both owners are transferred together without exposing mutable metadata
+    /// or reconstructing either allocation.
+    pub fn into_complex_storage_and_shape(self) -> (ComplexStorage, Vec<usize>) {
+        let Self { storage, shape } = self;
+        (storage, shape)
     }
 
     /// Validate retained dimensions against the current component storage
@@ -347,10 +349,21 @@ impl ComplexTensor {
     }
 
     fn apply_validated_shape(&mut self, shape: ValidatedShape) {
-        let (shape, rows, cols) = shape.into_components();
+        let (shape, _, _) = shape.into_components();
         self.shape = shape;
-        self.rows = rows;
-        self.cols = cols;
+    }
+
+    /// Borrows the authoritative column-major dimensions.
+    pub fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+
+    pub fn rows(&self) -> usize {
+        shape_dimensions(&self.shape).0
+    }
+
+    pub fn cols(&self) -> usize {
+        shape_dimensions(&self.shape).1
     }
 
     /// Formats one element using its exact integer components when present.

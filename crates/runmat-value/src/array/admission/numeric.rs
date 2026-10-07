@@ -197,11 +197,11 @@ mod tests {
     fn empty_scalar_overflow_and_length_diagnostics_preserve_constructor_contract(
     ) -> Result<(), String> {
         assert_eq!(
-            finish(NumericStorage::I16(Vec::new()), vec![0, 3], 1)?.shape,
+            finish(NumericStorage::I16(Vec::new()), vec![0, 3], 1)?.shape(),
             vec![0, 3]
         );
         assert_eq!(
-            finish(NumericStorage::U64(vec![9]), Vec::new(), 1)?.shape,
+            finish(NumericStorage::U64(vec![9]), Vec::new(), 1)?.shape(),
             Vec::<usize>::new()
         );
         let overflow = finish(NumericStorage::F64(Vec::new()), vec![usize::MAX, 2], 1)

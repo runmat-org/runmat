@@ -191,7 +191,7 @@ mod tests {
                 vec![0, 7],
                 1,
             )?
-            .shape,
+            .shape(),
             vec![0, 7]
         );
         assert_eq!(
@@ -200,7 +200,7 @@ mod tests {
                 Vec::new(),
                 1,
             )?
-            .shape,
+            .shape(),
             Vec::<usize>::new()
         );
         let overflow = finish(

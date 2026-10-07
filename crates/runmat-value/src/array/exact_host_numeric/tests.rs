@@ -212,8 +212,8 @@ fn exact_two_dimensional_owner_charges_shape_before_payload_and_retains_both() {
         integer_charge(16 + shape_bytes)
     );
     let tensor = allocation.into_tensor().expect("exact geometry");
-    assert_eq!(tensor.shape, [1, 2]);
-    assert_eq!(tensor.shape.capacity(), 2);
+    assert_eq!(tensor.shape(), [1, 2]);
+    assert_eq!(tensor.shape_capacity_for_testing(), 2);
     assert_eq!(
         tensor.integer_storage(),
         Some(&IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]))
@@ -251,7 +251,7 @@ fn exact_two_dimensional_float_retains_single_storage_and_shape_charge() {
         .copy_from_slice(&[0.25, -0.5, 1.5]);
     let original = allocation.as_f32_slice_mut().unwrap().as_ptr();
     let tensor = allocation.into_tensor().expect("exact shape");
-    assert_eq!(tensor.shape.as_slice(), [3, 1]);
+    assert_eq!(tensor.shape(), [3, 1]);
     assert_eq!(tensor.as_f32_slice(), Some([0.25, -0.5, 1.5].as_slice()));
     assert_eq!(tensor.as_f32_slice().unwrap().as_ptr(), original);
     assert_eq!(quota.retained.load(Ordering::SeqCst), total);

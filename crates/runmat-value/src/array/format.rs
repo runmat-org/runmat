@@ -152,7 +152,7 @@ impl fmt::Display for Tensor {
             }
         };
 
-        match self.shape.len() {
+        match self.shape().len() {
             0 | 1 => {
                 // Treat as row vector for display
                 write!(f, "[")?;
@@ -181,12 +181,12 @@ impl fmt::Display for Tensor {
                 Ok(())
             }
             _ => {
-                if should_expand_nd_display(&self.shape) {
-                    write_nd_pages(f, &self.shape, |f, idx| {
+                if should_expand_nd_display(self.shape()) {
+                    write_nd_pages(f, self.shape(), |f, idx| {
                         write!(f, "{}", format_element(idx))
                     })
                 } else {
-                    write!(f, "Tensor(shape={:?})", self.shape)
+                    write!(f, "Tensor(shape={:?})", self.shape())
                 }
             }
         }

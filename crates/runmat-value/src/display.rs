@@ -337,7 +337,7 @@ impl fmt::Display for Value {
 
 impl fmt::Display for ComplexTensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.shape.len() {
+        match self.shape().len() {
             0 | 1 => {
                 write!(f, "[")?;
                 for i in 0..self.len() {
@@ -350,8 +350,8 @@ impl fmt::Display for ComplexTensor {
                 write!(f, "]")
             }
             2 => {
-                let rows = self.rows;
-                let cols = self.cols;
+                let rows = self.rows();
+                let cols = self.cols();
                 write!(f, "[")?;
                 for r in 0..rows {
                     for c in 0..cols {
@@ -368,12 +368,12 @@ impl fmt::Display for ComplexTensor {
                 write!(f, "]")
             }
             _ => {
-                if should_expand_nd_display(&self.shape) {
-                    write_nd_pages(f, &self.shape, |f, idx| {
+                if should_expand_nd_display(self.shape()) {
+                    write_nd_pages(f, self.shape(), |f, idx| {
                         write!(f, "{}", self.format_element(idx))
                     })
                 } else {
-                    write!(f, "ComplexTensor(shape={:?})", self.shape)
+                    write!(f, "ComplexTensor(shape={:?})", self.shape())
                 }
             }
         }

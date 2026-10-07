@@ -2,9 +2,7 @@ use super::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor {
-    pub shape: Vec<usize>, // Column-major layout
-    pub rows: usize,       // Compatibility for 2D usage
-    pub cols: usize,       // Compatibility for 2D usage
+    shape: Vec<usize>, // Column-major layout
     // Keep storage last: an exact producer reservation attached to storage
     // may also account for this tensor's initial shape allocation. Field
     // drop order must release that claim only after shape deallocation.
@@ -81,13 +79,8 @@ impl Tensor {
     }
 
     pub(super) fn from_validated_parts(parts: ValidatedNumericTensorParts) -> Self {
-        let (storage, shape, rows, cols) = parts.into_components();
-        Self {
-            storage,
-            shape,
-            rows,
-            cols,
-        }
+        let (storage, shape, _, _) = parts.into_components();
+        Self { storage, shape }
     }
 
     pub fn numeric_dtype(&self) -> NumericDType {
@@ -205,10 +198,8 @@ impl Tensor {
     }
 
     fn apply_validated_shape(&mut self, shape: ValidatedShape) {
-        let (shape, rows, cols) = shape.into_components();
+        let (shape, _, _) = shape.into_components();
         self.shape = shape;
-        self.rows = rows;
-        self.cols = cols;
     }
 
     pub fn zeros(shape: Vec<usize>) -> Self {
@@ -232,10 +223,20 @@ impl Tensor {
     }
 
     pub fn rows(&self) -> usize {
-        self.shape.first().copied().unwrap_or(1)
+        shape_dimensions(&self.shape).0
     }
     pub fn cols(&self) -> usize {
-        self.shape.get(1).copied().unwrap_or(1)
+        shape_dimensions(&self.shape).1
+    }
+
+    /// Borrows the authoritative column-major dimensions.
+    pub fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+
+    #[cfg(test)]
+    pub(crate) fn shape_capacity_for_testing(&self) -> usize {
+        self.shape.capacity()
     }
 
     pub fn get2(&self, row: usize, col: usize) -> Result<f64, String> {

@@ -105,6 +105,10 @@ pub(in crate::array) fn admit_shape(
     Ok(shape)
 }
 
+pub(in crate::array) fn shape_dimensions(shape: &[usize]) -> (usize, usize) {
+    ShapeProgress::dimensions(shape)
+}
+
 fn synchronous_quantum() -> NonZeroUsize {
     NonZeroUsize::new(usize::MAX).expect("usize::MAX is nonzero")
 }

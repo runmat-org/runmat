@@ -142,7 +142,7 @@ mod integer_storage_tests {
         let tensor = Tensor::from_f32(source.clone(), vec![1, 3]).expect("single tensor");
 
         assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
-        assert_eq!(tensor.shape, vec![1, 3]);
+        assert_eq!(tensor.shape(), [1, 3]);
         assert_eq!(tensor.materialize_f64(), expected);
         assert!(tensor.integer_storage().is_none());
         assert_eq!(
@@ -700,7 +700,7 @@ mod integer_storage_tests {
             .reshape(vec![2, 1])
             .expect("reshape");
 
-        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(tensor.shape(), [2, 1]);
         assert_eq!(
             tensor.integer_storage(),
             Some(&IntegerStorage::I64(vec![-1, i64::MAX]))
@@ -716,9 +716,9 @@ mod integer_storage_tests {
             tensor.reshape_in_place(vec![3]).unwrap_err(),
             "single tensor data length 2 doesn't match shape [3] (3 elements)"
         );
-        assert_eq!(tensor.shape, vec![1, 2]);
-        assert_eq!(tensor.rows, 1);
-        assert_eq!(tensor.cols, 2);
+        assert_eq!(tensor.shape(), [1, 2]);
+        assert_eq!(tensor.rows(), 1);
+        assert_eq!(tensor.cols(), 2);
         assert_eq!(tensor.as_f32_slice().unwrap().as_ptr(), pointer);
         assert_eq!(tensor.as_f32_slice(), Some([1.0, 2.0].as_slice()));
 
@@ -731,7 +731,7 @@ mod integer_storage_tests {
                 vec![usize::MAX, 2]
             )
         );
-        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(tensor.shape(), [1, 2]);
         assert_eq!(tensor.as_f32_slice().unwrap().as_ptr(), pointer);
         assert_eq!(tensor.as_f32_slice(), Some([1.0, 2.0].as_slice()));
 
@@ -739,8 +739,36 @@ mod integer_storage_tests {
             .resize_zeroed_for_shape(vec![1, 4])
             .expect("checked vector growth");
         assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
-        assert_eq!(tensor.shape, vec![1, 4]);
+        assert_eq!(tensor.shape(), [1, 4]);
         assert_eq!(tensor.as_f32_slice(), Some([1.0, 2.0, 0.0, 0.0].as_slice()));
+    }
+
+    #[test]
+    fn dense_tensor_dimensions_are_derived_from_the_authoritative_shape() {
+        let scalar = Tensor::new(vec![1.0], vec![]).expect("scalar tensor");
+        assert!(scalar.shape().is_empty());
+        assert_eq!((scalar.rows(), scalar.cols()), (0, 0));
+
+        let vector = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).expect("vector tensor");
+        assert_eq!(vector.shape(), [3]);
+        assert_eq!((vector.rows(), vector.cols()), (1, 3));
+
+        let complex = ComplexTensor::new(vec![(1.0, -1.0); 6], vec![2, 3]).expect("complex matrix");
+        assert_eq!(complex.shape(), [2, 3]);
+        assert_eq!((complex.rows(), complex.cols()), (2, 3));
+    }
+
+    #[test]
+    fn consuming_complex_parts_transfer_shape_allocation_and_numeric_class() {
+        let tensor =
+            ComplexTensor::from_f32(vec![(1.0, -2.0)], vec![1, 1]).expect("single complex tensor");
+        let pointer = tensor.as_f32_slice().expect("single storage").as_ptr();
+        let (storage, shape) = tensor.into_complex_storage_and_shape();
+        let ComplexStorage::F32(values) = storage else {
+            panic!("single complex tensor must retain its class")
+        };
+        assert_eq!(values.as_ptr(), pointer);
+        assert_eq!(shape, [1, 1]);
     }
 
     #[test]
@@ -753,7 +781,7 @@ mod integer_storage_tests {
             tensor.reshape_in_place(vec![2]).unwrap_err(),
             "complex single storage length 1 doesn't match shape [2] (2 elements)"
         );
-        assert_eq!(tensor.shape, vec![1, 1]);
+        assert_eq!(tensor.shape(), [1, 1]);
         assert_eq!(tensor.as_f32_slice().unwrap().as_ptr(), pointer);
         assert_eq!(
             tensor.as_f32_slice(),
@@ -769,14 +797,14 @@ mod integer_storage_tests {
                 vec![usize::MAX, 2]
             )
         );
-        assert_eq!(tensor.shape, vec![1, 1]);
+        assert_eq!(tensor.shape(), [1, 1]);
         assert_eq!(tensor.as_f32_slice().unwrap().as_ptr(), pointer);
 
         tensor
             .resize_zeroed_for_shape(vec![1, 3])
             .expect("checked complex growth");
         assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
-        assert_eq!(tensor.shape, vec![1, 3]);
+        assert_eq!(tensor.shape(), [1, 3]);
         assert_eq!(
             tensor.as_f32_slice(),
             Some(
@@ -802,7 +830,7 @@ mod integer_storage_tests {
                 .unwrap_err(),
             "complex integer assignment components must match uint64 storage"
         );
-        assert_eq!(exact.shape, vec![1, 1]);
+        assert_eq!(exact.shape(), [1, 1]);
         assert_eq!(exact.integer_storage(), Some(&storage));
         assert_eq!(
             exact
@@ -818,7 +846,7 @@ mod integer_storage_tests {
                 vec![usize::MAX, 2]
             )
         );
-        assert_eq!(exact.shape, vec![1, 1]);
+        assert_eq!(exact.shape(), [1, 1]);
         assert_eq!(exact.integer_storage(), Some(&storage));
     }
 
@@ -837,9 +865,7 @@ mod integer_storage_tests {
         );
 
         let mut vector = tensor.clone();
-        vector.shape = vec![2];
-        vector.rows = 1;
-        vector.cols = 2;
+        vector.reshape_in_place(vec![2]).expect("vector reshape");
         assert_eq!(
             vector.to_string(),
             "[9007199254740993 18446744073709551615]"
