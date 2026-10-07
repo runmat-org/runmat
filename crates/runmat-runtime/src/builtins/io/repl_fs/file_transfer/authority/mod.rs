@@ -3,7 +3,6 @@
 use crate::context::RuntimeContext;
 use runmat_execution::cancellation::CancellationToken;
 use runmat_filesystem::{self as vfs, FsProvider};
-use std::cell::RefCell;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -27,12 +26,16 @@ impl TransferOperation {
 }
 
 pub(super) struct TransferFilesystem {
+    authority: CapturedFilesystemAuthority,
+    cooperation: super::cooperation::TransferCooperation,
+}
+
+struct CapturedFilesystemAuthority {
     operation: TransferOperation,
     provider: Arc<dyn FsProvider>,
     cwd: PathBuf,
     lease: Option<vfs::CapturedFsResourceLease>,
     cancellation: Option<CancellationToken>,
-    cooperation: RefCell<super::cooperation::TransferCooperation>,
 }
 
 impl TransferFilesystem {
@@ -51,14 +54,14 @@ impl TransferFilesystem {
         })?;
         let lease = vfs::capture_resource_lease(provider.clone());
         Ok(Self {
-            operation,
-            provider,
-            cwd,
-            lease,
-            cancellation: runtime.map(RuntimeContext::cancellation),
-            cooperation: RefCell::new(super::cooperation::TransferCooperation::new(
-                operation, runtime,
-            )),
+            authority: CapturedFilesystemAuthority {
+                operation,
+                provider,
+                cwd,
+                lease,
+                cancellation: runtime.map(RuntimeContext::cancellation),
+            },
+            cooperation: super::cooperation::TransferCooperation::new(operation, runtime),
         })
     }
 
@@ -68,12 +71,25 @@ impl TransferFilesystem {
         budget: crate::execution::CpuCooperationBudget,
     ) -> crate::BuiltinResult<Self> {
         let mut owner = Self::capture(operation, None)?;
-        owner.cooperation = RefCell::new(
-            super::cooperation::TransferCooperation::with_test_budget(operation, budget),
-        );
+        owner.cooperation =
+            super::cooperation::TransferCooperation::with_test_budget(operation, budget);
         Ok(owner)
     }
 
+    fn path(&self, path: &Path) -> PathBuf {
+        self.authority.path(path)
+    }
+
+    pub(super) fn check(&self) -> io::Result<()> {
+        self.authority.check()
+    }
+
+    pub(super) async fn checkpoint(&mut self) -> crate::BuiltinResult<()> {
+        self.cooperation.checkpoint().await
+    }
+}
+
+impl CapturedFilesystemAuthority {
     fn path(&self, path: &Path) -> PathBuf {
         if self.provider.path_namespace().is_absolute(path) {
             path.to_path_buf()
@@ -82,7 +98,7 @@ impl TransferFilesystem {
         }
     }
 
-    pub(super) fn check(&self) -> io::Result<()> {
+    fn check(&self) -> io::Result<()> {
         if self
             .cancellation
             .as_ref()
@@ -101,9 +117,5 @@ impl TransferFilesystem {
         } else {
             Ok(())
         }
-    }
-
-    pub(super) async fn checkpoint(&self) -> crate::BuiltinResult<()> {
-        self.cooperation.borrow_mut().checkpoint().await
     }
 }

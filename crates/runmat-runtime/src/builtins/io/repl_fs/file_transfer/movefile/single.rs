@@ -5,7 +5,7 @@ use super::super::outcome::TransferOutcome;
 use super::plan::{DestinationPolicy, MovePlanEntry};
 
 pub(super) async fn move_path(
-    fs: &super::super::authority::TransferFilesystem,
+    fs: &mut super::super::authority::TransferFilesystem,
     source: &str,
     destination: &str,
     force: bool,

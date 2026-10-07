@@ -2,7 +2,7 @@ use std::io;
 use std::path::Path;
 
 pub(super) async fn copy(
-    fs: &super::TransferFilesystem,
+    fs: &mut super::TransferFilesystem,
     source: &Path,
     destination: &Path,
     directory: bool,
@@ -16,7 +16,7 @@ pub(super) async fn copy(
 
 #[async_recursion::async_recursion(?Send)]
 async fn copy_directory(
-    fs: &super::TransferFilesystem,
+    fs: &mut super::TransferFilesystem,
     source: &Path,
     destination: &Path,
 ) -> io::Result<()> {
@@ -49,7 +49,7 @@ async fn copy_directory(
 }
 
 async fn copy_file(
-    fs: &super::TransferFilesystem,
+    fs: &mut super::TransferFilesystem,
     source: &Path,
     destination: &Path,
 ) -> io::Result<()> {

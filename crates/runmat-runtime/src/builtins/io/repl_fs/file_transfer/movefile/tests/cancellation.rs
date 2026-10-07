@@ -79,7 +79,7 @@ fn captured_move_owner_survives_global_provider_swap() {
     other
         .write_project_path("/selected/source.bin", b"wrong")
         .expect("other source");
-    let captured = runmat_filesystem::with_provider_override(selected.clone(), || {
+    let mut captured = runmat_filesystem::with_provider_override(selected.clone(), || {
         super::super::super::authority::TransferFilesystem::capture(
             super::super::super::authority::TransferOperation::Move,
             None,
@@ -89,7 +89,7 @@ fn captured_move_owner_survives_global_provider_swap() {
     let _replacement = runmat_filesystem::replace_provider(other.clone());
 
     let outcome = futures::executor::block_on(super::super::single::move_path(
-        &captured,
+        &mut captured,
         "source.bin",
         "target.bin",
         false,
@@ -122,7 +122,7 @@ fn dropped_pending_move_has_no_rename_effect_and_retires_turn() {
         cancellation.token(),
         move || Box::pin(PendingTurn(pending.clone())),
     );
-    let owner = runmat_filesystem::with_provider_override(filesystem.clone(), || {
+    let mut owner = runmat_filesystem::with_provider_override(filesystem.clone(), || {
         super::super::super::authority::TransferFilesystem::capture_with_budget(
             super::super::super::authority::TransferOperation::Move,
             budget,
@@ -131,7 +131,7 @@ fn dropped_pending_move_has_no_rename_effect_and_retires_turn() {
     });
 
     let mut call = Box::pin(super::super::single::move_path(
-        &owner,
+        &mut owner,
         "source.bin",
         "target.bin",
         false,
@@ -192,7 +192,7 @@ fn dropped_pending_wildcard_preserves_completed_move_without_replay() {
             }
         },
     );
-    let owner = runmat_filesystem::with_provider_override(filesystem.clone(), || {
+    let mut owner = runmat_filesystem::with_provider_override(filesystem.clone(), || {
         super::super::super::authority::TransferFilesystem::capture_with_budget(
             super::super::super::authority::TransferOperation::Move,
             budget,
@@ -201,7 +201,7 @@ fn dropped_pending_wildcard_preserves_completed_move_without_replay() {
     });
 
     let mut call = Box::pin(super::super::wildcard::move_matches(
-        &owner, "*.log", "moved", false,
+        &mut owner, "*.log", "moved", false,
     ));
     assert!(matches!(
         call.as_mut()

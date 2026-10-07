@@ -5,7 +5,7 @@ use super::super::outcome::TransferOutcome;
 use super::plan::{DestinationPolicy, MovePlanEntry};
 
 pub(super) async fn move_matches(
-    fs: &super::super::authority::TransferFilesystem,
+    fs: &mut super::super::authority::TransferFilesystem,
     pattern: &str,
     destination: &str,
     force: bool,
@@ -40,7 +40,7 @@ pub(super) async fn move_matches(
 }
 
 async fn plan(
-    fs: &super::super::authority::TransferFilesystem,
+    fs: &mut super::super::authority::TransferFilesystem,
     sources: Vec<PathBuf>,
     destination: &std::path::Path,
     force: bool,

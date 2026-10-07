@@ -60,14 +60,14 @@ async fn transfer(
     }
     let source = expand_user_path(&source, BUILTIN).map_err(runtime_error)?;
     let destination = expand_user_path(&destination, BUILTIN).map_err(runtime_error)?;
-    let filesystem = super::super::authority::TransferFilesystem::capture(
+    let mut filesystem = super::super::authority::TransferFilesystem::capture(
         super::super::authority::TransferOperation::Move,
         runtime,
     )?;
     if contains_wildcards(&source) {
-        super::wildcard::move_matches(&filesystem, &source, &destination, force).await
+        super::wildcard::move_matches(&mut filesystem, &source, &destination, force).await
     } else {
-        super::single::move_path(&filesystem, &source, &destination, force).await
+        super::single::move_path(&mut filesystem, &source, &destination, force).await
     }
 }
 

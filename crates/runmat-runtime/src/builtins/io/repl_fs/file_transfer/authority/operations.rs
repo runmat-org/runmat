@@ -1,8 +1,7 @@
-use super::TransferFilesystem;
+use super::{CapturedFilesystemAuthority, TransferFilesystem};
 use crate::execution::ExecutionServiceError;
 use async_trait::async_trait;
 use runmat_filesystem::{self as vfs, FsMetadata};
-use std::cell::RefMut;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -15,8 +14,8 @@ enum CopyCheckpointError {
 }
 
 struct OwnerCheckpoint<'a> {
-    owner: &'a TransferFilesystem,
-    cooperation: RefMut<'a, super::super::cooperation::TransferCooperation>,
+    authority: &'a CapturedFilesystemAuthority,
+    cooperation: &'a mut super::super::cooperation::TransferCooperation,
 }
 
 #[async_trait(?Send)]
@@ -24,9 +23,9 @@ impl vfs::FsCopyCheckpoint for OwnerCheckpoint<'_> {
     type Error = CopyCheckpointError;
 
     async fn checkpoint(&mut self, completed_bytes: u64) -> Result<(), Self::Error> {
-        self.owner.check()?;
+        self.authority.check()?;
         self.cooperation.raw_checkpoint(completed_bytes).await?;
-        self.owner.check()?;
+        self.authority.check()?;
         Ok(())
     }
 }
@@ -34,7 +33,7 @@ impl vfs::FsCopyCheckpoint for OwnerCheckpoint<'_> {
 impl TransferFilesystem {
     pub(in super::super) async fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
         self.check()?;
-        let result = self.provider.metadata(&self.path(path)).await;
+        let result = self.authority.provider.metadata(&self.path(path)).await;
         if result.is_ok() {
             self.check()?;
         }
@@ -43,7 +42,11 @@ impl TransferFilesystem {
 
     pub(in super::super) async fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata> {
         self.check()?;
-        let result = self.provider.symlink_metadata(&self.path(path)).await;
+        let result = self
+            .authority
+            .provider
+            .symlink_metadata(&self.path(path))
+            .await;
         if result.is_ok() {
             self.check()?;
         }
@@ -52,7 +55,11 @@ impl TransferFilesystem {
 
     pub(in super::super) async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
         self.check()?;
-        let result = self.provider.rename(&self.path(from), &self.path(to)).await;
+        let result = self
+            .authority
+            .provider
+            .rename(&self.path(from), &self.path(to))
+            .await;
         if result.is_ok() {
             self.check()?;
         }
@@ -62,6 +69,7 @@ impl TransferFilesystem {
     pub(in super::super) async fn rename_replace(&self, from: &Path, to: &Path) -> io::Result<()> {
         self.check()?;
         let result = self
+            .authority
             .provider
             .rename_replace(&self.path(from), &self.path(to))
             .await;
@@ -73,7 +81,7 @@ impl TransferFilesystem {
 
     pub(in super::super) async fn read_dir(&self, path: &Path) -> io::Result<Vec<vfs::DirEntry>> {
         self.check()?;
-        let result = self.provider.read_dir(&self.path(path)).await;
+        let result = self.authority.provider.read_dir(&self.path(path)).await;
         if result.is_ok() {
             self.check()?;
         }
@@ -82,7 +90,7 @@ impl TransferFilesystem {
 
     pub(in super::super) async fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
         self.check()?;
-        let result = self.provider.canonicalize(&self.path(path)).await;
+        let result = self.authority.provider.canonicalize(&self.path(path)).await;
         if result.is_ok() {
             self.check()?;
         }
@@ -91,7 +99,11 @@ impl TransferFilesystem {
 
     pub(in super::super) async fn create_dir_all(&self, path: &Path) -> io::Result<()> {
         self.check()?;
-        let result = self.provider.create_dir_all(&self.path(path)).await;
+        let result = self
+            .authority
+            .provider
+            .create_dir_all(&self.path(path))
+            .await;
         if result.is_ok() {
             self.check()?;
         }
@@ -100,7 +112,7 @@ impl TransferFilesystem {
 
     pub(in super::super) async fn remove_file(&self, path: &Path) -> io::Result<()> {
         self.check()?;
-        let result = self.provider.remove_file(&self.path(path)).await;
+        let result = self.authority.provider.remove_file(&self.path(path)).await;
         if result.is_ok() {
             self.check()?;
         }
@@ -109,7 +121,11 @@ impl TransferFilesystem {
 
     pub(in super::super) async fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
         self.check()?;
-        let result = self.provider.remove_dir_all(&self.path(path)).await;
+        let result = self
+            .authority
+            .provider
+            .remove_dir_all(&self.path(path))
+            .await;
         if result.is_ok() {
             self.check()?;
         }
@@ -122,23 +138,29 @@ impl TransferFilesystem {
         readonly: bool,
     ) -> io::Result<()> {
         self.check()?;
-        let result = self.provider.set_readonly(&self.path(path), readonly).await;
+        let result = self
+            .authority
+            .provider
+            .set_readonly(&self.path(path), readonly)
+            .await;
         if result.is_ok() {
             self.check()?;
         }
         result
     }
 
-    pub(in super::super) async fn copy_file(&self, from: &Path, to: &Path) -> io::Result<u64> {
+    pub(in super::super) async fn copy_file(&mut self, from: &Path, to: &Path) -> io::Result<u64> {
         self.check()?;
+        let from = self.authority.path(from);
+        let to = self.authority.path(to);
         let mut checkpoint = OwnerCheckpoint {
-            owner: self,
-            cooperation: self.cooperation.borrow_mut(),
+            authority: &self.authority,
+            cooperation: &mut self.cooperation,
         };
         let result = vfs::copy_file_on_async(
-            self.provider.as_ref(),
-            &self.path(from),
-            &self.path(to),
+            self.authority.provider.as_ref(),
+            &from,
+            &to,
             &mut checkpoint,
         )
         .await

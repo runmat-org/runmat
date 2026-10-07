@@ -178,7 +178,7 @@ fn revoked_lease_after_first_chunk_prevents_next_provider_effect() {
         writes: writes.clone(),
         pending_rename_dropped: None,
     });
-    let captured = runmat_filesystem::with_provider_override(provider, || {
+    let mut captured = runmat_filesystem::with_provider_override(provider, || {
         super::super::TransferFilesystem::capture(
             super::super::super::authority::TransferOperation::Copy,
             None,
@@ -186,7 +186,7 @@ fn revoked_lease_after_first_chunk_prevents_next_provider_effect() {
         .expect("capture lease")
     });
     let outcome = futures::executor::block_on(super::super::single::copy(
-        &captured,
+        &mut captured,
         "source.bin",
         "target.bin",
         false,

@@ -24,7 +24,7 @@ pub(super) struct CopyFailure {
 }
 
 pub(super) async fn execute(
-    fs: &super::TransferFilesystem,
+    fs: &mut super::TransferFilesystem,
     entries: &[CopyPlanEntry],
 ) -> Result<(), CopyFailure> {
     for entry in entries {

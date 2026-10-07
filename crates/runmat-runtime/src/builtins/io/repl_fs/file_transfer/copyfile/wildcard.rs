@@ -5,7 +5,7 @@ use super::super::outcome::TransferOutcome;
 use super::plan::{CopyPlanEntry, TargetKind};
 
 pub(super) async fn copy(
-    fs: &super::TransferFilesystem,
+    fs: &mut super::TransferFilesystem,
     pattern: &str,
     destination: &str,
     force: bool,

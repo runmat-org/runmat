@@ -14,7 +14,7 @@ fn captured_copy_owner_survives_global_provider_swap() {
     other
         .write_project_path("/selected/source.bin", b"wrong")
         .expect("lexically identical other-provider source");
-    let captured = runmat_filesystem::with_provider_override(selected.clone(), || {
+    let mut captured = runmat_filesystem::with_provider_override(selected.clone(), || {
         super::super::super::TransferFilesystem::capture(
             super::super::super::super::authority::TransferOperation::Copy,
             None,
@@ -23,7 +23,7 @@ fn captured_copy_owner_survives_global_provider_swap() {
     });
     let _replacement = runmat_filesystem::replace_provider(other.clone());
     let outcome = futures::executor::block_on(super::super::super::single::copy(
-        &captured,
+        &mut captured,
         "source.bin",
         "target.bin",
         false,
@@ -58,7 +58,7 @@ fn captured_copy_owner_applies_to_wildcards_and_recursive_children() {
     other
         .write_project_path("/selected/match-a.bin", b"wrong wildcard")
         .expect("other match");
-    let captured = runmat_filesystem::with_provider_override(selected.clone(), || {
+    let mut captured = runmat_filesystem::with_provider_override(selected.clone(), || {
         super::super::super::TransferFilesystem::capture(
             super::super::super::super::authority::TransferOperation::Copy,
             None,
@@ -67,14 +67,14 @@ fn captured_copy_owner_applies_to_wildcards_and_recursive_children() {
     });
     let _replacement = runmat_filesystem::replace_provider(other.clone());
     let recursive = futures::executor::block_on(super::super::super::single::copy(
-        &captured,
+        &mut captured,
         "tree",
         "tree-copy",
         false,
     ));
     assert_eq!(recursive.status(), 1.0, "{recursive:?}");
     let wildcard = futures::executor::block_on(super::super::super::wildcard::copy(
-        &captured,
+        &mut captured,
         "match-*.bin",
         "matches",
         false,

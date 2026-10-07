@@ -23,7 +23,7 @@ pub(super) struct MoveFailure {
 }
 
 pub(super) async fn execute(
-    fs: &super::super::authority::TransferFilesystem,
+    fs: &mut super::super::authority::TransferFilesystem,
     entries: &[MovePlanEntry],
 ) -> crate::BuiltinResult<Result<(), MoveFailure>> {
     for entry in entries {
