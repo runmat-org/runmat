@@ -3,7 +3,8 @@ use super::text::{ShapeCopy, TextCopy};
 use runmat_execution::value::{
     DurableDynamicProperty, DurableObjectArray, DurablePlainObject, DurableStructArray,
 };
-use runmat_value::{DynamicPropertyDef, ObjectArray, StructArray};
+use runmat_value::{DynamicPropertyDef, ObjectArrayAdmission, StructArrayAdmission};
+use std::num::NonZeroUsize;
 
 pub(in crate::execution::value_codec::decode::machine) struct PlainObjectTask<'a> {
     source: &'a DurablePlainObject,
@@ -159,6 +160,7 @@ pub(in crate::execution::value_codec::decode::machine) struct StructArrayTask<'a
     names: Vec<String>,
     name: Option<TextCopy<'a>>,
     values: Vec<Value>,
+    admission: Option<StructArrayAdmission>,
     path: String,
 }
 
@@ -172,6 +174,7 @@ impl<'a> StructArrayTask<'a> {
             names: Vec::with_capacity(source.fields.len()),
             name: None,
             values: Vec::with_capacity(capacity),
+            admission: None,
             path,
         }
     }
@@ -180,6 +183,25 @@ impl<'a> StructArrayTask<'a> {
         &mut self,
         maximum_work: usize,
     ) -> Result<(usize, Option<Value>), ValueCodecError> {
+        if let Some(admission) = &mut self.admission {
+            let completed = admission
+                .advance(NonZeroUsize::new(maximum_work).expect("machine work is nonzero"))
+                .map_err(|error| ValueCodecError::invalid(&self.path, error))?;
+            if !admission.is_complete() {
+                return Ok((completed, None));
+            }
+            let admission = self.admission.take().expect("completed struct admission");
+            return Ok((
+                completed,
+                Some(
+                    admission
+                        .into_validated()
+                        .ok()
+                        .expect("completed struct admission")
+                        .into_value(),
+                ),
+            ));
+        }
         if !self.shape.is_complete() {
             return Ok((self.shape.advance(maximum_work)?, None));
         }
@@ -203,13 +225,15 @@ impl<'a> StructArrayTask<'a> {
             return Ok((count.max(1), None));
         }
         let shape = std::mem::replace(&mut self.shape, ShapeCopy::new(&[], String::new())).finish();
-        let value = StructArray::normalize_field_major(
-            std::mem::take(&mut self.names),
-            std::mem::take(&mut self.values),
-            shape,
-        )
-        .map_err(|error| ValueCodecError::invalid(&self.path, error))?;
-        Ok((count.max(1), Some(value)))
+        self.admission = Some(
+            StructArrayAdmission::field_major(
+                std::mem::take(&mut self.names),
+                std::mem::take(&mut self.values),
+                shape,
+            )
+            .map_err(|error| ValueCodecError::invalid(&self.path, error))?,
+        );
+        Ok((count.max(1), None))
     }
 
     pub(super) fn take_children(&mut self) -> TakenValues {
@@ -222,7 +246,8 @@ pub(in crate::execution::value_codec::decode::machine) struct ObjectArrayTask<'a
     class: TextCopy<'a>,
     decoded_class: Option<runmat_types::ClassIdentity>,
     shape: ShapeCopy<'a>,
-    objects: Vec<ObjectInstance>,
+    objects: Vec<Value>,
+    admission: Option<ObjectArrayAdmission>,
     path: String,
 }
 
@@ -235,6 +260,7 @@ impl<'a> ObjectArrayTask<'a> {
             decoded_class: None,
             shape: ShapeCopy::new(&source.shape, path.clone()),
             objects: Vec::with_capacity(capacity),
+            admission: None,
             path,
         }
     }
@@ -243,6 +269,25 @@ impl<'a> ObjectArrayTask<'a> {
         &mut self,
         maximum_work: usize,
     ) -> Result<(usize, Option<Value>), ValueCodecError> {
+        if let Some(admission) = &mut self.admission {
+            let completed = admission
+                .advance(NonZeroUsize::new(maximum_work).expect("machine work is nonzero"))
+                .map_err(|error| ValueCodecError::invalid(&self.path, error))?;
+            if !admission.is_complete() {
+                return Ok((completed, None));
+            }
+            let admission = self.admission.take().expect("completed object admission");
+            return Ok((
+                completed,
+                Some(Value::ObjectArray(
+                    admission
+                        .into_validated()
+                        .ok()
+                        .expect("completed object admission")
+                        .into_array(),
+                )),
+            ));
+        }
         if self.decoded_class.is_none() {
             let completed = self.class.advance(maximum_work);
             if self.class.is_complete() {
@@ -259,28 +304,34 @@ impl<'a> ObjectArrayTask<'a> {
         }
         let count = self.children.remaining().min(maximum_work);
         for _ in 0..count {
-            let Value::Object(object) = self.children.next().expect("decoded object") else {
+            let value @ Value::Object(_) = self.children.next().expect("decoded object") else {
                 return Err(ValueCodecError::invalid(
                     &self.path,
                     "object-array child is not an object",
                 ));
             };
-            self.objects.push(object);
+            self.objects.push(value);
         }
         if self.children.remaining() != 0 {
             return Ok((count.max(1), None));
         }
         let shape = std::mem::replace(&mut self.shape, ShapeCopy::new(&[], String::new())).finish();
-        let array = ObjectArray::from_objects(
-            self.decoded_class.take().expect("class identity"),
-            std::mem::take(&mut self.objects),
-            shape,
-        )
-        .map_err(|error| ValueCodecError::invalid(&self.path, error))?;
-        Ok((count.max(1), Some(Value::ObjectArray(array))))
+        self.admission = Some(
+            ObjectArrayAdmission::values(
+                self.decoded_class.take().expect("class identity"),
+                std::mem::take(&mut self.objects),
+                shape,
+            )
+            .map_err(|error| ValueCodecError::invalid(&self.path, error))?,
+        );
+        Ok((count.max(1), None))
     }
 
     pub(super) fn take_children(&mut self) -> TakenValues {
         std::mem::replace(&mut self.children, DecodeMachine::empty_taken_values())
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "durable/tests.rs"]
+mod tests;

@@ -5,6 +5,10 @@ use runmat_types::ClassIdentity;
 
 use crate::{HandleRef, ObjectInstance, Value};
 
+#[path = "array/admission.rs"]
+mod admission;
+pub use admission::{ObjectArrayAdmission, ValidatedObjectArrayParts};
+
 /// A homogeneous MATLAB object array.
 ///
 /// Storage is column-major and the shape is always explicit. Elements may be
@@ -25,46 +29,11 @@ impl ObjectArray {
         data: Vec<Value>,
         shape: Vec<usize>,
     ) -> Result<Self, String> {
-        let class_name = class_name.into();
-        if shape.len() < 2 {
-            return Err("object array shape must contain at least two dimensions".into());
-        }
-        let element_count = shape
-            .iter()
-            .try_fold(1usize, |count, dim| count.checked_mul(*dim))
-            .ok_or_else(|| "object array shape overflows addressable storage".to_string())?;
-        if element_count != data.len() {
-            return Err(format!(
-                "object array shape describes {element_count} elements but {} were supplied",
-                data.len()
-            ));
-        }
-        let mut storage_kind = None;
-        for value in &data {
-            let (element_class, element_kind) = match value {
-                Value::Object(object) => (&object.class_name, false),
-                Value::HandleObject(handle) => (&handle.class_name, true),
-                _ => return Err("object array elements must be value or handle objects".into()),
-            };
-            if element_class != &class_name {
-                return Err(format!(
-                    "object array element class '{element_class}' does not match '{class_name}'"
-                ));
-            }
-            if storage_kind
-                .replace(element_kind)
-                .is_some_and(|kind| kind != element_kind)
-            {
-                return Err(
-                    "object array cannot mix value-object and handle-object storage".into(),
-                );
-            }
-        }
-        Ok(Self {
-            class_name,
-            data,
-            shape,
-        })
+        Ok(
+            ObjectArrayAdmission::values(class_name.into(), data, shape)?
+                .finish_synchronously()?
+                .into_array(),
+        )
     }
 
     pub fn from_objects(
@@ -72,10 +41,10 @@ impl ObjectArray {
         objects: Vec<ObjectInstance>,
         shape: Vec<usize>,
     ) -> Result<Self, String> {
-        Self::new(
-            class_name,
-            objects.into_iter().map(Value::Object).collect(),
-            shape,
+        Ok(
+            ObjectArrayAdmission::objects(class_name.into(), objects, shape)?
+                .finish_synchronously()?
+                .into_array(),
         )
     }
 
@@ -84,10 +53,10 @@ impl ObjectArray {
         handles: Vec<HandleRef>,
         shape: Vec<usize>,
     ) -> Result<Self, String> {
-        Self::new(
-            class_name,
-            handles.into_iter().map(Value::HandleObject).collect(),
-            shape,
+        Ok(
+            ObjectArrayAdmission::handles(class_name.into(), handles, shape)?
+                .finish_synchronously()?
+                .into_array(),
         )
     }
 

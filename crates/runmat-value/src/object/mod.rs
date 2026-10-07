@@ -9,7 +9,7 @@ mod instance;
 mod listener;
 mod memmap;
 
-pub use array::ObjectArray;
+pub use array::{ObjectArray, ObjectArrayAdmission, ValidatedObjectArrayParts};
 pub use containers_map::{
     ContainersMapEntry, ContainersMapKey, ContainersMapKeyType, ContainersMapStorage,
     ContainersMapValueClass, ContainersMapValueType,

@@ -13,7 +13,8 @@ mod transient;
 mod value;
 
 pub use aggregate::{
-    CellArray, StructArray, StructArrayOperand, StructElementRef, StructFieldsRef, StructValue,
+    CellArray, StructArray, StructArrayAdmission, StructArrayOperand, StructElementRef,
+    StructFieldsRef, StructValue, ValidatedStructArrayParts,
 };
 pub use array::{
     host_copy_metrics, record_host_copy, AdoptedHostAllocation, CharArray, ComplexElement,
@@ -43,7 +44,7 @@ pub use object::{
     GraphicsCallbackKind, GraphicsCallbackResult, GraphicsReceiverKind, GraphicsReceiverRef,
     GraphicsSceneLease, HandleRef, Listener, MemmapElementType, MemmapFieldState,
     MemmapFormatPresentationState, MemmapReceiverAuthority, MemmapReceiverState, ObjectArray,
-    ObjectInstance, ObjectPersistencePayloadKind,
+    ObjectArrayAdmission, ObjectInstance, ObjectPersistencePayloadKind, ValidatedObjectArrayParts,
 };
 pub use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity};
 pub use sequence::{

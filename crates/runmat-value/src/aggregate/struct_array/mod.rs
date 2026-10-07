@@ -3,6 +3,7 @@ use crate::Value;
 use indexmap::IndexMap;
 use std::{fmt, ops::Index};
 
+mod admission;
 mod concatenate;
 mod construction;
 mod fields;
@@ -11,6 +12,8 @@ mod mapping;
 mod mutation;
 mod shape;
 mod transform;
+
+pub use admission::{StructArrayAdmission, ValidatedStructArrayParts};
 
 #[cfg(test)]
 mod mutation_tests;

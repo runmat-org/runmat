@@ -51,29 +51,11 @@ impl StructArray {
         field_values: Vec<Value>,
         shape: Vec<usize>,
     ) -> Result<Value, String> {
-        let length = total_len(&shape)?;
-        let expected = field_names
-            .len()
-            .checked_mul(length)
-            .ok_or_else(|| "structure array field storage exceeds platform limits".to_string())?;
-        if field_values.len() != expected {
-            return Err(format!(
-                "structure array requires {expected} field values but {} were supplied",
-                field_values.len()
-            ));
-        }
-        if field_names.iter().collect::<HashSet<_>>().len() != field_names.len() {
-            return Err("structure array field names must be unique".into());
-        }
-        let mut values = field_values.into_iter();
-        let fields = field_names
-            .into_iter()
-            .map(|name| {
-                let column = values.by_ref().take(length).collect::<Vec<_>>();
-                (name, column)
-            })
-            .collect::<IndexMap<_, _>>();
-        Self::normalize_columns(fields, shape)
+        Ok(
+            super::StructArrayAdmission::field_major(field_names, field_values, shape)?
+                .finish_synchronously()?
+                .into_value(),
+        )
     }
 
     pub(crate) fn from_columns(
