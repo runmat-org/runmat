@@ -233,7 +233,6 @@ mod tests {
     use runmat_builtins::{
         BuiltinIntegerInputAvailability, DAMP_DESCRIPTOR, DAMP_INTEGER_CAPABILITIES,
     };
-    use runmat_value::ComplexTensor;
 
     fn tf(numerator: Value, denominator: Value, rest: &[Value]) -> Value {
         let mut args = vec![numerator, denominator];
@@ -469,9 +468,7 @@ mod tests {
         for value in tensor_data(&outputs[1]) {
             assert!((value - 0.125).abs() < 1.0e-8);
         }
-        assert!(
-            matches!(&outputs[2], Value::ComplexTensor(ComplexTensor { shape, .. }) if shape == &vec![2, 1])
-        );
+        assert!(matches!(&outputs[2], Value::ComplexTensor(tensor) if tensor.shape() == [2, 1]));
     }
 
     #[test]
