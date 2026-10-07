@@ -392,7 +392,7 @@ fn is_logical_truecolor_value(value: &Value) -> bool {
 
 fn is_supported_four_channel_image(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) if tensor.shape.get(2) == Some(&4) => matches!(
+        Value::Tensor(tensor) if tensor.shape().get(2) == Some(&4) => matches!(
             tensor.numeric_dtype(),
             NumericDType::F64 | NumericDType::F32 | NumericDType::U8 | NumericDType::U16
         ),
@@ -415,7 +415,7 @@ fn is_supported_four_channel_image(value: &Value) -> bool {
 fn is_truecolor_value(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor
-            .shape
+            .shape()
             .get(2)
             .copied()
             .is_some_and(|c| c == 3 || c == 4),
@@ -613,9 +613,10 @@ fn default_image_y_axis(rows: usize) -> Vec<f64> {
 }
 
 fn truecolor_shape(tensor: &Tensor) -> crate::BuiltinResult<(usize, usize)> {
-    let rows = tensor.shape.first().copied().unwrap_or(tensor.rows);
-    let cols = tensor.shape.get(1).copied().unwrap_or(tensor.cols);
-    let channels = tensor.shape.get(2).copied().unwrap_or(1);
+    let shape = tensor.shape();
+    let rows = shape.first().copied().unwrap_or(0);
+    let cols = shape.get(1).or_else(|| shape.first()).copied().unwrap_or(0);
+    let channels = shape.get(2).copied().unwrap_or(1);
     if rows == 0 || cols == 0 || (channels != 3 && channels != 4) {
         return Err(imshow_error(
             "imshow: truecolor image data must be MxNx3 or MxNx4",
@@ -633,14 +634,15 @@ fn build_truecolor_image_surface(
     x_axis: Vec<f64>,
     y_axis: Vec<f64>,
 ) -> crate::BuiltinResult<SurfacePlot> {
-    let image_rows = tensor.shape.first().copied().unwrap_or(tensor.rows);
-    let image_cols = tensor.shape.get(1).copied().unwrap_or(tensor.cols);
+    let shape = tensor.shape();
+    let image_rows = shape.first().copied().unwrap_or(0);
+    let image_cols = shape.get(1).or_else(|| shape.first()).copied().unwrap_or(0);
     if x_axis.len() != image_cols || y_axis.len() != image_rows {
         return Err(imshow_error(
             "imshow: truecolor image axes must match image columns and rows",
         ));
     }
-    let channels = tensor.shape.get(2).copied().unwrap_or(3);
+    let channels = shape.get(2).copied().unwrap_or(3);
     let dtype = tensor.numeric_dtype();
     let scale = match dtype {
         NumericDType::U8 => 1.0f32 / 255.0,

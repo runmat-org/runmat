@@ -13,7 +13,7 @@ use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
 use runmat_value::{IntegerStorage, Tensor, Value};
 
-use super::common::SurfaceDataInput;
+use super::common::{surface_matrix_dimensions, SurfaceDataInput};
 use super::op_common::surface_inputs::AxisSource;
 use super::state::{color_limits_snapshot, render_active_plot, PlotRenderOptions};
 use crate::builtins::common::spec::{
@@ -374,8 +374,7 @@ pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     )
     .map_err(map_heatmap_invalid)?;
 
-    let rows = color_data.rows;
-    let cols = color_data.cols;
+    let (rows, cols) = surface_matrix_dimensions(&color_data);
     let integer_color_data = color_data.integer_storage().is_some();
     let public_color_limit_value = integer_public_color_limit_value(&color_data);
     let public_color_limits = integer_public_color_limits(&color_data);
@@ -493,8 +492,9 @@ async fn parse_heatmap_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedHeat
     if cdata_with_properties {
         let mut it = args.into_iter();
         let color_data = cdata_tensor(it.next().expect("CData")).await?;
-        let x_labels = default_labels(color_data.cols);
-        let y_labels = default_labels(color_data.rows);
+        let (rows, cols) = surface_matrix_dimensions(&color_data);
+        let x_labels = default_labels(cols);
+        let y_labels = default_labels(rows);
         return Ok(ParsedHeatmap {
             x_labels,
             y_labels,
@@ -508,8 +508,9 @@ async fn parse_heatmap_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedHeat
         )),
         1 => {
             let color_data = cdata_tensor(args.into_iter().next().expect("one arg")).await?;
-            let x_labels = default_labels(color_data.cols);
-            let y_labels = default_labels(color_data.rows);
+            let (rows, cols) = surface_matrix_dimensions(&color_data);
+            let x_labels = default_labels(cols);
+            let y_labels = default_labels(rows);
             Ok(ParsedHeatmap {
                 x_labels,
                 y_labels,
@@ -527,8 +528,9 @@ async fn parse_heatmap_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedHeat
             let c = it.next().expect("cdata");
             let rest: Vec<Value> = it.collect();
             let color_data = cdata_tensor(c).await?;
-            let x_labels = labels_from_value(&x, color_data.cols, "XValues")?;
-            let y_labels = labels_from_value(&y, color_data.rows, "YValues")?;
+            let (rows, cols) = surface_matrix_dimensions(&color_data);
+            let x_labels = labels_from_value(&x, cols, "XValues")?;
+            let y_labels = labels_from_value(&y, rows, "YValues")?;
             Ok(ParsedHeatmap {
                 x_labels,
                 y_labels,
@@ -568,10 +570,16 @@ async fn cdata_tensor(value: Value) -> crate::BuiltinResult<Tensor> {
         }
         other => Tensor::try_from(&other).map_err(|e| heatmap_invalid(&e))?,
     };
-    if tensor.rows == 0 || tensor.cols == 0 {
+    let (rows, cols) = surface_matrix_dimensions(&tensor);
+    if rows == 0 || cols == 0 {
         return Err(heatmap_invalid("CData must contain at least a 2-D grid"));
     }
-    if tensor.shape.iter().skip(2).any(|&dimension| dimension != 1) {
+    if tensor
+        .shape()
+        .iter()
+        .skip(2)
+        .any(|&dimension| dimension != 1)
+    {
         return Err(heatmap_invalid("CData must be a 2-D numeric matrix"));
     }
     Ok(tensor)
@@ -790,7 +798,7 @@ fn normalize_integer_color_data(tensor: &Tensor) -> Tensor {
         IntegerStorage::U32(values) => normalize_unsigned(values.iter().map(|&v| u128::from(v))),
         IntegerStorage::U64(values) => normalize_unsigned(values.iter().map(|&v| u128::from(v))),
     };
-    Tensor::new(normalized, tensor.shape.clone()).expect("normalized heatmap shape")
+    Tensor::new(normalized, tensor.shape().to_vec()).expect("normalized heatmap shape")
 }
 
 fn normalize_signed(values: impl Iterator<Item = i128> + Clone) -> Vec<f64> {
@@ -850,11 +858,12 @@ fn default_axis(len: usize) -> Vec<f64> {
 
 #[cfg(test)]
 fn transpose_for_surface(tensor: &Tensor) -> Tensor {
+    let (rows, cols) = surface_matrix_dimensions(tensor);
     let mut indices = vec![0; tensor_utils::tensor_element_len(tensor)];
-    for row in 0..tensor.rows {
-        for col in 0..tensor.cols {
-            let src = row + tensor.rows * col;
-            let dst = col + tensor.cols * row;
+    for row in 0..rows {
+        for col in 0..cols {
+            let src = row + rows * col;
+            let dst = col + cols * row;
             indices[dst] = src;
         }
     }
@@ -863,8 +872,7 @@ fn transpose_for_surface(tensor: &Tensor) -> Tensor {
         .into_numeric_storage()
         .and_then(|storage| storage.reorder(&indices))
         .expect("heatmap transpose permutation");
-    Tensor::from_numeric_storage(storage, vec![tensor.cols, tensor.rows])
-        .expect("heatmap transpose shape")
+    Tensor::from_numeric_storage(storage, vec![cols, rows]).expect("heatmap transpose shape")
 }
 #[cfg(test)]
 mod tests {
@@ -899,8 +907,7 @@ mod tests {
     fn heatmap_transpose_reads_typed_integer_storage_exactly() {
         let transposed = transpose_for_surface(&int_tensor(vec![1, 2, 3, 4, 5, 6], 2, 3));
 
-        assert_eq!(transposed.rows, 3);
-        assert_eq!(transposed.cols, 2);
+        assert_eq!(transposed.shape(), [3, 2]);
         assert_eq!(
             transposed.materialize_f64(),
             vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]
@@ -910,6 +917,29 @@ mod tests {
             transposed.integer_storage(),
             Some(&runmat_value::IntegerStorage::I16(vec![1, 3, 5, 2, 4, 6]))
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn heatmap_preserves_dense_rank_one_grid_and_rank_zero_rejection() {
+        let _guard = setup();
+        let handle = futures::executor::block_on(heatmap_builtin(vec![Value::Tensor(
+            Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).expect("rank-one CData"),
+        )]))
+        .expect("rank-one CData is one heatmap row");
+        assert!(handle.is_finite());
+        let figure = clone_figure(current_figure_handle()).expect("heatmap figure");
+        let PlotElement::Surface(surface) = figure.plots().next().expect("heatmap surface") else {
+            panic!("expected heatmap surface")
+        };
+        assert_eq!(surface.x_data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(surface.y_data, vec![1.0]);
+
+        let error = futures::executor::block_on(heatmap_builtin(vec![Value::Tensor(
+            Tensor::new(vec![1.0], Vec::new()).expect("rank-zero CData"),
+        )]))
+        .expect_err("rank-zero CData has no grid extent");
+        assert!(error.message().contains("at least a 2-D grid"));
     }
 
     #[test]

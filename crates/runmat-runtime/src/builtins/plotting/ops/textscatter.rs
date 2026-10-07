@@ -434,7 +434,10 @@ fn parse_textscatter_args(
     let matrix_width = if is_3d { 3 } else { 2 };
     let (x, y, z, text_value, option_args) =
         if let Ok(matrix) = tensor_from_value_local(&args[0], builtin) {
-            if matrix.cols == matrix_width && args.len() >= 2 && looks_like_text_labels(&args[1]) {
+            if textscatter_matrix_dimensions(&matrix).1 == matrix_width
+                && args.len() >= 2
+                && looks_like_text_labels(&args[1])
+            {
                 let (x, y, z) = coordinates_from_matrix(&matrix, matrix_width, builtin)?;
                 (x, y, z, &args[1], &args[2..])
             } else if is_3d && args.len() >= 4 {
@@ -483,6 +486,15 @@ type CoordinateParse<'a> = (
 );
 type CoordinateVectors = (NumericPlotData, NumericPlotData, Option<NumericPlotData>);
 
+/// Projects dense coordinate/color tensors into their historical matrix geometry.
+fn textscatter_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 fn explicit_coordinates<'a>(
     args: &'a [Value],
     is_3d: bool,
@@ -503,7 +515,8 @@ fn coordinates_from_matrix(
     width: usize,
     builtin: &'static str,
 ) -> BuiltinResult<CoordinateVectors> {
-    if matrix.cols != width {
+    let (_, cols) = textscatter_matrix_dimensions(matrix);
+    if cols != width {
         return Err(textscatter_error(
             builtin,
             format!("coordinate matrix must have {width} columns"),
@@ -527,17 +540,15 @@ fn matrix_column(
     column: usize,
     builtin: &'static str,
 ) -> BuiltinResult<NumericPlotData> {
-    let indices = (0..matrix.rows)
-        .map(|row| row + column * matrix.rows)
-        .collect::<Vec<_>>();
+    let (rows, _) = textscatter_matrix_dimensions(matrix);
+    let indices = (0..rows).map(|row| row + column * rows).collect::<Vec<_>>();
     let storage = matrix
         .clone()
         .into_numeric_storage()
         .map_err(|err| textscatter_error(builtin, err))?
         .gather(&indices)
         .map_err(|err| textscatter_error(builtin, err))?;
-    NumericPlotData::new(storage, vec![matrix.rows, 1])
-        .map_err(|err| textscatter_error(builtin, err))
+    NumericPlotData::new(storage, vec![rows, 1]).map_err(|err| textscatter_error(builtin, err))
 }
 
 fn tensor_vector(
@@ -1357,23 +1368,24 @@ fn color_matrix(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<Vec4>
     if len == 0 {
         return Ok(Vec::new());
     }
-    if len == 3 && (tensor.rows == 1 || tensor.cols == 1) {
+    let (rows, cols) = textscatter_matrix_dimensions(&tensor);
+    if len == 3 && (rows == 1 || cols == 1) {
         let values = tensor_utils::tensor_values_f64(&tensor);
         let color = rgb_triplet(&values, builtin)?;
         return Ok(vec![color]);
     }
-    if tensor.cols != 3 || len != tensor.rows.saturating_mul(3) {
+    if cols != 3 || len != rows.saturating_mul(3) {
         return Err(textscatter_error(
             builtin,
             "RGB color matrices must have three columns",
         ));
     }
-    let mut colors = Vec::with_capacity(tensor.rows);
-    for row in 0..tensor.rows {
+    let mut colors = Vec::with_capacity(rows);
+    for row in 0..rows {
         let rgb = [
             tensor_utils::tensor_value_f64(&tensor, row),
-            tensor_utils::tensor_value_f64(&tensor, row + tensor.rows),
-            tensor_utils::tensor_value_f64(&tensor, row + 2 * tensor.rows),
+            tensor_utils::tensor_value_f64(&tensor, row + rows),
+            tensor_utils::tensor_value_f64(&tensor, row + 2 * rows),
         ];
         colors.push(rgb_triplet(&rgb, builtin)?);
     }
@@ -1616,6 +1628,26 @@ mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn textscatter_preserves_dense_rank_one_coordinate_matrix_geometry() {
+        let _guard = setup();
+        let labels = StringArray::new(vec!["point".into()], vec![1, 1]).expect("label");
+        let handle = textscatter_builtin(vec![
+            Value::Tensor(Tensor::new(vec![4.0, 5.0], vec![2]).expect("rank-one coordinates")),
+            Value::StringArray(labels.clone()),
+        ])
+        .expect("rank-one two-column coordinate matrix is one point");
+        assert!(handle.is_finite());
+
+        let error = textscatter_builtin(vec![
+            Value::Tensor(Tensor::new(vec![4.0], Vec::new()).expect("rank-zero coordinates")),
+            Value::StringArray(labels),
+        ])
+        .expect_err("rank-zero coordinate data has no matrix columns");
+        assert!(error.message().contains("coordinate matrix must be N-by-2"));
+    }
+
     #[test]
     fn textscatter_vector_coordinates_read_typed_integer_storage_exactly() {
         let _guard = setup();
@@ -1675,7 +1707,7 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("XData".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(actual.shape, vec![2, 1]);
+        assert_eq!(actual.shape(), [2, 1]);
         assert_eq!(
             actual.into_numeric_storage().unwrap(),
             runmat_value::NumericStorage::I64(vec![-(wide as i64), wide as i64])
@@ -1790,8 +1822,7 @@ mod tests {
             &get_builtin(vec![Value::Num(handle), Value::String("ColorData".into())]).unwrap(),
         )
         .unwrap();
-        assert_eq!(color_data.rows, 2);
-        assert_eq!(color_data.cols, 3);
+        assert_eq!(color_data.shape(), [2, 3]);
     }
 
     #[test]

@@ -816,18 +816,28 @@ fn ngram_labels(array: &StringArray) -> Vec<String> {
     labels
 }
 
+/// Projects dense count/color tensors into their historical matrix geometry.
+fn wordcloud_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+    match tensor.shape() {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 fn counts_by_columns(words: Vec<String>, counts: Tensor) -> BuiltinResult<WordCloudData> {
-    if counts.cols != words.len() {
+    let (rows, cols) = wordcloud_matrix_dimensions(&counts);
+    if cols != words.len() {
         return Err(wordcloud_error(
             "count matrix column count must match word data length",
         ));
     }
-    let mut sizes = Vec::with_capacity(counts.cols);
+    let mut sizes = Vec::with_capacity(cols);
     let count_values = counts.materialize_f64();
-    for col in 0..counts.cols {
+    for col in 0..cols {
         let mut sum = 0.0;
-        for row in 0..counts.rows {
-            let value = count_values[row + col * counts.rows];
+        for row in 0..rows {
+            let value = count_values[row + col * rows];
             if !value.is_finite() || value < 0.0 {
                 return Err(wordcloud_error("counts must be finite nonnegative values"));
             }
@@ -1520,29 +1530,30 @@ fn color_list(value: &Value, name: &str, expected_rows: Option<usize>) -> Builti
     if len == 0 {
         return Ok(Vec::new());
     }
-    if len == 3 && (tensor.rows == 1 || tensor.cols == 1) {
+    let (rows, cols) = wordcloud_matrix_dimensions(&tensor);
+    if len == 3 && (rows == 1 || cols == 1) {
         let values = tensor_utils::tensor_values_f64(&tensor);
         return Ok(vec![rgb_triplet(&values, name)?]);
     }
-    if tensor.cols != 3 || len != tensor.rows.saturating_mul(3) {
+    if cols != 3 || len != rows.saturating_mul(3) {
         return Err(wordcloud_error(format!(
             "{name} matrix must have three columns"
         )));
     }
     if let Some(expected) = expected_rows {
-        if tensor.rows != expected {
+        if rows != expected {
             return Err(wordcloud_error(format!(
                 "{name} matrix rows must match WordData length"
             )));
         }
     }
-    let mut colors = Vec::with_capacity(tensor.rows);
-    for row in 0..tensor.rows {
+    let mut colors = Vec::with_capacity(rows);
+    for row in 0..rows {
         colors.push(rgb_triplet(
             &[
                 tensor_utils::tensor_value_f64(&tensor, row),
-                tensor_utils::tensor_value_f64(&tensor, row + tensor.rows),
-                tensor_utils::tensor_value_f64(&tensor, row + 2 * tensor.rows),
+                tensor_utils::tensor_value_f64(&tensor, row + rows),
+                tensor_utils::tensor_value_f64(&tensor, row + 2 * rows),
             ],
             name,
         )?);
@@ -1770,6 +1781,29 @@ mod tests {
             color_list(&Value::Tensor(color), "Color", Some(2)).expect("color list"),
             vec![Vec4::new(1.0, 0.0, 0.0, 1.0), Vec4::new(0.0, 1.0, 0.0, 1.0)]
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn wordcloud_preserves_dense_rank_one_color_matrix_geometry() {
+        let _guard = setup();
+        let handle = wordcloud_builtin(vec![
+            str_array(&["alpha"], vec![1, 1]),
+            tensor(vec![2.0], vec![1, 1]),
+            Value::String("Color".into()),
+            tensor(vec![1.0, 0.0, 0.0], vec![3]),
+        ])
+        .expect("rank-one RGB data is one color row");
+        assert!(handle.is_finite());
+
+        let error = wordcloud_builtin(vec![
+            str_array(&["alpha"], vec![1, 1]),
+            tensor(vec![2.0], vec![1, 1]),
+            Value::String("Color".into()),
+            tensor(vec![1.0], Vec::new()),
+        ])
+        .expect_err("rank-zero color data has no RGB columns");
+        assert!(error.message().contains("three columns"));
     }
 
     #[test]
