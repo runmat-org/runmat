@@ -69,6 +69,26 @@ pub(super) fn validate_for_durable_storage(
     .payload(payload, 0)
 }
 
+pub(super) fn validate_all_for_durable_storage(
+    payloads: &[ValuePayload],
+    limits: ValueLimits,
+) -> Result<(), ContractError> {
+    let mut budget = ValidationBudget {
+        limits,
+        transport: None,
+        durable: true,
+        program_sources: ProgramSources::Local,
+        nodes: 0,
+        inline_bytes: 0,
+        elements: 0,
+        text_bytes: 0,
+    };
+    for payload in payloads {
+        budget.payload(payload, 0)?;
+    }
+    Ok(())
+}
+
 pub(super) fn validate_for_transport(
     payload: &ValuePayload,
     limits: ValueLimits,

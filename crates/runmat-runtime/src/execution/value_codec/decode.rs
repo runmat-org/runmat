@@ -1,24 +1,39 @@
-use runmat_execution::value::{
-    CallableValue, DenseValue, ElementType, ExceptionFailureOrigin, ExceptionGpuGatherRetry,
-    ExceptionRuntimeMetadata, ExceptionValue, InlineValue, SparseValue, ValueLimits, ValuePayload,
-};
+use runmat_execution::value::{ValueLimits, ValuePayload};
 use runmat_value::{
     CellArray, CharArray, Closure, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
     LogicalArray, MException, ObjectInstance, SparseTensor, StringArray, StructValue, Tensor,
     Value,
 };
+use std::num::NonZeroUsize;
+use std::rc::Rc;
+
+use crate::execution::{
+    CpuCooperationBudget, ExecutionServiceError, RootedValues, RootedValuesBuilder,
+};
 
 use super::ValueCodecError;
-use std::sync::Arc;
 
-#[path = "decode/aggregate.rs"]
-mod aggregate;
+#[path = "decode/machine.rs"]
+mod machine;
+use machine::{DecodeMachine, DecodeProgress};
+
+const DECODE_WORK_QUANTUM: NonZeroUsize = NonZeroUsize::new(8 * 1024).unwrap();
+
+/// Scheduling/invocation failure from the cooperative decoder. Portable value
+/// errors remain typed and are never flattened into execution diagnostics.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum CooperativeValueCodecError {
+    #[error(transparent)]
+    Value(#[from] ValueCodecError),
+    #[error(transparent)]
+    Execution(#[from] ExecutionServiceError),
+}
 
 pub fn decode_inline_value(payload: &ValuePayload) -> Result<Value, ValueCodecError> {
     payload
         .validate(ValueLimits::default())
         .map_err(|error| ValueCodecError::invalid("$", error.to_string()))?;
-    decode(payload, "$")
+    drain_machine(payload)
 }
 
 pub(super) fn decode_durable_inline_value(
@@ -27,538 +42,82 @@ pub(super) fn decode_durable_inline_value(
     payload
         .validate_for_durable_storage(ValueLimits::default())
         .map_err(|error| ValueCodecError::invalid("$", error.to_string()))?;
-    decode(payload, "$")
+    drain_machine(payload)
 }
 
-fn decode(payload: &ValuePayload, path: &str) -> Result<Value, ValueCodecError> {
-    let value = match payload {
-        ValuePayload::Inline(value) => value,
-        ValuePayload::Distributed(handle) => {
-            return Ok(Value::Distributed(handle.clone()));
-        }
-        ValuePayload::Composite(handle) => {
-            return Ok(Value::Composite(handle.clone()));
-        }
-        ValuePayload::Object(_) => {
-            return Err(ValueCodecError::unsupported(
-                path,
-                "object references require an execution object-store decoder",
-            ));
-        }
-    };
-    match value.as_ref() {
-        InlineValue::Null => Err(ValueCodecError::unsupported(
-            path,
-            "MATLAB has no null runtime value",
-        )),
-        InlineValue::Logical(value) => Ok(Value::Bool(*value)),
-        InlineValue::F64Bits(value) => Ok(Value::Num(f64::from_bits(*value))),
-        InlineValue::I8(value) => Ok(Value::Int(IntValue::I8(*value))),
-        InlineValue::I16(value) => Ok(Value::Int(IntValue::I16(*value))),
-        InlineValue::I32(value) => Ok(Value::Int(IntValue::I32(*value))),
-        InlineValue::I64(value) => Ok(Value::Int(IntValue::I64(*value))),
-        InlineValue::U8(value) => Ok(Value::Int(IntValue::U8(*value))),
-        InlineValue::U16(value) => Ok(Value::Int(IntValue::U16(*value))),
-        InlineValue::U32(value) => Ok(Value::Int(IntValue::U32(*value))),
-        InlineValue::U64(value) => Ok(Value::Int(IntValue::U64(*value))),
-        InlineValue::ComplexF64Bits { real, imaginary } => Ok(Value::Complex(
-            f64::from_bits(*real),
-            f64::from_bits(*imaginary),
-        )),
-        InlineValue::String(value) => Ok(Value::String(value.clone())),
-        InlineValue::StringArray { shape, values } => Ok(Value::StringArray(
-            StringArray::new(values.clone(), usize_shape(shape, path)?)
-                .map_err(|error| ValueCodecError::invalid(path, error))?,
-        )),
-        InlineValue::Char { shape, code_points } => {
-            let shape = usize_shape(shape, path)?;
-            let chars = code_points
-                .iter()
-                .map(|value| {
-                    char::from_u32(*value)
-                        .ok_or_else(|| ValueCodecError::invalid(path, "invalid Unicode scalar"))
-                })
-                .collect::<Result<_, _>>()?;
-            Ok(Value::CharArray(
-                CharArray::new_with_shape(chars, shape)
-                    .map_err(|error| ValueCodecError::invalid(path, error))?,
-            ))
-        }
-        InlineValue::Dense(value) => decode_dense(value, path),
-        InlineValue::Sparse(value) => decode_sparse(value, path),
-        InlineValue::Symbolic(_) => Err(ValueCodecError::unsupported(
-            path,
-            "the registered symbolic codec is unavailable in this runtime",
-        )),
-        InlineValue::Cell { shape, values } => Ok(Value::Cell(
-            CellArray::new_with_shape(
-                values
-                    .iter()
-                    .enumerate()
-                    .map(|(index, value)| decode(value, &format!("{path}[{index}]")))
-                    .collect::<Result<_, _>>()?,
-                usize_shape(shape, path)?,
-            )
-            .map_err(|error| ValueCodecError::invalid(path, error))?,
-        )),
-        InlineValue::Struct(fields) => {
-            let mut value = StructValue::new();
-            for field in fields {
-                value.insert(
-                    field.name.clone(),
-                    decode(&field.value, &format!("{path}.{}", field.name))?,
-                );
-            }
-            Ok(Value::Struct(value))
-        }
-        InlineValue::DurableOrderedStruct(fields) => {
-            let mut value = StructValue::new();
-            for field in fields {
-                value.insert(
-                    field.name.clone(),
-                    decode(&field.value, &format!("{path}.{}", field.name))?,
-                );
-            }
-            Ok(Value::Struct(value))
-        }
-        InlineValue::Exception(value) => decode_exception(value, path),
-        InlineValue::Callable(value) => decode_callable(value, path),
-        InlineValue::ImmutableValueClass(value) => {
-            if value.schema_version != 1 {
-                return Err(ValueCodecError::unsupported(
-                    path,
-                    "the immutable value-class schema version is unavailable in this runtime",
-                ));
-            }
-            let class_identity = runmat_types::ClassIdentity::new(&value.type_identity)
-                .map_err(|error| ValueCodecError::invalid(path, error.to_string()))?;
-            if !crate::parallel::codistributor::is_supported_class(&class_identity) {
-                return Err(ValueCodecError::unsupported(
-                    path,
-                    "the immutable value-class codec is not registered in this runtime",
-                ));
-            }
-            let mut object = ObjectInstance::new(class_identity);
-            for field in &value.fields {
-                if object
-                    .properties
-                    .insert(
-                        field.name.clone(),
-                        decode(&field.value, &format!("{path}.{}", field.name))?,
-                    )
-                    .is_some()
-                {
-                    return Err(ValueCodecError::invalid(
-                        path,
-                        "immutable value-class fields must be unique",
-                    ));
+/// Decode one validated aggregate under a shared validation limit and one
+/// invocation-owned cooperation budget. Validation is still the canonical
+/// synchronous `ValuePayload::validate_all` owner; making that cursor
+/// incremental is a separate prerequisite for universally bounded admission.
+pub async fn decode_inline_values_cooperatively(
+    payloads: &[ValuePayload],
+    limits: ValueLimits,
+    source_resolver: Option<Rc<crate::user_functions::ExecutionSourceResolver>>,
+    mut cooperation: Option<&mut CpuCooperationBudget>,
+) -> Result<RootedValues, CooperativeValueCodecError> {
+    ValuePayload::validate_all(payloads, limits)
+        .map_err(|error| ValueCodecError::invalid("$", error.to_string()))?;
+    decode_validated_values(payloads, source_resolver, &mut cooperation).await
+}
+
+/// Decode a complete durable batch under one shared admission budget and the
+/// selected invocation's cooperation policy. Durable validation is still the
+/// canonical synchronous validation owner; only materialization checkpoints
+/// in this API.
+pub async fn decode_durable_values_cooperatively(
+    payloads: &[ValuePayload],
+    limits: ValueLimits,
+    mut cooperation: Option<&mut CpuCooperationBudget>,
+) -> Result<RootedValues, CooperativeValueCodecError> {
+    for payload in payloads {
+        super::durable::require_durable(payload, "$")?;
+    }
+    ValuePayload::validate_all_for_durable_storage(payloads, limits)
+        .map_err(|error| ValueCodecError::invalid("$", error.to_string()))?;
+    decode_validated_values(payloads, None, &mut cooperation).await
+}
+
+async fn decode_validated_values(
+    payloads: &[ValuePayload],
+    source_resolver: Option<Rc<crate::user_functions::ExecutionSourceResolver>>,
+    cooperation: &mut Option<&mut CpuCooperationBudget>,
+) -> Result<RootedValues, CooperativeValueCodecError> {
+    let mut values = RootedValuesBuilder::with_capacity(payloads.len());
+    for payload in payloads {
+        let mut machine = DecodeMachine::new(payload, "$".to_owned(), source_resolver.clone());
+        loop {
+            match machine.advance(DECODE_WORK_QUANTUM)? {
+                DecodeProgress::Pending { completed_work } => {
+                    if let Some(budget) = cooperation.as_deref_mut() {
+                        budget.checkpoint(completed_work as u64).await?;
+                    }
+                }
+                DecodeProgress::Complete {
+                    value,
+                    completed_work,
+                } => {
+                    if let Some(budget) = cooperation.as_deref_mut() {
+                        budget.checkpoint(completed_work as u64).await?;
+                    }
+                    values.push_rooted(value);
+                    break;
                 }
             }
-            crate::parallel::codistributor::validate_definition(&object)
-                .map_err(|error| ValueCodecError::invalid(path, error.to_string()))?;
-            Ok(Value::Object(object))
         }
-        InlineValue::DurablePlainObject(value) => {
-            Ok(Value::Object(aggregate::plain_object(value, path)?))
+    }
+    Ok(values.finish()?)
+}
+
+fn drain_machine(payload: &ValuePayload) -> Result<Value, ValueCodecError> {
+    let mut machine = DecodeMachine::new(payload, "$".to_owned(), None);
+    loop {
+        match machine.advance(NonZeroUsize::new(usize::MAX).expect("usize::MAX is nonzero"))? {
+            DecodeProgress::Pending { .. } => continue,
+            DecodeProgress::Complete { value, .. } => return Ok(value.into_unrooted_value()),
         }
-        InlineValue::DurableStructArray(value) => aggregate::struct_array(value, path),
-        InlineValue::DurableObjectArray(value) => aggregate::object_array(value, path),
     }
 }
 
-fn decode_dense(value: &DenseValue, path: &str) -> Result<Value, ValueCodecError> {
-    let shape = usize_shape(&value.shape, path)?;
-    match value.element_type {
-        ElementType::Logical => Ok(Value::LogicalArray(
-            LogicalArray::new(value.little_endian_data.clone(), shape)
-                .map_err(|error| ValueCodecError::invalid(path, error))?,
-        )),
-        ElementType::F32 => Ok(Value::Tensor(
-            Tensor::from_f32(decode_f32(&value.little_endian_data, path)?, shape)
-                .map_err(|error| ValueCodecError::invalid(path, error))?,
-        )),
-        ElementType::F64 => Ok(Value::Tensor(
-            Tensor::new(decode_f64(&value.little_endian_data, path)?, shape)
-                .map_err(|error| ValueCodecError::invalid(path, error))?,
-        )),
-        ElementType::ComplexF64 => {
-            let words = decode_words::<8>(&value.little_endian_data, path)?;
-            let data = words
-                .chunks_exact(2)
-                .map(|pair| (f64::from_bits(pair[0]), f64::from_bits(pair[1])))
-                .collect();
-            Ok(Value::ComplexTensor(
-                ComplexTensor::new(data, shape)
-                    .map_err(|error| ValueCodecError::invalid(path, error))?,
-            ))
-        }
-        ElementType::ComplexF32 => {
-            let words = decode_arrays::<4>(&value.little_endian_data, path)?;
-            let data = words
-                .chunks_exact(2)
-                .map(|pair| {
-                    (
-                        f32::from_bits(u32::from_le_bytes(pair[0])),
-                        f32::from_bits(u32::from_le_bytes(pair[1])),
-                    )
-                })
-                .collect();
-            Ok(Value::ComplexTensor(
-                ComplexTensor::from_f32(data, shape)
-                    .map_err(|error| ValueCodecError::invalid(path, error))?,
-            ))
-        }
-        element_type if complex_integer_element_type(element_type).is_some() => {
-            let (scalar_type, width) = complex_integer_element_type(element_type)
-                .expect("guarded complex integer element type");
-            let pair_width = width * 2;
-            if !value.little_endian_data.len().is_multiple_of(pair_width) {
-                return Err(ValueCodecError::invalid(
-                    path,
-                    "complex integer byte length is not element aligned",
-                ));
-            }
-            let mut real = Vec::with_capacity(value.little_endian_data.len() / 2);
-            let mut imag = Vec::with_capacity(value.little_endian_data.len() / 2);
-            for pair in value.little_endian_data.chunks_exact(pair_width) {
-                real.extend_from_slice(&pair[..width]);
-                imag.extend_from_slice(&pair[width..]);
-            }
-            let storage = IntegerComplexStorage::new(
-                decode_integer_storage(scalar_type, &real, path)?,
-                decode_integer_storage(scalar_type, &imag, path)?,
-            )
-            .map_err(|error| ValueCodecError::invalid(path, error))?;
-            Ok(Value::ComplexTensor(
-                ComplexTensor::new_integer(storage, shape)
-                    .map_err(|error| ValueCodecError::invalid(path, error))?,
-            ))
-        }
-        element_type => Ok(Value::Tensor(
-            Tensor::new_integer(
-                decode_integer_storage(element_type, &value.little_endian_data, path)?,
-                shape,
-            )
-            .map_err(|error| ValueCodecError::invalid(path, error))?,
-        )),
-    }
-}
-
-fn decode_sparse(value: &SparseValue, path: &str) -> Result<Value, ValueCodecError> {
-    let rows = usize::try_from(value.rows)
-        .map_err(|_| ValueCodecError::invalid(path, "row count exceeds platform limits"))?;
-    let columns = usize::try_from(value.columns)
-        .map_err(|_| ValueCodecError::invalid(path, "column count exceeds platform limits"))?;
-    let column_offsets = usize_indices(&value.column_offsets, path)?;
-    let row_indices = usize_indices(&value.row_indices, path)?;
-    let sparse = match value.element_type {
-        ElementType::F64 => SparseTensor::new(
-            rows,
-            columns,
-            column_offsets,
-            row_indices,
-            decode_f64(&value.little_endian_data, path)?,
-        ),
-        ElementType::F32 => SparseTensor::new_f32(
-            rows,
-            columns,
-            column_offsets,
-            row_indices,
-            decode_f32(&value.little_endian_data, path)?,
-        ),
-        ElementType::ComplexF64 => {
-            let words = decode_words::<8>(&value.little_endian_data, path)?;
-            let values = words
-                .chunks_exact(2)
-                .map(|pair| (f64::from_bits(pair[0]), f64::from_bits(pair[1])))
-                .collect();
-            SparseTensor::new_complex(rows, columns, column_offsets, row_indices, values)
-        }
-        ElementType::ComplexF32 => {
-            let components = decode_f32(&value.little_endian_data, path)?;
-            let values = components
-                .chunks_exact(2)
-                .map(|pair| (pair[0], pair[1]))
-                .collect();
-            SparseTensor::new_complex_f32(rows, columns, column_offsets, row_indices, values)
-        }
-        ElementType::Logical => {
-            if value.little_endian_data.iter().any(|entry| *entry != 1) {
-                return Err(ValueCodecError::invalid(
-                    path,
-                    "logical sparse payload contains a stored false value",
-                ));
-            }
-            SparseTensor::new_logical(rows, columns, column_offsets, row_indices)
-        }
-        ElementType::ComplexI8
-        | ElementType::ComplexI16
-        | ElementType::ComplexI32
-        | ElementType::ComplexI64
-        | ElementType::ComplexU8
-        | ElementType::ComplexU16
-        | ElementType::ComplexU32
-        | ElementType::ComplexU64 => {
-            return Err(ValueCodecError::unsupported(
-                path,
-                "the runtime has no matching sparse value class",
-            ))
-        }
-        element_type => SparseTensor::new_integer(
-            rows,
-            columns,
-            column_offsets,
-            row_indices,
-            decode_integer_storage(element_type, &value.little_endian_data, path)?,
-        ),
-    }
-    .map_err(|error| ValueCodecError::invalid(path, error))?;
-    Ok(Value::SparseTensor(sparse))
-}
-
-fn complex_integer_element_type(element_type: ElementType) -> Option<(ElementType, usize)> {
-    Some(match element_type {
-        ElementType::ComplexI8 => (ElementType::I8, 1),
-        ElementType::ComplexI16 => (ElementType::I16, 2),
-        ElementType::ComplexI32 => (ElementType::I32, 4),
-        ElementType::ComplexI64 => (ElementType::I64, 8),
-        ElementType::ComplexU8 => (ElementType::U8, 1),
-        ElementType::ComplexU16 => (ElementType::U16, 2),
-        ElementType::ComplexU32 => (ElementType::U32, 4),
-        ElementType::ComplexU64 => (ElementType::U64, 8),
-        _ => return None,
-    })
-}
-
-fn decode_integer_storage(
-    element_type: ElementType,
-    bytes: &[u8],
-    path: &str,
-) -> Result<IntegerStorage, ValueCodecError> {
-    Ok(match element_type {
-        ElementType::I8 => IntegerStorage::I8(bytes.iter().map(|value| *value as i8).collect()),
-        ElementType::I16 => {
-            IntegerStorage::I16(decode_signed::<2, i16>(bytes, path, i16::from_le_bytes)?)
-        }
-        ElementType::I32 => {
-            IntegerStorage::I32(decode_signed::<4, i32>(bytes, path, i32::from_le_bytes)?)
-        }
-        ElementType::I64 => {
-            IntegerStorage::I64(decode_signed::<8, i64>(bytes, path, i64::from_le_bytes)?)
-        }
-        ElementType::U8 => IntegerStorage::U8(bytes.to_vec()),
-        ElementType::U16 => {
-            IntegerStorage::U16(decode_signed::<2, u16>(bytes, path, u16::from_le_bytes)?)
-        }
-        ElementType::U32 => {
-            IntegerStorage::U32(decode_signed::<4, u32>(bytes, path, u32::from_le_bytes)?)
-        }
-        ElementType::U64 => {
-            IntegerStorage::U64(decode_signed::<8, u64>(bytes, path, u64::from_le_bytes)?)
-        }
-        _ => {
-            return Err(ValueCodecError::invalid(
-                path,
-                "element type is not an integer",
-            ))
-        }
-    })
-}
-
-fn decode_signed<const N: usize, T>(
-    bytes: &[u8],
-    path: &str,
-    decode: fn([u8; N]) -> T,
-) -> Result<Vec<T>, ValueCodecError> {
-    decode_arrays(bytes, path)?
-        .into_iter()
-        .map(|word| Ok(decode(word)))
-        .collect()
-}
-
-fn decode_f32(bytes: &[u8], path: &str) -> Result<Vec<f32>, ValueCodecError> {
-    Ok(decode_arrays::<4>(bytes, path)?
-        .into_iter()
-        .map(|word| f32::from_bits(u32::from_le_bytes(word)))
-        .collect())
-}
-
-fn decode_f64(bytes: &[u8], path: &str) -> Result<Vec<f64>, ValueCodecError> {
-    Ok(decode_arrays::<8>(bytes, path)?
-        .into_iter()
-        .map(|word| f64::from_bits(u64::from_le_bytes(word)))
-        .collect())
-}
-
-fn decode_words<const N: usize>(bytes: &[u8], path: &str) -> Result<Vec<u64>, ValueCodecError> {
-    if N != 8 {
-        return Err(ValueCodecError::invalid(path, "invalid word width"));
-    }
-    Ok(decode_arrays::<N>(bytes, path)?
-        .into_iter()
-        .map(|word| {
-            let mut full = [0_u8; 8];
-            full.copy_from_slice(&word);
-            u64::from_le_bytes(full)
-        })
-        .collect())
-}
-
-fn decode_arrays<const N: usize>(
-    bytes: &[u8],
-    path: &str,
-) -> Result<Vec<[u8; N]>, ValueCodecError> {
-    if !bytes.len().is_multiple_of(N) {
-        return Err(ValueCodecError::invalid(
-            path,
-            "encoded data is not aligned to its element width",
-        ));
-    }
-    Ok(bytes
-        .chunks_exact(N)
-        .map(|chunk| chunk.try_into().expect("chunks have exact width"))
-        .collect())
-}
-
-fn decode_exception(value: &ExceptionValue, path: &str) -> Result<Value, ValueCodecError> {
-    if !value.causes.is_empty() {
-        return Err(ValueCodecError::unsupported(
-            path,
-            "nested exception causes are not represented by the current runtime MException",
-        ));
-    }
-    let exception = if let Some(metadata) = &value.runtime {
-        MException::from_runtime_error(
-            value.identifier.clone(),
-            value.message.clone(),
-            value.stack.clone(),
-            Arc::new(decode_exception_runtime(value, metadata, path)?),
-        )
-    } else {
-        let mut exception = MException::new(value.identifier.clone(), value.message.clone());
-        exception.stack = value.stack.clone();
-        exception
-    };
-    Ok(Value::MException(exception))
-}
-
-fn decode_exception_runtime(
-    value: &ExceptionValue,
-    metadata: &ExceptionRuntimeMetadata,
-    path: &str,
-) -> Result<crate::RuntimeError, ValueCodecError> {
-    fn local(value: u64, path: &str) -> Result<usize, ValueCodecError> {
-        usize::try_from(value)
-            .map_err(|_| ValueCodecError::invalid(path, "exception metadata exceeds local width"))
-    }
-    fn span(
-        value: Option<(u64, u64)>,
-        path: &str,
-    ) -> Result<Option<(usize, usize)>, ValueCodecError> {
-        value
-            .map(|(start, length)| Ok((local(start, path)?, local(length, path)?)))
-            .transpose()
-    }
-    let call_frames = metadata
-        .call_frames
-        .iter()
-        .map(|frame| {
-            Ok(crate::CallFrame {
-                function: frame.function.clone(),
-                // Portable exception frames contain program ordinals. Without
-                // a selected invocation binding they are not local SourceIds.
-                source_id: None,
-                span: span(frame.span, path)?,
-            })
-        })
-        .collect::<Result<Vec<_>, ValueCodecError>>()?;
-    let mut error = crate::RuntimeError::new(value.message.clone());
-    error.identifier = Some(value.identifier.clone());
-    error.span = span(metadata.span, path)?.map(Into::into);
-    error.context = crate::ErrorContext {
-        builtin: metadata.builtin.clone(),
-        task_id: metadata.task_id.clone(),
-        call_frames,
-        call_frames_elided: local(metadata.call_frames_elided, path)?,
-        call_stack: metadata.call_stack.clone(),
-        phase: metadata.phase.clone(),
-    };
-    error.gpu_gather_retry = match metadata.gpu_gather_retry {
-        ExceptionGpuGatherRetry::Legacy => crate::GpuGatherRetry::Legacy,
-        ExceptionGpuGatherRetry::Never => crate::GpuGatherRetry::Never,
-        ExceptionGpuGatherRetry::Requested => crate::GpuGatherRetry::Requested,
-    };
-    error.failure_origin = match metadata.failure_origin {
-        ExceptionFailureOrigin::Unclassified => runmat_async::RuntimeFailureOrigin::Unclassified,
-        ExceptionFailureOrigin::LanguageEvaluation => {
-            runmat_async::RuntimeFailureOrigin::LanguageEvaluation
-        }
-    };
-    Ok(error)
-}
-
-fn decode_callable(value: &CallableValue, path: &str) -> Result<Value, ValueCodecError> {
-    value
-        .validate_identity()
-        .map_err(|error| ValueCodecError::invalid(path, error.to_string()))?;
-    let captures = value
-        .captures
-        .iter()
-        .enumerate()
-        .map(|(index, value)| decode(value, &format!("{path}.capture[{index}]")))
-        .collect::<Result<Vec<_>, _>>()?;
-    let binding = match value.owner {
-        runmat_execution::value::CallableOwner::Bound(origin) => {
-            let binding = crate::user_functions::resolve_binding_origin_binding(origin)
-                .ok_or_else(|| {
-                    ValueCodecError::unsupported(path, "exact bound callable origin is unavailable")
-                })?;
-            Some(binding)
-        }
-        _ => None,
-    };
-    if value.form == runmat_execution::value::CallableForm::Closure {
-        return Ok(Value::Closure(Closure {
-            function_name: value.qualified_name.clone(),
-            binding,
-            source_role: value.source_role,
-            source_file: value.source_file.clone(),
-            captures,
-        }));
-    }
-    match value.owner {
-        runmat_execution::value::CallableOwner::Workspace => {
-            Ok(Value::FunctionHandle(value.qualified_name.clone()))
-        }
-        runmat_execution::value::CallableOwner::External => {
-            Ok(Value::ExternalFunctionHandle(value.qualified_name.clone()))
-        }
-        runmat_execution::value::CallableOwner::Method => {
-            Ok(Value::MethodFunctionHandle(value.qualified_name.clone()))
-        }
-        runmat_execution::value::CallableOwner::Bound(_) => Ok(Value::BoundFunctionHandle {
-            name: value.qualified_name.clone(),
-            function: binding
-                .as_ref()
-                .expect("resolved exact origin above")
-                .function,
-            authority: binding.expect("resolved exact origin above").authority,
-            source_role: value.source_role,
-            source_file: value.source_file.clone(),
-        }),
-    }
-}
-
-fn usize_shape(shape: &[u64], path: &str) -> Result<Vec<usize>, ValueCodecError> {
-    usize_indices(shape, path)
-}
-
-fn usize_indices(values: &[u64], path: &str) -> Result<Vec<usize>, ValueCodecError> {
-    values
-        .iter()
-        .map(|value| {
-            usize::try_from(*value)
-                .map_err(|_| ValueCodecError::invalid(path, "value exceeds platform limits"))
-        })
-        .collect()
-}
+#[cfg(test)]
+#[path = "decode/cooperation_tests.rs"]
+mod cooperation_tests;

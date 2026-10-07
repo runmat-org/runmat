@@ -39,7 +39,7 @@ pub fn decode_durable_value(payload: &ValuePayload) -> Result<Value, ValueCodecE
     decode_durable_inline_value(payload)
 }
 
-fn require_durable(payload: &ValuePayload, path: &str) -> Result<(), ValueCodecError> {
+pub(super) fn require_durable(payload: &ValuePayload, path: &str) -> Result<(), ValueCodecError> {
     let ValuePayload::Inline(value) = payload else {
         return Err(ValueCodecError::unsupported(
             path,

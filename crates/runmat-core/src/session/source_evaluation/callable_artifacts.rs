@@ -201,21 +201,15 @@ impl RuntimeCallableArtifactService for SessionCallableArtifactService {
             let values = runtime
                 .clone()
                 .scope(async move {
-                    let _facts = runmat_runtime::user_functions::install_execution_source_resolver(
+                    let mut cooperation = runtime.cpu_cooperation();
+                    runmat_runtime::execution::value_codec::decode_inline_values_cooperatively(
+                        &payloads,
+                        limits.value_limits,
                         Some(resolver),
-                    );
-                    let mut values = runmat_runtime::execution::RootedValuesBuilder::with_capacity(
-                        payloads.len(),
-                    );
-                    for payload in &payloads {
-                        let value =
-                            runmat_runtime::execution::value_codec::decode_inline_value(payload)
-                                .map_err(codec_error)?;
-                        values
-                            .push(value)
-                            .map_err(|error| error.into_runtime_error())?;
-                    }
-                    values.finish().map_err(|error| error.into_runtime_error())
+                        Some(&mut cooperation),
+                    )
+                    .await
+                    .map_err(cooperative_codec_error)
                 })
                 .await?;
             let (registry, _, staging_leases, imported_owners) = prepared.into_parts();

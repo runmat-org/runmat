@@ -9,7 +9,7 @@ pub(crate) mod staged_file;
 pub mod value_codec;
 
 pub use capture::{validate_spawn_capture, validate_spawn_captures};
-pub(crate) use completion::RootedValueHandles;
+pub(crate) use completion::{RootedValueChildren, RootedValueHandles, RootedValueMember};
 pub use completion::{RootedValueSequence, RootedValues, RootedValuesBuilder};
 pub use cooperation::{CpuCooperationBudget, CpuCooperationPolicy};
 pub use errors::{

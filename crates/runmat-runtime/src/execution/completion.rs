@@ -1,10 +1,11 @@
-use std::collections::HashSet;
-use std::rc::Rc;
-
-use runmat_gc::{ExplicitRoot, GcError, GcHandle, Trace, Tracer};
 use runmat_value::{Value, ValueSequence};
 
 use super::ExecutionServiceError;
+
+#[path = "completion/roots.rs"]
+mod roots;
+use roots::RetainedValueRoots;
+pub(crate) use roots::{RootedValueChildren, RootedValueHandles, RootedValueMember};
 
 /// A completed executor-owned value sequence whose reachable managed handles
 /// remain GC roots until the completion record is discarded.
@@ -20,7 +21,7 @@ pub struct RootedValueSequence {
 #[derive(Clone, Debug)]
 pub struct RootedValues {
     values: Vec<Value>,
-    _roots: RootedValueHandles,
+    _roots: RetainedValueRoots,
 }
 
 /// Incremental owner for values decoded by a potentially allocating codec.
@@ -28,14 +29,14 @@ pub struct RootedValues {
 #[derive(Debug, Default)]
 pub struct RootedValuesBuilder {
     values: Vec<Value>,
-    member_roots: Vec<RootedValueHandles>,
+    member_roots: RootedValueChildren,
 }
 
 impl RootedValuesBuilder {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             values: Vec::with_capacity(capacity),
-            member_roots: Vec::with_capacity(capacity),
+            member_roots: RootedValueChildren::new(),
         }
     }
 
@@ -46,22 +47,21 @@ impl RootedValuesBuilder {
             ))
         })?;
         self.values.push(value);
-        self.member_roots.push(roots);
+        self.member_roots.push(RetainedValueRoots::direct(roots));
         Ok(())
     }
 
+    pub(crate) fn push_rooted(&mut self, member: RootedValueMember) {
+        let (value, roots) = member.into_parts();
+        self.values.push(value);
+        self.member_roots.push(roots);
+    }
+
     pub fn finish(self) -> Result<RootedValues, ExecutionServiceError> {
-        let roots = RootedValueHandles::for_values(self.values.iter()).map_err(|error| {
-            ExecutionServiceError::Infrastructure(format!(
-                "could not root retained future inputs: {error}"
-            ))
-        })?;
-        let values = RootedValues {
+        Ok(RootedValues {
             values: self.values,
-            _roots: roots,
-        };
-        drop(self.member_roots);
-        Ok(values)
+            _roots: self.member_roots.finish(),
+        })
     }
 }
 
@@ -74,7 +74,7 @@ impl RootedValues {
         })?;
         Ok(Self {
             values,
-            _roots: roots,
+            _roots: RetainedValueRoots::direct(roots),
         })
     }
 
@@ -110,56 +110,6 @@ impl RootedValueSequence {
     /// out of this completion record.
     pub fn into_sequence(self) -> ValueSequence {
         self.value
-    }
-}
-
-/// Managed handles reachable from owned Values while an asynchronous owner
-/// retains them. This roots identities, not cloned payloads or device buffers.
-#[derive(Clone, Debug)]
-pub(crate) struct RootedValueHandles {
-    _roots: Option<Rc<Vec<ExplicitRoot>>>,
-}
-
-impl RootedValueHandles {
-    pub(crate) fn for_values<'a>(values: impl Iterator<Item = &'a Value>) -> Result<Self, GcError> {
-        let mut collector = HandleCollector::default();
-        for value in values {
-            value.trace(&mut collector);
-        }
-        Self::from_handles(collector)
-    }
-
-    pub(crate) fn for_traced(value: &impl Trace) -> Result<Self, GcError> {
-        let mut collector = HandleCollector::default();
-        value.trace(&mut collector);
-        Self::from_handles(collector)
-    }
-
-    fn from_handles(collector: HandleCollector) -> Result<Self, GcError> {
-        if collector.handles.is_empty() {
-            return Ok(Self { _roots: None });
-        }
-        let mut roots = Vec::with_capacity(collector.handles.len());
-        for handle in collector.handles {
-            roots.push(runmat_gc::gc_root(handle)?);
-        }
-        Ok(Self {
-            _roots: Some(Rc::new(roots)),
-        })
-    }
-}
-
-#[derive(Default)]
-struct HandleCollector {
-    seen: HashSet<GcHandle>,
-    handles: Vec<GcHandle>,
-}
-
-impl Tracer for HandleCollector {
-    fn mark(&mut self, handle: GcHandle) {
-        if self.seen.insert(handle) {
-            self.handles.push(handle);
-        }
     }
 }
 
@@ -270,6 +220,80 @@ mod tests {
             runmat_gc::gc_collect_major().expect("collect after batch drop");
             assert!(runmat_gc::gc_clone_value(&first_handle).is_err());
             assert!(runmat_gc::gc_clone_value(&second_handle).is_err());
+        });
+    }
+
+    #[test]
+    fn completed_member_roots_transfer_without_retrace_and_clone_until_last_owner() {
+        runmat_gc::gc_test_context(|| {
+            let initial = runmat_gc::gc_allocate_rooted(Value::String("member".into()))
+                .expect("allocate payload");
+            let handle = initial.handle();
+            let mut builder = RootedValuesBuilder::with_capacity(1);
+            builder
+                .push(Value::HandleObject(HandleRef {
+                    class_name: "DecodedHandle".into(),
+                    target: handle,
+                    valid: true,
+                }))
+                .expect("root decoded member exactly once");
+            initial.unroot().expect("transfer initial root");
+            let values = builder.finish().expect("transfer member roots");
+            let clone = values.clone();
+            drop(values);
+            runmat_gc::gc_collect_major().expect("collect with cloned completion");
+            assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+            drop(clone);
+            runmat_gc::gc_collect_major().expect("collect after final completion owner");
+            assert!(runmat_gc::gc_clone_value(&handle).is_err());
+        });
+    }
+
+    #[test]
+    fn chunked_member_roots_clone_and_retire_without_flattening() {
+        runmat_gc::gc_test_context(|| {
+            const MEMBER_COUNT: usize = 129;
+            let mut initial = Vec::new();
+            let mut builder = RootedValuesBuilder::with_capacity(MEMBER_COUNT);
+            for index in 0..MEMBER_COUNT {
+                let rooted = runmat_gc::gc_allocate_rooted(Value::Num(index as f64))
+                    .expect("allocate managed payload");
+                let handle = rooted.handle();
+                builder
+                    .push(Value::HandleObject(HandleRef {
+                        class_name: "ChunkedCompletionHandle".into(),
+                        target: handle,
+                        valid: true,
+                    }))
+                    .expect("root member");
+                initial.push((rooted, handle));
+            }
+            for (rooted, _) in initial.drain(..) {
+                rooted.unroot().expect("transfer initial root");
+            }
+            let values = builder.finish().expect("finish chunked roots");
+            let retained = values.clone();
+            drop(values);
+            runmat_gc::gc_collect_major().expect("collect with shared chunk chain");
+            for value in retained.values() {
+                let Value::HandleObject(handle) = value else {
+                    panic!("retained member should be a handle");
+                };
+                assert!(runmat_gc::gc_clone_value(&handle.target).is_ok());
+            }
+            let handles = retained
+                .values()
+                .iter()
+                .map(|value| match value {
+                    Value::HandleObject(handle) => handle.target,
+                    _ => unreachable!(),
+                })
+                .collect::<Vec<_>>();
+            drop(retained);
+            runmat_gc::gc_collect_major().expect("collect after final chunk owner");
+            assert!(handles
+                .iter()
+                .all(|handle| runmat_gc::gc_clone_value(handle).is_err()));
         });
     }
 }

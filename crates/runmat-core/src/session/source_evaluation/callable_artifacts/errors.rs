@@ -27,6 +27,23 @@ pub(super) fn codec_error(
         .build()
 }
 
+pub(super) fn cooperative_codec_error(
+    source: runmat_runtime::execution::value_codec::CooperativeValueCodecError,
+) -> RuntimeError {
+    use runmat_runtime::execution::value_codec::CooperativeValueCodecError;
+    match source {
+        CooperativeValueCodecError::Value(source) => codec_error(source),
+        CooperativeValueCodecError::Execution(source) => {
+            let retained = source.clone();
+            let mut error = source.into_runtime_error();
+            if error.source.is_none() {
+                error.source = Some(Box::new(retained));
+            }
+            error
+        }
+    }
+}
+
 pub(super) fn executable_admission_error(
     source: runmat_vm::ExecutableUnitAdmissionError,
 ) -> RuntimeError {
@@ -64,4 +81,39 @@ pub(super) fn unavailable_binding(function: usize) -> RuntimeError {
     ))
     .with_identifier("RunMat:BoundFunction:Unavailable")
     .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_runtime::execution::ExecutionServiceError;
+    use std::error::Error;
+
+    #[test]
+    fn cooperative_execution_failures_keep_canonical_identifiers_and_typed_causes() {
+        let cases = [
+            (
+                ExecutionServiceError::Cancelled,
+                "RunMat:parallel:Cancelled",
+            ),
+            (
+                ExecutionServiceError::Infrastructure("turn failed".into()),
+                "RunMat:parallel:InfrastructureFailure",
+            ),
+        ];
+        for (source, identifier) in cases {
+            let expected = source.clone();
+            let error = cooperative_codec_error(
+                runmat_runtime::execution::value_codec::CooperativeValueCodecError::Execution(
+                    source,
+                ),
+            );
+            assert_eq!(error.identifier(), Some(identifier));
+            assert_eq!(
+                Error::source(&error)
+                    .and_then(|cause| { cause.downcast_ref::<ExecutionServiceError>().cloned() }),
+                Some(expected)
+            );
+        }
+    }
 }

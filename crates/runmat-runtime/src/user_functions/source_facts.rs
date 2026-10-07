@@ -128,6 +128,19 @@ pub fn resolve_binding_origin_binding(
     })
 }
 
+/// Resolve a portable origin against one invocation-owned exact source graph.
+/// This path never consults or mutates the ambient resolver slot.
+pub(crate) fn resolve_binding_origin_binding_in(
+    resolver: &ExecutionSourceResolver,
+    origin: runmat_execution::FunctionBindingOrigin,
+) -> Option<runmat_value::BoundFunctionBinding> {
+    let info = resolver.origin(origin)?;
+    Some(runmat_value::BoundFunctionBinding {
+        function: info.function,
+        authority: authority_for_info(info.function, Some(&info), Some(resolver)),
+    })
+}
+
 fn unique_origin(
     catalog: &[SourceFunctionInfo],
     origin: runmat_execution::FunctionBindingOrigin,
@@ -179,12 +192,20 @@ fn authority_for_selected_info(
     function: usize,
     info: Option<&SourceFunctionInfo>,
 ) -> runmat_value::BoundFunctionAuthority {
+    let selected = selected_execution_facts();
+    authority_for_info(function, info, selected.as_deref())
+}
+
+fn authority_for_info(
+    function: usize,
+    info: Option<&SourceFunctionInfo>,
+    selected: Option<&ExecutionSourceResolver>,
+) -> runmat_value::BoundFunctionAuthority {
     use runmat_value::{BoundFunctionAuthority, FunctionDefinitionOwner, LocalExport};
 
-    let selected = selected_execution_facts();
     let owners = info
         .and_then(|info| info.definition_owners.clone())
-        .or_else(|| selected.as_ref().and_then(|facts| facts.owners(function)));
+        .or_else(|| selected.and_then(|facts| facts.owners(function)));
     if let Some(owners) = owners.as_ref() {
         let Some((_, owner)) = owners.iter().find(|(id, _)| *id == function) else {
             return dead_bound_authority(function);

@@ -86,6 +86,16 @@ impl ValuePayload {
         validation::validate_for_durable_storage(self, limits)
     }
 
+    /// Validate a durable aggregate under one shared budget. This is the
+    /// durable counterpart to [`Self::validate_all`]; validating members
+    /// independently would multiply each admission limit by the batch size.
+    pub fn validate_all_for_durable_storage(
+        values: &[Self],
+        limits: ValueLimits,
+    ) -> Result<(), ContractError> {
+        validation::validate_all_for_durable_storage(values, limits)
+    }
+
     pub fn logical_digest(&self) -> Result<Digest, ContractError> {
         identity::logical_digest(self)
     }
