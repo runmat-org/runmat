@@ -6,12 +6,22 @@ use crate::builtins::common::{linalg, tensor};
 use crate::BuiltinResult;
 use runmat_value::{NumericDType, NumericScalar, NumericStorage, Tensor};
 
+fn diagnostic_dimensions(shape: &[usize]) -> (usize, usize) {
+    match shape {
+        [] => (0, 0),
+        [cols] => (1, *cols),
+        [rows, cols, ..] => (*rows, *cols),
+    }
+}
+
 /// Matrix addition: C = A + B
 pub fn matrix_add(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
     if a.rows() != b.rows() || a.cols() != b.cols() {
+        let (a_rows, a_cols) = diagnostic_dimensions(a.shape());
+        let (b_rows, b_cols) = diagnostic_dimensions(b.shape());
         return Err(format!(
             "Matrix dimensions must agree: {}x{} + {}x{}",
-            a.rows, a.cols, b.rows, b.cols
+            a_rows, a_cols, b_rows, b_cols
         ));
     }
 
@@ -29,9 +39,11 @@ pub fn matrix_add(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
 /// Matrix subtraction: C = A - B
 pub fn matrix_sub(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
     if a.rows() != b.rows() || a.cols() != b.cols() {
+        let (a_rows, a_cols) = diagnostic_dimensions(a.shape());
+        let (b_rows, b_cols) = diagnostic_dimensions(b.shape());
         return Err(format!(
             "Matrix dimensions must agree: {}x{} - {}x{}",
-            a.rows, a.cols, b.rows, b.cols
+            a_rows, a_cols, b_rows, b_cols
         ));
     }
 
@@ -124,7 +136,7 @@ pub fn matrix_power(a: &Tensor, n: i32) -> Result<Tensor, MatrixPowerError> {
 
     let mut result = numeric_identity(a.numeric_dtype(), a.rows())?;
     if n == 0 {
-        return Tensor::from_numeric_storage(result, a.shape.clone())
+        return Tensor::from_numeric_storage(result, a.shape().to_vec())
             .map_err(MatrixPowerError::Storage);
     }
 
@@ -144,7 +156,7 @@ pub fn matrix_power(a: &Tensor, n: i32) -> Result<Tensor, MatrixPowerError> {
         }
     }
 
-    Tensor::from_numeric_storage(result, a.shape.clone()).map_err(MatrixPowerError::Storage)
+    Tensor::from_numeric_storage(result, a.shape().to_vec()).map_err(MatrixPowerError::Storage)
 }
 
 fn numeric_identity(dtype: NumericDType, size: usize) -> Result<NumericStorage, MatrixPowerError> {
@@ -263,22 +275,22 @@ pub fn complex_matrix_power(
     a: &runmat_value::ComplexTensor,
     n: i32,
 ) -> Result<runmat_value::ComplexTensor, MatrixPowerError> {
-    if a.rows != a.cols {
+    if a.rows() != a.cols() {
         return Err(MatrixPowerError::NonSquare {
-            rows: a.rows,
-            columns: a.cols,
+            rows: a.rows(),
+            columns: a.cols(),
         });
     }
     if n < 0 {
         return Err(MatrixPowerError::NegativeExponent);
     }
     if n == 0 {
-        return Ok(complex_matrix_eye(a.rows));
+        return Ok(complex_matrix_eye(a.rows()));
     }
     if n == 1 {
         return Ok(a.clone());
     }
-    let mut result = complex_matrix_eye(a.rows);
+    let mut result = complex_matrix_eye(a.rows());
     let mut base = a.clone();
     let mut exp = n as u32;
     while exp > 0 {
@@ -306,4 +318,45 @@ pub fn matrix_eye(n: usize) -> Tensor {
         data[i * n + i] = 1.0;
     }
     Tensor::new_2d(data, n, n).unwrap() // Always valid
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn matrix_errors_keep_their_prior_rank_zero_and_rank_one_dimensions() {
+        let scalar = Tensor::new(vec![7.0], vec![]).expect("rank-zero tensor");
+        let row = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("row tensor");
+        assert_eq!(
+            matrix_add(&scalar, &row).expect_err("different matrix dimensions"),
+            "Matrix dimensions must agree: 0x0 + 1x2"
+        );
+
+        let two = Tensor::new(vec![1.0, 2.0], vec![2]).expect("rank-one tensor");
+        let three = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).expect("rank-one tensor");
+        assert_eq!(
+            matrix_sub(&two, &three).expect_err("different matrix dimensions"),
+            "Matrix dimensions must agree: 1x2 - 1x3"
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn matrix_power_preserves_owned_shape_and_complex_empty_projection() {
+        let input = Tensor::new(vec![3.0], vec![1, 1, 1]).expect("singleton matrix");
+        let identity = matrix_power(&input, 0).expect("zero power");
+        assert_eq!(identity.shape(), [1, 1, 1]);
+        assert_eq!(identity.materialize_f64(), vec![1.0]);
+        let squared = matrix_power(&input, 2).expect("square");
+        assert_eq!(squared.shape(), [1, 1, 1]);
+        assert_eq!(squared.materialize_f64(), vec![9.0]);
+
+        let complex = runmat_value::ComplexTensor::new(vec![(3.0, 1.0)], vec![])
+            .expect("rank-zero complex tensor");
+        let identity = complex_matrix_power(&complex, 0).expect("zero power");
+        assert_eq!(identity.shape(), [0, 0]);
+        assert!(identity.materialize_f64().is_empty());
+    }
 }

@@ -813,12 +813,12 @@ async fn coerce_numeric(value: Value) -> BuiltinResult<NumericInput> {
     match value {
         Value::Tensor(tensor) => {
             let tensor = tensor::integer_tensor_to_f64(tensor).map_err(builtin_error)?;
-            ensure_matrix_shape(NAME, &tensor.shape)?;
+            ensure_matrix_shape(NAME, tensor.shape())?;
             Ok(NumericInput::Real(tensor))
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical).map_err(builtin_error)?;
-            ensure_matrix_shape(NAME, &tensor.shape)?;
+            ensure_matrix_shape(NAME, tensor.shape())?;
             Ok(NumericInput::Real(tensor))
         }
         Value::Num(n) => {
@@ -839,7 +839,7 @@ async fn coerce_numeric(value: Value) -> BuiltinResult<NumericInput> {
             Ok(NumericInput::Complex(tensor))
         }
         Value::ComplexTensor(ct) => {
-            ensure_matrix_shape(NAME, &ct.shape)?;
+            ensure_matrix_shape(NAME, ct.shape())?;
             Ok(NumericInput::Complex(ct))
         }
         Value::GpuTensor(handle) => {
@@ -847,7 +847,7 @@ async fn coerce_numeric(value: Value) -> BuiltinResult<NumericInput> {
                 .await
                 .map_err(map_control_flow)?;
             let tensor = tensor::integer_tensor_to_f64(tensor).map_err(builtin_error)?;
-            ensure_matrix_shape(NAME, &tensor.shape)?;
+            ensure_matrix_shape(NAME, tensor.shape())?;
             Ok(NumericInput::Real(tensor))
         }
         other => Err(builtin_error(format!(
@@ -938,11 +938,11 @@ fn upload_tensor(
     let values = tensor::tensor_values_f64_cow(tensor);
     let transfer = match provider.precision() {
         runmat_accelerate_api::ProviderPrecision::F64 => {
-            Tensor::new(values.into_owned(), tensor.shape.clone())
+            Tensor::new(values.into_owned(), tensor.shape().to_vec())
         }
         runmat_accelerate_api::ProviderPrecision::F32 => Tensor::from_f32(
             values.iter().map(|value| *value as f32).collect(),
-            tensor.shape.clone(),
+            tensor.shape().to_vec(),
         ),
     }
     .map_err(builtin_error)?;
@@ -1013,17 +1013,17 @@ fn solve_complex(
         }
     }
 
-    rhs_effective = normalize_rhs_complex(rhs_effective, lhs_effective.rows)?;
+    rhs_effective = normalize_rhs_complex(rhs_effective, lhs_effective.rows())?;
 
     if lower {
-        ensure_square(lhs_effective.rows, lhs_effective.cols)?;
+        ensure_square(lhs_effective.rows(), lhs_effective.cols())?;
         let (solution, rcond) = forward_substitution_complex(&lhs_effective, &rhs_effective)?;
         enforce_rcond(options, rcond)?;
         return Ok((solution, rcond));
     }
 
     if upper {
-        ensure_square(lhs_effective.rows, lhs_effective.cols)?;
+        ensure_square(lhs_effective.rows(), lhs_effective.cols())?;
         let (solution, rcond) = backward_substitution_complex(&lhs_effective, &rhs_effective)?;
         enforce_rcond(options, rcond)?;
         return Ok((solution, rcond));
@@ -1033,7 +1033,7 @@ fn solve_complex(
     enforce_rcond(options, rcond)?;
     Ok((
         solution,
-        if lhs_effective.rows == lhs_effective.cols {
+        if lhs_effective.rows() == lhs_effective.cols() {
             rcond
         } else {
             rank
@@ -1070,7 +1070,11 @@ fn forward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tenso
     }
 
     let rcond = diagonal_rcond(min_diag, max_diag);
-    let tensor = real_solution_tensor(solution, rhs.shape.clone(), real_solution_dtype(lhs, rhs))?;
+    let tensor = real_solution_tensor(
+        solution,
+        rhs.shape().to_vec(),
+        real_solution_dtype(lhs, rhs),
+    )?;
     Ok((tensor, rcond))
 }
 
@@ -1104,7 +1108,11 @@ fn backward_substitution_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tens
     }
 
     let rcond = diagonal_rcond(min_diag, max_diag);
-    let tensor = real_solution_tensor(solution, rhs.shape.clone(), real_solution_dtype(lhs, rhs))?;
+    let tensor = real_solution_tensor(
+        solution,
+        rhs.shape().to_vec(),
+        real_solution_dtype(lhs, rhs),
+    )?;
     Ok((tensor, rcond))
 }
 
@@ -1112,7 +1120,7 @@ fn forward_substitution_complex(
     lhs: &ComplexTensor,
     rhs: &ComplexTensor,
 ) -> BuiltinResult<(ComplexTensor, f64)> {
-    let n = lhs.rows;
+    let n = lhs.rows();
     let nrhs = rhs.materialize_f64().len() / n;
     let lhs_data: Vec<Complex64> = lhs
         .materialize_f64()
@@ -1150,7 +1158,7 @@ fn forward_substitution_complex(
     let rcond = diagonal_rcond(min_diag, max_diag);
     let tensor = ComplexTensor::new(
         solution.iter().map(|c| (c.re, c.im)).collect(),
-        rhs.shape.clone(),
+        rhs.shape().to_vec(),
     )
     .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
     Ok((tensor, rcond))
@@ -1160,7 +1168,7 @@ fn backward_substitution_complex(
     lhs: &ComplexTensor,
     rhs: &ComplexTensor,
 ) -> BuiltinResult<(ComplexTensor, f64)> {
-    let n = lhs.rows;
+    let n = lhs.rows();
     let nrhs = rhs.materialize_f64().len() / n;
     let lhs_data: Vec<Complex64> = lhs
         .materialize_f64()
@@ -1199,7 +1207,7 @@ fn backward_substitution_complex(
     let rcond = diagonal_rcond(min_diag, max_diag);
     let tensor = ComplexTensor::new(
         solution.iter().map(|c| (c.re, c.im)).collect(),
-        rhs.shape.clone(),
+        rhs.shape().to_vec(),
     )
     .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
     Ok((tensor, rcond))
@@ -1239,11 +1247,11 @@ fn solve_general_complex(
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
-    let a = DMatrix::from_column_slice(lhs.rows, lhs.cols, &a_data);
-    let b = DMatrix::from_column_slice(rhs.rows, rhs.cols, &b_data);
+    let a = DMatrix::from_column_slice(lhs.rows(), lhs.cols(), &a_data);
+    let b = DMatrix::from_column_slice(rhs.rows(), rhs.cols(), &b_data);
     let svd = SVD::new(a.clone(), true, true);
     let rcond = singular_value_rcond(svd.singular_values.as_slice());
-    let tol = compute_svd_tolerance(svd.singular_values.as_slice(), lhs.rows, lhs.cols);
+    let tol = compute_svd_tolerance(svd.singular_values.as_slice(), lhs.rows(), lhs.cols());
     let rank = svd
         .singular_values
         .iter()
@@ -1260,7 +1268,7 @@ fn normalize_rhs_tensor(rhs: Tensor, expected_rows: usize) -> BuiltinResult<Tens
     if rhs.rows() == expected_rows {
         return Ok(rhs);
     }
-    if rhs.shape.len() == 1 && rhs.shape[0] == expected_rows {
+    if rhs.shape().len() == 1 && rhs.shape()[0] == expected_rows {
         return rhs
             .reshape(vec![expected_rows, 1])
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
@@ -1272,10 +1280,10 @@ fn normalize_rhs_tensor(rhs: Tensor, expected_rows: usize) -> BuiltinResult<Tens
 }
 
 fn normalize_rhs_complex(rhs: ComplexTensor, expected_rows: usize) -> BuiltinResult<ComplexTensor> {
-    if rhs.rows == expected_rows {
+    if rhs.rows() == expected_rows {
         return Ok(rhs);
     }
-    if rhs.shape.len() == 1 && rhs.shape[0] == expected_rows {
+    if rhs.shape().len() == 1 && rhs.shape()[0] == expected_rows {
         return ComplexTensor::new(rhs.materialize_f64(), vec![expected_rows, 1])
             .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
@@ -1348,7 +1356,7 @@ fn matrix_complex_to_tensor(matrix: DMatrix<Complex64>) -> BuiltinResult<Complex
 fn promote_real_tensor(tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
     let values = tensor::tensor_values_f64_cow(tensor);
     let data: Vec<(f64, f64)> = values.iter().map(|&re| (re, 0.0)).collect();
-    ComplexTensor::new(data, tensor.shape.clone())
+    ComplexTensor::new(data, tensor.shape().to_vec())
         .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
@@ -1402,8 +1410,8 @@ fn transpose_tensor(tensor: &Tensor) -> Tensor {
 }
 
 fn transpose_complex(tensor: &ComplexTensor) -> ComplexTensor {
-    let rows = tensor.rows;
-    let cols = tensor.cols;
+    let rows = tensor.rows();
+    let cols = tensor.cols();
     let mut data = vec![(0.0, 0.0); tensor.materialize_f64().len()];
     for r in 0..rows {
         for c in 0..cols {
@@ -1418,7 +1426,7 @@ fn conjugate_in_place(_tensor: &mut Tensor) {
 }
 
 fn conjugate_complex_in_place(tensor: &mut ComplexTensor) {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = match tensor.clone().into_complex_storage() {
         ComplexStorage::F64(mut values) => {
             for value in &mut values {
@@ -1633,9 +1641,35 @@ pub(crate) mod tests {
         let result =
             linsolve_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).expect("linsolve");
         let t = test_support::gather(result).expect("gather");
-        assert_eq!(t.shape, vec![2, 1]);
+        assert_eq!(t.shape(), [2, 1]);
         approx_eq(t.materialize_f64()[0], 1.0);
         approx_eq(t.materialize_f64()[1], 2.0);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn rhs_normalization_preserves_real_getters_and_complex_cached_geometry() {
+        let real_rank_zero = Tensor::new(vec![7.0], vec![]).expect("rank-zero real rhs");
+        let real_rank_zero = normalize_rhs_tensor(real_rank_zero, 1).expect("real scalar rhs");
+        assert!(real_rank_zero.shape().is_empty());
+
+        let complex_rank_zero =
+            ComplexTensor::new(vec![(7.0, -1.0)], vec![]).expect("rank-zero complex rhs");
+        assert!(normalize_rhs_complex(complex_rank_zero, 1).is_err());
+
+        let real_rank_one = Tensor::new(vec![2.0, 3.0], vec![2]).expect("rank-one real rhs");
+        let real_rank_one = normalize_rhs_tensor(real_rank_one, 2).expect("real vector rhs");
+        assert_eq!(real_rank_one.shape(), [2]);
+
+        let complex_rank_one = ComplexTensor::new(vec![(2.0, 1.0), (3.0, -1.0)], vec![2])
+            .expect("rank-one complex rhs");
+        let complex_rank_one =
+            normalize_rhs_complex(complex_rank_one, 2).expect("complex vector rhs");
+        assert_eq!(complex_rank_one.shape(), [2, 1]);
+        assert_eq!(
+            complex_rank_one.materialize_f64(),
+            vec![(2.0, 1.0), (3.0, -1.0)]
+        );
     }
 
     #[test]
@@ -1682,7 +1716,7 @@ pub(crate) mod tests {
         let result =
             linsolve_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new()).expect("linsolve");
         let tensor = test_support::gather(result).expect("gather");
-        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(tensor.shape(), [2, 1]);
         approx_eq(tensor.materialize_f64()[0], 1.0);
         approx_eq(tensor.materialize_f64()[1], 2.0);
     }
@@ -1704,7 +1738,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(out) = result else {
             panic!("expected complex tensor output");
         };
-        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.shape(), [2, 1]);
         approx_eq(out.materialize_f64()[0].0, 3.0);
         approx_eq(out.materialize_f64()[0].1, 4.0);
         approx_eq(out.materialize_f64()[1].0, 5.0);
@@ -1726,7 +1760,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(out) = result else {
             panic!("expected complex tensor output");
         };
-        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.shape(), [2, 1]);
         approx_eq(out.materialize_f64()[0].0, 7.0);
         approx_eq(out.materialize_f64()[0].1, 0.0);
         approx_eq(out.materialize_f64()[1].0, 11.0);
@@ -1743,7 +1777,7 @@ pub(crate) mod tests {
         let (solution, _rcond) =
             linsolve_host_real_for_provider(&a, &b, &ProviderLinsolveOptions::default())
                 .expect("provider helper");
-        assert_eq!(solution.shape, vec![2, 1]);
+        assert_eq!(solution.shape(), [2, 1]);
         approx_eq(solution.materialize_f64()[0], 1.0);
         approx_eq(solution.materialize_f64()[1], 2.0);
     }
@@ -1758,7 +1792,7 @@ pub(crate) mod tests {
             linsolve_host_real_for_provider(&a, &b, &ProviderLinsolveOptions::default())
                 .expect("provider helper");
 
-        assert_eq!(solution.shape, vec![2, 1]);
+        assert_eq!(solution.shape(), [2, 1]);
         approx_eq(solution.materialize_f64()[0], 7.0 / 5.0);
         approx_eq(solution.materialize_f64()[1], -2.0 / 5.0);
         assert!(solution.integer_storage().is_none());
@@ -1790,7 +1824,7 @@ pub(crate) mod tests {
         .expect("linsolve");
         let tensor = test_support::gather(result).expect("gather");
 
-        assert_eq!(tensor.shape, vec![3, 1]);
+        assert_eq!(tensor.shape(), [3, 1]);
         let expected_a = Tensor::new(
             vec![3.0, 1.0, 0.0, 0.0, 4.0, 2.0, 0.0, 0.0, 5.0],
             vec![3, 3],
@@ -1833,7 +1867,7 @@ pub(crate) mod tests {
         )
         .expect("linsolve");
         let tensor = test_support::gather(result).expect("gather");
-        assert_eq!(tensor.shape, vec![3, 1]);
+        assert_eq!(tensor.shape(), [3, 1]);
         approx_eq(tensor.materialize_f64()[0], 3.0);
         approx_eq(tensor.materialize_f64()[1], 2.0);
         approx_eq(tensor.materialize_f64()[2], 1.0);
@@ -1864,7 +1898,7 @@ pub(crate) mod tests {
         )
         .expect("linsolve");
         let tensor = test_support::gather(result).expect("gather");
-        assert_eq!(tensor.shape, vec![3, 1]);
+        assert_eq!(tensor.shape(), [3, 1]);
 
         let a_transposed = transpose_tensor(&a);
         let (expected_tensor, _) =
@@ -1913,9 +1947,9 @@ pub(crate) mod tests {
             .iter()
             .map(|&(re, im)| Complex64::new(re, im))
             .collect();
-        let a_mat = DMatrix::from_column_slice(a.rows, a.cols, &mat_a);
-        let b_mat = DMatrix::from_column_slice(b.rows, b.cols, &mat_b);
-        let x_mat = DMatrix::from_column_slice(out.rows, out.cols, &mat_x);
+        let a_mat = DMatrix::from_column_slice(a.rows(), a.cols(), &mat_a);
+        let b_mat = DMatrix::from_column_slice(b.rows(), b.cols(), &mat_b);
+        let x_mat = DMatrix::from_column_slice(out.rows(), out.cols(), &mat_x);
         let residual = a_mat * x_mat - b_mat;
         assert!(residual.norm() < 1e-10, "residual={}", residual.norm());
     }
@@ -1957,7 +1991,7 @@ pub(crate) mod tests {
             panic!("expected complex tensor reference");
         };
 
-        assert_eq!(out.shape, expected.shape);
+        assert_eq!(out.shape(), expected.shape());
         for ((out_re, out_im), (exp_re, exp_im)) in out
             .materialize_f64()
             .iter()
@@ -2073,7 +2107,7 @@ pub(crate) mod tests {
             }
             other => panic!("unexpected solution value {other:?}"),
         };
-        assert_eq!(solution_tensor.shape, vec![2, 1]);
+        assert_eq!(solution_tensor.shape(), [2, 1]);
         approx_eq(solution_tensor.materialize_f64()[0], 1.0);
         approx_eq(solution_tensor.materialize_f64()[1], 2.0);
 
@@ -2118,11 +2152,11 @@ pub(crate) mod tests {
 
             let view_a = HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             };
             let view_b = HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             };
             let ha = provider.upload(&view_a).expect("upload A");
             let hb = provider.upload(&view_b).expect("upload B");
@@ -2140,14 +2174,14 @@ pub(crate) mod tests {
                 .release()
                 .expect("release temporary caller alias");
             let original = block_on(provider.download(&ha)).expect("caller A survives solve");
-            assert_eq!(original.shape, a.shape);
+            assert_eq!(original.shape.as_slice(), a.shape());
             assert_eq!(original.data, a.materialize_f64());
             ha.release().expect("release caller A");
             hb.release().expect("release caller B");
             assert!(weak_a.acquire().is_err());
             assert!(weak_b.acquire().is_err());
 
-            assert_eq!(gathered.shape, cpu_tensor.shape);
+            assert_eq!(gathered.shape(), cpu_tensor.shape());
             assert_eq!(gathered.len(), cpu_tensor.len());
             for (gpu, cpu) in gathered
                 .materialize_f64()
@@ -2187,7 +2221,7 @@ pub(crate) mod tests {
             let result = linsolve_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new())
                 .expect("host provider linsolve");
             let tensor = test_support::gather(result).expect("gather");
-            assert_eq!(tensor.shape, vec![2, 1]);
+            assert_eq!(tensor.shape(), [2, 1]);
             approx_eq(tensor.materialize_f64()[0], 1.0);
             approx_eq(tensor.materialize_f64()[1], 2.0);
 
@@ -2206,13 +2240,13 @@ pub(crate) mod tests {
             let ha = provider
                 .upload(&HostTensorView {
                     data: &a.materialize_f64(),
-                    shape: &a.shape,
+                    shape: a.shape(),
                 })
                 .expect("upload A");
             let hb = provider
                 .upload(&HostTensorView {
                     data: &b.materialize_f64(),
-                    shape: &b.shape,
+                    shape: b.shape(),
                 })
                 .expect("upload B");
 
@@ -2243,13 +2277,13 @@ pub(crate) mod tests {
             let ha = provider
                 .upload(&HostTensorView {
                     data: &a.materialize_f64(),
-                    shape: &a.shape,
+                    shape: a.shape(),
                 })
                 .expect("upload A");
             let hb = provider
                 .upload(&HostTensorView {
                     data: &b.materialize_f64(),
-                    shape: &b.shape,
+                    shape: b.shape(),
                 })
                 .expect("upload B");
 
@@ -2300,13 +2334,13 @@ pub(crate) mod tests {
         let ha = provider
             .upload(&HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             })
             .expect("upload B");
 
@@ -2325,7 +2359,7 @@ pub(crate) mod tests {
         ha.release().expect("release caller A");
         hb.release().expect("release caller B");
 
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         for (gpu, cpu) in gathered
             .materialize_f64()
             .iter()
@@ -2369,13 +2403,13 @@ pub(crate) mod tests {
         let ha = provider
             .upload(&HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             })
             .expect("upload B");
 
@@ -2389,7 +2423,7 @@ pub(crate) mod tests {
         ha.release().expect("release caller A");
         hb.release().expect("release caller B");
 
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         for (gpu, cpu) in gathered
             .materialize_f64()
             .iter()
@@ -2426,13 +2460,13 @@ pub(crate) mod tests {
         let ha = provider
             .upload(&HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             })
             .expect("upload B");
 
@@ -2456,7 +2490,7 @@ pub(crate) mod tests {
         ha.release().expect("release caller A");
         hb.release().expect("release caller B");
 
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), [2, 1]);
         assert!(
             (gpu_rcond - cpu_rcond).abs() < 1e-4,
             "gpu={gpu_rcond} cpu={cpu_rcond}"
@@ -2500,13 +2534,13 @@ pub(crate) mod tests {
         let ha = provider
             .upload(&HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             })
             .expect("upload B");
 
@@ -2529,7 +2563,7 @@ pub(crate) mod tests {
         ha.release().expect("release caller A");
         hb.release().expect("release caller B");
 
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         for (gpu, cpu) in gathered
             .materialize_f64()
             .iter()
@@ -2572,13 +2606,13 @@ pub(crate) mod tests {
         let ha = provider
             .upload(&HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             })
             .expect("upload B");
 
@@ -2597,7 +2631,7 @@ pub(crate) mod tests {
         ha.release().expect("release caller A");
         hb.release().expect("release caller B");
 
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         for (gpu, cpu) in gathered
             .materialize_f64()
             .iter()
@@ -2651,13 +2685,13 @@ pub(crate) mod tests {
         let ha = provider
             .upload(&HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             })
             .expect("upload B");
 
@@ -2685,7 +2719,7 @@ pub(crate) mod tests {
         ha.release().expect("release caller A");
         hb.release().expect("release caller B");
 
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         for (gpu, cpu) in gathered
             .materialize_f64()
             .iter()
@@ -2741,13 +2775,13 @@ pub(crate) mod tests {
         let ha = provider
             .upload(&HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             })
             .expect("upload B");
 
@@ -2774,7 +2808,7 @@ pub(crate) mod tests {
         ha.release().expect("release caller A");
         hb.release().expect("release caller B");
 
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         for (gpu, cpu) in gathered
             .materialize_f64()
             .iter()
@@ -2820,13 +2854,13 @@ pub(crate) mod tests {
         let ha = provider
             .upload(&HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             })
             .expect("upload B");
 
@@ -2847,7 +2881,7 @@ pub(crate) mod tests {
         ha.release().expect("release caller A");
         hb.release().expect("release caller B");
 
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         for (gpu, cpu) in gathered
             .materialize_f64()
             .iter()
@@ -2894,13 +2928,13 @@ pub(crate) mod tests {
         let ha = provider
             .upload(&HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             })
             .expect("upload B");
 
@@ -2924,7 +2958,7 @@ pub(crate) mod tests {
         ha.release().expect("release caller A");
         hb.release().expect("release caller B");
 
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         for (gpu, cpu) in gathered
             .materialize_f64()
             .iter()
@@ -2971,13 +3005,13 @@ pub(crate) mod tests {
         let ha = provider
             .upload(&HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             })
             .expect("upload B");
 
@@ -3001,7 +3035,7 @@ pub(crate) mod tests {
         ha.release().expect("release caller A");
         hb.release().expect("release caller B");
 
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         for (gpu, cpu) in gathered
             .materialize_f64()
             .iter()
@@ -3052,13 +3086,13 @@ pub(crate) mod tests {
         let ha = provider
             .upload(&HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             })
             .expect("upload B");
 
@@ -3085,7 +3119,7 @@ pub(crate) mod tests {
         ha.release().expect("release caller A");
         hb.release().expect("release caller B");
 
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         for (gpu, cpu) in gathered
             .materialize_f64()
             .iter()
@@ -3128,13 +3162,13 @@ pub(crate) mod tests {
         let ha = provider
             .upload(&HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             })
             .expect("upload B");
 
@@ -3155,7 +3189,7 @@ pub(crate) mod tests {
         ha.release().expect("release caller A");
         hb.release().expect("release caller B");
 
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         for (gpu, cpu) in gathered
             .materialize_f64()
             .iter()
@@ -3204,13 +3238,13 @@ pub(crate) mod tests {
         let ha = provider
             .upload(&HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             })
             .expect("upload B");
 
@@ -3235,7 +3269,7 @@ pub(crate) mod tests {
         ha.release().expect("release caller A");
         hb.release().expect("release caller B");
 
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         for (gpu, cpu) in gathered
             .materialize_f64()
             .iter()
@@ -3277,11 +3311,11 @@ pub(crate) mod tests {
 
         let view_a = HostTensorView {
             data: &a.materialize_f64(),
-            shape: &a.shape,
+            shape: a.shape(),
         };
         let view_b = HostTensorView {
             data: &b.materialize_f64(),
-            shape: &b.shape,
+            shape: b.shape(),
         };
         let ha = provider.upload(&view_a).expect("upload A");
         let hb = provider.upload(&view_b).expect("upload B");
@@ -3295,7 +3329,7 @@ pub(crate) mod tests {
         ha.release().expect("release caller A");
         hb.release().expect("release caller B");
 
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         for (gpu, cpu) in gathered
             .materialize_f64()
             .iter()
