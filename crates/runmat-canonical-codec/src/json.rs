@@ -9,7 +9,18 @@ pub fn profile_json_bytes<T: Serialize + ?Sized>(
     value: &T,
     maximum_bytes: u64,
 ) -> Result<u64, CanonicalCodecError> {
+    write_json_bounded(value, &mut io::sink(), maximum_bytes)
+}
+
+/// Stream the existing JSON wire representation through a bounded caller-owned sink.
+/// No complete byte buffer or value tree is constructed. Failure never returns a profile.
+pub fn write_json_bounded<T: Serialize + ?Sized, W: Write + ?Sized>(
+    value: &T,
+    sink: &mut W,
+    maximum_bytes: u64,
+) -> Result<u64, CanonicalCodecError> {
     let mut writer = Counter {
+        sink,
         bytes: 0,
         maximum: maximum_bytes,
         exceeded: false,
@@ -53,12 +64,13 @@ pub fn encode_json_bounded<T: Serialize + ?Sized>(
     Ok(writer.bytes)
 }
 
-struct Counter {
+struct Counter<'a, W: Write + ?Sized> {
+    sink: &'a mut W,
     bytes: u64,
     maximum: u64,
     exceeded: bool,
 }
-impl Write for Counter {
+impl<W: Write + ?Sized> Write for Counter<'_, W> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         let next = self
             .bytes
@@ -68,11 +80,12 @@ impl Write for Counter {
                 self.exceeded = true;
                 io::Error::other("JSON exceeds its byte budget")
             })?;
+        self.sink.write_all(bytes)?;
         self.bytes = next;
         Ok(bytes.len())
     }
     fn flush(&mut self) -> io::Result<()> {
-        Ok(())
+        self.sink.flush()
     }
 }
 struct Reserved {
@@ -98,6 +111,32 @@ impl Write for Reserved {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn streamed_sink_preserves_original_wire_and_rejects_budget_and_sink_failures() {
+        let value = serde_json::json!({"original":"λ\n\u{0}","ordinal":u64::MAX});
+        let expected = serde_json::to_vec(&value).unwrap();
+        let mut bytes = Vec::new();
+        assert_eq!(
+            write_json_bounded(&value, &mut bytes, expected.len() as u64).unwrap(),
+            expected.len() as u64
+        );
+        assert_eq!(bytes, expected);
+        let mut bounded = Vec::new();
+        assert!(write_json_bounded(&value, &mut bounded, 8).is_err());
+        assert!(bounded.len() <= 8);
+        assert_eq!(bounded, expected[..bounded.len()]);
+        struct Failed;
+        impl Write for Failed {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                Err(io::Error::other("original sink failure"))
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        assert!(write_json_bounded(&value, &mut Failed, 1024).is_err());
+    }
 
     #[test]
     fn profiles_escaped_unicode_numeric_and_empty_payloads_against_original_wire() {

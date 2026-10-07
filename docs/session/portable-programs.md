@@ -225,9 +225,9 @@ including requests with an ambient queued response, without changing user cancel
 The capture storage component counts requested record slots and UTF-8 payload bytes.
 It excludes allocator overhead, formatting and `evalc` buffers, warning/diary state,
 retained copies and wire encoding; it is not whole-task admission or measured RSS.
-Worker streaming, request-bound limits, original attempt fencing, durable/cold transcript
-reads and browser/remote transport remain required integration gates. Existing worker
-routes do not acquire a complete transcript merely because this source API is available.
+Worker streaming, request-bound limits and original attempt fencing are implemented
+for the scoped native route described below. Browser/remote transport remains open;
+source-local capture alone does not establish delivery or whole-task resource evidence.
 
 Caller-executed await handoffs now move the original deferred call out of serial,
 native and browser service state. The await action and native suspension keep one
@@ -256,7 +256,7 @@ memory, parent checkpoint storage, allocator overhead or measured RSS.
 
 The common executable invocation owner now checks sticky host rejection before
 and after execution. The native pipe/attempt path is implemented below; remote and browser worker delivery,
-live durable prefix journals and chunked access remain unfinished. This retained slice does not
+the durable prefix route is described below. This retained slice does not
 establish a whole-platform console envelope or publication qualification.
 
 
@@ -288,8 +288,8 @@ The actual native process/cold/cancellation witness passes, including original r
 ordinals, stdout/stderr/control ordering, retained receipts and non-yielding parent loss.
 Shared210/210 and strict shared lint pass. The broad native run passed288 tests;
 seven socket-related failures pass with local socket access from the same binary.
-Three child-entry tests remain intentionally ignored. This retained slice does not close live durable-prefix journaling, chunked reads,
-remote/browser console delivery, parent allocations, measured RSS or startup diagnostics.
+Three child-entry tests remain intentionally ignored. Remote/browser console delivery, parent allocations, measured RSS and startup
+diagnostics remain open; the scoped durable prefix route is described below.
 
 The legacy VM worker and response-only browser artifact route share the explicit
 non-capturing, noninteractive host when console is not requested. Browser capture
@@ -298,3 +298,38 @@ cannot imply console delivery. Five VM checks and eight actual WASM witnesses pa
 including cold browser controls, interactive-input rejection and intact parent input.
 The WASM witnesses use the existing debug-free test profile; the default debug module
 exceeds Node's 1 GiB module limit before execution and earns no test credit.
+
+
+### Durable native prefix and bounded reads (scoped lifecycle verification)
+
+The existing original-attempt lease owns a single journal publisher. Each source write
+publishes immutable typed data, then a small atomic prefix head through the shared
+private filesystem. The head binds the original assignment and ordered write chain;
+publication failure stops accepting further writes. A verified source footer seals the
+journal. No footer means interrupted capture, even when the retained prefix is empty.
+The existing scheduler retains the original lost-provider report and recovered prefix;
+console completion alone cannot establish successful physical execution.
+
+Supervisor protocol V5 adds `LocalSupervisorClient::console_page`: the complete original
+job handle, original attempt, UTF-8 cursor and explicit read budget are required. Reads
+bind a compact plan from the borrowed scheduled assignment, then release scheduler/store
+locks before filesystem reads. They neither construct an attachment nor clone the complete
+request or execution history. Fragments preserve source sequence, stream, original text length and
+byte offset. They are delivery fragments, not newly numbered source writes. A page checks
+local chain consistency and the observed head; it does not independently prove the whole
+inventory or authenticate producer claims. Full cold retention checks the entire original
+record chain and receipt. Numeric return ordinals remain separate.
+
+Read budgets support 1–256 fragments and 4 bytes–1 MiB of text. Four bytes ensure any
+UTF-8 scalar can make progress. Output obeys this budget; reading one original record
+and its adjacent chain link can require more memory than the requested output bytes,
+bounded by original capture controls. The journal reserves worst-case logical JSON
+storage against original scratch limits before launch. Filesystem blocks/inodes,
+whole-parent allocations and measured RSS remain separate unqualified obligations.
+No capture, task or physics limits are raised. Remote/browser delivery and supervisor
+bootstrap diagnostics remain open. The actual native witness passes: three original UTF-8/stdout/stderr/control writes
+are read live in four-byte pages, retained after abrupt publisher exit, then read from
+a cold supervisor with the same original lost attempt. It preserves Interrupted capture
+and unknown physical execution/resource evidence; no replay or successful result is
+inferred. Unit tests also reject stale assignment fences, substituted/missing records,
+invalid cursors and inadequate scratch reservations.

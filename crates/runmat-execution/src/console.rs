@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 
 mod transport;
 pub use transport::{ConsoleReceipt, ConsoleReceiver};
+mod inventory;
+pub use inventory::ConsoleInventory;
+mod page;
+pub use page::{ConsoleCursor, ConsoleFragment, ConsolePage, ConsoleReadBudget};
 mod capture;
 pub use capture::ConsoleCapture;
 mod admission;

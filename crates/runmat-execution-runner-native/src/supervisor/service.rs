@@ -281,6 +281,18 @@ impl LocalSupervisor {
             SupervisorCommand::Cancel { job_id } => SupervisorResponse::Cancelled {
                 record: self.cancel(job_id).await?,
             },
+            SupervisorCommand::ConsolePage {
+                handle,
+                attempt_id,
+                cursor,
+                budget,
+            } => SupervisorResponse::ConsolePage {
+                attempt_id,
+                page: self
+                    .console_page(handle, attempt_id, cursor, budget)
+                    .await?
+                    .map(Box::new),
+            },
             SupervisorCommand::CancelHandle { handle, reason } => SupervisorResponse::Cancelled {
                 record: self.cancel_handle(handle, reason).await?,
             },

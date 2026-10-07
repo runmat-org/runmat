@@ -64,8 +64,15 @@ pub(super) fn read_json<T: DeserializeOwned>(path: &Path) -> NativeExecutionResu
 pub(super) fn read_optional_json<T: DeserializeOwned>(
     path: &Path,
 ) -> NativeExecutionResult<Option<T>> {
+    read_optional_json_bounded(path, MAX_PERSISTED_JSON_BYTES)
+}
+
+pub(super) fn read_optional_json_bounded<T: DeserializeOwned>(
+    path: &Path,
+    maximum_bytes: u64,
+) -> NativeExecutionResult<Option<T>> {
     let bytes = match runmat_filesystem::NativeFsProvider
-        .read_bounded_sync(path, MAX_PERSISTED_JSON_BYTES)
+        .read_bounded_sync(path, maximum_bytes.min(MAX_PERSISTED_JSON_BYTES))
     {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),

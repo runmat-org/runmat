@@ -3,6 +3,8 @@ mod bootstrap;
 mod cancellation;
 mod client;
 mod config;
+mod console_access;
+mod console_journal;
 mod control;
 mod driver;
 mod driver_files;

@@ -10,6 +10,14 @@ async fn original_program_borrows_validation_and_worker_wire_without_payload_cop
         .unwrap();
     let submission = original_program_submission(context);
     submission.validate().unwrap();
+    let mut stable = submission.clone();
+    stable.idempotency_key = None;
+    let mut original_identity = b"runmat-local-program-batch-request-v1\0".to_vec();
+    original_identity.extend(serde_json::to_vec(&stable).unwrap());
+    assert_eq!(
+        submission.request_digest().unwrap(),
+        runmat_execution::Digest::sha256(original_identity)
+    );
     let request = submission.program_request();
     assert!(std::ptr::eq(request.recipe, &submission.recipe));
     assert!(std::ptr::eq(request.artifact, &submission.artifact));

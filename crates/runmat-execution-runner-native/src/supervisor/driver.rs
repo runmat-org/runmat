@@ -67,7 +67,7 @@ pub async fn execute_and_complete_program_batch(
         attempt.config.max_object_bytes,
     )
     .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-    let control = super::control::DurableControl::default();
+    let control = super::control::DurableControl::for_attempt(&attempt, &lease)?;
     let cancellation =
         super::program_store::cancel_path(&attempt.job_directory, attempt.request.id);
     let provider = NativeProcessProvider {

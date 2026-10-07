@@ -100,12 +100,17 @@ impl LocalSupervisor {
                             || unix_millis().saturating_sub(record.updated_unix_millis)
                                 >= super::service::STARTING_RECOVERY_GRACE_MILLIS
                         {
-                            let report = runmat_execution_runner::port::BackendReport::for_request(
+                            let mut report = runmat_execution_runner::port::BackendReport::for_request(
                                 &attempt.request,
                                 AttemptReport::Lost {
                                     message: "original durable provider ownership ended without a committed report; physical worker quiescence is unknown".into(),
                                 },
                             );
+                            report.console = super::console_journal::read_transcript(
+                                &store.job_dir(record.handle.id),
+                                &attempt.request,
+                            )?
+                            .map(Box::new);
                             actions.extend(scheduler.command(
                                 DriverCommand::WorkerLostWithReport {
                                     worker_id: attempt.request.worker_id,

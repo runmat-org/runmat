@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{BatchSubmission, JobAttachment, LocalJobRecord, ProgramBatchSubmission};
 
-pub const SUPERVISOR_PROTOCOL_VERSION: u16 = 4;
+pub const SUPERVISOR_PROTOCOL_VERSION: u16 = 5;
 pub const SUPERVISOR_MAX_MESSAGE_BYTES: u32 = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -37,6 +37,12 @@ pub enum SupervisorCommand {
         stdout_offset: u64,
         stderr_offset: u64,
     },
+    ConsolePage {
+        handle: runmat_execution::JobHandle,
+        attempt_id: runmat_execution::identity::AttemptId,
+        cursor: runmat_execution::console::ConsoleCursor,
+        budget: runmat_execution::console::ConsoleReadBudget,
+    },
     Cancel {
         job_id: JobId,
     },
@@ -67,6 +73,10 @@ pub enum SupervisorResponse {
     },
     Attachment {
         attachment: Box<JobAttachment>,
+    },
+    ConsolePage {
+        attempt_id: runmat_execution::identity::AttemptId,
+        page: Option<Box<runmat_execution::console::ConsolePage>>,
     },
     Cancelled {
         record: LocalJobRecord,

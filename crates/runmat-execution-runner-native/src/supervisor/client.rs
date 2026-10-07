@@ -110,6 +110,44 @@ impl LocalSupervisorClient {
         }
     }
 
+    pub async fn console_page(
+        &self,
+        handle: runmat_execution::JobHandle,
+        attempt_id: runmat_execution::identity::AttemptId,
+        cursor: runmat_execution::console::ConsoleCursor,
+        budget: runmat_execution::console::ConsoleReadBudget,
+    ) -> NativeExecutionResult<Option<runmat_execution::console::ConsolePage>> {
+        budget
+            .validate()
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        match self
+            .request(SupervisorCommand::ConsolePage {
+                handle,
+                attempt_id,
+                cursor,
+                budget,
+            })
+            .await?
+        {
+            SupervisorResponse::ConsolePage {
+                attempt_id: original,
+                page,
+            } if original == attempt_id => {
+                if let Some(page) = &page {
+                    page.validate()
+                        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+                    if page.cursor != cursor || page.budget != budget {
+                        return Err(NativeExecutionError::Protocol(
+                            "console page differs from original read".into(),
+                        ));
+                    }
+                }
+                Ok(page.map(|page| *page))
+            }
+            response => unexpected(response),
+        }
+    }
+
     pub async fn submit(
         &self,
         submission: BatchSubmission,

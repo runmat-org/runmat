@@ -13,6 +13,18 @@ pub(crate) type TransferResult = Result<AttemptSuccess, String>;
 pub(crate) trait ProcessControl: Send + Sync {
     fn cancellation(&self) -> &AtomicBool;
     fn record_progress(&self, progress: crate::protocol::ProgramProgress);
+    fn record_console(
+        &self,
+        _record: &runmat_execution::console::ConsoleRecord,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+    fn finish_console(
+        &self,
+        _receipt: &runmat_execution::console::ConsoleReceipt,
+    ) -> Result<(), String> {
+        Ok(())
+    }
     /// A failed control channel stops execution but is not a user cancellation.
     fn failure(&self) -> Option<String> {
         None

@@ -1,0 +1,174 @@
+//! Read original bounded writes while live, then kill their publisher and reopen cold.
+use super::*;
+use runmat_execution::console::*;
+use runmat_execution_runner::AttemptDisposition;
+
+pub(super) async fn verify(
+    service: &NativeExecutionService,
+    config: &NativeExecutionConfig,
+    root: &std::path::Path,
+) {
+    let mut original = call_source(1,
+        "function [first, second] = original_output_values(); fprintf(1,'λ🙂original prefix'); fprintf(2,'second'); clc; while true; first=13; end; second=29; end").await;
+    original.console = Some(ConsoleLimits {
+        max_records: 8,
+        max_text_bytes: 1000,
+    });
+    let job = service
+        .submit_job(
+            original,
+            DurableJobOptions {
+                idempotency_key: Some("original-live-prefix".into()),
+                retention_millis: runmat_execution_runner_native::supervisor::MIN_RETENTION_MILLIS,
+                resources: ResourceRequest {
+                    cpu_millicores: config.worker_cpu_millicores,
+                    memory_bytes: config.worker_memory_bytes,
+                    scratch_bytes: config.worker_scratch_bytes,
+                    max_wall_millis: 30_000,
+                    max_artifact_bytes: 1024 * 1024,
+                    max_egress_bytes: 0,
+                    max_relay_bytes: 0,
+                    accelerators: vec![],
+                    required_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
+                },
+            },
+        )
+        .unwrap();
+    let client = LocalSupervisorClient::for_current_executable().unwrap();
+    let attempt_id = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let attached = client.attach(job.id, 0, 0).await.unwrap();
+            if let Some(attempt) = attached.execution.as_ref().and_then(|h| h.attempts.last()) {
+                break attempt.request.id;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let budget = ConsoleReadBudget {
+        max_fragments: 1,
+        max_text_bytes: 4,
+    };
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if client
+                .console_page(job.clone(), attempt_id, ConsoleCursor::default(), budget)
+                .await
+                .unwrap()
+                .is_some_and(|page| page.observed_records == 3)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("original writes were not published while source was live");
+    let live = collect(&client, &job, attempt_id, budget).await;
+    assert_eq!(
+        live,
+        vec![
+            (ConsoleStream::Stdout, "λ🙂original prefix".into()),
+            (ConsoleStream::Stderr, "second".into()),
+            (ConsoleStream::ClearScreen, "".into())
+        ]
+    );
+    let mut forged = job.clone();
+    forged.generation += 1;
+    assert!(client
+        .console_page(forged, attempt_id, ConsoleCursor::default(), budget)
+        .await
+        .is_err());
+    let directory = root.join("jobs").join(job.id.to_string());
+    std::fs::write(
+        directory.join("test-provider-exit"),
+        b"exit original publisher",
+    )
+    .unwrap();
+    let lost = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let attached = client.attach(job.id, 0, 0).await.unwrap();
+            let history = attached.execution.unwrap();
+            if history.attempts[0].terminal.is_some() {
+                break history;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    lost.validate().unwrap();
+    assert_eq!(lost.attempts.len(), 1);
+    assert_eq!(
+        lost.task.state,
+        runmat_execution::state::TaskState::Indeterminate
+    );
+    let terminal = lost.attempts[0].terminal.as_ref().unwrap();
+    assert_eq!(terminal.disposition, AttemptDisposition::Lost);
+    assert!(terminal.resources.is_none());
+    assert!(terminal.execution.is_none());
+    let prefix = terminal.console.as_ref().unwrap();
+    assert_eq!(prefix.completion(), ConsoleCompletion::Interrupted);
+    assert!(prefix.source_receipt().is_none());
+    assert_eq!(prefix.records().len(), 3);
+    assert_eq!(collect(&client, &job, attempt_id, budget).await, live);
+    // Reopen the scheduler under a new supervisor after the real publisher ended.
+    std::fs::write(root.join("test-stop"), b"stop").unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let stopped = root.join("test-stopped").exists()
+                && runmat_filesystem::ExclusiveFileLock::try_acquire(&root.join("supervisor.lock"))
+                    .is_ok_and(|guard| guard.is_some());
+            if stopped {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("original supervisor did not release its authority");
+    std::fs::remove_file(root.join("test-stop")).unwrap();
+    std::fs::remove_file(root.join("test-stopped")).unwrap();
+    let cold = LocalSupervisorClient::for_current_executable().unwrap();
+    cold.connect_or_start().await.unwrap();
+    assert_eq!(collect(&cold, &job, attempt_id, budget).await, live);
+    assert_eq!(
+        cold.attach(job.id, 0, 0).await.unwrap().execution.unwrap(),
+        lost
+    );
+    println!("original live UTF-8/control prefix survives abrupt publisher exit and cold supervisor restart");
+}
+
+async fn collect(
+    client: &LocalSupervisorClient,
+    job: &runmat_execution::JobHandle,
+    attempt: runmat_execution::identity::AttemptId,
+    budget: ConsoleReadBudget,
+) -> Vec<(ConsoleStream, String)> {
+    let mut cursor = ConsoleCursor::default();
+    let mut writes: Vec<(ConsoleStream, String)> = vec![];
+    loop {
+        let page = client
+            .console_page(job.clone(), attempt, cursor, budget)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(page.completion, ConsoleCompletion::Interrupted);
+        assert!(page.source_receipt.is_none());
+        for f in &page.fragments {
+            if f.text_offset == 0 {
+                writes.push((f.stream, String::new()));
+            }
+            writes.last_mut().unwrap().1.push_str(&f.text);
+        }
+        assert!(page.fragments.len() <= 1);
+        assert!(page.fragments.iter().map(|f| f.text.len()).sum::<usize>() <= 4);
+        if page.next_cursor.sequence == page.observed_records + 1 {
+            break;
+        }
+        assert_ne!(page.next_cursor, cursor);
+        cursor = page.next_cursor;
+    }
+    writes
+}

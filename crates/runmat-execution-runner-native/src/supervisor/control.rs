@@ -13,8 +13,19 @@ pub(super) struct DurableControl {
     cancelled: AtomicBool,
     failure: Mutex<Option<String>>,
     progress: Mutex<Option<crate::protocol::ProgramProgress>>,
+    console: Option<Mutex<super::console_journal::ConsoleJournal>>,
 }
 impl DurableControl {
+    pub(super) fn for_attempt(
+        attempt: &super::DurableProgramAttempt,
+        lease: &super::DurableAttemptLease,
+    ) -> NativeExecutionResult<Self> {
+        Ok(Self {
+            console: super::console_journal::ConsoleJournal::create(attempt, lease)?
+                .map(Mutex::new),
+            ..Default::default()
+        })
+    }
     pub(super) fn stop(&self, delivered: NativeExecutionResult<()>) {
         if let Err(error) = delivered {
             *self.failure.lock().expect("durable control poisoned") = Some(error.to_string());
@@ -40,6 +51,30 @@ impl ProcessControl for DurableControl {
     }
     fn record_progress(&self, progress: crate::protocol::ProgramProgress) {
         *self.progress.lock().expect("durable progress poisoned") = Some(progress);
+    }
+    fn record_console(
+        &self,
+        record: &runmat_execution::console::ConsoleRecord,
+    ) -> Result<(), String> {
+        self.console
+            .as_ref()
+            .ok_or("durable console publisher is absent")?
+            .lock()
+            .map_err(|_| "durable console publisher poisoned")?
+            .push(record)
+            .map_err(|error| error.to_string())
+    }
+    fn finish_console(
+        &self,
+        receipt: &runmat_execution::console::ConsoleReceipt,
+    ) -> Result<(), String> {
+        self.console
+            .as_ref()
+            .ok_or("durable console publisher is absent")?
+            .lock()
+            .map_err(|_| "durable console publisher poisoned")?
+            .finish(receipt)
+            .map_err(|error| error.to_string())
     }
 }
 

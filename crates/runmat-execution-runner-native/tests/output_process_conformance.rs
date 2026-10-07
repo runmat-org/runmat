@@ -22,6 +22,8 @@ mod environment;
 mod fixture;
 #[path = "output_process_conformance/handles.rs"]
 mod handles;
+#[path = "output_process_conformance/live_prefix.rs"]
+mod live_prefix;
 #[path = "output_process_conformance/parent_loss.rs"]
 mod parent_loss;
 #[path = "output_process_conformance/portable_units.rs"]
@@ -41,7 +43,14 @@ fn main() {
             runmat_execution_runner_native::run_worker_stdio().await.unwrap();
         } else if std::env::args().any(|arg| arg == HiddenMode::ExecutionDriver.marker()) {
             let runmat_execution_runner_native::supervisor::BatchDriverInvocation::Program { attempt, submission, lease, .. } = runmat_execution_runner_native::supervisor::prepare_batch_driver().unwrap() else { panic!("original output witness requires program authority"); };
-            runmat_execution_runner_native::supervisor::execute_and_complete_program_batch(*attempt, *submission, *lease).await.unwrap();
+            let exit_marker = attempt.job_directory.join("test-provider-exit");
+            tokio::select! {
+                result = runmat_execution_runner_native::supervisor::execute_and_complete_program_batch(*attempt, *submission, *lease) => { result.unwrap(); },
+                _ = async { while !exit_marker.exists() { tokio::time::sleep(Duration::from_millis(10)).await; } } => {
+                    // Fixture-only abrupt original publisher loss; no completion/footer.
+                    std::process::exit(19);
+                },
+            }
         } else if std::env::args().any(|arg| arg == HiddenMode::LocalSupervisor.marker()) {
             let config = LocalSupervisorConfig::for_current_executable().unwrap();
             let root = config.paths.root.clone();
@@ -237,6 +246,7 @@ async fn witness() {
         assert_eq!(service.await_job(&job).unwrap(), expected(requested));
     }
     durable_poll::verify(&service, &config).await;
+    live_prefix::verify(&service, &config, namespace.root()).await;
     drop(service);
     println!("original zero/one/multiple outputs passed isolated execution, durable await and cold task evidence");
 }

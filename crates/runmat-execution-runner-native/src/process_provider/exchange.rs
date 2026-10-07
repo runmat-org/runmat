@@ -81,11 +81,12 @@ async fn read_response(
                 control.record_progress(progress);
             }
             WorkerProcessMessage::Console { record } => {
-                receiver
+                let receiver = receiver
                     .as_mut()
-                    .ok_or("worker emitted unrequested console evidence")?
-                    .push(record)
-                    .map_err(|error| error.to_string())?;
+                    .ok_or("worker emitted unrequested console evidence")?;
+                receiver.push(record).map_err(|error| error.to_string())?;
+                control
+                    .record_console(receiver.records().last().expect("retained original record"))?;
             }
             WorkerProcessMessage::Completed { response, console } => {
                 match (receiver.as_ref(), console.as_ref()) {
@@ -100,6 +101,9 @@ async fn read_response(
                 response
                     .validate_against(request)
                     .map_err(|error| error.to_string())?;
+                if let Some(console) = &console {
+                    control.finish_console(console)?;
+                }
                 *receipt = console;
                 return Ok(response);
             }

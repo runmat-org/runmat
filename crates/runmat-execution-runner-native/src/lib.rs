@@ -65,6 +65,7 @@ mod materialized_project;
 mod meshing_evaluator;
 mod meshing_host;
 mod meshing_platform;
+mod metadata_identity;
 mod native_pool;
 mod process_provider;
 mod program_object_source;

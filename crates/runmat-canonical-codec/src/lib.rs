@@ -11,7 +11,7 @@ pub use materialization::{
 };
 
 mod json;
-pub use json::{encode_json_bounded, profile_json_bytes};
+pub use json::{encode_json_bounded, profile_json_bytes, write_json_bounded};
 
 mod serialized_profile;
 mod value;

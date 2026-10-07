@@ -1,7 +1,6 @@
 //! Ordered source transport. Receipts establish consistency, not execution authenticity.
 use super::*;
 use crate::Digest;
-use sha2::{Digest as _, Sha256};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -53,6 +52,9 @@ pub struct ConsoleReceiver {
 }
 
 impl ConsoleReceiver {
+    pub fn records(&self) -> &[ConsoleRecord] {
+        self.capture.records()
+    }
     pub fn new(limits: ConsoleLimits) -> Result<Self, ContractError> {
         Ok(Self {
             capture: ConsoleCapture::new(limits)?,
@@ -98,19 +100,11 @@ impl ConsoleReceiver {
 }
 
 fn records_digest(records: &[ConsoleRecord]) -> Digest {
-    let mut hash = Sha256::new();
-    hash.update(b"runmat-console-records-v1\0");
+    let mut hash = super::inventory::RecordDigest::new();
     for record in records {
-        hash.update(record.sequence.to_be_bytes());
-        hash.update([match record.stream {
-            ConsoleStream::Stdout => 0,
-            ConsoleStream::Stderr => 1,
-            ConsoleStream::ClearScreen => 2,
-        }]);
-        hash.update((record.text.len() as u64).to_be_bytes());
-        hash.update(record.text.as_bytes());
+        hash.push(record);
     }
-    Digest::from_bytes(hash.finalize().into())
+    hash.finish()
 }
 
 #[cfg(test)]

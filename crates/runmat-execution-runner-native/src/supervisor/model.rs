@@ -142,6 +142,7 @@ impl ProgramBatchSubmission {
         self.program_request()
             .validate_for_portable_host()
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        super::console_journal::validate_reservation(&self.task.request)?;
         self.task
             .request
             .validate_invocation_reservation()
@@ -192,12 +193,11 @@ impl ProgramBatchSubmission {
             idempotency_key: None,
             retention_millis: self.retention_millis,
         };
-        let mut identity = b"runmat-local-program-batch-request-v1\0".to_vec();
-        identity.extend(runmat_canonical_codec::encode_json_bounded(
+        crate::metadata_identity::json_digest(
+            b"runmat-local-program-batch-request-v1\0",
             &stable,
             u64::from(super::protocol::SUPERVISOR_MAX_MESSAGE_BYTES),
-        )?);
-        Ok(Digest::sha256(identity))
+        )
     }
 
     pub fn idempotency_digest(&self) -> Option<Digest> {
