@@ -7,6 +7,7 @@ mod identity;
 mod durable_aggregate;
 mod origins;
 mod validation;
+pub use validation::{ValuePayloadValidationCursor, ValueValidationProgress};
 #[cfg(test)]
 mod callable_tests;
 pub use durable_aggregate::{

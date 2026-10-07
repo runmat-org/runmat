@@ -1,4 +1,6 @@
-use runmat_execution::value::{ValueLimits, ValuePayload};
+use runmat_execution::value::{
+    ValueLimits, ValuePayload, ValuePayloadValidationCursor, ValueValidationProgress,
+};
 use runmat_value::{
     CellArray, CharArray, Closure, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
     LogicalArray, MException, ObjectInstance, SparseTensor, StringArray, StructValue, Tensor,
@@ -45,25 +47,25 @@ pub(super) fn decode_durable_inline_value(
     drain_machine(payload)
 }
 
-/// Decode one validated aggregate under a shared validation limit and one
-/// invocation-owned cooperation budget. Validation is still the canonical
-/// synchronous `ValuePayload::validate_all` owner; making that cursor
-/// incremental is a separate prerequisite for universally bounded admission.
+/// Validate and decode one aggregate under a shared limit and the selected
+/// invocation's cooperation budget. The synchronous codec drains this same
+/// canonical validation cursor without installing a scheduler policy.
 pub async fn decode_inline_values_cooperatively(
     payloads: &[ValuePayload],
     limits: ValueLimits,
     source_resolver: Option<Rc<crate::user_functions::ExecutionSourceResolver>>,
     mut cooperation: Option<&mut CpuCooperationBudget>,
 ) -> Result<RootedValues, CooperativeValueCodecError> {
-    ValuePayload::validate_all(payloads, limits)
-        .map_err(|error| ValueCodecError::invalid("$", error.to_string()))?;
+    validate_values_cooperatively(
+        ValuePayloadValidationCursor::new(payloads, limits),
+        &mut cooperation,
+    )
+    .await?;
     decode_validated_values(payloads, source_resolver, &mut cooperation).await
 }
 
 /// Decode a complete durable batch under one shared admission budget and the
-/// selected invocation's cooperation policy. Durable validation is still the
-/// canonical synchronous validation owner; only materialization checkpoints
-/// in this API.
+/// selected invocation's cooperation policy.
 pub async fn decode_durable_values_cooperatively(
     payloads: &[ValuePayload],
     limits: ValueLimits,
@@ -72,9 +74,33 @@ pub async fn decode_durable_values_cooperatively(
     for payload in payloads {
         super::durable::require_durable(payload, "$")?;
     }
-    ValuePayload::validate_all_for_durable_storage(payloads, limits)
-        .map_err(|error| ValueCodecError::invalid("$", error.to_string()))?;
+    validate_values_cooperatively(
+        ValuePayloadValidationCursor::for_durable_storage(payloads, limits),
+        &mut cooperation,
+    )
+    .await?;
     decode_validated_values(payloads, None, &mut cooperation).await
+}
+
+async fn validate_values_cooperatively(
+    mut cursor: ValuePayloadValidationCursor<'_>,
+    cooperation: &mut Option<&mut CpuCooperationBudget>,
+) -> Result<(), CooperativeValueCodecError> {
+    loop {
+        let progress = cursor
+            .advance(DECODE_WORK_QUANTUM)
+            .map_err(|error| ValueCodecError::invalid("$", error.to_string()))?;
+        let (completed_work, complete) = match progress {
+            ValueValidationProgress::Pending { completed_work } => (completed_work, false),
+            ValueValidationProgress::Complete { completed_work } => (completed_work, true),
+        };
+        if let Some(budget) = cooperation.as_deref_mut() {
+            budget.checkpoint(completed_work as u64).await?;
+        }
+        if complete {
+            return Ok(());
+        }
+    }
 }
 
 async fn decode_validated_values(
