@@ -7,8 +7,8 @@
 mod capability;
 mod environment;
 mod portable_host;
-pub use portable_host::PortableConsoleHost;
 pub(crate) use portable_host::{accepts_queued_interaction, check_active_host};
+pub use portable_host::{NonCapturingPortableHost, PortableConsoleHost, PortableConsoleSink};
 mod runtime;
 mod scope;
 mod services;

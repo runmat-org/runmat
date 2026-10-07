@@ -14,7 +14,7 @@ use runmat_execution::{Digest, ExecutionScopeId, OutputContract, PoolId, Program
 use runmat_execution_artifact::{
     archive::{write_bundle, ArchiveLimits},
     ExecutableForm, ExecutionBundleBuilder, ProgramArtifact, ProgramBuildRecipe,
-    ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
 };
 use runmat_execution_runner::{
     AttemptReport, AttemptSuccess, PoolSpec, TaskSubmission, WorkerSpec,
@@ -627,6 +627,7 @@ async fn remote_pool_installs_once_per_node_and_schedules_concurrently() {
                 program.clone(),
                 TaskSubmission {
                     request: TaskRequest {
+                        console: None,
                         environment: runmat_execution::EnvironmentSnapshot::default(),
                         id: task_id,
                         scope_id,
@@ -1362,6 +1363,7 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
         ordinal: 1,
         driver_fence: 9,
         task: TaskRequest {
+            console: None,
             environment: runmat_execution::EnvironmentSnapshot::default(),
             id: task_id,
             scope_id,
@@ -1515,6 +1517,7 @@ pub(in crate::remote) fn submission(
 ) -> TaskSubmission {
     TaskSubmission {
         request: TaskRequest {
+            console: None,
             environment: runmat_execution::EnvironmentSnapshot::default(),
             id: task_id,
             scope_id,

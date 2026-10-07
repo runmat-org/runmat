@@ -366,6 +366,7 @@ pub(super) fn original_program_submission(
     .unwrap();
     let task = runmat_execution_runner::TaskSubmission {
         request: runmat_execution::task::TaskRequest {
+            console: None,
             environment: runmat_execution::EnvironmentSnapshot::default(),
             id: runmat_execution::TaskId::derive(&[b"original-durable-program"]),
             scope_id: context.scope_id,
@@ -391,6 +392,7 @@ pub(super) fn original_program_submission(
         priority: 0,
     };
     ProgramBatchSubmission {
+        console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
         recipe,
         artifact,

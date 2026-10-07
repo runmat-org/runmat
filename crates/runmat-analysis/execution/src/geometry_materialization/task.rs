@@ -61,6 +61,7 @@ pub fn build_geometry_task_submission(
     let resources = task_resources(&prepared.request)?;
     Ok(TaskSubmission {
         request: TaskRequest {
+            console: None,
             environment: runmat_execution::EnvironmentSnapshot::default(),
             id: task_id,
             scope_id: context.scope_id,

@@ -124,8 +124,9 @@ pub fn prepare_structural_study_root(
     );
     arguments.extend(sources.arguments);
     let request = ProgramExecutionRequest {
+        console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         recipe: recipe.clone(),
         artifact: artifact.clone(),
         function: 0,

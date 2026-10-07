@@ -3,10 +3,14 @@
 use crate::ContractError;
 use serde::{Deserialize, Serialize};
 
+mod transport;
+pub use transport::{ConsoleReceipt, ConsoleReceiver};
 mod capture;
 pub use capture::ConsoleCapture;
+mod admission;
+pub use admission::{deserialize_controls, invocation_memory_bytes, ConsoleStorageProfile};
 
-pub const CONSOLE_TRANSCRIPT_SCHEMA_VERSION: u16 = 1;
+pub const CONSOLE_TRANSCRIPT_SCHEMA_VERSION: u16 = 2;
 pub const MAX_CONSOLE_RECORDS: u32 = 65_536;
 pub const MAX_CONSOLE_TEXT_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -83,9 +87,14 @@ pub struct ConsoleTranscript {
     records: Vec<ConsoleRecord>,
     text_bytes: u64,
     completion: ConsoleCompletion,
+    #[serde(deserialize_with = "deserialize_source_receipt")]
+    source_receipt: Option<Box<ConsoleReceipt>>,
 }
 
 impl ConsoleTranscript {
+    pub fn source_receipt(&self) -> Option<&ConsoleReceipt> {
+        self.source_receipt.as_deref()
+    }
     pub fn records(&self) -> &[ConsoleRecord] {
         &self.records
     }
@@ -135,8 +144,34 @@ impl ConsoleTranscript {
                 "invalid UTF-8 byte inventory",
             ));
         }
+        if let Some(receipt) = &self.source_receipt {
+            receipt.validate_inventory(self)?;
+        }
         Ok(())
     }
+}
+
+fn deserialize_source_receipt<'de, D>(
+    deserializer: D,
+) -> Result<Option<Box<ConsoleReceipt>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Deserialize::deserialize(deserializer)
+}
+
+/// Required optional evidence: omitted fields cannot imply a complete empty console.
+pub fn deserialize_transcript<'de, D>(
+    deserializer: D,
+) -> Result<Option<Box<ConsoleTranscript>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let transcript: Option<Box<ConsoleTranscript>> = Deserialize::deserialize(deserializer)?;
+    if let Some(transcript) = &transcript {
+        transcript.validate().map_err(serde::de::Error::custom)?;
+    }
+    Ok(transcript)
 }
 
 #[cfg(test)]

@@ -148,6 +148,7 @@ async fn cold_worker_receives_only_exact_task_input_closure_and_inventory_is_imm
     .unwrap();
     let submission = TaskSubmission {
         request: TaskRequest {
+            console: None,
             environment: runmat_execution::EnvironmentSnapshot::default(),
             id: TaskId::derive(&[b"scoped-task"]),
             scope_id: scope,

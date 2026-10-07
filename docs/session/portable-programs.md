@@ -176,7 +176,7 @@ these environment checks.
 The compiler compatibility identity and invocation environment are distinct. Deferred
 calls capture the original session environment when the future is created. A single
 materializer carries it with the callable, arguments and outputs in the portable
-schema-V2 request. The required field may be explicitly empty; omission does not mean
+schema-V3 request. The required field may be explicitly empty; omission does not mean
 inherit the worker process. Context is included in request identity and in the original
 scheduled task, attempt and checkpoint. A code artifact alone does not own context.
 
@@ -234,3 +234,67 @@ native and browser service state. The await action and native suspension keep on
 boxed carrier instead of cloning captured arguments, program bytes and environment.
 The original handle and Running/ExecutingInCaller transition still govern completion,
 cancellation and rejection of a second concurrent await.
+
+
+## Request-bound console admission
+
+The retained V3 cutover requires an explicit optional `console` control
+field on program requests, descriptors, tasks and durable program submissions.
+`None` means capture was not requested; it is not evidence of a complete empty
+transcript. Omission rejects. Requested capture requires a complete V4 executable
+unit, and the largest original write must fit the bounded transport frame.
+Controls enter canonical request identity and are preserved by borrowed requests,
+child descriptors, future capture, local/durable/browser task construction and
+remote admission/recovery comparisons.
+
+One shared component profile accounts for original source capture, an in-flight
+record inventory and worst-case JSON encoding. Task admission checks the sum of
+this component and the original environment against memory and checks the wire
+component against the original artifact reservation. Explicit task caps are not
+raised to make admission pass. This is a component lower bound, not whole-process
+memory, parent checkpoint storage, allocator overhead or measured RSS.
+
+The common executable invocation owner now checks sticky host rejection before
+and after execution. The native pipe/attempt path is implemented below; remote and browser worker delivery,
+live durable prefix journals and chunked access remain unfinished. This retained slice does not
+establish a whole-platform console envelope or publication qualification.
+
+
+### Native stream (scoped verification passes)
+
+The native stdio worker installs the requested bounded source host. Original writes
+use the shared synchronous frame codec so a long interpreter loop cannot starve a
+writer on the same async thread. An explicit no-capture invocation uses the same
+noninteractive policy and discards writes without building a console inventory.
+Return ordinals stay separate from typed console frames and a compact terminal receipt.
+
+The parent receiver rejects reordered, duplicated, unrequested or over-budget writes
+and verifies controls, counts and a streamed record digest against the receipt.
+A missing receipt leaves the received prefix interrupted. Provider reports carry this
+inventory into the original fenced attempt terminal and durable checkpoint. Requested
+capture blocks successful commit without complete retained evidence. A cold read checks
+shape, original controls and the retained source receipt against the record inventory.
+Schema-V2 transcripts require an explicit optional source receipt: source-local captures
+have none, while a receiver retains the original verified footer. Same-length text and
+receipt substitutions reject. This is consistency evidence, not independent execution
+authentication.
+
+The one-request native worker monitors its original parent pipe on a separately
+admitted 64 KiB thread stack, so loss of the parent ends the worker root even during
+a non-yielding interpreter loop. The guard disarms before terminal publication. This
+does not establish universal descendant containment or a browser/remote lifetime policy.
+
+The actual native process/cold/cancellation witness passes, including original return
+ordinals, stdout/stderr/control ordering, retained receipts and non-yielding parent loss.
+Shared210/210 and strict shared lint pass. The broad native run passed288 tests;
+seven socket-related failures pass with local socket access from the same binary.
+Three child-entry tests remain intentionally ignored. This retained slice does not close live durable-prefix journaling, chunked reads,
+remote/browser console delivery, parent allocations, measured RSS or startup diagnostics.
+
+The legacy VM worker and response-only browser artifact route share the explicit
+non-capturing, noninteractive host when console is not requested. Browser capture
+requests reject until an owning console transport is available; a numeric success
+cannot imply console delivery. Five VM checks and eight actual WASM witnesses pass,
+including cold browser controls, interactive-input rejection and intact parent input.
+The WASM witnesses use the existing debug-free test profile; the default debug module
+exceeds Node's 1 GiB module limit before execution and earns no test credit.

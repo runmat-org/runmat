@@ -16,7 +16,7 @@ pub struct RetryResourceEnvelope {
 impl TaskSubmission {
     pub fn retry_resource_envelope(&self) -> RunnerResult<RetryResourceEnvelope> {
         self.request
-            .validate_environment_reservation()
+            .validate_invocation_reservation()
             .map_err(|error| RunnerError::Invalid(error.to_string()))?;
         let count = super::maximum_attempts(self.request.retry);
         if count == 0 {

@@ -428,9 +428,17 @@ impl RunMatSession {
             .runtime_context
             .clone()
             .with_program_revision(Some(unit.revision().program_revision.clone()));
-        runtime
+        if let Some(host) = runtime.service_ports().host() {
+            host.check_execution()?;
+        }
+        let result = runtime
             .scope(self.invoke_executable_in_context(unit, invocation, control, parent_control))
-            .await
+            .await;
+        // Sticky host rejection cannot become successful execution through a language catch.
+        if let Some(host) = runtime.service_ports().host() {
+            host.check_execution()?;
+        }
+        result
     }
 
     async fn invoke_executable_in_context(

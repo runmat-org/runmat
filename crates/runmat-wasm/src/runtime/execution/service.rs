@@ -326,11 +326,11 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             .validate_for_portable_host()
             .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
         let mut resources = browser_request(self.capabilities);
-        let context_bytes = request
-            .environment
-            .storage_profile()
-            .and_then(|profile| profile.minimum_memory_bytes())
-            .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
+        let context_bytes = runmat_execution::console::invocation_memory_bytes(
+            &request.environment,
+            request.console,
+        )
+        .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
         resources.memory_bytes = resources
             .memory_bytes
             .checked_add(context_bytes)
@@ -355,6 +355,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
             .driver
             .handle(DriverCommand::Submit(Box::new(TaskSubmission {
                 request: TaskRequest {
+                    console: call.console,
                     environment: call.environment.clone(),
                     id: task_id,
                     scope_id: task_scope_id,
@@ -530,7 +531,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
 
 #[cfg(test)]
 mod tests {
-    use runmat_execution_artifact::{ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2};
+    use runmat_execution_artifact::{ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3};
     use wasm_bindgen_test::*;
 
     use super::*;
@@ -554,6 +555,7 @@ mod tests {
         let envelope = unit.portable_envelope_for(Some("originalFailure")).unwrap();
         let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
         DeferredCall {
+            console: None,
             environment: runmat_execution::EnvironmentSnapshot::default(),
             function,
             arguments: Vec::new(),
@@ -594,6 +596,7 @@ mod tests {
         let service = BrowserExecutionService::new(None).unwrap();
         let future = service
             .create_future(DeferredCall {
+                console: None,
                 environment: runmat_execution::EnvironmentSnapshot::default(),
                 function: 0,
                 arguments: Vec::new(),

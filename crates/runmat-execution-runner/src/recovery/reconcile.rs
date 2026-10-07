@@ -41,6 +41,7 @@ pub fn reconcile_snapshot_at_fence(
             attempt.terminal = Some(crate::task::AttemptTerminal {
                 disposition: crate::task::AttemptDisposition::Lost,
                 closed_at_driver_millis,
+                console: None,
                 resources: None,
                 execution: None,
                 diagnostic: Some("driver authority replaced before a terminal report".into()),

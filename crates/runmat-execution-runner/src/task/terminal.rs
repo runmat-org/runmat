@@ -31,6 +31,8 @@ impl AttemptDisposition {
 #[serde(deny_unknown_fields)]
 pub struct AttemptTerminal {
     pub disposition: AttemptDisposition,
+    #[serde(deserialize_with = "runmat_execution::console::deserialize_transcript")]
+    pub console: Option<Box<runmat_execution::console::ConsoleTranscript>>,
     /// Saved logical driver clock, not worker elapsed time or a cessation fence.
     pub closed_at_driver_millis: u64,
     /// Original report; None explicitly leaves consumption unaccounted.
@@ -42,6 +44,20 @@ pub struct AttemptTerminal {
 
 impl AttemptTerminal {
     pub(crate) fn validate_against(&self, attempt: &AttemptRecord) -> Result<(), String> {
+        if let Some(console) = &self.console {
+            console.validate().map_err(|error| error.to_string())?;
+            if Some(console.limits()) != attempt.request.task.console {
+                return Err("console evidence differs from original attempt controls".into());
+            }
+        }
+        if self.disposition == AttemptDisposition::Succeeded
+            && attempt.request.task.console.is_some()
+            && self.console.as_ref().is_none_or(|console| {
+                console.completion() != runmat_execution::console::ConsoleCompletion::Complete
+            })
+        {
+            return Err("successful attempt lacks complete requested console evidence".into());
+        }
         if self.closed_at_driver_millis < attempt.assigned_at_millis {
             return Err("attempt closure precedes its assignment".into());
         }

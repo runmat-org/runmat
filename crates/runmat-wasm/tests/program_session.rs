@@ -44,8 +44,9 @@ async fn original(text: &str, selected: Option<&str>, outputs: u16) -> ProgramEx
         expected_artifact_id: None,
     };
     ProgramExecutionRequest {
+        console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         function: envelope.manifest.identity.entrypoint_function.0 as usize,
         artifact: ProgramArtifact::materialize(
             &recipe,
@@ -171,5 +172,35 @@ async fn cold_browser_invocation_preserves_explicit_environment_and_absence() {
             Value::CharArray(runmat_value::CharArray::new_row("")),
             Value::CharArray(runmat_value::CharArray::new_row("")),
         ]
+    );
+}
+
+#[wasm_bindgen_test]
+async fn response_only_browser_worker_enforces_original_host_policy() {
+    let mut request = original("fprintf(1,'original write'); ans=42;", None, 1).await;
+    assert_eq!(
+        values(execute(request.clone()).await),
+        vec![Value::Num(42.0)]
+    );
+    request.console = Some(runmat_execution::console::ConsoleLimits {
+        max_records: 4,
+        max_text_bytes: 100,
+    });
+    request.validate().unwrap();
+    let cold: ProgramExecutionRequest =
+        serde_json::from_slice(&serde_json::to_vec(&request).unwrap()).unwrap();
+    assert_eq!(
+        execute(cold).await,
+        ProgramExecutionResponse::Failure {
+            message: "requested console capture requires an owning transport".into(),
+        },
+    );
+    let interactive = original("ans=input('prompt','s');", None, 1).await;
+    let ProgramExecutionResponse::Failure { message } = execute(interactive).await else {
+        panic!("portable browser workers must reject interactive input");
+    };
+    assert!(
+        message.contains("portable execution does not permit interactive input"),
+        "{message}"
     );
 }

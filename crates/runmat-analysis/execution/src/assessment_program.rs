@@ -180,11 +180,11 @@ pub fn prepare_assessment_program(
     executable: ExecutableUnitEnvelope,
 ) -> AnalysisBridgeResult<PreparedAssessmentProgram> {
     use runmat_execution_artifact::{
-        ProgramExecutionInputs, ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        ProgramExecutionInputs, ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
     };
     let descriptor = prepare_assessment_descriptor(assessment, revision, callable, executable)?;
     let inputs = ProgramExecutionInputs {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         arguments: assessment_inputs(assessment, measured_si)?,
         objects: Vec::new(),
     };
@@ -237,6 +237,7 @@ pub fn build_assessment_task_submission(
     }
     Ok(runmat_execution_runner::TaskSubmission {
         request: TaskRequest {
+            console: None,
             environment: runmat_execution::EnvironmentSnapshot::default(),
             id: TaskId::derive(&[prepared.identity.bytes()]),
             scope_id: context.scope_id,

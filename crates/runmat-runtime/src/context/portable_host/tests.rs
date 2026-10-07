@@ -169,3 +169,46 @@ fn interleaved_invocations_retain_only_their_original_console_writes() {
         );
     }
 }
+
+#[test]
+fn source_sink_failure_is_sticky_and_cannot_claim_complete_delivery() {
+    struct FailedSink;
+    impl PortableConsoleSink for FailedSink {
+        fn emit(&self, _record: &ConsoleRecord) -> Result<(), String> {
+            Err("original transport failure".into())
+        }
+    }
+    let host = PortableConsoleHost::with_sink(
+        ConsoleLimits {
+            max_records: 4,
+            max_text_bytes: 100,
+        },
+        Some(Rc::new(FailedSink)),
+    )
+    .unwrap();
+    host.console(ConsoleStream::Stdout, "original".into());
+    host.console(
+        ConsoleStream::Stderr,
+        "must not append after failure".into(),
+    );
+    assert!(host.check_execution().is_err());
+    let retained = host.finish(true).unwrap();
+    assert_eq!(retained.records().len(), 1);
+    assert_eq!(retained.records()[0].text.as_ref(), "original");
+    assert_eq!(retained.completion(), ConsoleCompletion::Interrupted);
+}
+
+#[test]
+fn explicitly_unrequested_console_neither_retains_an_unbounded_buffer_nor_claims_capture() {
+    let host = Rc::new(NonCapturingPortableHost);
+    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(RuntimeServicePorts::default().with_host(host.clone()));
+    let _scope = runtime.enter();
+    crate::console::reset_thread_buffer();
+    for _ in 0..1000 {
+        crate::console::record_console_output(ConsoleStream::Stdout, "unrequested");
+    }
+    assert!(crate::console::take_thread_buffer().is_empty());
+    assert_eq!(host.console_limits(), None);
+    host.check_execution().unwrap();
+}

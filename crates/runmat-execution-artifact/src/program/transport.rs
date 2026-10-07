@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use super::request::validate_externalized_inventory;
 use super::{
     ProgramExecutionResponse, MAX_PROGRAM_EXECUTION_ARGUMENTS,
-    MAX_PROGRAM_EXECUTION_RESULT_OBJECTS, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    MAX_PROGRAM_EXECUTION_RESULT_OBJECTS, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
 };
 use crate::{ArtifactError, ArtifactResult};
 
@@ -258,7 +258,7 @@ pub struct ProgramExecutionInputs {
 
 impl ProgramExecutionInputs {
     pub fn validate(&self) -> ArtifactResult<()> {
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V2
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V3
             || self.arguments.len() > MAX_PROGRAM_EXECUTION_ARGUMENTS
         {
             return Err(ArtifactError::Invalid(
@@ -305,7 +305,7 @@ impl ProgramExecutionOutputs {
         objects: Vec<ProgramExecutionObjectLocation>,
     ) -> ArtifactResult<Self> {
         let outputs = Self {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
             response,
             objects,
         };
@@ -314,7 +314,7 @@ impl ProgramExecutionOutputs {
     }
 
     pub fn validate(&self) -> ArtifactResult<()> {
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V2 {
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V3 {
             return Err(ArtifactError::Invalid(
                 "program outputs use an unsupported schema".into(),
             ));
@@ -573,7 +573,7 @@ mod tests {
         let bytes = b"canonical input object".to_vec();
         let root = input_reference(&bytes);
         let inputs = ProgramExecutionInputs {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
             arguments: vec![ValuePayload::Object(Box::new(root.clone()))],
             objects: vec![ProgramExecutionObjectLocation {
                 reference: root.clone(),
@@ -598,7 +598,7 @@ mod tests {
         assert!(duplicate.validate().is_err());
 
         let mut resident = ProgramExecutionInputs {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
             arguments: vec![ValuePayload::Object(Box::new(input_reference(b"resident")))],
             objects: Vec::new(),
         };
@@ -813,7 +813,7 @@ mod tests {
             .unwrap()
             .clone();
         let inputs = |object: ProgramExecutionObjectLocation| ProgramExecutionInputs {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
             arguments: vec![ValuePayload::Object(Box::new(object.reference.clone()))],
             objects: vec![object],
         };

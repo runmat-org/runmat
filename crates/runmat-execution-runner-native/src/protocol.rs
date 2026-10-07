@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub use runmat_execution_artifact::{
     ProgramExecutionRequest as WorkerRequest, ProgramExecutionResponse as WorkerResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
 };
 
 pub const NATIVE_WORKER_MESSAGE_SCHEMA_V1: u16 = 1;
@@ -42,8 +42,17 @@ impl ProgramProgress {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "message", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkerProcessMessage {
-    Progress { progress: ProgramProgress },
-    Completed { response: WorkerResponse },
+    Progress {
+        progress: ProgramProgress,
+    },
+    Console {
+        record: runmat_execution::console::ConsoleRecord,
+    },
+    Completed {
+        response: WorkerResponse,
+        #[serde(deserialize_with = "required_option")]
+        console: Option<runmat_execution::console::ConsoleReceipt>,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -55,6 +64,14 @@ pub struct StoredProgram<
     pub recipe: R,
     pub artifact: A,
     pub function: usize,
+}
+
+fn required_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    serde::Deserialize::deserialize(deserializer)
 }
 
 #[cfg(test)]

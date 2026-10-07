@@ -24,6 +24,17 @@ impl ConsoleCapture {
         })
     }
 
+    pub fn limits(&self) -> ConsoleLimits {
+        self.limits
+    }
+    pub fn text_bytes(&self) -> u64 {
+        self.text_bytes
+    }
+
+    pub fn records(&self) -> &[ConsoleRecord] {
+        &self.records
+    }
+
     pub fn rejected(&self) -> Option<ConsoleRejection> {
         self.rejected
     }
@@ -68,6 +79,7 @@ impl ConsoleCapture {
     pub fn finish(self, completed: bool) -> ConsoleTranscript {
         ConsoleTranscript {
             schema_version: CONSOLE_TRANSCRIPT_SCHEMA_VERSION,
+            source_receipt: None,
             limits: self.limits,
             records: self.records,
             text_bytes: self.text_bytes,

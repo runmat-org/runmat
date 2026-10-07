@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundleBuilder, ProgramExecutionDescriptor, ProgramExecutionInputs,
-    ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
 };
 use runmat_package::FrozenProjectHandoff;
 use runmat_test::protocol::{ProtocolHandshake, WorkerCapability};
@@ -164,8 +164,9 @@ impl WorkerBackend for RemoteTestBackend {
                 .cloned()
                 .ok_or_else(|| protocol("remote test bundle has no program artifact"))?;
             let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
+                console: None,
                 environment: runmat_execution::EnvironmentSnapshot::default(),
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
                 recipe: bundled_recipe.clone(),
                 artifact: bundled_artifact,
                 function: 0,
@@ -173,7 +174,7 @@ impl WorkerBackend for RemoteTestBackend {
             })
             .map_err(protocol)?;
             let inputs = ProgramExecutionInputs {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
                 arguments: Vec::new(),
                 objects: Vec::new(),
             };

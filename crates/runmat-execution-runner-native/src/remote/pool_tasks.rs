@@ -85,6 +85,7 @@ pub(super) fn submit_root_task(
     let completion = pool.submit(
         TaskSubmission {
             request: TaskRequest {
+                console: request.console,
                 environment: request.environment.clone(),
                 id: task_id,
                 scope_id: pool.scope_id(),

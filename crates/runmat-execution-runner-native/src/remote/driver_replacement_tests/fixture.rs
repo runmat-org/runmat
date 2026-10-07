@@ -234,8 +234,9 @@ pub(super) fn exact_study_fixture_with_wall_time(
     )
     .unwrap();
     let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
+        console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         recipe: request.recipe.clone(),
         artifact: request.artifact.clone(),
         function: request.function,
@@ -262,7 +263,7 @@ pub(super) fn exact_study_fixture_with_wall_time(
         });
     }
     let inputs = serde_json::to_vec(&ProgramExecutionInputs {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         arguments: request.arguments,
         objects: locations,
     })

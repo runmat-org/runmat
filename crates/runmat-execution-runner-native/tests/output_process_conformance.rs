@@ -22,6 +22,8 @@ mod environment;
 mod fixture;
 #[path = "output_process_conformance/handles.rs"]
 mod handles;
+#[path = "output_process_conformance/parent_loss.rs"]
+mod parent_loss;
 #[path = "output_process_conformance/portable_units.rs"]
 mod portable_units;
 
@@ -55,11 +57,15 @@ fn main() {
 }
 
 async fn call(requested_outputs: usize) -> DeferredCall {
-    call_source(
+    let mut call = call_source(
         requested_outputs,
-        "function [first, second] = original_output_values(); first = 13; second = 29; end",
-    )
-    .await
+        "function [first, second] = original_output_values(); fprintf(1,'first'); fprintf(2,'middle'); clc; fprintf(1,'last'); first = 13; second = 29; end",
+    ).await;
+    call.console = Some(runmat_execution::console::ConsoleLimits {
+        max_records: 8,
+        max_text_bytes: 1000,
+    });
+    call
 }
 
 async fn call_source(requested_outputs: usize, source: &str) -> DeferredCall {
@@ -76,6 +82,7 @@ async fn call_source(requested_outputs: usize, source: &str) -> DeferredCall {
         .unwrap();
     let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
     DeferredCall {
+        console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
         function,
         arguments: vec![],
@@ -99,6 +106,7 @@ async fn witness() {
     let namespace = fixture::SupervisorFixture::new("original-output-authority");
     std::env::set_var("RUNMAT_EXECUTION_STATE_DIR", namespace.root());
     let config = NativeExecutionConfig::for_current_executable().unwrap();
+    parent_loss::verify(&config).await;
     let service = NativeExecutionService::new(config.clone()).unwrap();
     handles::verify_caller(&service).await;
     cancellation::verify(&config).await;
@@ -176,6 +184,34 @@ async fn witness() {
             .execution
             .expect("durable original task evidence must survive cold attachment");
         assert!(!evidence.attempts.is_empty());
+        for attempt in &evidence.attempts {
+            let transcript = attempt
+                .terminal
+                .as_ref()
+                .unwrap()
+                .console
+                .as_ref()
+                .expect("original console retained in cold attempt");
+            transcript.validate().unwrap();
+            assert!(transcript.source_receipt().is_some());
+            assert_eq!(
+                transcript.completion(),
+                runmat_execution::console::ConsoleCompletion::Complete
+            );
+            assert_eq!(
+                transcript
+                    .records()
+                    .iter()
+                    .map(|record| (record.stream, record.text.as_ref()))
+                    .collect::<Vec<_>>(),
+                vec![
+                    (runmat_execution::console::ConsoleStream::Stdout, "first"),
+                    (runmat_execution::console::ConsoleStream::Stderr, "middle"),
+                    (runmat_execution::console::ConsoleStream::ClearScreen, ""),
+                    (runmat_execution::console::ConsoleStream::Stdout, "last"),
+                ]
+            );
+        }
         let original = call(requested).await;
         let request = runmat_vm::materialize_deferred_call(
             &original,

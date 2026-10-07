@@ -7,7 +7,7 @@ use runmat_execution::OutputContract;
 use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
     ProgramExecutionResponse, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
 };
 use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -46,8 +46,9 @@ async fn browser_executes_the_exact_portable_artifact_without_a_project() {
     )
     .unwrap();
     let request: ProgramExecutionRequest = ProgramExecutionRequest {
+        console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         recipe,
         artifact,
         function,

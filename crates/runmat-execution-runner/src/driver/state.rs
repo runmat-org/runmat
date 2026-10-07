@@ -156,8 +156,7 @@ impl Driver {
                     self.finish_attempt(
                         &attempt,
                         crate::task::AttemptDisposition::Cancelled,
-                        None,
-                        None,
+                        super::reports::ProviderEvidence::default(),
                         None,
                     )?;
                     self.snapshot

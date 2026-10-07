@@ -3,6 +3,8 @@ use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
 use crate::protocol::{WorkerRequest, WorkerResponse};
 use crate::{NativeExecutionError, NativeExecutionResult};
 
+mod console;
+
 pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
     if std::env::var_os(crate::NATIVE_ACCELERATOR_REQUIRED_ENV).is_some() {
         let encoded = std::env::var(crate::NATIVE_ACCELERATOR_REQUESTS_ENV).map_err(|_| {
@@ -25,12 +27,14 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
     let payload = read_payload(&mut reader, limits).await?;
     let request: WorkerRequest = serde_json::from_slice(&payload)
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-    let response = execute(request).await;
-    let payload =
-        serde_json::to_vec(&crate::protocol::WorkerProcessMessage::Completed { response })
-            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-    write_payload(&mut writer, &payload, limits).await?;
-    Ok(())
+    if !reader.buffer().is_empty() {
+        return Err(NativeExecutionError::Protocol(
+            "unexpected input follows one-request worker invocation".into(),
+        ));
+    }
+    drop(reader);
+    let parent = runmat_process_host::ipc::WorkerParentGuard::start(std::io::stdin())?;
+    console::execute_streamed(request, &mut writer, limits, &parent).await
 }
 
 pub(crate) async fn execute(request: WorkerRequest) -> WorkerResponse {
@@ -83,8 +87,9 @@ mod tests {
         .unwrap();
         artifact.executable_bytes.push(0);
         let response = execute(WorkerRequest {
+            console: None,
             environment: runmat_execution::EnvironmentSnapshot::default(),
-            schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+            schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
             recipe,
             artifact,
             function: 0,

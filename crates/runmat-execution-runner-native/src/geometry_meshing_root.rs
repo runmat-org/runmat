@@ -10,7 +10,7 @@ use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::{
     ArtifactAccess, ExecutableForm, LogicalObject, ObjectNamespace, ProgramArtifact,
     ProgramBuildRecipe, ProgramExecutionDescriptor, ProgramExecutionRequest, ProgramTarget,
-    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
 };
 use runmat_meshing_core::MeshingRequest;
 use runmat_meshing_execution::prepare_meshing_host_program;
@@ -238,8 +238,9 @@ pub fn prepare_geometry_meshing_root(
     let mut arguments = vec![ValuePayload::Object(Box::new(root_reference))];
     arguments.extend(geometry.program.arguments);
     let request = ProgramExecutionRequest {
+        console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         recipe,
         artifact,
         function: 0,
@@ -316,8 +317,9 @@ pub fn decode_geometry_meshing_root(
         .ok_or_else(|| protocol("geometry meshing component argument count differs"))?
         .to_vec();
     let geometry = ProgramExecutionRequest {
+        console: request.geometry.console,
         environment: request.geometry.environment.clone(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         recipe: request.geometry.recipe.clone(),
         artifact: request.geometry.artifact.clone(),
         function: request.geometry.function,
@@ -335,6 +337,7 @@ pub fn decode_geometry_meshing_root(
 
 fn descriptor_from_request(request: &ProgramExecutionRequest) -> ProgramExecutionDescriptor {
     ProgramExecutionDescriptor {
+        console: request.console,
         environment: request.environment.clone(),
         schema_version: request.schema_version,
         recipe: request.recipe.clone(),

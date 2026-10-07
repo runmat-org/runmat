@@ -73,6 +73,10 @@ pub trait RuntimeHostService {
         false
     }
 
+    fn console_limits(&self) -> Option<runmat_execution::console::ConsoleLimits> {
+        None
+    }
+
     /// Sticky host failures cannot be hidden by a caught language exception.
     fn check_execution(&self) -> Result<(), RuntimeError> {
         Ok(())

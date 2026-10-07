@@ -19,6 +19,21 @@ pub(super) async fn blocked_worker() {
     let request: runmat_execution_artifact::ProgramExecutionRequest =
         serde_json::from_slice(&bytes).unwrap();
     request.validate_for_portable_host().unwrap();
+    let record = runmat_execution::console::ConsoleRecord {
+        sequence: 1,
+        stream: runmat_execution::console::ConsoleStream::Stdout,
+        text: "original before termination".into(),
+    };
+    let message = runmat_execution_runner_native::WorkerProcessMessage::Console { record };
+    runmat_process_host::ipc::write_payload(
+        &mut tokio::io::stdout(),
+        &serde_json::to_vec(&message).unwrap(),
+        runmat_process_host::ipc::FrameLimits {
+            max_message_bytes: 64 * 1024 * 1024,
+        },
+    )
+    .await
+    .unwrap();
     let objects =
         std::env::var_os(runmat_execution_runner_native::NATIVE_OBJECT_STORE_ROOT_ENV).unwrap();
     let root = Path::new(&objects).parent().unwrap();
@@ -91,6 +106,22 @@ pub(super) async fn verify(original: &NativeExecutionConfig) {
             .termination,
         AttemptExecutionTermination::ProcessExited { success: false, .. }
     ));
+    let prefix = evidence.attempts[0]
+        .terminal
+        .as_ref()
+        .unwrap()
+        .console
+        .as_ref()
+        .expect("cancelled original console prefix");
+    assert_eq!(
+        prefix.completion(),
+        runmat_execution::console::ConsoleCompletion::Interrupted
+    );
+    assert_eq!(prefix.records().len(), 1);
+    assert_eq!(
+        prefix.records()[0].text.as_ref(),
+        "original before termination"
+    );
     service
         .cancel(&Value::Future(future), CancellationReason::User)
         .unwrap();

@@ -24,7 +24,7 @@ use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{
     ArtifactAccess, ExecutionBundleBuilder, ProgramExecutionDescriptor, ProgramExecutionInputs,
     ProgramExecutionObject, ProgramExecutionObjectClosure, ProgramExecutionObjectLocation,
-    ProgramExecutionOutputs, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    ProgramExecutionOutputs, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
 };
 use runmat_execution_runner::WorkerSpec;
 use runmat_execution_transport_native::control::{

@@ -41,6 +41,7 @@ fn unreadable_program_preserves_known_prelaunch_consumption() {
 
 fn admit(driver: &LocalDriver, artifact_id: ArtifactId) -> runmat_execution_runner::AttemptRequest {
     let task = TaskRequest {
+        console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
         id: TaskId::derive(&[b"preflight"]),
         scope_id: driver.scope_id(),

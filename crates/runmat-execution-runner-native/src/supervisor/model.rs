@@ -4,7 +4,7 @@ use runmat_execution::value::ValuePayload;
 use runmat_execution::{Digest, JobHandle};
 use runmat_execution_artifact::{
     ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest, ProgramExecutionResponse,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
 };
 use runmat_execution_runner::AttemptResourceAccounting;
 use serde::{Deserialize, Serialize};
@@ -94,6 +94,8 @@ pub struct ProgramBatchSubmission<
     pub function: usize,
     pub arguments: V,
     pub environment: E,
+    #[serde(deserialize_with = "runmat_execution::console::deserialize_controls")]
+    pub console: Option<runmat_execution::console::ConsoleLimits>,
     pub requested_outputs: u16,
     pub task: T,
     pub idempotency_key: Option<String>,
@@ -113,6 +115,7 @@ impl ProgramBatchSubmission {
             function: request.function,
             arguments: request.arguments,
             environment: request.environment,
+            console: request.console,
             requested_outputs: request.requested_outputs,
             task,
             idempotency_key,
@@ -124,8 +127,9 @@ impl ProgramBatchSubmission {
         &self,
     ) -> runmat_execution_artifact::BorrowedProgramExecutionRequest<'_> {
         ProgramExecutionRequest {
+            console: self.console,
             environment: &self.environment,
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
             recipe: &self.recipe,
             artifact: &self.artifact,
             function: self.function,
@@ -140,10 +144,15 @@ impl ProgramBatchSubmission {
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         self.task
             .request
+            .validate_invocation_reservation()
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        self.task
+            .request
             .resources
             .validate()
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-        if self.task.request.environment != self.environment
+        if self.task.request.console != self.console
+            || self.task.request.environment != self.environment
             || self.task.request.inputs != self.arguments
             || self.task.request.outputs.requested_outputs != self.requested_outputs
             || self.task.request.program_artifact_id
@@ -177,6 +186,7 @@ impl ProgramBatchSubmission {
             function: self.function,
             arguments: self.arguments.as_slice(),
             environment: &self.environment,
+            console: self.console,
             requested_outputs: self.requested_outputs,
             task: &self.task,
             idempotency_key: None,

@@ -332,6 +332,7 @@ mod tests {
             ordinal: 0,
             driver_fence: 1,
             task: TaskRequest {
+                console: None,
                 environment: runmat_execution::EnvironmentSnapshot::default(),
                 id: task_id,
                 scope_id: ExecutionScopeId::derive(&[b"scope"]),

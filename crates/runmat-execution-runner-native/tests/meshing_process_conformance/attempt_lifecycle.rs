@@ -46,7 +46,11 @@ pub(super) async fn fault_child(mode: &str) {
     let bytes = if mode == "--raw-terminal-child" {
         serde_json::to_vec(&response).unwrap()
     } else {
-        serde_json::to_vec(&WorkerProcessMessage::Completed { response }).unwrap()
+        serde_json::to_vec(&WorkerProcessMessage::Completed {
+            response,
+            console: None,
+        })
+        .unwrap()
     };
     write_payload(&mut writer, &bytes, limits).await.unwrap();
     if mode == "--exit-after-success-child" {

@@ -35,7 +35,8 @@ pub fn materialize_deferred_call(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
     let request = ProgramExecutionRequest {
-        schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        console: call.console,
+        schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         recipe,
         artifact,
         arguments,
@@ -67,6 +68,11 @@ pub async fn execute_program_request(request: ProgramExecutionRequest) -> Progra
             }
         }
     };
+    let runtime = runtime.with_service_ports(
+        runmat_runtime::context::RuntimeServicePorts::default().with_host(std::rc::Rc::new(
+            runmat_runtime::context::NonCapturingPortableHost,
+        )),
+    );
     runtime
         .scope(execute_validated_program_request(request))
         .await
@@ -229,7 +235,7 @@ mod tests {
     use runmat_execution::{Digest, OutputContract, ProgramEnvironment, ProgramRevision};
     use runmat_execution_artifact::{
         ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest,
-        ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
     };
 
     use super::execute_program_request;
@@ -277,8 +283,9 @@ mod tests {
         .unwrap();
         let response =
             futures::executor::block_on(execute_program_request(ProgramExecutionRequest {
+                console: None,
                 environment: runmat_execution::EnvironmentSnapshot::default(),
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
                 recipe,
                 artifact,
                 function: 0,
@@ -325,8 +332,9 @@ mod tests {
         .unwrap();
         let response =
             futures::executor::block_on(execute_program_request(ProgramExecutionRequest {
+                console: None,
                 environment: runmat_execution::EnvironmentSnapshot::default(),
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
                 recipe,
                 artifact,
                 function: 0,
@@ -345,3 +353,7 @@ mod tests {
 #[cfg(test)]
 #[path = "program_execution/outputs.rs"]
 mod output_tests;
+
+#[cfg(test)]
+#[path = "program_execution/host_policy.rs"]
+mod host_policy_tests;

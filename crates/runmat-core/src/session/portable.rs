@@ -36,9 +36,6 @@ impl RunMatSession {
                 ProcedureTarget::SemanticFunction(envelope.manifest.identity.entrypoint_function)
             }
         };
-        if let Some(host) = self.runtime_context.service_ports().host() {
-            host.check_execution().map_err(|error| error.to_string())?;
-        }
         let result = self
             .invoke_executable(
                 &unit,
@@ -51,9 +48,6 @@ impl RunMatSession {
             )
             .await
             .map_err(|error| error.to_string());
-        if let Some(host) = self.runtime_context.service_ports().host() {
-            host.check_execution().map_err(|error| error.to_string())?;
-        }
         result
     }
 }

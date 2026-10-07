@@ -14,7 +14,7 @@ pub use recipe::{ProgramBuildRecipe, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION};
 pub use request::{
     BorrowedProgramExecutionRequest, ProgramExecutionDescriptor, ProgramExecutionRequest,
     ProgramExecutionResponse, MAX_PROGRAM_EXECUTION_ARGUMENTS,
-    MAX_PROGRAM_EXECUTION_RESULT_OBJECTS, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    MAX_PROGRAM_EXECUTION_RESULT_OBJECTS, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
 };
 pub use target::{
     NativeTargetIdentity, ProgramTarget, ProgramTargetCohort, PROGRAM_TARGET_SCHEMA_VERSION,

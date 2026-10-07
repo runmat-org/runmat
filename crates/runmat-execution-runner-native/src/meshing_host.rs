@@ -197,7 +197,10 @@ pub async fn run_meshing_worker_stdio(
     }
     write_message(
         &mut writer,
-        &WorkerProcessMessage::Completed { response },
+        &WorkerProcessMessage::Completed {
+            response,
+            console: None,
+        },
         frame_limits,
     )
     .await?;

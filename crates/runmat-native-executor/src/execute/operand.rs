@@ -193,6 +193,11 @@ pub(super) fn evaluate_rvalue(
                 .runtime
                 .execution()
                 .create_future(runmat_runtime::execution::DeferredCall {
+                    console: state
+                        .runtime
+                        .service_ports()
+                        .host()
+                        .and_then(|host| host.console_limits()),
                     environment: runmat_runtime::execution::capture_deferred_environment(
                         &state.runtime,
                     )?,

@@ -2,7 +2,7 @@ use anyhow::Result;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{
     ArtifactAccess, ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionObject,
-    ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
 };
 use runmat_execution_runner_native::{PreparedStructuralStudyRoot, PreparedStructuralSweepRoot};
 use runmat_runtime::analysis::PreparedStructuralStudyIntent;
@@ -36,15 +36,16 @@ fn prepare_remote_execution(
     bundle_archive: Vec<u8>,
 ) -> Result<PreparedRemoteExecution> {
     let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
+        console: None,
         environment: request.environment,
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         recipe: request.recipe,
         artifact: request.artifact,
         function: request.function,
         requested_outputs: request.requested_outputs,
     })?;
     let inputs = ProgramExecutionInputs {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         arguments: request.arguments,
         objects: Vec::new(),
     };

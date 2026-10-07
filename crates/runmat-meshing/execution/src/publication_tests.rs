@@ -241,6 +241,7 @@ fn scheduled_task() -> (Driver, runmat_execution_runner::AttemptRequest, TaskId)
     let actions = driver
         .handle(DriverCommand::Submit(Box::new(TaskSubmission {
             request: TaskRequest {
+                console: None,
                 environment: runmat_execution::EnvironmentSnapshot::default(),
                 id: task_id,
                 scope_id: scope,

@@ -76,11 +76,12 @@ pub(super) async fn build(
     let mut bundle_bytes = Vec::new();
     write_bundle(&bundle, &mut bundle_bytes, ArchiveLimits::default()).unwrap();
     let program = ProgramExecutionRequest {
+        console: None,
         environment: runmat_execution::EnvironmentSnapshot::new(
             bundle.manifest.portable_environment.clone(),
         )
         .unwrap(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         recipe,
         artifact,
         function,

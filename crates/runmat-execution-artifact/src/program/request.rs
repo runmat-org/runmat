@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionInputs};
 use crate::{ArtifactError, ArtifactResult};
 
-pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V2: u16 = 2;
+pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V3: u16 = 3;
 pub const MAX_PROGRAM_EXECUTION_ARGUMENTS: usize = 4096;
 pub const MAX_PROGRAM_EXECUTION_RESULT_OBJECTS: usize = 65_539;
 
@@ -22,15 +22,18 @@ pub struct ProgramExecutionDescriptor {
     pub function: usize,
     pub requested_outputs: u16,
     pub environment: EnvironmentSnapshot,
+    #[serde(deserialize_with = "runmat_execution::console::deserialize_controls")]
+    pub console: Option<runmat_execution::console::ConsoleLimits>,
 }
 
 impl ProgramExecutionDescriptor {
     pub fn validate(&self) -> ArtifactResult<()> {
+        validate_console(self.console, self.artifact.form)?;
         self.environment
             .validate()
             .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
         self.artifact.validate_against(&self.recipe)?;
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V2
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V3
             || !entrypoint_matches(self.artifact.form, self.function, &self.recipe.entrypoint)
             || self.requested_outputs != self.recipe.outputs.requested_outputs
         {
@@ -63,6 +66,8 @@ pub struct ProgramExecutionRequest<
     pub arguments: V,
     pub requested_outputs: u16,
     pub environment: E,
+    #[serde(deserialize_with = "runmat_execution::console::deserialize_controls")]
+    pub console: Option<runmat_execution::console::ConsoleLimits>,
 }
 
 /// Original request fields borrowed for validation, identity and transport encoding.
@@ -82,7 +87,8 @@ impl ProgramExecutionRequest {
         descriptor.validate()?;
         inputs.validate()?;
         let request = Self {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+            console: descriptor.console,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
             recipe: descriptor.recipe,
             artifact: descriptor.artifact,
             function: descriptor.function,
@@ -104,6 +110,7 @@ impl<
 {
     pub fn as_borrowed(&self) -> BorrowedProgramExecutionRequest<'_> {
         ProgramExecutionRequest {
+            console: self.console,
             schema_version: self.schema_version,
             recipe: self.recipe.borrow(),
             artifact: self.artifact.borrow(),
@@ -115,6 +122,7 @@ impl<
     }
 
     pub fn validate(&self) -> ArtifactResult<()> {
+        validate_console(self.console, self.artifact.borrow().form)?;
         self.environment
             .borrow()
             .validate()
@@ -122,7 +130,7 @@ impl<
         let recipe = self.recipe.borrow();
         let artifact = self.artifact.borrow();
         let arguments = self.arguments.as_ref();
-        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V2 {
+        if self.schema_version != PROGRAM_EXECUTION_REQUEST_SCHEMA_V3 {
             return Err(ArtifactError::Invalid(
                 "unsupported program execution request schema".into(),
             ));
@@ -179,7 +187,7 @@ impl<
         let mut bytes = b"runmat-program-execution-request\0".to_vec();
         let mut encoder = Encoder::new(&mut bytes);
         encoder
-            .array(7)
+            .array(8)
             .and_then(|encoder| encoder.u16(self.schema_version))
             .and_then(|encoder| encoder.bytes(recipe_id.0.bytes()))
             .and_then(|encoder| encoder.bytes(self.artifact.borrow().id.0.bytes()))
@@ -203,8 +211,37 @@ impl<
                     .bytes(),
             )
             .map_err(encoding)?;
+        match self.console {
+            None => {
+                encoder.null().map_err(encoding)?;
+            }
+            Some(limits) => {
+                encoder
+                    .array(2)
+                    .and_then(|encoder| encoder.u32(limits.max_records))
+                    .and_then(|encoder| encoder.u64(limits.max_text_bytes))
+                    .map_err(encoding)?;
+            }
+        }
         Ok(Digest::sha256(bytes))
     }
+}
+
+fn validate_console(
+    console: Option<runmat_execution::console::ConsoleLimits>,
+    form: ExecutableForm,
+) -> ArtifactResult<()> {
+    if let Some(limits) = console {
+        limits
+            .validate_transport(64 * 1024 * 1024)
+            .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
+        if form != ExecutableForm::ExecutableUnitV4 {
+            return Err(ArtifactError::Invalid(
+                "console capture requires a session-capable complete executable unit".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn encoding(error: minicbor::encode::Error<std::convert::Infallible>) -> ArtifactError {
@@ -389,8 +426,9 @@ mod tests {
         )
         .unwrap();
         ProgramExecutionRequest {
+            console: None,
             environment: EnvironmentSnapshot::default(),
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
             recipe,
             artifact,
             function: 7,

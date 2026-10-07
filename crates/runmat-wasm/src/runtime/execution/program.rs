@@ -9,6 +9,11 @@ pub(crate) async fn execute(
     request: ProgramExecutionRequest,
     execution: Option<Rc<dyn RuntimeExecutionServices>>,
 ) -> ProgramExecutionResponse {
+    if request.console.is_some() {
+        return ProgramExecutionResponse::Failure {
+            message: "requested console capture requires an owning transport".into(),
+        };
+    }
     if request.artifact.form != ExecutableForm::ExecutableUnitV4 {
         return runmat_vm::execute_program_request(request).await;
     }
@@ -47,6 +52,7 @@ async fn invoke(
     )
     .map_err(|error| format!("failed to initialize portable browser session: {error}"))?;
     session.set_compat_mode(mode);
+    session.install_host_service(Rc::new(runmat_runtime::context::NonCapturingPortableHost));
     if let Some(execution) = execution {
         session.install_execution_services(execution);
     }

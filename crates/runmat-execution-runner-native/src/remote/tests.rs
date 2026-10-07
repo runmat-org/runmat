@@ -16,7 +16,7 @@ use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundle, ExecutionBundleBuilder, ProgramArtifact, ProgramBuildRecipe,
     ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionObject,
     ProgramExecutionObjectClosure, ProgramExecutionObjectLocation, ProgramExecutionOutputs,
-    ProgramExecutionRequest, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    ProgramExecutionRequest, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
 };
 use runmat_execution_transport_native::control::{
     CheckpointDisposition, DriverArtifactDownload, DriverArtifactKind, DriverAuthority,
@@ -450,8 +450,9 @@ async fn recovery_publication_commits_objects_then_catalog_then_checkpoint() {
     let artifact =
         ProgramArtifact::materialize(&recipe, ExecutableForm::AnalysisWorkload, vec![1]).unwrap();
     let request = ProgramExecutionRequest {
+        console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         recipe,
         artifact,
         function: 0,
@@ -882,18 +883,19 @@ async fn run_encrypted_remote_request_with_prior_sequence(
     let mut bundle_bytes = Vec::new();
     write_bundle(&bundle, &mut bundle_bytes, ArchiveLimits::default()).unwrap();
     let descriptor_contract = ProgramExecutionDescriptor {
+        console: None,
         environment: runmat_execution::EnvironmentSnapshot::new(
             bundle.manifest.portable_environment.clone(),
         )
         .unwrap(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         recipe,
         artifact,
         function: 0,
         requested_outputs: 1,
     };
     let inputs_contract = ProgramExecutionInputs {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         arguments: Vec::new(),
         objects: Vec::new(),
     };

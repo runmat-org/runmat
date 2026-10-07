@@ -112,3 +112,70 @@ fn portable_input_fails_explicitly_after_preserving_the_emitted_prefix() {
     assert_eq!(transcript.completion(), ConsoleCompletion::Interrupted);
     assert_eq!(transcript.records()[0].text.as_ref(), "before input");
 }
+
+#[test]
+fn original_capture_controls_bind_request_identity_and_cold_parts() {
+    let mut original = request("function y=outer(); y=7; end", None, 1);
+    let disabled = original.canonical_digest().unwrap();
+    original.console = Some(ConsoleLimits {
+        max_records: 20,
+        max_text_bytes: 100,
+    });
+    original.validate_for_portable_host().unwrap();
+    let digest = original.canonical_digest().unwrap();
+    assert_ne!(disabled, digest);
+    assert_eq!(digest, original.as_borrowed().canonical_digest().unwrap());
+    assert_eq!(
+        serde_json::to_vec(&original).unwrap(),
+        serde_json::to_vec(&original.as_borrowed()).unwrap()
+    );
+    let cold: ProgramExecutionRequest =
+        serde_json::from_slice(&serde_json::to_vec(&original).unwrap()).unwrap();
+    assert_eq!(cold.canonical_digest().unwrap(), digest);
+    let descriptor = runmat_execution_artifact::ProgramExecutionDescriptor {
+        schema_version: original.schema_version,
+        recipe: original.recipe.clone(),
+        artifact: original.artifact.clone(),
+        function: original.function,
+        requested_outputs: original.requested_outputs,
+        environment: original.environment.clone(),
+        console: original.console,
+    };
+    let rebuilt = ProgramExecutionRequest::from_parts(
+        descriptor,
+        runmat_execution_artifact::ProgramExecutionInputs {
+            schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+            objects: Vec::new(),
+            arguments: original.arguments.clone(),
+        },
+    )
+    .unwrap();
+    assert_eq!(rebuilt.canonical_digest().unwrap(), digest);
+    original.console.as_mut().unwrap().max_text_bytes += 1;
+    assert_ne!(original.canonical_digest().unwrap(), digest);
+}
+
+#[test]
+fn ordinary_executable_invocation_rejects_sealed_host_without_running_source() {
+    let original = request("function y=outer(); y=7; end", None, 1);
+    let envelope = original.artifact.executable_unit().unwrap().unwrap();
+    let unit = crate::ExecutableUnit::from_portable_envelope(&envelope).unwrap();
+    for native in [false, true] {
+        let (mut session, host) = session(native, 100);
+        host.finish(true).unwrap();
+        let result = block_on(session.invoke_executable(
+            &unit,
+            crate::ProcedureInvocation {
+                target: crate::ProcedureTarget::SemanticFunction(
+                    envelope.manifest.identity.entrypoint_function,
+                ),
+                arguments: Vec::new(),
+                requested_outputs: 1,
+            },
+            &control(native),
+        ));
+        assert!(result.is_err());
+        #[cfg(not(target_arch = "wasm32"))]
+        assert_eq!(session.generic_native_cache_counts().0, 0);
+    }
+}

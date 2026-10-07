@@ -23,7 +23,7 @@ use runmat_execution_artifact::{
     ArtifactAccess, ExecutableForm, LogicalObject, ObjectNamespace, ProgramArtifact,
     ProgramBuildRecipe, ProgramExecutionDescriptor, ProgramExecutionObject,
     ProgramExecutionRequest, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
 };
 use runmat_meshing_core::MeshingRequest;
 use runmat_meshing_execution::MeshingHostProgram;
@@ -234,8 +234,9 @@ pub struct DecodedExactStructuralStudyRoot {
 
 fn descriptor(request: &ProgramExecutionRequest) -> ProgramExecutionDescriptor {
     ProgramExecutionDescriptor {
+        console: request.console,
         environment: request.environment.clone(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         recipe: request.recipe.clone(),
         artifact: request.artifact.clone(),
         function: request.function,

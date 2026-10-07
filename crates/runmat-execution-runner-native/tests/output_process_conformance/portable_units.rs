@@ -5,7 +5,7 @@ use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
 use runmat_execution::{Digest, OutputContract, TaskId};
 use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest, ProgramTarget,
-    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
 };
 use runmat_execution_runner::{DriverSnapshot, TaskSubmission};
 use runmat_execution_runner_native::NativeProgramSession;
@@ -36,8 +36,9 @@ async fn request(text: &str, selected: Option<&str>, outputs: u16) -> ProgramExe
         expected_artifact_id: None,
     };
     ProgramExecutionRequest {
+        console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         function: envelope.manifest.identity.entrypoint_function.0 as usize,
         artifact: ProgramArtifact::materialize(
             &recipe,
@@ -65,6 +66,7 @@ async fn execute(
             request,
             TaskSubmission {
                 request: TaskRequest {
+                    console: None,
                     environment: original.environment.clone(),
                     id: task_id,
                     scope_id: session.scope_id(),
@@ -183,8 +185,9 @@ async fn transitive_request() -> ProgramExecutionRequest {
     )
     .unwrap();
     ProgramExecutionRequest {
+        console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         function: envelope.manifest.identity.entrypoint_function.0 as usize,
         arguments: vec![
             runmat_runtime::execution::value_codec::encode_inline_value(&Value::Num(5.0)).unwrap(),

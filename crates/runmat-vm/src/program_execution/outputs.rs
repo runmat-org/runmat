@@ -94,8 +94,9 @@ fn original_function_outputs_preserve_zero_one_and_multiple_ordinals() {
         )
         .unwrap();
         let request = ProgramExecutionRequest {
+            console: None,
             environment: runmat_execution::EnvironmentSnapshot::default(),
-            schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+            schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
             recipe,
             artifact,
             function: 7,

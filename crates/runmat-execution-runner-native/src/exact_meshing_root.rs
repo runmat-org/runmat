@@ -12,7 +12,7 @@ use runmat_execution_artifact::{
     ProgramBuildRecipe, ProgramExecutionRequest, ProgramExecutionResponse, ProgramTarget,
     MAX_PROGRAM_EXECUTION_ARGUMENTS, MAX_PROGRAM_EXECUTION_OBJECT_BYTES,
     MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
 };
 use runmat_geometry_core::{GeometryDocument, PersistentEntityId, PersistentEntityKind};
 use runmat_geometry_io::{ExactCadImportOptions, GeometryImportContext};
@@ -469,8 +469,9 @@ pub fn prepare_exact_meshing_root(
     )
     .map_err(protocol)?;
     let request = ProgramExecutionRequest {
+        console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         recipe,
         artifact,
         function: 0,

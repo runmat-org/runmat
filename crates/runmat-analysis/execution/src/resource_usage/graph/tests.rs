@@ -64,6 +64,7 @@ fn original(plan: &FeaResourcePlan, first: FirstAttempt) -> TaskExecutionEvidenc
         .unwrap();
     let submission = TaskSubmission {
         request: TaskRequest {
+            console: None,
             environment: runmat_execution::EnvironmentSnapshot::default(),
             id: TaskId::derive(&[b"usage-history"]),
             scope_id: scope,

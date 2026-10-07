@@ -30,8 +30,9 @@ async fn original_request() -> ProgramExecutionRequest {
         expected_artifact_id: None,
     };
     let request: ProgramExecutionRequest = ProgramExecutionRequest {
+        console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         function: envelope.manifest.identity.entrypoint_function.0 as usize,
         artifact: ProgramArtifact::materialize(
             &recipe,

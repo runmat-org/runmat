@@ -25,7 +25,7 @@ pub(crate) struct NativeProcessProvider<'a> {
     pub objects: &'a FilesystemObjectStore,
 }
 use crate::protocol::{
-    StoredProgram, WorkerRequest, WorkerResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    StoredProgram, WorkerRequest, WorkerResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
 };
 use runmat_execution_runner::{
     AttemptExecutionObservation, AttemptExecutionTermination, AttemptFailureKind, AttemptReport,
@@ -49,6 +49,7 @@ pub(crate) struct ObservedAttempt {
     pub response: Option<WorkerResponse>,
     pub execution: AttemptExecutionObservation,
     pub unsuccessful_resources: Option<Box<AttemptResourceAccounting>>,
+    pub console: Option<runmat_execution::console::ConsoleTranscript>,
 }
 
 pub(crate) async fn execute_attempt(
@@ -59,15 +60,28 @@ pub(crate) async fn execute_attempt(
 ) -> ObservedAttempt {
     let meters = TransportMeters::default();
     let mut termination = AttemptExecutionTermination::NotStarted;
+    let mut console = None;
     let response = if control.cancellation().load(Ordering::Acquire) {
         Err("execution was cancelled before process launch".into())
     } else {
         match prepare_program(provider, request) {
-            Ok(program) => run_process(provider, program, control, &meters, &mut termination).await,
+            Ok(program) => {
+                run_process(
+                    provider,
+                    program,
+                    control,
+                    &meters,
+                    &mut termination,
+                    &mut console,
+                )
+                .await
+            }
             Err(error) => Err(error),
         }
     };
-    observe(request, started, response, meters, termination)
+    let mut observed = observe(request, started, response, meters, termination);
+    observed.console = console;
+    observed
 }
 
 impl ObservedAttempt {
@@ -98,6 +112,7 @@ impl ObservedAttempt {
         let mut report = runmat_execution_runner::port::BackendReport::for_request(request, report);
         report.execution = Some(Box::new(self.execution));
         report.unsuccessful_resources = self.unsuccessful_resources;
+        report.console = self.console.map(Box::new);
         (self.result, report)
     }
 
@@ -160,6 +175,7 @@ fn observe(
             None
         };
     ObservedAttempt {
+        console: None,
         result,
         response: original_response,
         execution,
@@ -171,6 +187,15 @@ fn prepare_program(
     provider: &NativeProcessProvider<'_>,
     request: &AttemptRequest,
 ) -> Result<WorkerRequest, String> {
+    request
+        .task
+        .validate_invocation_reservation()
+        .map_err(|error| error.to_string())?;
+    if let Some(limits) = request.task.console {
+        limits
+            .validate_transport(u64::from(provider.config.max_message_bytes))
+            .map_err(|error| error.to_string())?;
+    }
     let stored = provider
         .artifacts
         .get(
@@ -181,8 +206,9 @@ fn prepare_program(
     let stored: StoredProgram =
         serde_json::from_slice(&stored).map_err(|error| error.to_string())?;
     let worker_request = WorkerRequest {
+        console: request.task.console,
         environment: request.task.environment.clone(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         recipe: stored.recipe,
         artifact: stored.artifact,
         function: stored.function,
@@ -198,6 +224,17 @@ fn prepare_program(
     {
         return Err("native stored program differs from original admitted artifact".into());
     }
+    let invocation = runmat_execution::console::invocation_memory_bytes(
+        &request.task.environment,
+        request.task.console,
+    )
+    .map_err(|error| error.to_string())?;
+    let minimum = invocation
+        .checked_add(runmat_process_host::ipc::WORKER_PARENT_MONITOR_STACK_BYTES)
+        .ok_or("native invocation storage overflow")?;
+    if minimum > request.task.resources.memory_bytes {
+        return Err("native invocation and parent monitor exceed task memory reservation".into());
+    }
     Ok(worker_request)
 }
 
@@ -207,6 +244,7 @@ async fn run_process(
     control: &dyn ProcessControl,
     meters: &TransportMeters,
     termination: &mut AttemptExecutionTermination,
+    console: &mut Option<runmat_execution::console::ConsoleTranscript>,
 ) -> Result<WorkerResponse, String> {
     if control.cancellation().load(Ordering::Acquire) {
         return Err("execution was cancelled before process launch".into());
@@ -234,7 +272,8 @@ async fn run_process(
     *termination = AttemptExecutionTermination::Unconfirmed;
     let mut child = command.spawn().await.map_err(|error| error.to_string())?;
     let stderr = child.captured_stderr();
-    let response = exchange::exchange(provider, &mut child, &request, control, meters).await;
+    let response =
+        exchange::exchange(provider, &mut child, &request, control, meters, console).await;
     let exit = if response.is_err() {
         stop_and_wait(&mut child).await
     } else {

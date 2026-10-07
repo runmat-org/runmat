@@ -118,8 +118,9 @@ pub fn prepare_exact_structural_study_root(
             .map(|object| ValuePayload::Object(Box::new(object.reference.clone()))),
     );
     let request = ProgramExecutionRequest {
+        console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         recipe,
         artifact,
         function: 0,

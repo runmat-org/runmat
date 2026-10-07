@@ -8,10 +8,81 @@ pub(crate) async fn execute_unit(
     environment: Option<&[(String, String)]>,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> ProgramExecutionResponse {
-    match invoke_unit(request, project, environment, cancellation).await {
+    if request.console.is_some() {
+        return ProgramExecutionResponse::Failure {
+            message: "requested console capture requires an owning transport".into(),
+        };
+    }
+    execute_unit_with_console(request, project, environment, cancellation, None)
+        .await
+        .0
+}
+
+pub(crate) async fn execute_unit_with_console(
+    request: &ProgramExecutionRequest,
+    project: Option<&runmat_package::FrozenProjectHandoff>,
+    environment: Option<&[(String, String)]>,
+    cancellation: Option<Arc<AtomicBool>>,
+    sink: Option<std::rc::Rc<dyn runmat_runtime::context::PortableConsoleSink>>,
+) -> (
+    ProgramExecutionResponse,
+    Option<runmat_execution::console::ConsoleReceipt>,
+) {
+    let host = match request
+        .console
+        .map(|limits| runmat_runtime::context::PortableConsoleHost::with_sink(limits, sink))
+        .transpose()
+    {
+        Ok(host) => host.map(std::rc::Rc::new),
+        Err(error) => {
+            return (
+                ProgramExecutionResponse::Failure {
+                    message: error.to_string(),
+                },
+                None,
+            )
+        }
+    };
+    let result = invoke_unit(
+        request,
+        project,
+        environment,
+        cancellation.clone(),
+        host.as_ref(),
+    )
+    .await;
+    let response = match result {
         Ok(outputs) => ProgramExecutionResponse::from_success_outputs(outputs, vec![]),
         Err(message) => ProgramExecutionResponse::Failure { message },
-    }
+    };
+    let completed = cancellation
+        .as_ref()
+        .is_none_or(|signal| !signal.load(std::sync::atomic::Ordering::Acquire));
+    let receipt = match host.map(|host| host.finish(completed)).transpose() {
+        Ok(transcript) => match transcript
+            .map(|transcript| transcript.receipt())
+            .transpose()
+        {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                return (
+                    ProgramExecutionResponse::Failure {
+                        message: error.to_string(),
+                    },
+                    None,
+                )
+            }
+        },
+        Err(error) => {
+            return (
+                ProgramExecutionResponse::Failure {
+                    message: error.to_string(),
+                },
+                None,
+            )
+        }
+    };
+    (response, receipt)
 }
 
 async fn invoke_unit(
@@ -19,8 +90,16 @@ async fn invoke_unit(
     project: Option<&runmat_package::FrozenProjectHandoff>,
     environment: Option<&[(String, String)]>,
     cancellation: Option<Arc<AtomicBool>>,
+    host: Option<&std::rc::Rc<runmat_runtime::context::PortableConsoleHost>>,
 ) -> Result<Vec<runmat_execution::value::ValuePayload>, String> {
     let mut session = prepare_session(request, project, environment)?;
+    if let Some(host) = host {
+        session.install_host_service(host.clone());
+    } else {
+        session.install_host_service(std::rc::Rc::new(
+            runmat_runtime::context::NonCapturingPortableHost,
+        ));
+    }
     let mut control = runmat_core::InvocationControl::default();
     if let Some(cancellation) = cancellation {
         control = control.with_cancellation(cancellation);

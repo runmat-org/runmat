@@ -12,10 +12,17 @@ use crate::{RunnerError, RunnerResult};
 use super::state::attempt_state_is_terminal;
 use super::{Driver, DriverAction, DriverEventKind};
 
+#[derive(Default)]
+pub(super) struct ProviderEvidence {
+    pub resources: Option<Box<crate::task::AttemptResourceAccounting>>,
+    pub execution: Option<Box<crate::task::AttemptExecutionObservation>>,
+    pub console: Option<Box<runmat_execution::console::ConsoleTranscript>>,
+}
+
 impl Driver {
     pub(super) fn apply_backend_report(
         &mut self,
-        report: BackendReport,
+        mut report: BackendReport,
         actions: &mut Vec<DriverAction>,
     ) -> RunnerResult<()> {
         if let Some(reason) = self.backend_report_rejection_reason(&report) {
@@ -25,10 +32,16 @@ impl Driver {
         let attempt = self.snapshot.attempts[&report.attempt_id].clone();
         let resources = report.unsuccessful_resources.clone();
         let execution = report.execution.clone();
+        let console = report.console.take();
         match report.report {
             AttemptReport::Started => self.start_attempt(&report)?,
             AttemptReport::Succeeded { result } => {
-                if result.validate_against(&attempt.request).is_err()
+                if (attempt.request.task.console.is_some()
+                    && console.as_ref().is_none_or(|console| {
+                        console.completion()
+                            != runmat_execution::console::ConsoleCompletion::Complete
+                    }))
+                    || result.validate_against(&attempt.request).is_err()
                     || execution.as_ref().is_some_and(|execution| {
                         !matches!(
                             execution.termination,
@@ -44,8 +57,11 @@ impl Driver {
                     self.fail_attempt(
                         &attempt,
                         AttemptFailureKind::Rejected,
-                        None,
-                        execution,
+                        ProviderEvidence {
+                            resources: None,
+                            execution,
+                            console,
+                        },
                         Some(
                             "worker success contradicts admitted accounting or execution evidence"
                                 .into(),
@@ -57,8 +73,11 @@ impl Driver {
                 self.finish_attempt(
                     &attempt,
                     AttemptDisposition::Succeeded,
-                    result.resources.clone(),
-                    execution,
+                    ProviderEvidence {
+                        resources: result.resources.clone(),
+                        execution,
+                        console,
+                    },
                     None,
                 )?;
                 let decision = self.commit_result(&attempt, result)?;
@@ -82,14 +101,26 @@ impl Driver {
                 }
             }
             AttemptReport::Failed { kind, message } => {
-                self.fail_attempt(&attempt, kind, resources, execution, Some(message))?;
+                self.fail_attempt(
+                    &attempt,
+                    kind,
+                    ProviderEvidence {
+                        resources,
+                        execution,
+                        console,
+                    },
+                    Some(message),
+                )?;
             }
             AttemptReport::Lost { message } => {
                 self.finish_attempt(
                     &attempt,
                     AttemptDisposition::Lost,
-                    resources,
-                    execution,
+                    ProviderEvidence {
+                        resources,
+                        execution,
+                        console,
+                    },
                     Some(message),
                 )?;
                 self.emit(DriverEventKind::AttemptLost {
@@ -102,8 +133,11 @@ impl Driver {
                 self.finish_attempt(
                     &attempt,
                     AttemptDisposition::Cancelled,
-                    resources,
-                    execution,
+                    ProviderEvidence {
+                        resources,
+                        execution,
+                        console,
+                    },
                     None,
                 )?;
                 self.emit(DriverEventKind::AttemptCancelled {
@@ -151,6 +185,14 @@ impl Driver {
         if attempt_state_is_terminal(attempt.state) {
             return Some("attempt is already terminal");
         }
+        if let Some(console) = &report.console {
+            if matches!(report.report, AttemptReport::Started)
+                || console.validate().is_err()
+                || Some(console.limits()) != attempt.request.task.console
+            {
+                return Some("invalid original console evidence");
+            }
+        }
         if let Some(execution) = &report.execution {
             if matches!(report.report, AttemptReport::Started)
                 || execution.validate_against(&attempt.request).is_err()
@@ -194,8 +236,7 @@ impl Driver {
         &mut self,
         attempt: &AttemptRecord,
         kind: AttemptFailureKind,
-        resources: Option<Box<crate::task::AttemptResourceAccounting>>,
-        execution: Option<Box<crate::task::AttemptExecutionObservation>>,
+        evidence: ProviderEvidence,
         diagnostic: Option<String>,
     ) -> RunnerResult<()> {
         let task_id = attempt.request.task_id;
@@ -203,8 +244,7 @@ impl Driver {
         self.finish_attempt(
             attempt,
             AttemptDisposition::Failed { kind },
-            resources,
-            execution,
+            evidence,
             diagnostic,
         )?;
         self.emit(DriverEventKind::AttemptFailed {
@@ -224,15 +264,15 @@ impl Driver {
         &mut self,
         attempt: &AttemptRecord,
         disposition: AttemptDisposition,
-        resources: Option<Box<crate::task::AttemptResourceAccounting>>,
-        execution: Option<Box<crate::task::AttemptExecutionObservation>>,
+        evidence: ProviderEvidence,
         diagnostic: Option<String>,
     ) -> RunnerResult<()> {
         let terminal = AttemptTerminal {
             disposition,
             closed_at_driver_millis: self.snapshot.now_millis,
-            resources,
-            execution,
+            resources: evidence.resources,
+            execution: evidence.execution,
+            console: evidence.console,
             diagnostic,
         };
         terminal

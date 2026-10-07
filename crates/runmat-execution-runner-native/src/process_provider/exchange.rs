@@ -14,6 +14,7 @@ pub(super) async fn exchange(
     request: &WorkerRequest,
     control: &dyn ProcessControl,
     meters: &TransportMeters,
+    console: &mut Option<runmat_execution::console::ConsoleTranscript>,
 ) -> Result<WorkerResponse, String> {
     let stdio = child.take_stdio().map_err(|error| error.to_string())?;
     let mut reader = BufReader::new(MeteredIo::new(stdio.stdout, meters.received.clone()));
@@ -25,9 +26,46 @@ pub(super) async fn exchange(
     write_payload(&mut writer, &payload, limits)
         .await
         .map_err(|error| error.to_string())?;
+    let mut receiver = request
+        .console
+        .map(runmat_execution::console::ConsoleReceiver::new)
+        .transpose()
+        .map_err(|error| error.to_string())?;
+    let mut receipt = None;
+    let response = read_response(
+        &mut reader,
+        limits,
+        request,
+        control,
+        &mut receiver,
+        &mut receipt,
+    )
+    .await;
+    *console = receiver
+        .map(|receiver| receiver.finish(receipt.as_ref()))
+        .transpose()
+        .map_err(|error| error.to_string())?;
+    let response = response?;
+    // Keep the request pipe open until a terminal frame is received. EOF before
+    // then is parent death to domain workers, and would cancel healthy execution.
+    drop(writer);
+    response
+        .validate_against(request)
+        .map_err(|error| error.to_string())?;
+    Ok(response)
+}
+
+async fn read_response(
+    reader: &mut (impl tokio::io::AsyncRead + Unpin),
+    limits: FrameLimits,
+    request: &WorkerRequest,
+    control: &dyn ProcessControl,
+    receiver: &mut Option<runmat_execution::console::ConsoleReceiver>,
+    receipt: &mut Option<runmat_execution::console::ConsoleReceipt>,
+) -> Result<WorkerResponse, String> {
     let mut last_progress_sequence = 0;
-    let response = loop {
-        let payload = read_payload_until_cancelled(&mut reader, limits, control.cancellation())
+    loop {
+        let payload = read_payload_until_cancelled(reader, limits, control.cancellation())
             .await
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "execution was cancelled".to_string())?;
@@ -42,16 +80,31 @@ pub(super) async fn exchange(
                 last_progress_sequence = progress.sequence;
                 control.record_progress(progress);
             }
-            WorkerProcessMessage::Completed { response } => break response,
+            WorkerProcessMessage::Console { record } => {
+                receiver
+                    .as_mut()
+                    .ok_or("worker emitted unrequested console evidence")?
+                    .push(record)
+                    .map_err(|error| error.to_string())?;
+            }
+            WorkerProcessMessage::Completed { response, console } => {
+                match (receiver.as_ref(), console.as_ref()) {
+                    (Some(receiver), Some(console)) => receiver
+                        .verify_receipt(console)
+                        .map_err(|error| error.to_string())?,
+                    (None, None) => {}
+                    _ => {
+                        return Err("worker console receipt differs from requested controls".into())
+                    }
+                }
+                response
+                    .validate_against(request)
+                    .map_err(|error| error.to_string())?;
+                *receipt = console;
+                return Ok(response);
+            }
         }
-    };
-    // Keep the request pipe open until a terminal frame is received. EOF before
-    // then is parent death to domain workers, and would cancel healthy execution.
-    drop(writer);
-    response
-        .validate_against(request)
-        .map_err(|error| error.to_string())?;
-    Ok(response)
+    }
 }
 
 pub(crate) async fn read_payload_until_cancelled(

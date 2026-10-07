@@ -187,6 +187,11 @@ fn create_async_future_value(
         .runtime
         .execution()
         .create_future(runmat_runtime::execution::DeferredCall {
+            console: context
+                .runtime
+                .service_ports()
+                .host()
+                .and_then(|host| host.console_limits()),
             environment: runmat_runtime::execution::capture_deferred_environment(&context.runtime)?,
             function: function.0,
             arguments,

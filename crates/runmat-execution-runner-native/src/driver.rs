@@ -109,11 +109,11 @@ impl LocalDriver {
         program
             .validate_for_portable_host()
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
-        let context_bytes = program
-            .environment
-            .storage_profile()
-            .and_then(|profile| profile.minimum_memory_bytes())
-            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+        let context_bytes = runmat_execution::console::invocation_memory_bytes(
+            &program.environment,
+            program.console,
+        )
+        .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         let memory_bytes = (1024_u64 * 1024)
             .checked_add(context_bytes)
             .ok_or_else(|| {
@@ -128,6 +128,7 @@ impl LocalDriver {
         let artifact = program.artifact;
         let artifact_id = ArtifactId::derive(&[artifact.id.0.bytes()]);
         let request = TaskRequest {
+            console: program.console,
             environment: program.environment,
             id: task_id,
             scope_id: self.scope_id,

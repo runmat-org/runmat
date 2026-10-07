@@ -17,7 +17,7 @@ use runmat_execution_artifact::encryption::{
 use runmat_execution_artifact::{
     ExecutableForm, ExecutionBundleBuilder, ProgramBuildRecipe, ProgramExecutionDescriptor,
     ProgramExecutionInputs, ProgramExecutionObject, ProgramExecutionObjectLocation,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
 };
 use runmat_server_client::execution::{endpoint_evidence, public_error, ExecutionArtifactUpload};
 use runmat_server_client::public_api::types;
@@ -153,14 +153,15 @@ pub async fn submit(
         .context("compiled bundle has no program artifact")?;
     let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        console: None,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         recipe,
         artifact,
         function: executable_function,
         requested_outputs,
     })?;
     let inputs = ProgramExecutionInputs {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V2,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         arguments: args
             .into_iter()
             .map(|value| ValuePayload::Inline(Box::new(InlineValue::String(value))))
