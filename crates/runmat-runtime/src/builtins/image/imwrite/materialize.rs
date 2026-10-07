@@ -123,7 +123,7 @@ pub(super) fn ensure_documented_alpha_class(alpha: &Tensor) -> BuiltinResult<()>
 }
 
 pub(super) fn image_dimensions(tensor: &Tensor) -> BuiltinResult<(usize, usize, usize)> {
-    image_dimensions_from_shape(&tensor.shape)
+    image_dimensions_from_shape(tensor.shape())
 }
 
 pub(super) fn image_dimensions_from_shape(shape: &[usize]) -> BuiltinResult<(usize, usize, usize)> {
@@ -205,7 +205,8 @@ async fn materialize_indexed_image(
             "indexed image X must be a 2-D array",
         ));
     }
-    if map.shape.len() != 2 || map.shape[1] != 3 || map.shape[0] == 0 {
+    let map_shape = map.shape();
+    if map_shape.len() != 2 || map_shape[1] != 3 || map_shape[0] == 0 {
         return Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_COLORMAP,
             "map must be an Nx3 colormap",
@@ -213,7 +214,7 @@ async fn materialize_indexed_image(
     }
     let pixels = geometry::pixels(rows, cols)?;
     let byte_len = geometry::samples(rows, cols, 3)?;
-    let map_len = geometry::samples(map.shape[0], 1, 3)?;
+    let map_len = geometry::samples(map_shape[0], 1, 3)?;
     if indexed.len() != pixels || map.len() != map_len {
         return Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_IMAGE,
@@ -243,11 +244,11 @@ async fn materialize_indexed_image(
             let pixel = row + rows * col;
             let map_idx = map_index(
                 tensor_numeric_value(indexed, pixel, "indexed image")?,
-                map.shape[0],
+                map_shape[0],
             )?;
             let dst = (row * cols + col) * 3;
             for channel in 0..3 {
-                let src = map_idx + map.shape[0] * channel;
+                let src = map_idx + map_shape[0] * channel;
                 data[dst + channel] = value_to_u8(tensor_numeric_value(map, src, "colormap")?);
             }
             pending += 3;
@@ -292,7 +293,8 @@ async fn apply_alpha(
     alpha: &Tensor,
     cooperation: &mut ImageCooperation,
 ) -> BuiltinResult<()> {
-    if alpha.shape.len() != 2 || alpha.shape[0] != image.rows || alpha.shape[1] != image.cols {
+    let alpha_shape = alpha.shape();
+    if alpha_shape.len() != 2 || alpha_shape[0] != image.rows || alpha_shape[1] != image.cols {
         return Err(imwrite_error_with_detail(
             &IMWRITE_ERROR_INVALID_OPTION,
             "Alpha must be an MxN array matching the image dimensions",

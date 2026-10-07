@@ -6,6 +6,22 @@ use std::cell::Cell;
 use std::num::NonZeroU64;
 use std::rc::Rc;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn materialization_preserves_rank_zero_and_rank_one_image_geometry() {
+    let scalar = Tensor::new(vec![0.5], Vec::new()).expect("rank-zero image");
+    let mut cooperation = ImageCooperation::new(None, "imwrite");
+    let scalar = futures::executor::block_on(materialize_direct_image(&scalar, &mut cooperation))
+        .expect("rank-zero image is one grayscale pixel");
+    assert_eq!((scalar.rows, scalar.cols, scalar.channels), (1, 1, 1));
+
+    let row = Tensor::new(vec![0.0, 0.5, 1.0], vec![3]).expect("rank-one image");
+    let mut cooperation = ImageCooperation::new(None, "imwrite");
+    let row = futures::executor::block_on(materialize_direct_image(&row, &mut cooperation))
+        .expect("rank-one image is one grayscale row");
+    assert_eq!((row.rows, row.cols, row.channels), (1, 3, 1));
+}
+
 #[test]
 fn host_pixel_conversion_yields_and_cancellation_discards_partial_output() {
     let source = CancellationSource::new();

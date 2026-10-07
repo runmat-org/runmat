@@ -4,9 +4,9 @@ use super::{tensor, RuntimeError, Value};
 
 pub fn value_shape_2d(value: &Value) -> (usize, usize) {
     match value {
-        Value::Tensor(t) => (t.rows, t.cols),
+        Value::Tensor(t) => dense_matrix_dimensions(t.shape()),
         Value::SparseTensor(t) => (t.rows, t.cols),
-        Value::ComplexTensor(t) => (t.rows, t.cols),
+        Value::ComplexTensor(t) => (t.rows(), t.cols()),
         Value::SymbolicArray(array) => (array.rows, array.cols),
         Value::ObjectArray(array) => (
             array.shape().first().copied().unwrap_or(1),
@@ -33,6 +33,14 @@ pub fn value_shape_2d(value: &Value) -> (usize, usize) {
     }
 }
 
+fn dense_matrix_dimensions(shape: &[usize]) -> (usize, usize) {
+    match shape {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
+}
+
 pub fn value_is_empty(value: &Value) -> bool {
     match value {
         Value::Tensor(t) => t.is_empty(),
@@ -52,8 +60,8 @@ pub fn value_is_empty(value: &Value) -> bool {
 
 pub fn value_is_scalar_or_empty(value: &Value) -> bool {
     let shape: &[usize] = match value {
-        Value::Tensor(value) => &value.shape,
-        Value::ComplexTensor(value) => &value.shape,
+        Value::Tensor(value) => value.shape(),
+        Value::ComplexTensor(value) => value.shape(),
         Value::LogicalArray(value) => &value.shape,
         Value::StringArray(value) => &value.shape,
         Value::Cell(value) => &value.shape,
@@ -72,8 +80,8 @@ pub fn value_is_scalar_or_empty(value: &Value) -> bool {
 
 pub fn value_is_column(value: &Value) -> bool {
     let shape: &[usize] = match value {
-        Value::Tensor(value) => &value.shape,
-        Value::ComplexTensor(value) => &value.shape,
+        Value::Tensor(value) => value.shape(),
+        Value::ComplexTensor(value) => value.shape(),
         Value::LogicalArray(value) => &value.shape,
         Value::StringArray(value) => &value.shape,
         Value::Cell(value) => &value.shape,
@@ -101,8 +109,8 @@ pub fn value_is_vector(value: &Value) -> Result<bool, RuntimeError> {
     }
 
     Ok(match value {
-        Value::Tensor(value) => shape_is_vector(&value.shape),
-        Value::ComplexTensor(value) => shape_is_vector(&value.shape),
+        Value::Tensor(value) => shape_is_vector(value.shape()),
+        Value::ComplexTensor(value) => shape_is_vector(value.shape()),
         Value::LogicalArray(value) => shape_is_vector(&value.shape),
         Value::StringArray(value) => shape_is_vector(&value.shape),
         Value::Cell(value) => shape_is_vector(&value.shape),

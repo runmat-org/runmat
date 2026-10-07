@@ -1,5 +1,21 @@
 use super::*;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn dense_rank_boundaries_preserve_validation_shape_contracts() {
+    let scalar = Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap());
+    assert_eq!(value_shape_2d(&scalar), (0, 0));
+    assert!(value_is_scalar_or_empty(&scalar));
+    assert!(value_is_column(&scalar));
+    assert!(value_is_vector(&scalar).unwrap());
+
+    let row = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap());
+    assert_eq!(value_shape_2d(&row), (1, 3));
+    assert!(!value_is_scalar_or_empty(&row));
+    assert!(value_is_column(&row));
+    assert!(value_is_vector(&row).unwrap());
+}
+
 #[test]
 fn underlying_type_uses_allocation_class_not_owner_preference() {
     use runmat_accelerate_api::{GpuTensorStorage, HostNumericDataView, HostNumericTensorView};
