@@ -8,7 +8,7 @@ fn matrix_square_power() {
         mpower_builtin(Value::Tensor(matrix), Value::Int(IntValue::I32(2))).expect("mpower");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), [2, 2]);
             assert_eq!(t.materialize_f64(), vec![7.0, 10.0, 15.0, 22.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),

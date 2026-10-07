@@ -10,7 +10,7 @@ fn solves_square_system() {
     let result =
         mldivide_builtin(Value::Tensor(a.clone()), Value::Tensor(b.clone())).expect("mldivide");
     let gathered = test_support::gather(result).expect("gather");
-    assert_eq!(gathered.shape, vec![2, 1]);
+    assert_eq!(gathered.shape(), [2, 1]);
 
     let mat_a = DMatrix::from_column_slice(a.rows(), a.cols(), &a.materialize_f64());
     let mat_x = DMatrix::from_column_slice(
@@ -33,7 +33,7 @@ fn solves_least_squares() {
     let result =
         mldivide_builtin(Value::Tensor(a.clone()), Value::Tensor(b.clone())).expect("mldivide");
     let gathered = test_support::gather(result).expect("gather");
-    assert_eq!(gathered.shape, vec![2, 1]);
+    assert_eq!(gathered.shape(), [2, 1]);
 
     let mat_a = DMatrix::from_column_slice(a.rows(), a.cols(), &a.materialize_f64());
     let mat_x = DMatrix::from_column_slice(
@@ -78,9 +78,9 @@ fn supports_complex_inputs() {
                 .map(|&(re, im)| Complex64::new(re, im))
                 .collect();
 
-            let a_mat = DMatrix::from_column_slice(a.rows, a.cols, &mat_a);
-            let b_mat = DMatrix::from_column_slice(b.rows, b.cols, &mat_b);
-            let x_mat = DMatrix::from_column_slice(out.rows, out.cols, &mat_x);
+            let a_mat = DMatrix::from_column_slice(a.rows(), a.cols(), &mat_a);
+            let b_mat = DMatrix::from_column_slice(b.rows(), b.cols(), &mat_b);
+            let x_mat = DMatrix::from_column_slice(out.rows(), out.cols(), &mat_x);
             let residual = &a_mat * &x_mat - b_mat;
             assert!(residual.norm() < 1e-6, "residual = {}", residual);
         }

@@ -8,11 +8,11 @@ fn mtimes_gpu_roundtrip() {
         let b = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
         let view_a = runmat_accelerate_api::HostTensorView {
             data: &a.materialize_f64(),
-            shape: &a.shape,
+            shape: a.shape(),
         };
         let view_b = runmat_accelerate_api::HostTensorView {
             data: &b.materialize_f64(),
-            shape: &b.shape,
+            shape: b.shape(),
         };
         let ha = provider.upload(&view_a).expect("upload A");
         let hb = provider.upload(&view_b).expect("upload B");
@@ -26,7 +26,7 @@ fn mtimes_gpu_roundtrip() {
         };
         let output_lease = output.allocation_lease().downgrade();
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 2]);
+        assert_eq!(gathered.shape(), [2, 2]);
         assert_eq!(gathered.materialize_f64(), vec![26.0, 38.0, 30.0, 44.0]);
         assert!(inputs.iter().all(|lease| lease.acquire().is_none()));
         assert!(output_lease.acquire().is_none());
@@ -75,11 +75,11 @@ async fn check_mtimes_wgpu_matches_cpu(
 
     let view_a = runmat_accelerate_api::HostTensorView {
         data: &a.materialize_f64(),
-        shape: &a.shape,
+        shape: a.shape(),
     };
     let view_b = runmat_accelerate_api::HostTensorView {
         data: &b.materialize_f64(),
-        shape: &b.shape,
+        shape: b.shape(),
     };
     let ha = provider
         .upload(&view_a)
@@ -106,7 +106,7 @@ async fn check_mtimes_wgpu_matches_cpu(
         .expect("gather gpu");
     drop(output);
 
-    assert_eq!(gathered.shape, expected.shape);
+    assert_eq!(gathered.shape(), expected.shape());
     assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     assert!(inputs.iter().all(|lease| lease.acquire().is_none()));
     assert!(output_lease.acquire().is_none());

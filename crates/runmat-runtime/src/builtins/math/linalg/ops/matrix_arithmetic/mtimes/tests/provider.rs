@@ -7,7 +7,7 @@ fn gpu_scalar_matrix_product() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &matrix.materialize_f64(),
-            shape: &matrix.shape,
+            shape: matrix.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result =
@@ -16,7 +16,7 @@ fn gpu_scalar_matrix_product() {
             Value::GpuTensor(out) => test_support::gather(Value::GpuTensor(out)).expect("gather"),
             other => panic!("expected gpu tensor, got {other:?}"),
         };
-        assert_eq!(gathered.shape, vec![2, 2]);
+        assert_eq!(gathered.shape(), [2, 2]);
         assert_eq!(gathered.materialize_f64(), vec![2.0, 4.0, 6.0, 8.0]);
     });
 }
@@ -27,7 +27,7 @@ fn gpu_nonscalar_floating_partner_rejects_typed_integer_scalar() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &matrix.materialize_f64(),
-            shape: &matrix.shape,
+            shape: matrix.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let scalar = Tensor::new_integer(IntegerStorage::U8(vec![3]), vec![1, 1]).expect("scalar");

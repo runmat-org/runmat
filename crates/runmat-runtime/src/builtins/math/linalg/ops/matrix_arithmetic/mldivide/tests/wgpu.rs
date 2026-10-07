@@ -26,11 +26,11 @@ fn wgpu_tall_path_avoids_host_reupload_fallback() {
 
     let view_a = HostTensorView {
         data: &a.materialize_f64(),
-        shape: &a.shape,
+        shape: a.shape(),
     };
     let view_b = HostTensorView {
         data: &b.materialize_f64(),
-        shape: &b.shape,
+        shape: b.shape(),
     };
     let ha = provider.upload(&view_a).expect("upload A");
     let hb = provider.upload(&view_b).expect("upload B");
@@ -40,7 +40,7 @@ fn wgpu_tall_path_avoids_host_reupload_fallback() {
     ha.release().expect("release caller A");
     hb.release().expect("release caller B");
 
-    assert_eq!(gathered.shape, cpu_tensor.shape);
+    assert_eq!(gathered.shape(), cpu_tensor.shape());
     for (gpu, cpu) in gathered
         .materialize_f64()
         .iter()
@@ -80,11 +80,11 @@ fn wgpu_square_path_avoids_host_reupload_fallback() {
 
     let view_a = HostTensorView {
         data: &a.materialize_f64(),
-        shape: &a.shape,
+        shape: a.shape(),
     };
     let view_b = HostTensorView {
         data: &b.materialize_f64(),
-        shape: &b.shape,
+        shape: b.shape(),
     };
     let ha = provider.upload(&view_a).expect("upload A");
     let hb = provider.upload(&view_b).expect("upload B");
@@ -94,7 +94,7 @@ fn wgpu_square_path_avoids_host_reupload_fallback() {
     ha.release().expect("release caller A");
     hb.release().expect("release caller B");
 
-    assert_eq!(gathered.shape, cpu_tensor.shape);
+    assert_eq!(gathered.shape(), cpu_tensor.shape());
     for (gpu, cpu) in gathered
         .materialize_f64()
         .iter()
@@ -133,11 +133,11 @@ fn wgpu_round_trip_matches_cpu() {
 
     let view_a = HostTensorView {
         data: &a.materialize_f64(),
-        shape: &a.shape,
+        shape: a.shape(),
     };
     let view_b = HostTensorView {
         data: &b.materialize_f64(),
-        shape: &b.shape,
+        shape: b.shape(),
     };
     let ha = provider.upload(&view_a).expect("upload A");
     let hb = provider.upload(&view_b).expect("upload B");
@@ -147,7 +147,7 @@ fn wgpu_round_trip_matches_cpu() {
     ha.release().expect("release caller A");
     hb.release().expect("release caller B");
 
-    assert_eq!(gathered.shape, cpu_tensor.shape);
+    assert_eq!(gathered.shape(), cpu_tensor.shape());
     for (gpu, cpu) in gathered
         .materialize_f64()
         .iter()

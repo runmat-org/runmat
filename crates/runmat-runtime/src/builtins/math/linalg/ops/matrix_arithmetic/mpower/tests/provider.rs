@@ -9,7 +9,7 @@ fn gpu_matrix_power_roundtrip() {
         let result = mpower_builtin(Value::GpuTensor(handle), Value::Int(IntValue::I32(3)))
             .expect("gpu mpower");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![2, 2]);
+        assert_eq!(gathered.shape(), [2, 2]);
         assert_eq!(gathered.materialize_f64(), vec![37.0, 54.0, 81.0, 118.0]);
     });
 }

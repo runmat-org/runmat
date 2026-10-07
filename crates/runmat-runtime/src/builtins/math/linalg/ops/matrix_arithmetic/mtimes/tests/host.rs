@@ -8,7 +8,7 @@ fn matrix_product_matches_expected() {
     let result = mtimes_builtin(Value::Tensor(a), Value::Tensor(b)).expect("mtimes");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), [2, 2]);
             assert_eq!(t.materialize_f64(), vec![58.0, 139.0, 64.0, 154.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -83,7 +83,7 @@ fn logical_matrix_product() {
         mtimes_builtin(Value::LogicalArray(logical), Value::Tensor(matrix)).expect("mtimes");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), [2, 2]);
             assert_eq!(t.materialize_f64(), vec![2.0, 3.0, 4.0, 5.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -102,7 +102,7 @@ fn complex_tensor_product() {
     let result = mtimes_builtin(Value::ComplexTensor(ct.clone()), scalar).expect("mtimes");
     match result {
         Value::ComplexTensor(t) => {
-            assert_eq!(t.shape, ct.shape);
+            assert_eq!(t.shape(), ct.shape());
             assert_eq!(
                 t.materialize_f64(),
                 vec![(3.0, 1.0), (-1.0, -7.0), (11.0, 1.0), (-1.0, -15.0)]

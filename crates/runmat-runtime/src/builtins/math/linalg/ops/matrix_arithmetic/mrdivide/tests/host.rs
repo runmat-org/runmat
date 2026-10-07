@@ -10,7 +10,7 @@ fn solves_square_system() {
     let result = mrdivide_builtin(Value::Tensor(a), Value::Tensor(b)).expect("mrdivide");
     let gathered = test_support::gather(result).expect("gather");
     let expected = vec![3.0, 2.0, -2.0, -1.0];
-    assert_eq!(gathered.shape, vec![2, 2]);
+    assert_eq!(gathered.shape(), [2, 2]);
     for (val, exp) in gathered.materialize_f64().iter().zip(expected.into_iter()) {
         assert!((val - exp).abs() < 1e-12);
     }
@@ -27,7 +27,7 @@ fn solves_least_squares() {
         mrdivide_builtin(Value::Tensor(a.clone()), Value::Tensor(b.clone())).expect("mrdivide");
     let gathered = test_support::gather(result).expect("gather");
     let expected = host_mrdivide_real(&a, &b);
-    assert_eq!(gathered.shape, expected.shape);
+    assert_eq!(gathered.shape(), expected.shape());
     for (actual, expected) in gathered
         .materialize_f64()
         .iter()

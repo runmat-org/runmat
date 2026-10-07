@@ -13,11 +13,11 @@ fn gpu_round_trip_matches_cpu() {
 
         let view_a = HostTensorView {
             data: &a.materialize_f64(),
-            shape: &a.shape,
+            shape: a.shape(),
         };
         let view_b = HostTensorView {
             data: &b.materialize_f64(),
-            shape: &b.shape,
+            shape: b.shape(),
         };
         let ha = provider
             .upload(&view_a)
@@ -35,7 +35,7 @@ fn gpu_round_trip_matches_cpu() {
         ha.release().expect("release caller A");
         hb.release().expect("release caller B");
 
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         assert_eq!(gathered.len(), cpu_tensor.len());
         for (gpu, cpu) in gathered
             .materialize_f64()
@@ -56,13 +56,13 @@ fn provider_telemetry_records_gpu_host_reupload_path() {
         let ha = provider
             .upload(&HostTensorView {
                 data: &a.materialize_f64(),
-                shape: &a.shape,
+                shape: a.shape(),
             })
             .expect("upload A");
         let hb = provider
             .upload(&HostTensorView {
                 data: &b.materialize_f64(),
-                shape: &b.shape,
+                shape: b.shape(),
             })
             .expect("upload B");
 
@@ -89,13 +89,13 @@ fn scalar_gpu_rhs_falls_back_without_provider_solve_dispatch() {
         let hm = provider
             .upload(&HostTensorView {
                 data: &matrix.materialize_f64(),
-                shape: &matrix.shape,
+                shape: matrix.shape(),
             })
             .expect("upload matrix");
         let hs = provider
             .upload(&HostTensorView {
                 data: &scalar.materialize_f64(),
-                shape: &scalar.shape,
+                shape: scalar.shape(),
             })
             .expect("upload scalar");
 

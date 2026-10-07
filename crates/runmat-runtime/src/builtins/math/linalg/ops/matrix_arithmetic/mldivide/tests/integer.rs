@@ -111,7 +111,7 @@ fn complex_single_scalar_left_division_preserves_single_storage() {
         panic!("expected complex tensor")
     };
     assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::F32);
-    assert_eq!(result.shape, vec![2, 1]);
+    assert_eq!(result.shape(), [2, 1]);
 }
 
 #[test]
@@ -197,7 +197,7 @@ fn mldivide_complex_scalar_promotion_reads_typed_integer_storage_exactly() {
     let Value::ComplexTensor(out) = result else {
         panic!("expected complex tensor result");
     };
-    assert_eq!(out.shape, vec![2, 1]);
+    assert_eq!(out.shape(), [2, 1]);
     assert!((out.materialize_f64()[0].0 - 3.0).abs() < 1e-12);
     assert!((out.materialize_f64()[0].1 - 2.0).abs() < 1e-12);
     assert!((out.materialize_f64()[1].0 - 1.0).abs() < 1e-12);
