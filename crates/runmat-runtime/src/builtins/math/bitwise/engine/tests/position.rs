@@ -240,7 +240,7 @@ fn bitset_accepts_same_size_inputs_and_scalar_values() {
     .expect("bitset") else {
         panic!("expected tensor result");
     };
-    assert_eq!(output.shape, vec![1, 2]);
+    assert_eq!(output.shape(), &[1, 2]);
     assert_eq!(
         output.integer_storage(),
         Some(&IntegerStorage::U16(vec![1, 0]))

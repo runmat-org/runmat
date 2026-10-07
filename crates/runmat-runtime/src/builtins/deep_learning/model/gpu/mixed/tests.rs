@@ -188,13 +188,14 @@ fn host_origin_uses_the_same_pure_physical_stage_lowering() {
         .expect("admitted parameters have a physical route");
     assert_eq!(route.analyze().unwrap().output_bytes, 16);
 
-    assert!(matches!(
-        route.input,
-        DeepLearningForwardSource::Host {
-            element_type: NumericElementType::F32,
-            ..
-        }
-    ));
+    let DeepLearningForwardSource::Host {
+        element_type: NumericElementType::F32,
+        shape,
+    } = route.input
+    else {
+        panic!("admitted host input must stay a physical host source")
+    };
+    assert_eq!(shape, vec![2, 2]);
 }
 
 fn replace_normalization_parameter(

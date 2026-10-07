@@ -4,6 +4,35 @@ use runmat_value::{
     Value,
 };
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn low_rank_numeric_inputs_preserve_cell_geometry_and_native_values() {
+    let scalar = Tensor::from_f32(vec![1.25], Vec::new()).unwrap();
+    let Value::Cell(scalar) = run(Value::Tensor(scalar), Vec::new()) else {
+        panic!("scalar cell expected")
+    };
+    assert!(scalar.shape.is_empty());
+    let Value::Tensor(value) = &scalar.data[0] else {
+        panic!("single scalar retains native storage")
+    };
+    assert_eq!(value.shape(), &[1, 1]);
+    assert_eq!(value.as_f32_slice(), Some(&[1.25][..]));
+
+    let vector =
+        Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1 << 63]), vec![2]).unwrap();
+    let Value::Cell(vector) = run(Value::Tensor(vector), Vec::new()) else {
+        panic!("vector cell expected")
+    };
+    assert_eq!(vector.shape, vec![2]);
+    assert_eq!(
+        vector.data.as_slice(),
+        &[
+            Value::Int(IntValue::U64(u64::MAX)),
+            Value::Int(IntValue::U64(1 << 63))
+        ]
+    );
+}
+
 #[test]
 fn converts_numeric_matrix_in_matlab_order() {
     let matrix = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
@@ -27,7 +56,7 @@ fn dimension_order_permutates_grouped_block() {
     let Value::Tensor(block) = output.get(0, 0).unwrap() else {
         panic!("expected grouped tensor");
     };
-    assert_eq!(block.shape, vec![3, 2]);
+    assert_eq!(block.shape(), &[3, 2]);
     assert_eq!(block.materialize_f64(), vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
 }
 
@@ -98,7 +127,7 @@ fn empty_arrays_preserve_outer_and_grouped_block_shapes() {
         let Value::Tensor(column) = column else {
             panic!("expected empty numeric block");
         };
-        assert_eq!(column.shape, vec![0, 1]);
+        assert_eq!(column.shape(), &[0, 1]);
         assert!(column.is_empty());
     }
 }

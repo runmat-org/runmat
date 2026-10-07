@@ -85,6 +85,6 @@ fn empty_nd_division_preserves_shape_without_inspecting_unused_zero_divisor() {
     .unwrap() else {
         panic!("empty dense output");
     };
-    assert_eq!(output.shape, shape);
+    assert_eq!(output.shape(), shape.as_slice());
     assert_eq!(output.integer_storage(), Some(&IntegerStorage::I16(vec![])));
 }

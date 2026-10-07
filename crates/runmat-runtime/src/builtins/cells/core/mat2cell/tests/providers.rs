@@ -8,7 +8,7 @@ fn mat2cell_gpu_falls_back_to_host() {
         let tensor = Tensor::new((1..=6).map(|v| v as f64).collect(), vec![3, 2]).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = run(
@@ -24,7 +24,7 @@ fn mat2cell_gpu_falls_back_to_host() {
         let block = cell.data[3].clone();
         let gathered = test_support::gather(block).expect("gather");
         assert_eq!(gathered.materialize_f64(), vec![5.0, 6.0]);
-        assert_eq!(gathered.shape, vec![2, 1]);
+        assert_eq!(gathered.shape(), &[2, 1]);
     });
 }
 
@@ -45,7 +45,7 @@ fn mat2cell_wgpu_matches_cpu_partitions() {
 
     let view = runmat_accelerate_api::HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let handle = runmat_accelerate_api::provider()
         .expect("wgpu provider")
@@ -72,7 +72,7 @@ fn mat2cell_wgpu_matches_cpu_partitions() {
         let gpu_val = gpu.clone();
         let cpu_tensor = test_support::gather(cpu_val).expect("cpu gather");
         let gpu_tensor = test_support::gather(gpu_val).expect("gpu gather");
-        assert_eq!(cpu_tensor.shape, gpu_tensor.shape);
+        assert_eq!(cpu_tensor.shape(), gpu_tensor.shape());
         assert_eq!(cpu_tensor.materialize_f64(), gpu_tensor.materialize_f64());
     }
 }

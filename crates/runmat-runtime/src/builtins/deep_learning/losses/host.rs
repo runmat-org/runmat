@@ -112,7 +112,7 @@ impl LossPayload {
                 }
                 Ok(Self {
                     data,
-                    shape: tensor.shape.clone(),
+                    shape: tensor.shape().to_vec(),
                     dtype: output_dtype,
                     format: None,
                     dlarray: false,

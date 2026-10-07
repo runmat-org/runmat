@@ -35,7 +35,7 @@ fn source<'a>(
         Value::GpuTensor(handle) => Some(DeepLearningForwardSource::Resident(handle)),
         Value::Tensor(tensor) => Some(DeepLearningForwardSource::Host {
             element_type,
-            shape: tensor.shape.clone(),
+            shape: tensor.shape().to_vec(),
         }),
         Value::LogicalArray(array) => Some(DeepLearningForwardSource::Host {
             element_type,
@@ -155,7 +155,7 @@ pub(super) fn from_plan<'a, 'h: 'a>(
                 };
                 let weights_shape = match forward_data(weights_value) {
                     Value::GpuTensor(handle) => handle.shape(),
-                    Value::Tensor(tensor) => &tensor.shape,
+                    Value::Tensor(tensor) => tensor.shape(),
                     Value::LogicalArray(array) => &array.shape,
                     Value::Num(_) | Value::Int(_) | Value::Bool(_) => &[1, 1],
                     _ => return Ok(None),

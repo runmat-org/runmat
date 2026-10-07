@@ -3,6 +3,27 @@ use crate::builtins::common::test_support;
 use runmat_value::NumericStorage;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rank_one_single_input_uses_the_existing_row_partition_geometry() {
+    let input = Tensor::from_f32(vec![1., 2.], vec![2]).unwrap();
+    let Value::Cell(cells) = run(
+        Value::Tensor(input),
+        vec![Value::Num(1.), row_vector(&[1., 1.])],
+    )
+    .unwrap() else {
+        panic!("partition cells expected")
+    };
+    assert_eq!(cells.shape, vec![1, 2]);
+    for (cell, expected) in cells.data.iter().zip([1.0_f32, 2.]) {
+        let Value::Tensor(value) = cell else {
+            panic!("single block expected")
+        };
+        assert_eq!(value.shape(), &[1, 1]);
+        assert_eq!(value.as_f32_slice(), Some(&[expected][..]));
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn partition_matrix_into_quadrants() {
     let tensor = Tensor::new((1..=16).map(|v| v as f64).collect(), vec![4, 4]).unwrap();
@@ -20,7 +41,7 @@ fn partition_matrix_into_quadrants() {
 
     let bottom_right = cell.data[3].clone();
     let gathered = test_support::gather(bottom_right).expect("gather");
-    assert_eq!(gathered.shape, vec![2, 3]);
+    assert_eq!(gathered.shape(), &[2, 3]);
     assert_eq!(
         gathered.materialize_f64(),
         vec![7.0, 8.0, 11.0, 12.0, 15.0, 16.0]
@@ -70,7 +91,7 @@ fn row_vector_with_single_partition_vector() {
     let third = cell.data[2].clone();
     let gathered = test_support::gather(third).expect("gather");
     assert_eq!(gathered.materialize_f64(), vec![4.0, 5.0, 6.0]);
-    assert_eq!(gathered.shape, vec![1, 3]);
+    assert_eq!(gathered.shape(), &[1, 3]);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -85,7 +106,7 @@ fn column_vector_with_implicit_column_partition() {
     assert_eq!(cell.shape, vec![2, 1]);
     let second = cell.data[1].clone();
     let gathered = test_support::gather(second).expect("gather");
-    assert_eq!(gathered.shape, vec![2, 1]);
+    assert_eq!(gathered.shape(), &[2, 1]);
     assert_eq!(gathered.materialize_f64(), vec![3.0, 4.0]);
 }
 

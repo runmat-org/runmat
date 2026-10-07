@@ -9,14 +9,14 @@ fn cell2mat_gpu_cells_are_gathered() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let cell = crate::make_cell(vec![Value::GpuTensor(handle.clone())], 1, 1).expect("cell");
         let result = run(cell).expect("cell2mat");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert_eq!(t.materialize_f64(), tensor.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -35,14 +35,14 @@ fn cell2mat_wgpu_cells_are_gathered() {
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
     let view = runmat_accelerate_api::HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let handle = provider.upload(&view).expect("upload");
     let cell = crate::make_cell(vec![Value::GpuTensor(handle.clone())], 1, 1).expect("cell");
     let result = run(cell).expect("cell2mat");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), tensor.materialize_f64());
         }
         other => panic!("expected tensor, got {other:?}"),

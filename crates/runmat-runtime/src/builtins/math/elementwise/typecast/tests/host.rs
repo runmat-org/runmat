@@ -13,7 +13,7 @@ fn preserves_integer_bytes_width_and_orientation() {
     .expect("typecast") else {
         panic!("expected tensor");
     };
-    assert_eq!(output.shape, vec![1, 12]);
+    assert_eq!(output.shape(), &[1, 12]);
     let mut expected = Vec::new();
     for value in [1_u32, 255, 256] {
         expected.extend_from_slice(&value.to_ne_bytes());
@@ -22,6 +22,35 @@ fn preserves_integer_bytes_width_and_orientation() {
         output.integer_storage(),
         Some(&IntegerStorage::U8(expected))
     );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn low_rank_inputs_preserve_typecast_vector_orientation_and_exact_bytes() {
+    for (shape, expected_shape) in [(Vec::new(), vec![1, 2]), (vec![2], vec![4, 1])] {
+        let values = if shape.is_empty() {
+            vec![0x0102]
+        } else {
+            vec![0x0102, 0x0304]
+        };
+        let input = Tensor::new_integer(IntegerStorage::U16(values.clone()), shape).expect("input");
+        let Value::Tensor(output) = block_on(typecast_builtin(vec![
+            Value::Tensor(input),
+            Value::String("uint8".into()),
+        ]))
+        .expect("typecast") else {
+            panic!("expected byte tensor");
+        };
+        assert_eq!(output.shape(), expected_shape.as_slice());
+        let expected = values
+            .into_iter()
+            .flat_map(u16::to_ne_bytes)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            output.integer_storage(),
+            Some(&IntegerStorage::U8(expected))
+        );
+    }
 }
 
 #[test]
@@ -41,7 +70,7 @@ fn round_trips_exact_uint64_bits() {
     .expect("from bytes") else {
         panic!("expected tensor");
     };
-    assert_eq!(output.shape, vec![3, 1]);
+    assert_eq!(output.shape(), &[3, 1]);
     assert_eq!(
         output.integer_storage(),
         Some(&IntegerStorage::U64(original.to_vec()))
@@ -72,7 +101,7 @@ fn like_complex_integer_groups_adjacent_components_exactly() {
     .expect("complex like") else {
         panic!("expected complex tensor");
     };
-    assert_eq!(output.shape, vec![1, 2]);
+    assert_eq!(output.shape(), &[1, 2]);
     let storage = output.integer_storage().expect("integer complex");
     assert_eq!(storage.real, IntegerStorage::I16(vec![-1, i16::MIN]));
     assert_eq!(storage.imag, IntegerStorage::I16(vec![2, i16::MAX]));

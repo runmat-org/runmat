@@ -118,6 +118,36 @@ fn adamupdate_payload_preserves_native_single_representation() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn adamupdate_admission_preserves_exact_rank_zero_and_one_payload_shapes() {
+    let empty = || Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
+    for (shape, data) in [(vec![], vec![1.0]), (vec![2], vec![1.0, 2.0])] {
+        let args = AdamUpdateArgs::parse(vec![
+            Value::Tensor(Tensor::new(data.clone(), shape.clone()).unwrap()),
+            Value::Tensor(Tensor::new(vec![0.1; data.len()], shape.clone()).unwrap()),
+            empty(),
+            empty(),
+            Value::Num(1.0),
+        ])
+        .unwrap();
+        assert_eq!(args.parameters.shape, shape);
+        assert_eq!(args.gradient.shape, shape);
+        assert_eq!(args.average_grad.shape, shape);
+        assert_eq!(args.average_sq_grad.shape, shape);
+    }
+    let error = AdamUpdateArgs::parse(vec![
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![0.1, 0.2], vec![1, 2]).unwrap()),
+        empty(),
+        empty(),
+        Value::Num(1.0),
+    ])
+    .err()
+    .unwrap();
+    assert!(error.message().contains("grad"));
+}
+
 #[test]
 fn adamupdate_gpu_inputs_return_resident_outputs() {
     test_support::with_test_provider(|provider| {
@@ -163,9 +193,9 @@ fn adamupdate_gpu_inputs_return_resident_outputs() {
         let avg = test_support::gather(values[1].clone()).expect("avg");
         let avg_sq = test_support::gather(values[2].clone()).expect("avg sq");
 
-        assert_eq!(updated.shape, shape);
-        assert_eq!(avg.shape, shape);
-        assert_eq!(avg_sq.shape, shape);
+        assert_eq!(updated.shape(), shape);
+        assert_eq!(avg.shape(), shape);
+        assert_eq!(avg_sq.shape(), shape);
         assert_close(updated.materialize_f64()[0], 0.990000001);
         assert_close(updated.materialize_f64()[1], 2.0099999995);
         assert_close(updated.materialize_f64()[2], 2.9900000003333334);
@@ -300,7 +330,7 @@ fn adamupdate_single_resident_inputs_fall_back_without_widening_class() {
                 panic!("the fallback returns host tensors");
             };
             assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
-            assert_eq!(tensor.shape, shape);
+            assert_eq!(tensor.shape(), shape);
         }
         assert!(provider.telemetry_snapshot().download_bytes > 0);
     });

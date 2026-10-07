@@ -6,7 +6,7 @@ pub(super) fn parse(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
     match value {
         Value::Num(value) => Ok(vec![floating(*value)?]),
         Value::Int(value) => Ok(vec![integer(value)?]),
-        Value::Tensor(tensor) if is_vector(&tensor.shape) => (0..tensor.len())
+        Value::Tensor(tensor) if is_vector(tensor.shape()) => (0..tensor.len())
             .map(|index| {
                 tensor
                     .numeric_value_at(index)

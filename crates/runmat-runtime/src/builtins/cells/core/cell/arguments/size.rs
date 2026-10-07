@@ -41,7 +41,7 @@ fn vector(tensor: &Tensor) -> crate::BuiltinResult<Vec<usize>> {
     if tensor.is_empty() {
         return Ok(vec![0, 0]);
     }
-    if !row_vector(&tensor.shape) {
+    if !row_vector(tensor.shape()) {
         return Err(error::invalid_size("size vector must be a row vector"));
     }
     let mut dimensions = (0..tensor.len())

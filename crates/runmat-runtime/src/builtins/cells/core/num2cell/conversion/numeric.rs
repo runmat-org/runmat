@@ -3,7 +3,7 @@ use runmat_value::{NumericStorage, Tensor, Value};
 use super::super::{error, plan::PartitionPlan};
 
 pub(super) fn convert(tensor: Tensor, dimensions: &[usize]) -> crate::BuiltinResult<Value> {
-    let plan = PartitionPlan::new(&tensor.shape, dimensions)?;
+    let plan = PartitionPlan::new(tensor.shape(), dimensions)?;
     let storage = tensor.into_numeric_storage().map_err(error::internal)?;
     let cells = plan
         .groups()

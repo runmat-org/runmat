@@ -60,10 +60,31 @@ fn idivide_broadcasts_uint_tensor_and_preserves_dtype() {
     let Value::Tensor(tensor) = out else {
         panic!("expected tensor");
     };
-    assert_eq!(tensor.shape, vec![1, 3]);
+    assert_eq!(tensor.shape(), &[1, 3]);
     assert_eq!(
         tensor.integer_storage(),
         Some(&IntegerStorage::U16(vec![3, 3, 3]))
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rank_zero_wide_integer_tensor_broadcasts_over_rank_one_exactly() {
+    let dividend =
+        Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![]).expect("rank zero");
+    let divisor =
+        Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX]), vec![2]).expect("rank one");
+    let Value::Tensor(output) = block_on(idivide_builtin(vec![
+        Value::Tensor(dividend),
+        Value::Tensor(divisor),
+    ]))
+    .expect("low-rank idivide") else {
+        panic!("expected integer tensor");
+    };
+    assert_eq!(output.shape(), &[2]);
+    assert_eq!(
+        output.integer_storage(),
+        Some(&IntegerStorage::U64(vec![u64::MAX, 1]))
     );
 }
 

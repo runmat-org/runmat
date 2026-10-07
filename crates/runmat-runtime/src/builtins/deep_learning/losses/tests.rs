@@ -66,11 +66,52 @@ fn recognized_name_value_options_pass_public_preflight() {
     let Value::Tensor(losses) = output else {
         panic!("unreduced numeric pair returns an array");
     };
-    assert_eq!(losses.shape, vec![2, 3]);
+    assert_eq!(losses.shape(), &[2, 3]);
     let expected = [-0.8_f64.ln(), 0.0, -0.7_f64.ln(), 0.0, -0.6_f64.ln(), 0.0];
     for (actual, expected) in losses.materialize_f64().iter().zip(expected) {
         assert!((actual - expected).abs() < 1e-12);
     }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn unreduced_numeric_loss_preserves_rank_zero_and_one_mask_geometry() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
+    for (shape, predictions, targets) in [
+        (vec![], vec![0.8], vec![1.0]),
+        (vec![2], vec![0.8, 0.2], vec![1.0, 0.0]),
+    ] {
+        let mask = Value::Tensor(Tensor::new(vec![1.0; predictions.len()], shape.clone()).unwrap());
+        let output = block_on(crossentropy_builtin(
+            Value::Tensor(Tensor::new(predictions, shape.clone()).unwrap()),
+            Value::Tensor(Tensor::new(targets, shape.clone()).unwrap()),
+            vec![
+                Value::String("Reduction".into()),
+                Value::String("none".into()),
+                Value::String("Mask".into()),
+                mask,
+            ],
+        ))
+        .unwrap();
+        let Value::Tensor(losses) = output else {
+            panic!("unreduced numeric loss tensor expected")
+        };
+        assert_eq!(losses.shape(), shape);
+        assert!((losses.materialize_f64()[0] + 0.8_f64.ln()).abs() < 1.0e-12);
+    }
+
+    let error = block_on(crossentropy_builtin(
+        Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![2]).unwrap()),
+        Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![2]).unwrap()),
+        vec![
+            Value::String("Mask".into()),
+            Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
+        ],
+    ))
+    .unwrap_err();
+    assert!(error
+        .message()
+        .contains("Mask must have the same size as predictions"));
 }
 
 #[test]

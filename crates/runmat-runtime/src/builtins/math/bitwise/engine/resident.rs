@@ -47,7 +47,7 @@ pub(super) fn bitwise_result_as_logical(name: &'static str, value: Value) -> Bui
                 .into_iter()
                 .map(|value| u8::from(value != 0.0))
                 .collect(),
-            tensor.shape,
+            tensor.shape().to_vec(),
         )
         .map(Value::LogicalArray)
         .map_err(|error| error_with_detail(name, &ERROR_INVALID_INPUT, error)),

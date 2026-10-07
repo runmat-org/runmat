@@ -90,7 +90,7 @@ impl IdivideBuffer {
     }
 
     fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
-        let shape = tensor.shape.clone();
+        let shape = tensor.shape().to_vec();
         if let Some(storage) = tensor.integer_storage() {
             return Ok(Self {
                 data: storage

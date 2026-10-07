@@ -79,7 +79,7 @@ fn entries(value: &Value) -> Option<Vec<Entry>> {
         Value::Num(value) => Some(vec![Entry::Float(*value)]),
         Value::Int(value) => Some(vec![Entry::Integer(value.clone())]),
         Value::Bool(value) => Some(vec![Entry::Float(f64::from(*value))]),
-        Value::Tensor(tensor) if vector_shape(&tensor.shape) => {
+        Value::Tensor(tensor) if vector_shape(tensor.shape()) => {
             tensor.integer_storage().map_or_else(
                 || {
                     Some(

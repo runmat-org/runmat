@@ -8,7 +8,7 @@ fn simple_numeric_cell() {
     let result = run(cell).expect("cell2mat");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
         }
         other => panic!("expected tensor result, got {other:?}"),
@@ -26,7 +26,7 @@ fn native_single_cells_preserve_class_and_block_layout() {
         panic!("expected tensor");
     };
 
-    assert_eq!(output.shape, vec![2, 2]);
+    assert_eq!(output.shape(), &[2, 2]);
     assert_eq!(
         output.into_numeric_storage(),
         Ok(NumericStorage::F32(vec![1.25, 2.5, 3.75, 4.5]))
@@ -45,7 +45,7 @@ fn block_concatenation() {
     let result = run(cell).expect("cell2mat");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 5]);
+            assert_eq!(t.shape(), &[2, 5]);
             assert_eq!(
                 t.materialize_f64(),
                 vec![1.0, 6.0, 2.0, 7.0, 3.0, 8.0, 4.0, 9.0, 5.0, 10.0]
@@ -81,7 +81,7 @@ fn complex_cell() {
     let result = run(cell).expect("cell2mat");
     match result {
         Value::ComplexTensor(ct) => {
-            assert_eq!(ct.shape, vec![1, 2]);
+            assert_eq!(ct.shape(), &[1, 2]);
             assert_eq!(ct.materialize_f64(), vec![(1.0, 2.0), (3.0, 4.0)]);
         }
         other => panic!("expected complex tensor, got {other:?}"),

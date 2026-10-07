@@ -23,7 +23,7 @@ fn three_dimensional_tensor_partition() {
     assert_eq!(cell.shape, vec![2, 2, 2]);
     let block = index_cell_value(&cell, &[2, 2, 1]).expect("N-D cell subscript");
     let gathered = test_support::gather(block).expect("gather");
-    assert_eq!(gathered.shape, vec![2, 2, 1]);
+    assert_eq!(gathered.shape(), &[2, 2, 1]);
     assert_eq!(gathered.materialize_f64(), vec![8.0, 9.0, 11.0, 12.0]);
 }
 
@@ -44,7 +44,7 @@ fn zero_sized_blocks() {
     let top_left = cell.data[0].clone();
     let gathered = test_support::gather(top_left).expect("gather");
     assert_eq!(gathered.materialize_f64().len(), 0);
-    assert_eq!(gathered.shape, vec![0, 1]);
+    assert_eq!(gathered.shape(), &[0, 1]);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -61,7 +61,7 @@ fn logical_partition_vector_supported() {
     assert_eq!(cell.shape, vec![4, 1]);
     let third = cell.data[2].clone();
     let gathered = test_support::gather(third).expect("gather");
-    assert_eq!(gathered.shape, vec![1, 1]);
+    assert_eq!(gathered.shape(), &[1, 1]);
     assert_eq!(gathered.materialize_f64(), vec![3.0]);
 }
 

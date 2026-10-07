@@ -14,7 +14,7 @@ fn round_trip(storage: NumericStorage, class: &str) {
     else {
         panic!("expected tensor");
     };
-    assert_eq!(output.shape, vec![1, 2], "{class}");
+    assert_eq!(output.shape(), &[1, 2], "{class}");
     assert_eq!(
         output.into_numeric_storage().expect("output storage"),
         storage,
@@ -60,7 +60,7 @@ fn logical_source_exposes_its_normalized_byte_storage() {
     .expect("numeric output") else {
         panic!("expected numeric tensor");
     };
-    assert_eq!(output.shape, vec![3, 1]);
+    assert_eq!(output.shape(), &[3, 1]);
     assert_eq!(
         output.integer_storage(),
         Some(&IntegerStorage::U8(vec![0, 1, 1]))
@@ -78,6 +78,6 @@ fn empty_vectors_retain_orientation() {
         .expect("empty output") else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, expected);
+        assert_eq!(output.shape(), expected.as_slice());
     }
 }

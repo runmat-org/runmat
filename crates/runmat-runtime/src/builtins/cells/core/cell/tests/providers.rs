@@ -71,7 +71,7 @@ fn deterministic_provider_supplies_size_and_prototype_shape() {
         let size_data = sizes.materialize_f64();
         let size_view = runmat_accelerate_api::HostTensorView {
             data: &size_data,
-            shape: &sizes.shape,
+            shape: sizes.shape(),
         };
         let size_handle = provider.upload(&size_view).unwrap();
         output(vec![Value::GpuTensor(size_handle)], &[3, 2]);
@@ -80,7 +80,7 @@ fn deterministic_provider_supplies_size_and_prototype_shape() {
         let prototype_data = prototype.materialize_f64();
         let prototype_view = runmat_accelerate_api::HostTensorView {
             data: &prototype_data,
-            shape: &prototype.shape,
+            shape: prototype.shape(),
         };
         let prototype_handle = provider.upload(&prototype_view).unwrap();
         output(
@@ -104,7 +104,7 @@ fn wgpu_supplies_size_and_prototype_shape() {
     let size_data = sizes.materialize_f64();
     let size_view = runmat_accelerate_api::HostTensorView {
         data: &size_data,
-        shape: &sizes.shape,
+        shape: sizes.shape(),
     };
     output(
         vec![Value::GpuTensor(provider.upload(&size_view).unwrap())],
@@ -115,7 +115,7 @@ fn wgpu_supplies_size_and_prototype_shape() {
     let prototype_data = prototype.materialize_f64();
     let prototype_view = runmat_accelerate_api::HostTensorView {
         data: &prototype_data,
-        shape: &prototype.shape,
+        shape: prototype.shape(),
     };
     output(
         vec![

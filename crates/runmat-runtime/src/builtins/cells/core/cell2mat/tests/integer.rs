@@ -44,7 +44,7 @@ fn typed_integer_cells_preserve_every_native_class_exactly() {
         let Value::Tensor(output) = result else {
             panic!("expected typed integer tensor");
         };
-        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.shape(), &[1, 2]);
         assert_eq!(
             output.integer_storage(),
             Some(&append_same_class(&left, &right))
@@ -63,12 +63,12 @@ fn typed_integer_cells_preserve_block_shape_and_saturate_mixed_classes() {
         crate::make_cell(vec![Value::Tensor(first), Value::Tensor(second)], 1, 2).expect("cell");
     let result = run(cell).expect("cell2mat");
     assert!(matches!(
-        result,
-        Value::Tensor(output)
-            if output.shape == vec![2, 2]
-                && output.integer_storage()
-                    == Some(&IntegerStorage::U64(vec![u64::MAX, 7, 1_u64 << 63, 3]))
-    ));
+            result,
+            Value::Tensor(output)
+    if output.shape() == [2, 2]
+                    && output.integer_storage()
+                        == Some(&IntegerStorage::U64(vec![u64::MAX, 7, 1_u64 << 63, 3]))
+        ));
 
     let scalar_cell = crate::make_cell(
         vec![
@@ -92,11 +92,11 @@ fn typed_integer_cells_preserve_block_shape_and_saturate_mixed_classes() {
     let empty_cell = crate::make_cell(vec![Value::Tensor(empty)], 1, 1).expect("empty cell");
     let empty_result = run(empty_cell).expect("cell2mat");
     assert!(matches!(
-        empty_result,
-        Value::Tensor(output)
-            if output.shape == vec![0, 0]
-                && output.integer_storage() == Some(&IntegerStorage::U64(Vec::new()))
-    ));
+            empty_result,
+            Value::Tensor(output)
+    if output.shape() == [0, 0]
+                    && output.integer_storage() == Some(&IntegerStorage::U64(Vec::new()))
+        ));
 
     let mixed = crate::make_cell(
         vec![

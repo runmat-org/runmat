@@ -64,7 +64,7 @@ fn swap_integer(value: IntValue) -> IntValue {
 }
 
 fn swap_tensor(tensor: Tensor) -> BuiltinResult<Value> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor.into_numeric_storage().map_err(invalid)?;
     let swapped = match storage {
         NumericStorage::F64(values) => NumericStorage::F64(

@@ -94,9 +94,9 @@ impl NumericPayload {
                 ensure_finite(&data, label)?;
                 Self {
                     data,
-                    shape: tensor.shape.clone(),
+                    shape: tensor.shape().to_vec(),
                     repr: NumericRepr::Dense {
-                        shape: tensor.shape.clone(),
+                        shape: tensor.shape().to_vec(),
                         dtype,
                     },
                 }

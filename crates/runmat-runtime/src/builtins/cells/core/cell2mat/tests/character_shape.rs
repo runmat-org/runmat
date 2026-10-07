@@ -12,7 +12,7 @@ fn nd_cell_grid_positions_follow_semantic_linear_order() {
         let Value::Tensor(result) = run(Value::Cell(cells)).unwrap() else {
             panic!("numeric result")
         };
-        assert_eq!(result.shape, shape);
+        assert_eq!(result.shape(), shape.as_slice());
         assert_eq!(result.materialize_f64(), expected);
     }
 }
@@ -61,7 +61,7 @@ fn higher_dimensional_tiling() {
     let result = run(cell).expect("cell2mat");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 3, 2]);
+            assert_eq!(t.shape(), &[2, 3, 2]);
             assert_eq!(t.materialize_f64().len(), 12);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -75,7 +75,7 @@ fn empty_cell_returns_empty_double() {
     let result = run(cell).expect("cell2mat");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![0, 0]);
+            assert_eq!(t.shape(), &[0, 0]);
             assert!(t.materialize_f64().is_empty());
         }
         other => panic!("expected empty tensor, got {other:?}"),

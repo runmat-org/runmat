@@ -15,7 +15,7 @@ fn native_complex_single_concatenation_preserves_payload_class_and_shape() {
         panic!("complex output");
     };
     assert_eq!(result.numeric_dtype(), NumericDType::F32);
-    assert_eq!(result.shape, vec![2, 2]);
+    assert_eq!(result.shape(), &[2, 2]);
     let ComplexStorage::F32(storage) = result.complex_storage() else {
         panic!("native single storage")
     };
@@ -38,7 +38,7 @@ fn empty_complex_single_blocks_keep_their_class() {
         panic!("complex output")
     };
     assert_eq!(result.numeric_dtype(), NumericDType::F32);
-    assert_eq!(result.shape, vec![0, 3]);
+    assert_eq!(result.shape(), &[0, 3]);
 }
 
 #[test]

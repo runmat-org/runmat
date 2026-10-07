@@ -376,7 +376,7 @@ fn integer_operand(value: &Value) -> Option<IntegerOperand<'_>> {
         }),
         Value::Tensor(tensor) => tensor.integer_storage().map(|storage| IntegerOperand {
             storage: IntegerStorageRef::Array(storage),
-            shape: tensor.shape.clone(),
+            shape: tensor.shape().to_vec(),
             target: IntegerClass::from_storage(storage),
         }),
         _ => None,
@@ -1040,6 +1040,27 @@ mod tests {
                 IntegerStorage::I16(vec![99, -101, 98, -102, 97, -103]),
                 vec![2, 3]
             )
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn rank_zero_wide_integer_tensor_broadcasts_over_rank_one_exactly() {
+        let result = try_integer_binary(
+            &integer(IntegerStorage::U64(vec![9_007_199_254_740_993]), vec![]),
+            &integer(IntegerStorage::U64(vec![1, u64::MAX]), vec![2]),
+            IntegerBinaryOp::Add,
+            "plus",
+        )
+        .expect("integer operation")
+        .expect("integer path");
+        let Value::Tensor(result) = result else {
+            panic!("expected integer tensor");
+        };
+        assert_eq!(result.shape(), &[2]);
+        assert_eq!(
+            result.integer_storage(),
+            Some(&IntegerStorage::U64(vec![9_007_199_254_740_994, u64::MAX]))
         );
     }
 

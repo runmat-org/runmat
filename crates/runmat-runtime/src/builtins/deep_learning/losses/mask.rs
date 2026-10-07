@@ -12,7 +12,7 @@ impl LossMask {
                 array.data.iter().map(|value| f64::from(*value)).collect(),
                 array.shape.clone(),
             ),
-            Value::Tensor(tensor) => (tensor::tensor_values_f64(tensor), tensor.shape.clone()),
+            Value::Tensor(tensor) => (tensor::tensor_values_f64(tensor), tensor.shape().to_vec()),
             other => {
                 return Err(deep_learning_error(
                     "crossentropy",
@@ -50,7 +50,7 @@ pub(super) fn mask_values_for_layout(
             array.data.iter().map(|value| f64::from(*value)).collect(),
             array.shape.clone(),
         ),
-        Value::Tensor(tensor) => (tensor::tensor_values_f64(tensor), tensor.shape.clone()),
+        Value::Tensor(tensor) => (tensor::tensor_values_f64(tensor), tensor.shape().to_vec()),
         other => {
             return Err(deep_learning_error(
                 "crossentropy",

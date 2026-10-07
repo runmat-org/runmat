@@ -11,7 +11,7 @@ use crate::BuiltinResult;
 pub(super) fn value(value: Value) -> BuiltinResult<CellEntry> {
     let entry = match value {
         Value::Tensor(tensor) => {
-            let shape = normalized_shape(tensor.shape.clone());
+            let shape = normalized_shape(tensor.shape().to_vec());
             let storage = tensor.into_numeric_storage().map_err(|error| {
                 cell2mat_error_with_message(format!("cell2mat: {error}"), &CELL2MAT_ERROR_INTERNAL)
             })?;
@@ -39,19 +39,19 @@ pub(super) fn value(value: Value) -> BuiltinResult<CellEntry> {
             )),
         },
         Value::ComplexTensor(tensor) => {
-            let shape = normalized_shape(tensor.shape.clone());
-            if let Some(storage) = tensor.integer_storage() {
-                CellEntry {
+            let (storage, shape) = tensor.into_complex_storage_and_shape();
+            let shape = normalized_shape(shape);
+            match storage {
+                ComplexStorage::Integer(storage) => CellEntry {
                     kind: ElementKind::TypedComplexInteger,
                     shape,
-                    data: EntryData::TypedComplexInteger(storage.clone()),
-                }
-            } else {
-                CellEntry {
+                    data: EntryData::TypedComplexInteger(storage),
+                },
+                storage @ (ComplexStorage::F32(_) | ComplexStorage::F64(_)) => CellEntry {
                     kind: ElementKind::Complex,
                     shape,
-                    data: EntryData::Complex(tensor.into_complex_storage()),
-                }
+                    data: EntryData::Complex(storage),
+                },
             }
         }
         Value::CharArray(array) => CellEntry {

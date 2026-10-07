@@ -22,7 +22,7 @@ fn bitand_broadcasts_tensor_and_scalar() {
     .expect("bitand");
     match out {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(
                 t.integer_storage(),
                 Some(&IntegerStorage::U32(vec![1, 0, 1, 0]))
@@ -30,6 +30,21 @@ fn bitand_broadcasts_tensor_and_scalar() {
         }
         other => panic!("expected tensor, got {other:?}"),
     }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn logical_rank_one_input_uses_canonical_broadcast_shape_and_raw_logical_output() {
+    let input = LogicalArray::new(vec![1, 0], vec![2]).expect("rank-one logical");
+    let Value::LogicalArray(output) = block_on(bitand_builtin(vec![
+        Value::LogicalArray(input),
+        Value::Bool(true),
+    ]))
+    .expect("logical bitand") else {
+        panic!("expected logical array");
+    };
+    assert_eq!(output.shape, vec![1, 2]);
+    assert_eq!(&*output.data, &[1, 0]);
 }
 
 #[test]
@@ -120,7 +135,7 @@ fn binary_bitwise_sparse_dense_and_broadcast_forms_use_zero_aware_output_storage
     .expect("sparse dense bitor") else {
         panic!("bitor materializes when broadcast dense values make implicit zeros nonzero");
     };
-    assert_eq!(or.shape, vec![2, 2]);
+    assert_eq!(or.shape(), &[2, 2]);
     assert_eq!(
         or.as_f64_slice().expect("double bitor output"),
         &[6.0, 1.0, 0.0, 11.0]
