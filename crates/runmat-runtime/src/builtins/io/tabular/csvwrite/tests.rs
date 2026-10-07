@@ -61,6 +61,28 @@ fn line_ending() -> &'static str {
     "\n"
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn csvwrite_preserves_rank_zero_and_rank_one_column_layout() {
+    let _outputs = crate::output_count::push_output_count(Some(0));
+    let cases = [
+        (vec![7.0], Vec::new(), "7\n"),
+        (vec![7.0, 8.0], vec![2], "7\n8\n"),
+    ];
+    for (values, shape, expected) in cases {
+        let path = temp_path("csv");
+        csvwrite_builtin(
+            Value::from(path.to_string_lossy().into_owned()),
+            Value::Tensor(Tensor::new(values, shape).unwrap()),
+            Vec::new(),
+        )
+        .expect("write exact-rank tensor");
+        let contents = fs::read_to_string(&path).expect("read output");
+        fs::remove_file(&path).expect("remove test output");
+        assert_eq!(contents, expected);
+    }
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn csvwrite_writes_basic_matrix() {
@@ -162,7 +184,7 @@ fn csvwrite_handles_gpu_tensors() {
         let tensor = Tensor::new(vec![0.5, 1.5], vec![1, 2]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let filename = path.to_string_lossy().into_owned();
@@ -254,7 +276,7 @@ fn csvwrite_handles_wgpu_provider_gather() {
     let tensor = Tensor::new(vec![2.0, 4.0], vec![1, 2]).unwrap();
     let view = HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let handle = provider.upload(&view).expect("upload");
     let filename = path.to_string_lossy().into_owned();

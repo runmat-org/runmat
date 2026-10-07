@@ -17,7 +17,9 @@ use crate::builtins::common::{
     },
     tensor,
 };
-use crate::builtins::control::tf_model::{output_complex_column, validate_sample_time, SS_CLASS};
+use crate::builtins::control::tf_model::{
+    output_complex_column, state_matrix_dimensions, validate_sample_time, SS_CLASS,
+};
 use crate::{build_runtime_error, dispatcher, BuiltinResult};
 
 const BUILTIN_NAME: &str = "lqr";
@@ -227,16 +229,20 @@ impl RealMatrix {
     fn from_tensor(label: &'static str, tensor: Tensor) -> BuiltinResult<Self> {
         Self::validate_tensor(label, &tensor)?;
         let values = tensor::tensor_values_f64_cow(&tensor);
+        let (rows, cols) = state_matrix_dimensions(&tensor);
         Ok(Self {
-            matrix: DMatrix::from_column_slice(tensor.rows, tensor.cols, &values),
+            matrix: DMatrix::from_column_slice(rows, cols, &values),
         })
     }
 
     fn validate_tensor(label: &'static str, tensor: &Tensor) -> BuiltinResult<()> {
-        if tensor.shape.len() > 2 {
+        if tensor.shape().len() > 2 {
             return Err(lqr_error(
                 &LQR_ERROR_INVALID_DIMENSIONS,
-                format!("{label} must be a 2-D matrix, got shape {:?}", tensor.shape),
+                format!(
+                    "{label} must be a 2-D matrix, got shape {:?}",
+                    tensor.shape()
+                ),
             ));
         }
         let values = tensor::tensor_values_f64_cow(tensor);
@@ -834,7 +840,8 @@ mod tests {
     fn matrix_from_value(value: &Value) -> DMatrix<f64> {
         match value {
             Value::Tensor(tensor) => {
-                DMatrix::from_column_slice(tensor.rows, tensor.cols, &tensor.materialize_f64())
+                let (rows, cols) = state_matrix_dimensions(tensor);
+                DMatrix::from_column_slice(rows, cols, &tensor.materialize_f64())
             }
             other => panic!("expected tensor, got {other:?}"),
         }
@@ -861,6 +868,17 @@ mod tests {
         assert!((s[(0, 0)] - 3.0_f64.sqrt()).abs() < 1.0e-8);
         assert!((s[(0, 1)] - 1.0).abs() < 1.0e-8);
         assert!((s[(1, 1)] - 3.0_f64.sqrt()).abs() < 1.0e-8);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn lqr_preserves_rank_one_dense_matrix_projection() {
+        let error = block_on(lqr_builtin(
+            Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2]).unwrap()),
+            vec![Value::Num(1.0), Value::Num(1.0), Value::Num(1.0)],
+        ))
+        .expect_err("rank-one A is a one-by-two matrix");
+        assert!(error.message().contains("A must be square, got 1x2"));
     }
 
     #[test]
@@ -1103,7 +1121,7 @@ mod tests {
         assert!(s[(1, 1)].is_finite());
         match &outputs[2] {
             Value::ComplexTensor(poles) => {
-                assert_eq!(poles.shape, vec![2, 1]);
+                assert_eq!(poles.shape(), &[2, 1]);
                 assert!(poles
                     .materialize_f64()
                     .iter()

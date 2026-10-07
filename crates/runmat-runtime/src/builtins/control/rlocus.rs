@@ -268,8 +268,8 @@ fn is_plot_style_arg(value: &Value) -> bool {
 fn is_numeric_vector_like(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => true,
-        Value::Tensor(tensor) => is_vector_shape(&tensor.shape),
-        Value::ComplexTensor(tensor) => is_vector_shape(&tensor.shape),
+        Value::Tensor(tensor) => is_vector_shape(tensor.shape()),
+        Value::ComplexTensor(tensor) => is_vector_shape(tensor.shape()),
         Value::LogicalArray(logical) => is_vector_shape(&logical.shape),
         Value::GpuTensor(handle) => is_vector_shape(handle.shape()),
         _ => false,
@@ -288,11 +288,11 @@ fn real_gain_vector(value: Value) -> BuiltinResult<Vec<f64>> {
         Value::Bool(b) => vec![if b { 1.0 } else { 0.0 }],
         Value::Complex(re, 0.0) => vec![re],
         Value::Tensor(tensor) => {
-            ensure_vector_shape(&tensor.shape)?;
+            ensure_vector_shape(tensor.shape())?;
             tensor::tensor_values_f64(&tensor)
         }
         Value::ComplexTensor(tensor) => {
-            ensure_vector_shape(&tensor.shape)?;
+            ensure_vector_shape(tensor.shape())?;
             tensor
                 .materialize_f64()
                 .into_iter()
@@ -865,7 +865,7 @@ mod tests {
             else {
                 panic!("expected root matrix");
             };
-            assert_eq!(roots.shape, vec![1, 1]);
+            assert_eq!(roots.shape(), &[1, 1]);
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         });
     }
@@ -934,12 +934,30 @@ mod tests {
         assert_eq!(outputs.len(), 2);
 
         let roots = tensor(&outputs[0]);
-        assert_eq!(roots.shape, vec![1, 3]);
+        assert_eq!(roots.shape(), &[1, 3]);
         assert_eq!(roots.materialize_f64(), vec![-1.0, -2.0, -4.0]);
 
         let gains = tensor(&outputs[1]);
-        assert_eq!(gains.shape, vec![1, 3]);
+        assert_eq!(gains.shape(), &[1, 3]);
         assert_eq!(gains.materialize_f64(), vec![0.0, 1.0, 3.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn explicit_gain_preserves_rank_zero_and_rank_one_vector_admission() {
+        let scalar_gain = Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap());
+        let scalar_roots =
+            run_rlocus(tf(vec![1.0], vec![1.0, 1.0]), vec![scalar_gain]).expect("rank-zero gain");
+        let scalar_roots = tensor(&scalar_roots);
+        assert_eq!(scalar_roots.shape(), &[1, 1]);
+        assert_eq!(scalar_roots.materialize_f64(), vec![-2.0]);
+
+        let vector_gain = Value::Tensor(Tensor::new(vec![0.0, 3.0], vec![2]).unwrap());
+        let vector_roots =
+            run_rlocus(tf(vec![1.0], vec![1.0, 1.0]), vec![vector_gain]).expect("rank-one gains");
+        let vector_roots = tensor(&vector_roots);
+        assert_eq!(vector_roots.shape(), &[1, 2]);
+        assert_eq!(vector_roots.materialize_f64(), vec![-1.0, -4.0]);
     }
 
     #[test]
@@ -956,11 +974,11 @@ mod tests {
         };
 
         let roots = tensor(&outputs[0]);
-        assert_eq!(roots.shape, vec![1, 3]);
+        assert_eq!(roots.shape(), &[1, 3]);
         assert_eq!(roots.materialize_f64(), vec![-1.0, -2.0, -4.0]);
 
         let gains = tensor(&outputs[1]);
-        assert_eq!(gains.shape, vec![1, 3]);
+        assert_eq!(gains.shape(), &[1, 3]);
         assert_eq!(gains.materialize_f64(), vec![0.0, 1.0, 3.0]);
         assert!(gains.integer_storage().is_none());
     }
@@ -971,7 +989,7 @@ mod tests {
         let gains = Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap());
         let result = run_rlocus(sys, vec![gains]).expect("rlocus");
         let roots = tensor(&result);
-        assert_eq!(roots.shape, vec![2, 3]);
+        assert_eq!(roots.shape(), &[2, 3]);
 
         for (gain_idx, gain) in [0.0_f64, 1.0, 2.0].iter().enumerate() {
             let column = &roots.materialize_f64()[gain_idx * 2..gain_idx * 2 + 2];
@@ -996,7 +1014,7 @@ mod tests {
         let gains = Value::Tensor(Tensor::new(vec![0.0, 1.0, 3.0], vec![1, 3]).unwrap());
         let result = run_rlocus(sys, vec![gains]).expect("rlocus");
         let roots = tensor(&result);
-        assert_eq!(roots.shape, vec![1, 3]);
+        assert_eq!(roots.shape(), &[1, 3]);
         for (actual, expected) in roots.materialize_f64().iter().zip([-1.0, -2.0, -4.0]) {
             assert!((actual - expected).abs() < 1.0e-8);
         }
@@ -1030,7 +1048,7 @@ mod tests {
         let Value::ComplexTensor(roots) = result else {
             panic!("expected complex root matrix");
         };
-        assert_eq!(roots.shape, vec![2, 1]);
+        assert_eq!(roots.shape(), &[2, 1]);
         assert!(roots
             .materialize_f64()
             .iter()
@@ -1047,7 +1065,7 @@ mod tests {
         let gains = Value::Tensor(Tensor::new(vec![0.5], vec![1, 1]).unwrap());
         let roots = run_rlocus(sys, vec![gains]).expect("rlocus");
         let roots = tensor(&roots);
-        assert_eq!(roots.shape, vec![1, 1]);
+        assert_eq!(roots.shape(), &[1, 1]);
         assert!(roots.materialize_f64()[0].abs() < 1.0e-12);
     }
 

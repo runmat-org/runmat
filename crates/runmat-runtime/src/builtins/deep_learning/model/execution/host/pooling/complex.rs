@@ -59,7 +59,7 @@ pub(in crate::builtins::deep_learning) fn backward_complex(
 ) -> Result<ComplexTensor, PoolError> {
     let geometry = Geometry::new(input_axes)?;
     geometry.validate_complex_input(input)?;
-    if output_gradient.shape.as_slice() != geometry.output.shape()
+    if output_gradient.shape() != geometry.output.shape()
         || output_gradient.len() != geometry.output.element_count()
     {
         return Err(PoolError::ShapeMismatch);

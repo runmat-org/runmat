@@ -61,6 +61,10 @@ fn decimal_label(value: f64, function: &'static str) -> BuiltinResult<String> {
     Ok(format!("{value:.0}"))
 }
 
+fn numeric_label_column_shape(shape: &[usize]) -> bool {
+    matches!(shape, [1] | [_, 1])
+}
+
 pub(super) fn label_strings(
     value: &Value,
     function: &'static str,
@@ -78,8 +82,7 @@ pub(super) fn label_strings(
         Value::Num(number) => Ok(Some(vec![decimal_label(*number, function)?])),
         Value::Tensor(codes)
             if codes.numeric_dtype().integer_class().is_some()
-                && codes.shape.len() <= 2
-                && codes.cols == 1 =>
+                && numeric_label_column_shape(codes.shape()) =>
         {
             let mut labels = Vec::with_capacity(codes.len());
             for index in 0..codes.len() {
@@ -106,8 +109,7 @@ pub(super) fn label_strings(
         }
         Value::Tensor(codes)
             if matches!(codes.numeric_dtype(), NumericDType::F32 | NumericDType::F64)
-                && codes.shape.len() <= 2
-                && codes.cols == 1 =>
+                && numeric_label_column_shape(codes.shape()) =>
         {
             let mut labels = Vec::with_capacity(codes.len());
             for index in 0..codes.len() {
@@ -197,4 +199,55 @@ fn categorical_index(
             format!("{function}: categorical Codes must index known categories"),
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_value::{IntegerStorage, Tensor};
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn numeric_label_columns_keep_rank_zero_and_rank_one_admission() {
+        let wide = (1_u64 << 53) + 1;
+        for (shape, admitted) in [
+            (vec![], false),
+            (vec![1], true),
+            (vec![2], false),
+            (vec![2, 1], true),
+            (vec![2, 0], false),
+            (vec![1, 1, 1], false),
+        ] {
+            let len = shape.iter().product::<usize>();
+            let integers = (0..len)
+                .map(|index| if index == 0 { wide } else { 2 })
+                .collect();
+            let integer = Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(integers), shape.clone()).unwrap(),
+            );
+            let integer_labels = label_strings(&integer, "trainnet").unwrap();
+            assert_eq!(
+                integer_labels,
+                admitted.then(|| {
+                    (0..len)
+                        .map(|index| {
+                            if index == 0 {
+                                wide.to_string()
+                            } else {
+                                "2".into()
+                            }
+                        })
+                        .collect()
+                })
+            );
+
+            let floats = (0..len).map(|index| (index + 1) as f64).collect();
+            let float = Value::Tensor(Tensor::new(floats, shape).unwrap());
+            let float_labels = label_strings(&float, "trainnet").unwrap();
+            assert_eq!(
+                float_labels,
+                admitted.then(|| (1..=len).map(|value| value.to_string()).collect())
+            );
+        }
+    }
 }

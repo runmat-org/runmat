@@ -120,7 +120,7 @@ pub(super) fn summarize_for_cell(value: &Value) -> String {
                     .unwrap_or("double");
                 format!(
                     "[{} {class_name}]",
-                    dims_to_string(&canonical_dims(&tensor.shape)),
+                    dims_to_string(&canonical_dims(tensor.shape())),
                 )
             }
         }
@@ -143,7 +143,7 @@ pub(super) fn summarize_for_cell(value: &Value) -> String {
                     .unwrap_or("double");
                 format!(
                     "[{} complex {}]",
-                    dims_to_string(&canonical_dims(&tensor.shape)),
+                    dims_to_string(&canonical_dims(tensor.shape())),
                     class_name
                 )
             }

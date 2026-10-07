@@ -10,7 +10,7 @@ pub(in crate::builtins::deep_learning) fn backward(
     input_axes: &AxisPlan,
 ) -> Result<Tensor, PoolError> {
     let geometry = Geometry::new(input_axes)?;
-    if output_gradient.shape.as_slice() != geometry.output.shape()
+    if output_gradient.shape() != geometry.output.shape()
         || output_gradient.len() != geometry.output.element_count()
     {
         return Err(PoolError::ShapeMismatch);

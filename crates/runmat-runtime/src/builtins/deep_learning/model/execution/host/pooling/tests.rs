@@ -29,16 +29,16 @@ fn cbt_non_square_pool_has_independent_channel_batch_oracle() {
         }
     }
     let x = Tensor::new(values, vec![2, 3, 4]).unwrap();
-    let result = forward(&x, &axes("CBT", &x.shape)).unwrap();
+    let result = forward(&x, &axes("CBT", x.shape())).unwrap();
     assert_eq!(result.axes.layout().labels(), "CB");
-    assert_eq!(result.tensor.shape, vec![2, 3]);
+    assert_eq!(result.tensor.shape(), &[2, 3]);
     assert_eq!(
         result.tensor.as_f64_slice().unwrap(),
         &[1.5, 101.5, 11.5, 111.5, 21.5, 121.5]
     );
     let dy = Tensor::new(vec![2., 4., 6., 8., 10., 12.], vec![2, 3]).unwrap();
-    let dx = backward(&dy, &axes("CBT", &x.shape)).unwrap();
-    assert_eq!(dx.shape, x.shape);
+    let dx = backward(&dy, &axes("CBT", x.shape())).unwrap();
+    assert_eq!(dx.shape(), x.shape());
     assert_eq!(
         &dx.as_f64_slice().unwrap()[0..6],
         &[0.5, 1., 1.5, 2., 2.5, 3.]
@@ -52,33 +52,33 @@ fn cbt_non_square_pool_has_independent_channel_batch_oracle() {
 #[test]
 fn spatial_pool_preserves_s_and_time_while_ct_becomes_cu() {
     let scb = Tensor::from_f32(vec![1., 3., 5., 2., 4., 6.], vec![3, 1, 2]).unwrap();
-    let result = forward(&scb, &axes("SCB", &scb.shape)).unwrap();
+    let result = forward(&scb, &axes("SCB", scb.shape())).unwrap();
     assert_eq!(result.axes.layout().labels(), "SCB");
-    assert_eq!(result.tensor.shape, vec![1, 1, 2]);
+    assert_eq!(result.tensor.shape(), &[1, 1, 2]);
     assert_eq!(
         result.tensor.into_numeric_storage().unwrap(),
         NumericStorage::F32(vec![3., 4.])
     );
     let dy = Tensor::from_f32(vec![6., 9.], vec![1, 1, 2]).unwrap();
-    let dx = backward(&dy, &axes("SCB", &scb.shape)).unwrap();
+    let dx = backward(&dy, &axes("SCB", scb.shape())).unwrap();
     assert_eq!(
         dx.into_numeric_storage().unwrap(),
         NumericStorage::F32(vec![2., 2., 2., 3., 3., 3.])
     );
 
     let scbt = Tensor::from_f32(vec![1., 3., 5., 2., 4., 6.], vec![3, 1, 1, 2]).unwrap();
-    let result = forward(&scbt, &axes("SCBT", &scbt.shape)).unwrap();
+    let result = forward(&scbt, &axes("SCBT", scbt.shape())).unwrap();
     assert_eq!(result.axes.layout().labels(), "SCBT");
-    assert_eq!(result.tensor.shape, vec![1, 1, 1, 2]);
+    assert_eq!(result.tensor.shape(), &[1, 1, 1, 2]);
     assert_eq!(
         result.tensor.into_numeric_storage().unwrap(),
         NumericStorage::F32(vec![3., 4.])
     );
 
     let ct = Tensor::new(vec![1., 2., 3., 4., 5., 6.], vec![2, 3]).unwrap();
-    let result = forward(&ct, &axes("CT", &ct.shape)).unwrap();
+    let result = forward(&ct, &axes("CT", ct.shape())).unwrap();
     assert_eq!(result.axes.layout().labels(), "CU");
-    assert_eq!(result.tensor.shape, vec![2, 1]);
+    assert_eq!(result.tensor.shape(), &[2, 1]);
     assert_eq!(result.tensor.as_f64_slice().unwrap(), &[3., 4.]);
 }
 
@@ -110,7 +110,7 @@ fn pool_adjoint_matches_finite_difference_and_rejects_empty_axis() {
     }
     let empty = Tensor::new(vec![], vec![2, 1, 0]).unwrap();
     assert!(matches!(
-        forward(&empty, &self::axes("CBT", &empty.shape)),
+        forward(&empty, &self::axes("CBT", empty.shape())),
         Err(PoolError::EmptyPool)
     ));
 }
@@ -134,7 +134,7 @@ fn documented_no_channel_formats_pool_their_spatial_or_time_axis() {
         let axes = AxisPlan::new(layout, &shape).unwrap();
         let result = forward(&input, &axes).unwrap();
         assert_eq!(result.axes.layout().labels(), expected_format);
-        assert_eq!(result.tensor.shape, expected_shape);
+        assert_eq!(result.tensor.shape(), expected_shape.as_slice());
         assert_eq!(result.tensor.as_f64_slice().unwrap(), expected);
         let dy = Tensor::new(vec![1.; expected.len()], expected_shape).unwrap();
         let dx = backward(&dy, &axes).unwrap();
@@ -172,7 +172,7 @@ fn nonsquare_spatial_sequence_and_unbatched_adjoint_match_independent_finite_dif
         let axes = axes(format, &shape);
         let input = Tensor::new(x.clone(), shape.clone()).unwrap();
         let result = forward(&input, &axes).unwrap();
-        let output_shape = result.tensor.shape.clone();
+        let output_shape = result.tensor.shape().to_vec();
         let dy_values: Vec<f64> = (0..result.tensor.len())
             .map(|i| i as f64 * 0.2 + 0.5)
             .collect();
@@ -214,9 +214,9 @@ fn nonsquare_spatial_sequence_and_unbatched_adjoint_match_independent_finite_dif
 #[test]
 fn empty_batch_retains_zero_elements_without_dividing_by_zero() {
     let input = Tensor::new(vec![], vec![2, 0, 3]).unwrap();
-    let axes = axes("CBT", &input.shape);
+    let axes = axes("CBT", input.shape());
     let result = forward(&input, &axes).unwrap();
-    assert_eq!(result.tensor.shape, vec![2, 0]);
+    assert_eq!(result.tensor.shape(), &[2, 0]);
     let dy = Tensor::new(vec![], vec![2, 0]).unwrap();
-    assert_eq!(backward(&dy, &axes).unwrap().shape, input.shape);
+    assert_eq!(backward(&dy, &axes).unwrap().shape(), input.shape());
 }

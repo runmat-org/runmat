@@ -21,7 +21,7 @@ fn complex_spatial_sequence_forward_has_independent_full_output_oracle() {
     let input = ComplexTensor::new(values.clone(), shape.clone()).unwrap();
     let result = forward_complex(&input, &axes("SCBT", &shape)).unwrap();
     assert_eq!(result.axes.layout().labels(), "SCBT");
-    assert_eq!(result.tensor.shape, vec![1, 2, 2, 2]);
+    assert_eq!(result.tensor.shape(), &[1, 2, 2, 2]);
     for (out_index, &ComplexElement(real, imaginary)) in
         result.tensor.as_f64_slice().unwrap().iter().enumerate()
     {
@@ -47,7 +47,7 @@ fn real_linear_complex_adjoint_matches_both_component_finite_differences() {
     let dy: Vec<(f64, f64)> = (0..result.tensor.len())
         .map(|i| (i as f64 * 0.17 + 0.4, i as f64 * -0.11 - 0.2))
         .collect();
-    let gradient = ComplexTensor::new(dy.clone(), result.tensor.shape).unwrap();
+    let gradient = ComplexTensor::new(dy.clone(), result.tensor.shape().to_vec()).unwrap();
     let dx = backward_complex(&input, &gradient, &axes).unwrap();
     let objective = |values: Vec<(f64, f64)>| -> f64 {
         let tensor = ComplexTensor::new(values, shape.clone()).unwrap();
@@ -83,7 +83,7 @@ fn real_linear_complex_adjoint_matches_both_component_finite_differences() {
 fn single_complex_extreme_components_stay_native_and_finite() {
     let input =
         ComplexTensor::from_f32(vec![(2.0e38, 2.0e38), (2.0e38, -2.0e38)], vec![1, 2]).unwrap();
-    let axes = axes("CT", &input.shape);
+    let axes = axes("CT", input.shape());
     let result = forward_complex(&input, &axes).unwrap();
     assert_eq!(result.axes.layout().labels(), "CU");
     assert_eq!(result.tensor.numeric_dtype(), NumericDType::F32);
@@ -119,7 +119,7 @@ fn no_channel_layout_and_empty_batch_keep_checked_complex_geometry() {
         vec![2, 3],
     )
     .unwrap();
-    let result = forward_complex(&bt, &axes("BT", &bt.shape)).unwrap();
+    let result = forward_complex(&bt, &axes("BT", bt.shape())).unwrap();
     assert_eq!(result.axes.layout().labels(), "BU");
     assert_eq!(
         result.tensor.as_f64_slice().unwrap(),
@@ -158,20 +158,20 @@ fn no_channel_layout_and_empty_batch_keep_checked_complex_geometry() {
     let axes = AxisPlan::new(layout, &[2, 0, 3]).unwrap();
     let empty = ComplexTensor::new(vec![], vec![2, 0, 3]).unwrap();
     let result = forward_complex(&empty, &axes).unwrap();
-    assert_eq!(result.tensor.shape, vec![2, 0]);
+    assert_eq!(result.tensor.shape(), &[2, 0]);
     let empty_gradient = ComplexTensor::new(vec![], vec![2, 0]).unwrap();
     assert_eq!(
         backward_complex(&empty, &empty_gradient, &axes)
             .unwrap()
-            .shape,
-        empty.shape
+            .shape(),
+        empty.shape()
     );
 }
 
 #[test]
 fn complex_gradient_class_and_shape_must_match_forward_contract() {
     let input = ComplexTensor::from_f32(vec![(1., 2.), (3., 4.)], vec![1, 2]).unwrap();
-    let axes = axes("CT", &input.shape);
+    let axes = axes("CT", input.shape());
     let wrong_class = ComplexTensor::new(vec![(1., 1.)], vec![1, 1]).unwrap();
     assert!(matches!(
         backward_complex(&input, &wrong_class, &axes),

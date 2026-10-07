@@ -3,6 +3,40 @@ use crate::builtins::common::test_support;
 use crate::make_cell;
 use runmat_value::{ComplexTensor, IntValue, StringArray, SymbolicExpr, Tensor};
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn disp_preserves_rank_zero_scalar_and_rank_one_row_display() {
+    let _outputs = crate::output_count::push_output_count(Some(0));
+    let cases = [
+        (
+            Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap()),
+            "7\n",
+        ),
+        (
+            Value::Tensor(Tensor::new(vec![7.0, 8.0], vec![2]).unwrap()),
+            "     7       8\n",
+        ),
+        (
+            Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 2.0)], Vec::new()).unwrap()),
+            "1+2i\n",
+        ),
+        (
+            Value::ComplexTensor(
+                ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![2]).unwrap(),
+            ),
+            "  1+2i    3+4i\n",
+        ),
+    ];
+    for (value, expected) in cases {
+        crate::console::reset_thread_buffer();
+        futures::executor::block_on(disp_builtin(value, Vec::new()))
+            .expect("display exact-rank tensor");
+        let entries = crate::console::take_thread_buffer();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].text, expected);
+    }
+}
+
 #[test]
 fn disp_descriptor_signatures_cover_core_forms() {
     let labels: Vec<&str> = DISP_DESCRIPTOR
@@ -347,7 +381,7 @@ fn disp_accepts_gpu_tensor() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result =

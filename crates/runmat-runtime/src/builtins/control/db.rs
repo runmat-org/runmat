@@ -209,7 +209,7 @@ fn magnitude_input(value: Value) -> BuiltinResult<RealInput> {
             let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, other)
                 .map_err(|e| db_error_with_detail(&DB_ERROR_INVALID_INPUT, e))?;
             let precision = tensor_precision(&tensor);
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let values = tensor::tensor_into_values_f64(tensor)
                 .into_iter()
                 .map(f64::abs)
@@ -224,7 +224,7 @@ fn magnitude_input(value: Value) -> BuiltinResult<RealInput> {
 }
 
 fn complex_magnitudes(tensor: ComplexTensor) -> RealInput {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let precision = if tensor.numeric_dtype() == NumericDType::F32 {
         OutputPrecision::Single
     } else {
@@ -254,7 +254,7 @@ fn power_input(value: Value) -> BuiltinResult<RealInput> {
             let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, other)
                 .map_err(|e| db_error_with_detail(&DB_ERROR_INVALID_INPUT, e))?;
             let precision = tensor_precision(&tensor);
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let values = tensor::tensor_into_values_f64(tensor);
             if values.iter().any(|value| *value < 0.0) {
                 return Err(db_error_with_detail(
@@ -284,7 +284,7 @@ fn resistance_input(value: Value) -> BuiltinResult<RealInput> {
             let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, other)
                 .map_err(|e| db_error_with_detail(&DB_ERROR_INVALID_RESISTANCE, e))?;
             let precision = tensor_precision(&tensor);
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let values = tensor::tensor_into_values_f64(tensor);
             for &resistance in &values {
                 if !resistance.is_finite() || resistance <= 0.0 {
@@ -383,7 +383,7 @@ pub(crate) mod tests {
     fn assert_tensor_close(value: Value, expected_shape: &[usize], expected: &[f64]) {
         match value {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, expected_shape);
+                assert_eq!(tensor.shape(), expected_shape);
                 assert_eq!(tensor.materialize_f64().len(), expected.len());
                 for (&actual, &expected) in tensor.materialize_f64().iter().zip(expected) {
                     if expected.is_infinite() {
@@ -498,6 +498,24 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn db_preserves_rank_zero_and_rank_one_tensor_shapes() {
+        let scalar = db_builtin(
+            Value::Tensor(Tensor::new(vec![10.0], Vec::new()).unwrap()),
+            Vec::new(),
+        )
+        .expect("rank-zero db");
+        assert_num_close(scalar, 20.0);
+
+        let vector = db_builtin(
+            Value::Tensor(Tensor::new(vec![1.0, 10.0], vec![2]).unwrap()),
+            Vec::new(),
+        )
+        .expect("rank-one db");
+        assert_tensor_close(vector, &[2], &[0.0, 20.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn db_preserves_native_single_output() {
         let tensor = Tensor::from_f32(vec![1.0, 10.0, 100.0], vec![1, 3]).unwrap();
@@ -526,7 +544,7 @@ pub(crate) mod tests {
             panic!("expected real single tensor");
         };
         assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
-        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(tensor.shape(), &[2, 1]);
         assert_eq!(
             tensor.materialize_f64(),
             vec![f64::from((20.0_f64 * 5.0_f64.log10()) as f32), 20.0]
@@ -726,7 +744,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 10.0, 100.0], vec![1, 3]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = db_builtin(Value::GpuTensor(handle), Vec::new()).expect("db");

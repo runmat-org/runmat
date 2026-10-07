@@ -19,6 +19,7 @@ use crate::builtins::common::{
     },
     tensor,
 };
+use crate::builtins::control::tf_model::state_matrix_dimensions;
 use crate::{build_runtime_error, dispatcher, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "ss";
@@ -412,10 +413,13 @@ impl RealMatrix {
             }
         };
 
-        if tensor.shape.len() > 2 {
+        if tensor.shape().len() > 2 {
             return Err(ss_error_with_detail(
                 &SS_ERROR_INVALID_DIMENSIONS,
-                format!("{label} must be a 2-D matrix, got shape {:?}", tensor.shape),
+                format!(
+                    "{label} must be a 2-D matrix, got shape {:?}",
+                    tensor.shape()
+                ),
             ));
         }
         let values = tensor::tensor_values_f64_cow(&tensor);
@@ -426,11 +430,8 @@ impl RealMatrix {
             ));
         }
 
-        Ok(Self {
-            rows: tensor.rows,
-            cols: tensor.cols,
-            tensor,
-        })
+        let (rows, cols) = state_matrix_dimensions(&tensor);
+        Ok(Self { rows, cols, tensor })
     }
 
     fn into_value(self) -> Value {
@@ -532,7 +533,7 @@ mod tests {
     fn assert_tensor(value: &Value, shape: &[usize], data: &[f64]) {
         match value {
             Value::Tensor(tensor) => {
-                assert_eq!(tensor.shape, shape);
+                assert_eq!(tensor.shape(), shape);
                 assert_eq!(tensor.materialize_f64(), data);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -574,6 +575,31 @@ mod tests {
         assert_tensor(property(&sys, "D"), &[1, 1], &[0.0]);
         assert_tensor(property(&sys, "InputDelay"), &[1, 1], &[0.0]);
         assert_tensor(property(&sys, "OutputDelay"), &[1, 1], &[0.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn ss_preserves_dense_rank_zero_and_rank_one_matrix_projection() {
+        let rank_zero = || Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap());
+        let system = run_ss(
+            rank_zero(),
+            rank_zero(),
+            rank_zero(),
+            rank_zero(),
+            Vec::new(),
+        )
+        .expect("rank-zero state-space matrices");
+        assert_tensor(property(&system, "A"), &[], &[1.0]);
+
+        let error = run_ss(
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap()),
+            Value::Num(1.0),
+            Value::Num(1.0),
+            Value::Num(1.0),
+            Vec::new(),
+        )
+        .expect_err("rank-one A is a one-by-two matrix");
+        assert!(error.message().contains("A must be square, got 1x2"));
     }
 
     #[test]
@@ -800,7 +826,7 @@ mod tests {
             let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let sys = run_ss(

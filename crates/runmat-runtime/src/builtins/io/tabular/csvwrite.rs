@@ -201,7 +201,7 @@ async fn csvwrite_builtin(
 fn preflight_data(value: &Value) -> BuiltinResult<()> {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(()),
-        Value::Tensor(tensor) => ensure_matrix_dims(&tensor.shape),
+        Value::Tensor(tensor) => ensure_matrix_dims(tensor.shape()),
         Value::LogicalArray(array) => ensure_matrix_dims(&array.shape),
         Value::ComplexTensor(tensor) => {
             if tensor.integer_storage().is_some() {
@@ -210,7 +210,7 @@ fn preflight_data(value: &Value) -> BuiltinResult<()> {
                     "csvwrite: complex integer input is not supported",
                 ));
             }
-            ensure_matrix_dims(&tensor.shape)
+            ensure_matrix_dims(tensor.shape())
         }
         Value::GpuTensor(handle) => ensure_matrix_dims(handle.shape()),
         _ => Err(csvwrite_error_with(
@@ -250,8 +250,8 @@ impl CsvMatrix {
 
     fn shape(&self) -> &[usize] {
         match self {
-            Self::Real(t) => &t.shape,
-            Self::Complex(t) => &t.shape,
+            Self::Real(t) => t.shape(),
+            Self::Complex(t) => t.shape(),
         }
     }
 

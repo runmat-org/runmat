@@ -17,7 +17,7 @@ use runmat_value::{ObjectInstance, Tensor, Value};
 
 /// Host state matrices retain the model domain's row-by-column projection.
 /// Rank-zero tensors have no matrix extent; rank-one tensors form one row.
-pub(super) fn state_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
+pub(in super::super) fn state_matrix_dimensions(tensor: &Tensor) -> (usize, usize) {
     match tensor.shape() {
         [] => (0, 0),
         [columns] => (1, *columns),

@@ -94,8 +94,7 @@ impl Geometry {
     }
 
     pub fn validate_input(&self, input: &Tensor) -> Result<(), PoolError> {
-        if input.shape.as_slice() != self.input.shape() || input.len() != self.input.element_count()
-        {
+        if input.shape() != self.input.shape() || input.len() != self.input.element_count() {
             return Err(PoolError::ShapeMismatch);
         }
         if !matches!(input.numeric_dtype(), NumericDType::F32 | NumericDType::F64) {
@@ -105,8 +104,7 @@ impl Geometry {
     }
 
     pub fn validate_complex_input(&self, input: &ComplexTensor) -> Result<(), PoolError> {
-        if input.shape.as_slice() != self.input.shape() || input.len() != self.input.element_count()
-        {
+        if input.shape() != self.input.shape() || input.len() != self.input.element_count() {
             return Err(PoolError::ShapeMismatch);
         }
         if !matches!(input.numeric_dtype(), NumericDType::F32 | NumericDType::F64) {

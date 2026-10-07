@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn format_numeric_tensor(tensor: &Tensor) -> Vec<String> {
-    let shape = canonical_dims(&tensor.shape);
+    let shape = canonical_dims(tensor.shape());
     let len = tensor::tensor_element_len(tensor);
     if len == 0 {
         return Vec::new();
@@ -76,7 +76,7 @@ pub(super) fn format_numeric_tensor_nested(tensor: &Tensor) -> Vec<String> {
     if len == 1 {
         return vec![format_tensor_value(tensor, 0)];
     }
-    let shape = canonical_dims(&tensor.shape);
+    let shape = canonical_dims(tensor.shape());
     let class_name = tensor.numeric_dtype().class_name();
     vec![format!("[{} {class_name}]", dims_to_string(&shape))]
 }
@@ -93,7 +93,7 @@ pub(super) fn format_tensor_value(tensor: &Tensor, index: usize) -> String {
 }
 
 pub(super) fn format_complex_tensor(tensor: &ComplexTensor) -> Vec<String> {
-    let shape = canonical_dims(&tensor.shape);
+    let shape = canonical_dims(tensor.shape());
     let len = tensor::complex_tensor_element_len(tensor);
     if len == 0 {
         return Vec::new();
@@ -168,7 +168,7 @@ pub(super) fn format_complex_tensor_nested(tensor: &ComplexTensor) -> Vec<String
     if len == 1 {
         return vec![tensor.format_element(0)];
     }
-    let shape = canonical_dims(&tensor.shape);
+    let shape = canonical_dims(tensor.shape());
     let class_name = tensor
         .integer_storage()
         .as_ref()

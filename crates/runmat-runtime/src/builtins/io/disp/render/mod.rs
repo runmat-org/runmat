@@ -26,7 +26,7 @@ pub(crate) fn format_for_display(value: &Value) -> Vec<String> {
 }
 
 fn format_empty_numeric_tensor_for_display(tensor: &Tensor) -> String {
-    let shape = canonical_dims(&tensor.shape);
+    let shape = canonical_dims(tensor.shape());
     let dtype = tensor.numeric_dtype();
     if dtype == runmat_value::NumericDType::F64 && shape == [0, 0] {
         return "[]".to_string();

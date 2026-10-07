@@ -5,9 +5,10 @@ mod power;
 #[cfg(test)]
 mod boundary_tests;
 pub use admission::preflight_ss_host_properties;
+pub(super) use admission::state_matrix_dimensions;
 use admission::{
     admit_coefficient_property, admit_delay_property, admit_sample_time_property,
-    preflight_host_model_properties, state_matrix_dimensions,
+    preflight_host_model_properties,
 };
 use numerics::{finite_complex_ratio, finite_complex_ratio_direction};
 use runmat_types::MemberAccess;
