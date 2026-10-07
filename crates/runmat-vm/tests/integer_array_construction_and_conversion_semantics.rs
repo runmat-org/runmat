@@ -22,7 +22,7 @@ fn compiled_integer_grid_imag_and_nextpow2_forms_preserve_native_classes() {
         );
         assert!(
             values.iter().any(
-                |value| matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.integer_storage().is_some_and(|storage| storage.class_name() == constructor))
+                |value| matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![2, 2] && tensor.integer_storage().is_some_and(|storage| storage.class_name() == constructor))
             ),
             "{constructor} grid output"
         );
@@ -35,9 +35,9 @@ fn compiled_magic_uses_first_real_element_floor_and_supports_order_two() {
         execute_source("a = magic([3.9 99]); b = magic(2);").expect("compiled magic semantics");
     assert!(values
         .iter()
-        .any(|value| matches!(value, Value::Tensor(tensor) if tensor.shape == vec![3, 3])));
+        .any(|value| matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![3, 3])));
     assert!(values.iter().any(|value| {
-        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.materialize_f64() == vec![1.0, 4.0, 3.0, 2.0])
+        matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![2, 2] && tensor.materialize_f64() == vec![1.0, 4.0, 3.0, 2.0])
     }));
 }
 
@@ -67,7 +67,7 @@ fn compiled_mat2cell_supports_nd_cell_subscripts() {
     .expect("compiled N-D cell subscript");
     assert!(
         values.iter().any(|value| {
-            matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2, 1] && tensor.materialize_f64() == vec![14.0, 15.0, 17.0, 18.0])
+            matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![2, 2, 1] && tensor.materialize_f64() == vec![14.0, 15.0, 17.0, 18.0])
         }),
         "unexpected compiled values: {values:?}"
     );

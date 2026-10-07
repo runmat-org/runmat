@@ -444,7 +444,7 @@ fn lsqcurvefit_accepts_anonymous_curve_model() {
     )
     .unwrap();
     assert!(vars.iter().any(|v| {
-        matches!(v, runmat_value::Value::Tensor(t) if t.shape == vec![2, 1] && (t.materialize_f64()[0] - 2.0).abs() < 1e-5 && (t.materialize_f64()[1] - 1.0).abs() < 1e-5)
+        matches!(v, runmat_value::Value::Tensor(t) if t.shape() == vec![2, 1] && (t.materialize_f64()[0] - 2.0).abs() < 1e-5 && (t.materialize_f64()[1] - 1.0).abs() < 1e-5)
     }));
 }
 
@@ -453,7 +453,7 @@ fn lsqnonlin_accepts_anonymous_residual_function() {
     let vars =
         execute_source("r = @(x) [x(1)-2; x(2)-3; x(1)+x(2)-5]; x = lsqnonlin(r, [0;0]);").unwrap();
     assert!(vars.iter().any(|v| {
-        matches!(v, runmat_value::Value::Tensor(t) if t.shape == vec![2, 1] && (t.materialize_f64()[0] - 2.0).abs() < 1e-5 && (t.materialize_f64()[1] - 3.0).abs() < 1e-5)
+        matches!(v, runmat_value::Value::Tensor(t) if t.shape() == vec![2, 1] && (t.materialize_f64()[0] - 2.0).abs() < 1e-5 && (t.materialize_f64()[1] - 3.0).abs() < 1e-5)
     }));
 }
 

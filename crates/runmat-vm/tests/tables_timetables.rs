@@ -183,7 +183,7 @@ fn dictionary_compiled_surface_preserves_wide_integer_keys_and_scalar_expansion(
         matches!(
             value,
             Value::Tensor(tensor)
-                if tensor.shape == [2, 1]
+                if tensor.shape() == [2, 1]
                     && tensor.integer_storage()
                         == Some(&runmat_value::IntegerStorage::I16(vec![7, 7]))
         )

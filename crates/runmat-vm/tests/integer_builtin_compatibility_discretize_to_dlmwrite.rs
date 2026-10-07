@@ -34,7 +34,7 @@ fn contains_integer_storage(values: &[Value], expected: &IntegerStorage) -> bool
 fn contains_numeric_tensor(values: &[Value], shape: &[usize], expected: &[f64]) -> bool {
     values.iter().any(|value| {
         matches!(value, Value::Tensor(tensor)
-            if tensor.shape == shape && tensor.materialize_f64() == expected)
+            if tensor.shape() == shape && tensor.materialize_f64() == expected)
     })
 }
 

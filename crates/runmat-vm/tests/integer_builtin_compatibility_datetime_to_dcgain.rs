@@ -106,7 +106,7 @@ fn compiled_integer_decomposition_dispatches_transpose_and_both_solves() {
             .iter()
             .filter(|value| {
                 matches!(value, Value::Tensor(tensor)
-                    if matches!(tensor.shape.as_slice(), [2, 1] | [1, 2])
+                    if matches!(tensor.shape(), [2, 1] | [1, 2])
                         && tensor.materialize_f64().iter().all(|entry| (*entry - 2.0).abs() < 1.0e-12))
             })
             .count(),

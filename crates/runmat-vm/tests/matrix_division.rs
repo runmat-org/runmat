@@ -13,7 +13,7 @@ fn execute_program(source: &str) -> Vec<Value> {
 fn assert_same_real_tensor(lhs: &Value, rhs: &Value) {
     match (lhs, rhs) {
         (Value::Tensor(left), Value::Tensor(right)) => {
-            assert_eq!(left.shape, right.shape);
+            assert_eq!(left.shape(), right.shape());
             assert_eq!(left.materialize_f64(), right.materialize_f64());
         }
         (Value::Num(left), Value::Num(right)) => {
@@ -26,7 +26,7 @@ fn assert_same_real_tensor(lhs: &Value, rhs: &Value) {
 fn assert_same_complex_tensor(lhs: &Value, rhs: &Value) {
     match (lhs, rhs) {
         (Value::ComplexTensor(left), Value::ComplexTensor(right)) => {
-            assert_eq!(left.shape, right.shape);
+            assert_eq!(left.shape(), right.shape());
             assert_eq!(left.materialize_f64(), right.materialize_f64());
         }
         (Value::Complex(lr, li), Value::Complex(rr, ri)) => {

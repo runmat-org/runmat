@@ -32,7 +32,7 @@ pub(super) fn run() {
                 else {
                     panic!("dense result");
                 };
-                assert_eq!(gathered.shape, vec![1, 1, 2]);
+                assert_eq!(gathered.shape(), vec![1, 1, 2]);
                 for (actual, expected) in gathered.as_f64_slice().unwrap().iter().zip(expected) {
                     assert!((actual - expected).abs() < 1e-12, "{name}");
                 }

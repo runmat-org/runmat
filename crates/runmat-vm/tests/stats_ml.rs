@@ -1,4 +1,4 @@
-use runmat_value::{LogicalArray, Tensor, Value};
+use runmat_value::{LogicalArray, Value};
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -11,10 +11,7 @@ fn has_num(vars: &[Value], expected: f64) -> bool {
 
 fn has_tensor_shape(vars: &[Value], shape: &[usize]) -> bool {
     vars.iter().any(|value| match value {
-        Value::Tensor(Tensor {
-            shape: tensor_shape,
-            ..
-        }) => tensor_shape == shape,
+        Value::Tensor(tensor) => tensor.shape() == shape,
         _ => false,
     })
 }
@@ -23,7 +20,7 @@ fn has_tensor_data(vars: &[Value], shape: &[usize], expected: &[f64]) -> bool {
     vars.iter().any(|value| match value {
         Value::Tensor(tensor) => {
             let data = tensor.materialize_f64();
-            tensor.shape == shape
+            tensor.shape() == shape
                 && data.len() == expected.len()
                 && data
                     .iter()
@@ -499,7 +496,7 @@ fn bootstrp_integer_extensions_preserve_exact_compiled_callback_output() {
         matches!(
             value,
             Value::Tensor(tensor)
-                if tensor.shape == vec![2, 1]
+                if tensor.shape() == vec![2, 1]
                     && tensor.integer_storage()
                         == Some(&runmat_value::IntegerStorage::U64(vec![
                             9_007_199_254_740_993,
@@ -508,7 +505,7 @@ fn bootstrp_integer_extensions_preserve_exact_compiled_callback_output() {
         )
     }));
     assert!(vars.iter().any(
-        |value| matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.materialize_f64() == vec![1.0; 4])
+        |value| matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![2, 2] && tensor.materialize_f64() == vec![1.0; 4])
     ));
 }
 

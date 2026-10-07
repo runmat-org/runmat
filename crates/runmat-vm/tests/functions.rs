@@ -2382,11 +2382,11 @@ fn implicit_array_creation_from_linear_index_assignment() {
     let vars = execute_source(program);
     assert!(vars.iter().any(|v| matches!(
         v,
-        runmat_value::Value::Tensor(t) if t.shape == vec![1, 3] && t.materialize_f64() == vec![0.0, 0.0, 10.0]
+        runmat_value::Value::Tensor(t) if t.shape() == vec![1, 3] && t.materialize_f64() == vec![0.0, 0.0, 10.0]
     )));
     assert!(vars.iter().any(|v| matches!(
         v,
-        runmat_value::Value::Tensor(t) if t.shape == vec![1, 1] && t.materialize_f64() == vec![0.0]
+        runmat_value::Value::Tensor(t) if t.shape() == vec![1, 1] && t.materialize_f64() == vec![0.0]
     )));
 }
 
@@ -5567,7 +5567,7 @@ fn compiled_integer_implicit_expansion_uses_trailing_singletons_and_strict_zero_
                 let runmat_value::Value::Tensor(tensor) = value else {
                     return false;
                 };
-                tensor.shape == [2, 1, 3]
+                tensor.shape() == [2, 1, 3]
                     && tensor.integer_storage().map(|storage| storage.class_name())
                         == Some(class_name)
                     && tensor.materialize_f64() == [11.0, 22.0, 31.0, 42.0, 51.0, 62.0]
@@ -5592,7 +5592,7 @@ fn compiled_integer_implicit_expansion_uses_trailing_singletons_and_strict_zero_
         matches!(
             value,
             runmat_value::Value::Tensor(tensor)
-                if tensor.shape == [0, 3]
+                if tensor.shape() == [0, 3]
                     && tensor.integer_storage().is_some_and(|storage| storage.class_name() == "int8")
                     && tensor.is_empty()
         )
@@ -6262,8 +6262,8 @@ fn string_array_literal_concat_index_and_compare() {
                 }
             }
             runmat_value::Value::Tensor(t) => {
-                println!("T shape={:?} data={:?}", t.shape, t.materialize_f64());
-                if t.shape == vec![2, 2] {
+                println!("T shape={:?} data={:?}", t.shape(), t.materialize_f64());
+                if t.shape() == vec![2, 2] {
                     saw_e1 = true;
                     saw_e2 = true;
                 }
@@ -6309,10 +6309,10 @@ fn computed_integer_indices_work_for_column_slice_read_and_assign() {
     let mut saw_assign = false;
     for value in &vars {
         if let runmat_value::Value::Tensor(t) = value {
-            if t.shape == vec![2, 1] && t.materialize_f64() == vec![2.0, 5.0] {
+            if t.shape() == vec![2, 1] && t.materialize_f64() == vec![2.0, 5.0] {
                 saw_read = true;
             }
-            if t.shape == vec![2, 1] && t.materialize_f64() == vec![7.0, 9.0] {
+            if t.shape() == vec![2, 1] && t.materialize_f64() == vec![7.0, 9.0] {
                 saw_assign = true;
             }
         }
@@ -6413,7 +6413,7 @@ fn type_class_static_method_zeros() {
     assert!(
         vars.iter().any(|v| {
             if let runmat_value::Value::Tensor(t) = v {
-                t.shape == vec![2, 3] && t.materialize_f64().iter().all(|&x| x == 0.0)
+                t.shape() == vec![2, 3] && t.materialize_f64().iter().all(|&x| x == 0.0)
             } else {
                 false
             }
@@ -6455,28 +6455,28 @@ fn integer_type_class_static_method_zeros_preserves_integer_classes() {
     assert!(vars.iter().any(|value| matches!(
         value,
         runmat_value::Value::Tensor(tensor)
-            if tensor.shape == vec![2, 3]
+            if tensor.shape() == vec![2, 3]
                 && tensor.integer_storage()
                     == Some(&runmat_value::IntegerStorage::I8(vec![0; 6]))
     )));
     assert!(vars.iter().any(|value| matches!(
         value,
         runmat_value::Value::Tensor(tensor)
-            if tensor.shape == vec![1, 4]
+            if tensor.shape() == vec![1, 4]
                 && tensor.integer_storage()
                     == Some(&runmat_value::IntegerStorage::I32(vec![0; 4]))
     )));
     assert!(vars.iter().any(|value| matches!(
         value,
         runmat_value::Value::Tensor(tensor)
-            if tensor.shape == vec![3, 1]
+            if tensor.shape() == vec![3, 1]
                 && tensor.integer_storage()
                     == Some(&runmat_value::IntegerStorage::U16(vec![0; 3]))
     )));
     assert!(vars.iter().any(|value| matches!(
         value,
         runmat_value::Value::Tensor(tensor)
-            if tensor.shape == vec![1, 2]
+            if tensor.shape() == vec![1, 2]
                 && tensor.integer_storage()
                     == Some(&runmat_value::IntegerStorage::U64(vec![0; 2]))
     )));
@@ -6504,21 +6504,21 @@ fn eye_integer_class_strings_preserve_integer_storage_on_script_surface() {
     assert!(vars.iter().any(|value| matches!(
         value,
         runmat_value::Value::Tensor(tensor)
-            if tensor.shape == vec![2, 3]
+            if tensor.shape() == vec![2, 3]
                 && tensor.integer_storage()
                     == Some(&runmat_value::IntegerStorage::I16(vec![1, 0, 0, 1, 0, 0]))
     )));
     assert!(vars.iter().any(|value| matches!(
         value,
         runmat_value::Value::Tensor(tensor)
-            if tensor.shape == vec![2, 2]
+            if tensor.shape() == vec![2, 2]
                 && tensor.integer_storage()
                     == Some(&runmat_value::IntegerStorage::U32(vec![1, 0, 0, 1]))
     )));
     assert!(vars.iter().any(|value| matches!(
         value,
         runmat_value::Value::Tensor(tensor)
-            if tensor.shape == vec![1, 4]
+            if tensor.shape() == vec![1, 4]
                 && tensor.integer_storage()
                     == Some(&runmat_value::IntegerStorage::U64(vec![1, 0, 0, 0]))
     )));
@@ -6544,7 +6544,7 @@ fn diag_integer_class_strings_preserve_integer_storage_on_script_surface() {
     assert!(vars.iter().any(|value| matches!(
         value,
         runmat_value::Value::Tensor(tensor)
-            if tensor.shape == vec![3, 3]
+            if tensor.shape() == vec![3, 3]
                 && tensor.integer_storage()
                     == Some(&runmat_value::IntegerStorage::I16(vec![
                         2, 0, 0, 0, -3, 0, 0, 0, 300
@@ -6553,7 +6553,7 @@ fn diag_integer_class_strings_preserve_integer_storage_on_script_surface() {
     assert!(vars.iter().any(|value| matches!(
         value,
         runmat_value::Value::Tensor(tensor)
-            if tensor.shape == vec![2, 2]
+            if tensor.shape() == vec![2, 2]
                 && tensor.integer_storage()
                     == Some(&runmat_value::IntegerStorage::I64(vec![
                         i64::MAX,

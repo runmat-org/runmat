@@ -75,7 +75,7 @@ fn assert_fusion_numeric_output(bytecode: &runmat_vm::Bytecode, vars: &[Value], 
     let Value::Tensor(tensor) = value else {
         panic!("expected numeric tensor, got {value:?}");
     };
-    assert_eq!(tensor.shape, vec![1, inputs.len()]);
+    assert_eq!(tensor.shape(), vec![1, inputs.len()]);
     for (actual, input) in tensor.materialize_f64().iter().zip(inputs) {
         let expected = input.sin() * input + 2.0;
         assert!((actual - expected).abs() < 1e-9, "{actual} != {expected}");

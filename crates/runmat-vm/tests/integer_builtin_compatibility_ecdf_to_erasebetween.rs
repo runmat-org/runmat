@@ -73,7 +73,7 @@ fn compiled_static_and_global_empty_preserve_integer_storage() {
         assert!(
             values.iter().any(|value| {
                 matches!(value, Value::Tensor(tensor)
-                    if tensor.shape == [0, 3]
+                    if tensor.shape() == [0, 3]
                         && tensor.integer_storage() == Some(&expected))
             }),
             "{constructor}.empty result"
@@ -86,7 +86,7 @@ fn compiled_static_and_global_empty_preserve_integer_storage() {
         .expect("compiled global empty shorthand");
     assert!(values.iter().any(|value| {
         matches!(value, Value::Tensor(tensor)
-            if tensor.shape == [0, 4]
+            if tensor.shape() == [0, 4]
                 && tensor.integer_storage() == Some(&IntegerStorage::U16(Vec::new())))
     }));
 }

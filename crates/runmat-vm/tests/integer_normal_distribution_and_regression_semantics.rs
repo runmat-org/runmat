@@ -24,7 +24,7 @@ fn compiled_normal_family_executes_every_integer_class_in_runmat_mode() {
             values
                 .iter()
                 .filter_map(|value| match value {
-                    Value::Tensor(tensor) if tensor.shape == vec![1, 2] => Some(tensor),
+                    Value::Tensor(tensor) if tensor.shape() == vec![1, 2] => Some(tensor),
                     _ => None,
                 })
                 .count()
@@ -52,13 +52,13 @@ fn compiled_random_and_regression_integer_extensions_keep_declared_shapes() {
     .expect("compiled random and regression semantics");
     assert!(values
         .iter()
-        .any(|value| matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 3])));
+        .any(|value| matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![2, 3])));
     assert!(values
         .iter()
-        .any(|value| matches!(value, Value::Tensor(tensor) if tensor.shape == vec![3, 2])));
+        .any(|value| matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![3, 2])));
     assert!(values
         .iter()
-        .any(|value| matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 1])));
+        .any(|value| matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![2, 1])));
 }
 
 #[test]

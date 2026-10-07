@@ -419,7 +419,7 @@ fn interpreter_keeps_empty_nd_broadcast_and_dimension_error_semantics() {
                     assert_eq!(expected, [*number]);
                 }
                 Value::Tensor(tensor) => {
-                    assert_eq!(tensor.shape, expected_shape);
+                    assert_eq!(tensor.shape(), expected_shape);
                     assert_eq!(tensor.materialize_f64(), expected);
                 }
                 _ => panic!("numeric interpreter result: {value:?}"),

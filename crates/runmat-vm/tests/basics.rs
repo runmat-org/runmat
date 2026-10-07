@@ -118,7 +118,7 @@ fn compiled_builtin_inherits_exact_integer_single_and_output_count_semantics() {
             matches!(
                 value,
                 Value::Tensor(tensor)
-                    if tensor.shape == vec![2, 1]
+                    if tensor.shape() == vec![2, 1]
                         && tensor.as_f64_slice().is_some()
                         && tensor.materialize_f64().iter().all(|entry| matches!(*entry, 1.0 | 2.0))
             )
@@ -181,11 +181,11 @@ fn bare_random_builtin_identifiers_execute_as_zero_arg_calls() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 4] => Some(tensor),
             _ => None,
         })
         .expect("expected output tensor");
-    assert_eq!(out.shape, vec![1, 4]);
+    assert_eq!(out.shape(), vec![1, 4]);
     assert!(out.materialize_f64()[0] > 0.0 && out.materialize_f64()[0] < 1.0);
     assert_eq!(out.materialize_f64()[1], 6.0);
     assert_eq!(out.materialize_f64()[2], 1.0);
@@ -207,7 +207,7 @@ fn rand_legacy_seed_forms_execute_from_source() {
     let result = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 2] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 2] => Some(tensor),
             _ => None,
         })
         .expect("expected result tensor");
@@ -315,7 +315,7 @@ fn nan_constant_and_constructor_coexist() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 4] => Some(tensor),
             _ => None,
         })
         .expect("expected output tensor");
@@ -334,7 +334,7 @@ fn inf_constant_and_constructor_coexist() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 4] => Some(tensor),
             _ => None,
         })
         .expect("expected output tensor");
@@ -357,7 +357,7 @@ fn hilbert_builtin_executes_for_fm_demod_shape() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 4] => Some(tensor),
             _ => None,
         })
         .expect("expected output tensor");
@@ -375,7 +375,7 @@ fn buttord_builtin_executes_for_butterworth_workflow() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 4] => Some(tensor),
             _ => None,
         })
         .expect("expected output tensor");
@@ -473,7 +473,7 @@ fn pwelch_builtin_executes_for_psd_workflow() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 4] => Some(tensor),
             _ => None,
         })
         .expect("expected output tensor");
@@ -497,7 +497,7 @@ fn periodogram_builtin_executes_for_psd_workflow() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 4] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 4] => Some(tensor),
             _ => None,
         })
         .expect("expected output tensor");
@@ -521,7 +521,7 @@ fn spectrogram_builtin_executes_for_stft_workflow() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 7] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 7] => Some(tensor),
             _ => None,
         })
         .expect("expected output tensor");
@@ -546,7 +546,7 @@ fn pulstran_rectpuls_builtin_executes_for_impulse_train_shape() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 6] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 6] => Some(tensor),
             _ => None,
         })
         .expect("expected pulse train summary tensor");
@@ -570,7 +570,7 @@ fn upsample_downsample_builtin_executes_for_discrete_signal_workflow() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 16] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 16] => Some(tensor),
             _ => None,
         })
         .expect("expected sample-rate summary tensor");
@@ -593,7 +593,7 @@ fn nanmax_builtin_executes_for_reduction_and_pairwise_workflows() {
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 8] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 8] => Some(tensor),
             _ => None,
         })
         .expect("expected nanmax summary tensor");
@@ -701,7 +701,7 @@ fn array_construct_like_and_size_vector_inference() {
         let Value::Tensor(tensor_like) = &vars_like[1] else {
             panic!("expected tensor result for zeros('like', A)");
         };
-        assert_eq!(tensor_like.shape, vec![3, 4]);
+        assert_eq!(tensor_like.shape(), vec![3, 4]);
     }
 
     // zeros([5,6]) via size vector
@@ -726,7 +726,7 @@ fn array_construct_like_and_size_vector_inference() {
         let Value::Tensor(tensor_sz) = &vars_sz[1] else {
             panic!("expected tensor result for zeros(sz)");
         };
-        assert_eq!(tensor_sz.shape, vec![5, 6]);
+        assert_eq!(tensor_sz.shape(), vec![5, 6]);
     }
 }
 
@@ -803,7 +803,7 @@ fn scalar_value_index_assignment_executes() {
     match updated {
         Value::Num(n) => assert!((*n - 2.0).abs() < 1e-9),
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 1]);
+            assert_eq!(t.shape(), vec![1, 1]);
             assert_eq!(t.materialize_f64(), vec![2.0]);
         }
         other => panic!("expected scalar numeric assignment result, got {other:?}"),
@@ -825,7 +825,7 @@ fn undefined_root_index_assignment_uses_index_assignment_load_semantics() {
     let Value::Tensor(tensor) = updated else {
         panic!("expected tensor assignment result, got {updated:?}");
     };
-    assert_eq!(tensor.shape, vec![1, 1]);
+    assert_eq!(tensor.shape(), vec![1, 1]);
     assert_eq!(tensor.materialize_f64(), vec![7.0]);
 }
 
@@ -847,7 +847,7 @@ fn complex_literal_matrix_executes() {
     let vars = execute_source(input);
     match &vars[0] {
         Value::ComplexTensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), vec![1, 2]);
             assert_eq!(tensor.materialize_f64(), vec![(1.0, 2.0), (3.0, -4.0)]);
         }
         other => panic!("expected complex tensor, got {other:?}"),
@@ -860,7 +860,7 @@ fn leading_dot_complex_literals_execute() {
     let vars = execute_source(input);
     match &vars[0] {
         Value::ComplexTensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.shape(), vec![1, 2]);
             assert_eq!(tensor.materialize_f64(), vec![(0.0, 0.1), (0.0, 0.005)]);
         }
         other => panic!("expected complex tensor, got {other:?}"),
@@ -873,7 +873,7 @@ fn matrix_literal_with_leading_dot_entries_executes() {
     let vars = execute_source(input);
     match &vars[0] {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 3]);
+            assert_eq!(tensor.shape(), vec![1, 3]);
             assert_eq!(tensor.materialize_f64(), vec![1.0, 0.2, 0.3]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -886,7 +886,7 @@ fn elementwise_division_accepts_leading_dot_rhs() {
     let vars = execute_source(input);
     match &vars[1] {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 3]);
+            assert_eq!(tensor.shape(), vec![1, 3]);
             assert_eq!(tensor.materialize_f64(), vec![2.0, 4.0, 6.0]);
         }
         other => panic!("expected tensor, got {other:?}"),
@@ -909,7 +909,7 @@ fn chol_multiassign_reports_failure() {
     assert_eq!(p, 2.0);
     match &vars[1] {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.shape(), vec![2, 2]);
         }
         other => panic!("expected chol factor tensor, got {other:?}"),
     }
@@ -921,7 +921,7 @@ fn uint16_cast_is_callable_in_vm() {
     let vars = execute_source(input);
     match &vars[0] {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 3]);
+            assert_eq!(tensor.shape(), vec![1, 3]);
             assert_eq!(tensor.materialize_f64(), vec![3.0, 0.0, u16::MAX as f64]);
         }
         other => panic!("expected tensor output, got {other:?}"),
@@ -1173,13 +1173,13 @@ fn fftshift_accepts_abs_of_fft2_complex_output() {
         Value::Tensor(tensor) => tensor,
         other => panic!("abs(fft2(A)) should produce a real tensor, got {other:?}"),
     };
-    assert_eq!(m.shape, vec![2, 2]);
+    assert_eq!(m.shape(), vec![2, 2]);
     assert_eq!(m.materialize_f64(), vec![10.0, 4.0, 2.0, 0.0]);
 
     let out = vars
         .iter()
         .find_map(|value| match value {
-            Value::Tensor(tensor) if tensor.shape == vec![1, 6] => Some(tensor),
+            Value::Tensor(tensor) if tensor.shape() == vec![1, 6] => Some(tensor),
             _ => None,
         })
         .expect("expected shape summary tensor");

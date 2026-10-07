@@ -21,10 +21,10 @@ fn tf_constructs_object_through_vm_dispatch() {
         .iter()
         .any(|value| matches!(value, Value::String(class_name) if class_name == "tf")));
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![1, 1] && tensor.materialize_f64() == vec![20.0])
+        matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![1, 1] && tensor.materialize_f64() == vec![20.0])
     }));
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![1, 2] && tensor.materialize_f64() == vec![1.0, 5.0])
+        matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![1, 2] && tensor.materialize_f64() == vec![1.0, 5.0])
     }));
 }
 
@@ -331,10 +331,10 @@ fn ss_constructs_object_through_vm_dispatch() {
         .iter()
         .any(|value| matches!(value, Value::String(class_name) if class_name == "ss")));
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.materialize_f64() == vec![0.0, -2.0, 1.0, -3.0])
+        matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![2, 2] && tensor.materialize_f64() == vec![0.0, -2.0, 1.0, -3.0])
     }));
     assert!(vars.iter().any(|value| {
-        matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 1] && tensor.materialize_f64() == vec![0.0, 1.0])
+        matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![2, 1] && tensor.materialize_f64() == vec![0.0, 1.0])
     }));
     assert!(vars
         .iter()
@@ -351,14 +351,14 @@ fn step_returns_siso_response_through_vm_dispatch() {
 
     assert!(vars.iter().any(|value| {
         matches!(value, Value::Tensor(tensor)
-            if tensor.shape == vec![3, 1]
+            if tensor.shape() == vec![3, 1]
                 && (tensor.materialize_f64()[0] - 0.0).abs() < 1.0e-8
                 && (tensor.materialize_f64()[1] - (1.0 - (-1.0_f64).exp())).abs() < 1.0e-5
                 && (tensor.materialize_f64()[2] - (1.0 - (-2.0_f64).exp())).abs() < 1.0e-5)
     }));
     assert!(vars.iter().any(|value| {
         matches!(value, Value::Tensor(tensor)
-            if tensor.shape == vec![3, 1] && tensor.materialize_f64() == vec![0.0, 1.0, 2.0])
+            if tensor.shape() == vec![3, 1] && tensor.materialize_f64() == vec![0.0, 1.0, 2.0])
     }));
 }
 
@@ -372,7 +372,7 @@ fn step_single_output_assignment_returns_response() {
 
     assert!(vars.iter().any(|value| {
         matches!(value, Value::Tensor(tensor)
-            if tensor.shape == vec![3, 1]
+            if tensor.shape() == vec![3, 1]
                 && (tensor.materialize_f64()[0] - 0.0).abs() < 1.0e-8
                 && (tensor.materialize_f64()[2] - (1.0 - (-1.0_f64).exp())).abs() < 1.0e-5)
     }));
@@ -409,7 +409,7 @@ fn impulse_returns_siso_response_through_vm_dispatch() {
 
     assert!(vars
         .iter()
-        .any(|value| { matches!(value, Value::Tensor(tensor) if tensor.shape == vec![3, 1]) }));
+        .any(|value| { matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![3, 1]) }));
     assert!(vars.iter().any(|value| match value {
         Value::Num(n) => (*n - 20.0).abs() < 1.0e-8,
         _ => false,
@@ -437,7 +437,7 @@ fn impulse_discrete_response_through_vm_dispatch() {
     let vars = execute_source(discrete).unwrap();
     assert!(vars
         .iter()
-        .any(|value| { matches!(value, Value::Tensor(tensor) if tensor.shape == vec![6, 1]) }));
+        .any(|value| { matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![6, 1]) }));
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::Num(n) if n.abs() < 1.0e-12)));
@@ -478,7 +478,7 @@ fn nyquist_returns_frequency_response_through_vm_dispatch() {
 
     assert!(vars
         .iter()
-        .any(|value| { matches!(value, Value::Tensor(tensor) if tensor.shape == vec![3, 1]) }));
+        .any(|value| { matches!(value, Value::Tensor(tensor) if tensor.shape() == vec![3, 1]) }));
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::Num(n) if (n - 1.0).abs() < 1.0e-12)));

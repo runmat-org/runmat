@@ -16,7 +16,7 @@ fn compiled_log2_dissection_receives_two_requested_outputs() {
     let Value::Tensor(exponent) = &values[2] else {
         panic!("expected double exponent tensor");
     };
-    assert_eq!(fraction.shape, vec![1, 5]);
+    assert_eq!(fraction.shape(), vec![1, 5]);
     assert_eq!(
         fraction.materialize_f64()[..4],
         [0.0, 0.5, -0.75, f64::INFINITY]

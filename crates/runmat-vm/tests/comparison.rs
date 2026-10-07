@@ -25,7 +25,7 @@ fn tensor_scalar_gt_mask_feeds_elementwise_multiply() {
         matches!(
             value,
             Value::Tensor(tensor)
-                if tensor.shape == vec![2, 2]
+                if tensor.shape() == vec![2, 2]
                     && tensor.materialize_f64() == vec![0.0, 30.0, 20.0, 0.0]
         )
     }));

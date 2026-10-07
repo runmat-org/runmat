@@ -287,7 +287,7 @@ fn assert_power_execution() {
                 let gathered = block_on(runmat_runtime::gather_if_needed_async(result)).unwrap();
                 let actual = match gathered {
                     Value::Tensor(tensor) if !complex => {
-                        assert_eq!(&tensor.shape, shape);
+                        assert_eq!(tensor.shape(), shape);
                         tensor
                             .as_f64_slice()
                             .unwrap()
@@ -296,7 +296,7 @@ fn assert_power_execution() {
                             .collect::<Vec<_>>()
                     }
                     Value::ComplexTensor(tensor) if *complex => {
-                        assert_eq!(&tensor.shape, shape);
+                        assert_eq!(tensor.shape(), shape);
                         tensor
                             .as_f64_slice()
                             .unwrap()
