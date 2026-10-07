@@ -8,10 +8,8 @@ use runmat_analysis_core::{
 use runmat_meshing_core::SolverMeshArtifact;
 
 use super::contract::{
-    CanonicalStructuralConstraintRow, CanonicalStructuralConstraintTerm, CanonicalStructuralDof,
-    CanonicalStructuralDofOwner, CanonicalStructuralReferencePoint, ConstraintCouplingEvidence,
-    ConstraintCouplingKind, ConstraintPairingEvidence, ConstraintPlanError,
-    ResolvedConstraintTarget,
+    CanonicalStructuralConstraintTerm, CanonicalStructuralDof, CanonicalStructuralDofOwner,
+    CanonicalStructuralReferencePoint, ConstraintCouplingKind, ConstraintPlanError,
 };
 use super::coupling::compile_reference_coupling;
 use super::frame::{
@@ -25,12 +23,9 @@ use super::row;
 use super::target::{node_coordinates, resolve_nodal_target};
 use super::workspace::{check_cancelled, reserve};
 
-type CompiledConstraint = (
-    Vec<ResolvedConstraintTarget>,
-    Vec<CanonicalStructuralConstraintRow>,
-    Vec<ConstraintPairingEvidence>,
-    Option<ConstraintCouplingEvidence>,
-);
+use super::compilation::CompiledConstraint;
+use super::lowering;
+use super::workspace::multiply;
 
 mod reference_points;
 pub(super) use reference_points::canonical_reference_points;
@@ -59,7 +54,7 @@ pub(super) fn compile_constraint(
                     constraint.constraint_id
                 )));
             }
-            let mut targets = Vec::with_capacity(equation.terms.len());
+            let mut targets = reserve(equation.terms.len())?;
             let mut terms = Vec::new();
             for term in &equation.terms {
                 if !term.coefficient.is_finite() || term.coefficient == 0.0 {
@@ -69,6 +64,9 @@ pub(super) fn compile_constraint(
                     )));
                 }
                 let resolved = resolve_nodal_target(mesh, &term.target, &constraint.constraint_id)?;
+                terms
+                    .try_reserve_exact(resolved.matched_node_identities.len())
+                    .map_err(|_| super::workspace::overflow())?;
                 terms.extend(
                     resolved
                         .matched_node_identities
@@ -87,16 +85,13 @@ pub(super) fn compile_constraint(
                     constraint_id: constraint.constraint_id.clone(),
                 });
             }
-            Ok((
-                targets,
-                vec![row::new_sparse(
-                    &constraint.constraint_id,
-                    terms,
-                    right_hand_side,
-                )?],
-                Vec::new(),
-                None,
-            ))
+            let mut rows = lowering::rows(1, terms.len(), &constraint.constraint_id)?;
+            rows.push(row::new_sparse(
+                &constraint.constraint_id,
+                terms,
+                right_hand_side,
+            )?);
+            Ok(CompiledConstraint::rows(targets, rows))
         }
         StructuralConstraintKind::NormalDisplacement { target, value } => {
             require_normal_capable(constraint)?;
@@ -104,19 +99,23 @@ pub(super) fn compile_constraint(
             let normals = boundary_node_normals(mesh, &resolved, &constraint.constraint_id)?;
             let right_hand_side =
                 study_constant_displacement(value, model, &constraint.constraint_id)?;
-            let rows = resolved
-                .matched_node_identities
-                .iter()
-                .map(|node_identity| {
-                    row::new_direction(
-                        &constraint.constraint_id,
-                        *node_identity,
-                        normals[node_identity],
-                        right_hand_side,
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok((vec![resolved], rows, Vec::new(), None))
+            let mut rows = lowering::rows(
+                resolved.matched_node_identities.len(),
+                3,
+                &constraint.constraint_id,
+            )?;
+            for node_identity in &resolved.matched_node_identities {
+                rows.push(row::new_direction(
+                    &constraint.constraint_id,
+                    *node_identity,
+                    normals[node_identity],
+                    right_hand_side,
+                )?);
+            }
+            Ok(CompiledConstraint::rows(
+                lowering::targets([resolved])?,
+                rows,
+            ))
         }
         StructuralConstraintKind::Symmetry { target } => {
             compile_boundary_directions(mesh, constraint, target, false)
@@ -148,16 +147,26 @@ fn compile_fixed(
     target: &runmat_analysis_core::RegionTarget,
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
     let resolved = resolve_nodal_target(mesh, target, &constraint.constraint_id)?;
-    let rows = resolved
-        .matched_node_identities
-        .iter()
-        .flat_map(|node_identity| {
-            CanonicalStructuralDof::TRANSLATIONS.map(|dof| {
-                row::new_singleton(&constraint.constraint_id, *node_identity, dof, 1.0, 0.0)
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok((vec![resolved], rows, Vec::new(), None))
+    let mut rows = lowering::rows(
+        multiply(resolved.matched_node_identities.len(), 3)?,
+        1,
+        &constraint.constraint_id,
+    )?;
+    for node_identity in &resolved.matched_node_identities {
+        for dof in CanonicalStructuralDof::TRANSLATIONS {
+            rows.push(row::new_singleton(
+                &constraint.constraint_id,
+                *node_identity,
+                dof,
+                1.0,
+                0.0,
+            )?);
+        }
+    }
+    Ok(CompiledConstraint::rows(
+        lowering::targets([resolved])?,
+        rows,
+    ))
 }
 
 fn compile_prescribed(
@@ -171,16 +180,13 @@ fn compile_prescribed(
             constraint_id: constraint.constraint_id.clone(),
         });
     }
-    let prescribed = values
-        .translations
-        .iter()
-        .map(|value| {
-            Ok((
-                CanonicalStructuralDof::from(value.dof),
-                study_constant_displacement(&value.value, model, &constraint.constraint_id)?,
-            ))
-        })
-        .collect::<Result<Vec<_>, ConstraintPlanError>>()?;
+    let mut prescribed = reserve(values.translations.len())?;
+    for value in &values.translations {
+        prescribed.push((
+            CanonicalStructuralDof::from(value.dof),
+            study_constant_displacement(&value.value, model, &constraint.constraint_id)?,
+        ));
+    }
     let resolved = resolve_nodal_target(mesh, &values.target, &constraint.constraint_id)?;
     let normals = if constraint.frame == CoordinateFrame::BoundaryNormalTangent {
         Some(boundary_node_normals(
@@ -191,8 +197,13 @@ fn compile_prescribed(
     } else {
         None
     };
-    let mut rows = Vec::new();
+    let mut rows = lowering::rows(
+        multiply(resolved.matched_node_identities.len(), prescribed.len())?,
+        3,
+        &constraint.constraint_id,
+    )?;
     for node_identity in &resolved.matched_node_identities {
+        check_cancelled()?;
         let point = node_coordinates(mesh, *node_identity, &constraint.constraint_id)?;
         let normal = normals
             .as_ref()
@@ -208,7 +219,10 @@ fn compile_prescribed(
             )?);
         }
     }
-    Ok((vec![resolved], rows, Vec::new(), None))
+    Ok(CompiledConstraint::rows(
+        lowering::targets([resolved])?,
+        rows,
+    ))
 }
 
 fn compile_prescribed_motion(
@@ -218,12 +232,14 @@ fn compile_prescribed_motion(
 ) -> Result<CompiledConstraint, ConstraintPlanError> {
     require_global(constraint)?;
     let resolved = resolve_nodal_target(mesh, &motion.target, &constraint.constraint_id)?;
-    let mut rows = Vec::with_capacity(
-        resolved
-            .matched_node_identities
-            .len()
-            .saturating_mul(motion.translations.len()),
-    );
+    let mut rows = lowering::rows(
+        multiply(
+            resolved.matched_node_identities.len(),
+            motion.translations.len(),
+        )?,
+        1,
+        &constraint.constraint_id,
+    )?;
     for node_identity in &resolved.matched_node_identities {
         for translation in &motion.translations {
             rows.push(row::new_singleton(
@@ -235,7 +251,10 @@ fn compile_prescribed_motion(
             )?);
         }
     }
-    Ok((vec![resolved], rows, Vec::new(), None))
+    Ok(CompiledConstraint::rows(
+        lowering::targets([resolved])?,
+        rows,
+    ))
 }
 
 fn compile_boundary_directions(
@@ -247,14 +266,19 @@ fn compile_boundary_directions(
     require_normal_capable(constraint)?;
     let resolved = resolve_nodal_target(mesh, target, &constraint.constraint_id)?;
     let normals = boundary_node_normals(mesh, &resolved, &constraint.constraint_id)?;
-    let mut rows = Vec::new();
+    let count = multiply(
+        resolved.matched_node_identities.len(),
+        if tangential { 2 } else { 1 },
+    )?;
+    let mut rows = lowering::rows(count, 3, &constraint.constraint_id)?;
     for node_identity in &resolved.matched_node_identities {
+        check_cancelled()?;
         let directions = if tangential {
-            boundary_tangent_basis(normals[node_identity], &constraint.constraint_id)?.to_vec()
+            boundary_tangent_basis(normals[node_identity], &constraint.constraint_id)?
         } else {
-            vec![normals[node_identity]]
+            [normals[node_identity]; 2]
         };
-        for direction in directions {
+        for direction in directions.into_iter().take(if tangential { 2 } else { 1 }) {
             rows.push(row::new_direction(
                 &constraint.constraint_id,
                 *node_identity,
@@ -263,7 +287,10 @@ fn compile_boundary_directions(
             )?);
         }
     }
-    Ok((vec![resolved], rows, Vec::new(), None))
+    Ok(CompiledConstraint::rows(
+        lowering::targets([resolved])?,
+        rows,
+    ))
 }
 
 fn compile_periodic(
@@ -298,7 +325,12 @@ fn compile_pair(
         transform,
         transform_displacement,
     )?;
-    Ok((vec![primary, secondary], rows, pairings, None))
+    Ok(CompiledConstraint {
+        targets: lowering::targets([primary, secondary])?,
+        rows,
+        pairings,
+        coupling: None,
+    })
 }
 
 fn compile_coupling(
@@ -321,7 +353,12 @@ fn compile_coupling(
         kind,
         &constraint.constraint_id,
     )?;
-    Ok((vec![target], rows, Vec::new(), Some(evidence)))
+    Ok(CompiledConstraint {
+        targets: lowering::targets([target])?,
+        rows,
+        pairings: Vec::new(),
+        coupling: Some(evidence),
+    })
 }
 
 pub(super) fn study_constant_displacement(

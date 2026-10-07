@@ -33,8 +33,8 @@ impl<'a> CompilationTopology<'a> {
             .filter(|value| !value.elements.is_empty());
         match (mesh, structural) {
             (Some(mesh), Some(structural)) if !mesh.topology.volume_elements.is_empty() => {
-                let nodes =
-                    CanonicalStructuralNodeSpace::derive(mesh, structural).map_err(invalid)?;
+                let nodes = CanonicalStructuralNodeSpace::derive(mesh, structural)
+                    .map_err(node_space_error)?;
                 Ok(Self::Mixed {
                     mesh,
                     structural,
@@ -46,8 +46,8 @@ impl<'a> CompilationTopology<'a> {
                 Ok(Self::Solid(mesh))
             }
             (None, Some(structural)) => {
-                let nodes =
-                    CanonicalStructuralNodeSpace::derive_explicit(structural).map_err(invalid)?;
+                let nodes = CanonicalStructuralNodeSpace::derive_explicit(structural)
+                    .map_err(node_space_error)?;
                 Ok(Self::Explicit { structural, nodes })
             }
             (None, None) => Err(invalid(
@@ -83,15 +83,8 @@ impl<'a> CompilationTopology<'a> {
             _ => None,
         };
         if let Some(mesh) = solid {
-            let (targets, rows, pairings, coupling) =
-                compile::compile_constraint(model, mesh, constraint)?;
             return Ok((
-                CompiledConstraint {
-                    targets,
-                    rows,
-                    pairings,
-                    coupling,
-                },
+                compile::compile_constraint(model, mesh, constraint)?,
                 BoundaryTransferImplementation::CanonicalBoundaryProjection,
             ));
         }
@@ -115,4 +108,15 @@ impl<'a> CompilationTopology<'a> {
 
 fn invalid(error: impl std::fmt::Display) -> ConstraintPlanError {
     ConstraintPlanError::Invalid(error.to_string())
+}
+
+fn node_space_error(
+    error: crate::physics::structural::topology::node_space::StructuralNodeSpaceError,
+) -> ConstraintPlanError {
+    match error {
+        crate::physics::structural::topology::node_space::StructuralNodeSpaceError::Storage(
+            error,
+        ) => error.into(),
+        other => invalid(other),
+    }
 }

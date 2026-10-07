@@ -26,15 +26,13 @@ pub(super) fn new_singleton(
     coefficient: f64,
     right_hand_side: f64,
 ) -> Result<CanonicalStructuralConstraintRow, ConstraintPlanError> {
-    new_sparse(
-        constraint_id,
-        vec![CanonicalStructuralConstraintTerm {
-            owner: CanonicalStructuralDofOwner::StructuralNode(node_identity),
-            dof,
-            coefficient,
-        }],
-        right_hand_side,
-    )
+    let mut terms = super::workspace::reserve(1)?;
+    terms.push(CanonicalStructuralConstraintTerm {
+        owner: CanonicalStructuralDofOwner::StructuralNode(node_identity),
+        dof,
+        coefficient,
+    });
+    new_sparse(constraint_id, terms, right_hand_side)
 }
 
 pub(super) fn new_direction(
@@ -43,16 +41,23 @@ pub(super) fn new_direction(
     direction: [f64; 3],
     right_hand_side: f64,
 ) -> Result<CanonicalStructuralConstraintRow, ConstraintPlanError> {
-    let terms = CanonicalStructuralDof::TRANSLATIONS
-        .into_iter()
-        .zip(direction)
-        .filter(|(_, coefficient)| *coefficient != 0.0)
-        .map(|(dof, coefficient)| CanonicalStructuralConstraintTerm {
-            owner: CanonicalStructuralDofOwner::StructuralNode(node_identity),
-            dof,
-            coefficient,
-        })
-        .collect();
+    let mut terms = super::workspace::reserve(
+        direction
+            .iter()
+            .filter(|coefficient| **coefficient != 0.0)
+            .count(),
+    )?;
+    terms.extend(
+        CanonicalStructuralDof::TRANSLATIONS
+            .into_iter()
+            .zip(direction)
+            .filter(|(_, coefficient)| *coefficient != 0.0)
+            .map(|(dof, coefficient)| CanonicalStructuralConstraintTerm {
+                owner: CanonicalStructuralDofOwner::StructuralNode(node_identity),
+                dof,
+                coefficient,
+            }),
+    );
     new_sparse(constraint_id, terms, right_hand_side)
 }
 
@@ -95,7 +100,7 @@ pub(super) fn new_sparse(
     let residual_quantity = residual_quantity(&terms);
     let mut row = CanonicalStructuralConstraintRow {
         identity: Digest::from_bytes([0; 32]),
-        constraint_id: constraint_id.into(),
+        constraint_id: super::lowering::owned_id(constraint_id)?,
         terms,
         right_hand_side,
         residual_quantity,

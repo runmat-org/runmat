@@ -39,13 +39,13 @@ impl CompiledConstraint {
         target: ResolvedConstraintTarget,
         rows: Vec<CanonicalStructuralConstraintRow>,
         coupling: ConstraintCouplingEvidence,
-    ) -> Self {
-        Self {
-            targets: vec![target],
+    ) -> Result<Self, ConstraintPlanError> {
+        Ok(Self {
+            targets: super::lowering::targets([target])?,
             rows,
             pairings: Vec::new(),
             coupling: Some(coupling),
-        }
+        })
     }
 }
 
@@ -134,15 +134,15 @@ fn group(
     coupling: Option<ConstraintCouplingEvidence>,
     row_count: usize,
 ) -> Result<ConstraintGroupEvidence, ConstraintPlanError> {
+    let mut reference_point_identities =
+        super::workspace::reserve(usize::from(coupling.is_some()))?;
+    reference_point_identities.extend(coupling.iter().map(|value| value.reference_point_identity));
     Ok(ConstraintGroupEvidence {
-        constraint_id: constraint.constraint_id.clone(),
+        constraint_id: super::lowering::owned_id(&constraint.constraint_id)?,
         source_digest: source_digest(constraint)?,
         implementation,
         targets,
-        reference_point_identities: coupling
-            .iter()
-            .map(|value| value.reference_point_identity)
-            .collect(),
+        reference_point_identities,
         coupling,
         pairings,
         row_count,

@@ -15,6 +15,8 @@ mod coupling;
 mod enforcement;
 mod explicit_surface;
 mod frame;
+mod lowering;
+pub use lowering::{constraint_row_expansion_profile, ConstraintRowExpansionProfile};
 mod matrix_apply;
 mod mixed;
 mod mixed_surface;

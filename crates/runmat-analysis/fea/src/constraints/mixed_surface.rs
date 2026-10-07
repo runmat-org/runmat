@@ -15,9 +15,12 @@ use super::{
         boundary_tangent_basis, require_global, require_normal_capable, translation_basis,
         translation_direction,
     },
+    lowering,
     mixed::resolve_target,
     plan::reference_point_identity,
-    row, CanonicalStructuralDof, ConstraintCouplingKind, ConstraintPlanError,
+    row,
+    workspace::{count_add, multiply},
+    CanonicalStructuralDof, ConstraintCouplingKind, ConstraintPlanError,
 };
 
 pub(super) fn compile_prescribed(
@@ -37,7 +40,11 @@ pub(super) fn compile_prescribed(
     } else {
         None
     };
-    let mut rows = Vec::new();
+    let count = multiply(
+        nodes.len(),
+        count_add(values.translations.len(), values.rotations.len())?,
+    )?;
+    let mut rows = lowering::rows(count, 3, &constraint.constraint_id)?;
     for node in nodes {
         let canonical = &topology.nodes[node];
         let basis = translation_basis(
@@ -92,7 +99,10 @@ pub(super) fn compile_prescribed(
             )?);
         }
     }
-    Ok(CompiledConstraint::rows(vec![resolved], rows))
+    Ok(CompiledConstraint::rows(
+        lowering::targets([resolved])?,
+        rows,
+    ))
 }
 
 pub(super) fn compile_normal(
@@ -110,19 +120,23 @@ pub(super) fn compile_normal(
         resolve_explicit_surface(structural, topology, &resolved, &constraint.constraint_id)?;
     let right_hand_side =
         super::compile::study_constant_displacement(value, model, &constraint.constraint_id)?;
-    let rows = resolved
-        .matched_node_identities
-        .iter()
-        .map(|identity| {
-            row::new_direction(
-                &constraint.constraint_id,
-                *identity,
-                surface.nodes[identity].oriented_normal,
-                right_hand_side,
-            )
-        })
-        .collect::<Result<_, _>>()?;
-    Ok(CompiledConstraint::rows(vec![resolved], rows))
+    let mut rows = lowering::rows(
+        resolved.matched_node_identities.len(),
+        3,
+        &constraint.constraint_id,
+    )?;
+    for identity in &resolved.matched_node_identities {
+        rows.push(row::new_direction(
+            &constraint.constraint_id,
+            *identity,
+            surface.nodes[identity].oriented_normal,
+            right_hand_side,
+        )?);
+    }
+    Ok(CompiledConstraint::rows(
+        lowering::targets([resolved])?,
+        rows,
+    ))
 }
 
 pub(super) fn compile_directions(
@@ -137,18 +151,21 @@ pub(super) fn compile_directions(
     let (resolved, _) = resolve_target(mesh, structural, topology, constraint, target)?;
     let surface =
         resolve_explicit_surface(structural, topology, &resolved, &constraint.constraint_id)?;
-    let mut rows = Vec::new();
+    let count = multiply(
+        resolved.matched_node_identities.len(),
+        if tangential { 2 } else { 1 },
+    )?;
+    let mut rows = lowering::rows(count, 3, &constraint.constraint_id)?;
     for identity in &resolved.matched_node_identities {
         let directions = if tangential {
             boundary_tangent_basis(
                 surface.nodes[identity].oriented_normal,
                 &constraint.constraint_id,
             )?
-            .to_vec()
         } else {
-            vec![surface.nodes[identity].oriented_normal]
+            [surface.nodes[identity].oriented_normal; 2]
         };
-        for direction in directions {
+        for direction in directions.into_iter().take(if tangential { 2 } else { 1 }) {
             rows.push(row::new_direction(
                 &constraint.constraint_id,
                 *identity,
@@ -157,7 +174,10 @@ pub(super) fn compile_directions(
             )?);
         }
     }
-    Ok(CompiledConstraint::rows(vec![resolved], rows))
+    Ok(CompiledConstraint::rows(
+        lowering::targets([resolved])?,
+        rows,
+    ))
 }
 
 pub(super) fn compile_coupling(
@@ -184,7 +204,7 @@ pub(super) fn compile_coupling(
         kind,
         &constraint.constraint_id,
     )?;
-    Ok(CompiledConstraint::coupling(target, rows, evidence))
+    CompiledConstraint::coupling(target, rows, evidence)
 }
 
 fn finite_value(value: f64, constraint: &StructuralConstraint) -> Result<f64, ConstraintPlanError> {

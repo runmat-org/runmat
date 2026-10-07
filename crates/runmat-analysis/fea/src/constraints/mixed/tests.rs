@@ -371,3 +371,40 @@ fn model_and_mesh() -> (AnalysisModel, SolverMeshArtifact) {
         mesh,
     )
 }
+
+#[test]
+fn mixed_dispatch_preserves_target_failure_and_cancellation_instead_of_falling_through() {
+    let (model, mesh) = model_and_mesh();
+    let structural = model.structural.as_ref().unwrap();
+    let topology = CanonicalStructuralNodeSpace::derive(&mesh, structural).unwrap();
+    let constraint = StructuralConstraint {
+        constraint_id: "absent".into(),
+        frame: CoordinateFrame::Global,
+        kind: StructuralConstraintKind::Fixed {
+            target: runmat_analysis_core::RegionTarget::boundary("absent"),
+        },
+    };
+    let direct = resolve_target(
+        Some(&mesh),
+        structural,
+        &topology,
+        &constraint,
+        constraint.kind.target().unwrap(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        requires_mixed_compilation(&constraint, &mesh, structural, &topology).unwrap_err(),
+        direct
+    );
+    let token = crate::progress::FeaCancellationToken::new();
+    token.cancel();
+    let _guard =
+        crate::progress::replace_fea_progress_context(crate::progress::FeaProgressContext {
+            cancellation: token,
+            ..Default::default()
+        });
+    assert_eq!(
+        requires_mixed_compilation(&constraint, &mesh, structural, &topology).unwrap_err(),
+        ConstraintPlanError::Cancelled
+    );
+}

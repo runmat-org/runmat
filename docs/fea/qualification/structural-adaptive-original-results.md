@@ -280,3 +280,37 @@ exclude borrowed inputs, allocator overhead and RSS. Complete lowering/evidence 
 pre-expansion whole-compilation admission, adaptive working/output composition, scheduled
 execution and atomic semantic publication remain separate gates. The original cantilever
 refinement failure remains open; no numerical tolerance or resource cap changed.
+
+
+## Counted constraint row expansion
+
+Solid, explicit and mixed lowering now return one shared compiled-constraint carrier;
+the solid-only tuple conversion is removed. Ordinary fixed, prescribed, motion, normal,
+symmetry and antisymmetry rows derive checked row/term/identifier inventories before
+allocating their row buffers. Motion counts use checked multiplication instead of
+saturation. Equation target storage and incremental term expansion use fallible exact
+reservations. Existing pairing/coupling owners retain their separate counted inventories.
+
+Singleton and directional term vectors reserve their actual nonzero term counts.
+Row/group identifier copies and group reference-point identity vectors are fallible;
+short target inventories move into exact buffers. Normal/tangent directions use fixed
+arrays, and mixed DOF traversal uses an iterator instead of per-node allocated vectors.
+The original basis transforms, equations, rotational ownership, floating-point term
+combination and canonical-byte goldens remain unchanged.
+
+Mixed family routing now propagates target-resolution failures instead of treating them
+as a request to fall through to mixed lowering. Cancellation remains typed through
+node-space dispatch. Invalid inputs may consequently report an unresolved target earlier.
+Independent references retain fixed Tet10 translations and explicit shell rotations,
+original canonical replay, requested retained-row inventory bounds, overflow and entry
+cancellation. Analytic normal/reaction, curved-foundation, rotated-periodicity, distributing
+wrench and accepted nonlinear kinematics tests remain mandatory.
+
+The row expansion profile counts retained row/term slots and identifier payloads. It
+excludes targets, geometry, separate row identity/sorting/compaction, plan accumulation/
+classification, allocator overhead and RSS. Equation profiles include retained terms but
+run after their progressive construction, so they do not prove admission before every
+term allocation. Group/evidence construction is additional to this row inventory.
+It is a component inventory, not whole-compilation policy admission. Full pre-expansion
+composition and retained-output overlap remain required for the scheduled adaptive path;
+no original scientific gate, resource cap or production envelope is promoted here.
