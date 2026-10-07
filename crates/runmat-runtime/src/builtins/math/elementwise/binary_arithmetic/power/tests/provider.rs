@@ -1,4 +1,39 @@
 use super::*;
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn mixed_host_resident_power_preserves_low_rank_shape_owner_and_allocation() {
+    test_support::with_test_provider(|provider| {
+        for (shape, base_values, exponent_values, expected) in [
+            (Vec::new(), vec![3.0], vec![2.0], vec![9.0]),
+            (vec![2], vec![2.0, 3.0], vec![2.0, 3.0], vec![4.0, 27.0]),
+        ] {
+            let base = Tensor::new(base_values, shape.clone()).expect("resident base");
+            let base = gpu_helpers::upload_tensor(provider, &base).expect("upload base");
+            let exponent = Tensor::new(exponent_values, shape.clone()).expect("host exponent");
+            let output = power_builtin(
+                Value::GpuTensor(base.clone()),
+                Value::Tensor(exponent),
+                Vec::new(),
+            )
+            .expect("mixed host/resident power");
+            let Value::GpuTensor(output) = output else {
+                panic!("supported provider route must retain residency")
+            };
+            assert_eq!(output.shape(), shape);
+            assert!(!output.shares_allocation_with(&base));
+            assert!(runmat_accelerate_api::same_provider_instance(
+                gpu_helpers::exact_provider_for_handle(&output).expect("output owner"),
+                gpu_helpers::exact_provider_for_handle(&base).expect("input owner"),
+            ));
+            let gathered = test_support::gather(Value::GpuTensor(output)).expect("gather output");
+            assert_eq!(gathered.shape(), shape);
+            assert_eq!(gathered.materialize_f64(), expected);
+            base.release().expect("release base");
+        }
+    });
+}
+
 #[test]
 fn power_gpu_left_rejects_nonscalar_host_integer_rhs() {
     test_support::with_test_provider(|provider| {

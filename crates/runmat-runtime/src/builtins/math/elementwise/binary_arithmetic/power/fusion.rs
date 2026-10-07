@@ -78,7 +78,8 @@ fn admit(context: FusionAdmissionContext<'_>) -> FusionAdmissionFuture<'_> {
             let (Some(left), Some(right)) = (host_tensor(left)?, host_tensor(right)?) else {
                 return Ok(None);
             };
-            let plan = BroadcastPlan::new(&left.shape, &right.shape).map_err(anyhow::Error::msg)?;
+            let plan =
+                BroadcastPlan::new(left.shape(), right.shape()).map_err(anyhow::Error::msg)?;
             *context.work = FusionAdmissionWork::Host {
                 elements: u64::try_from(plan.len())?,
             };

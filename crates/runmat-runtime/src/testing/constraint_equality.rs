@@ -23,7 +23,7 @@ impl RealNumeric<'_> {
     fn shape(&self) -> &[usize] {
         match self {
             Self::Double(_) | Self::Integer(_) => &[1, 1],
-            Self::Array(value) => &value.shape,
+            Self::Array(value) => value.shape(),
         }
     }
 
@@ -86,6 +86,24 @@ pub(crate) fn constraint_values_equal(actual: &Value, expected: &Value) -> bool 
 mod tests {
     use super::*;
     use runmat_value::IntegerStorage;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn numeric_constraint_equality_uses_exact_low_rank_shape() {
+        for shape in [Vec::new(), vec![2]] {
+            let count = shape.iter().product::<usize>();
+            let input = Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX; count]), shape.clone())
+                    .unwrap(),
+            );
+            let row = Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX; count]), vec![1, count])
+                    .unwrap(),
+            );
+            assert!(constraint_values_equal(&input, &input));
+            assert!(!constraint_values_equal(&input, &row));
+        }
+    }
 
     #[test]
     fn wide_integers_are_compared_without_floating_conversion() {

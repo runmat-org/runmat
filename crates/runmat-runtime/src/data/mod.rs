@@ -699,7 +699,7 @@ fn data_values_from_value(
                 .into_numeric_storage()
                 .map_err(|error| data_error(format!("invalid numeric tensor storage: {error}")))?;
             let values = DataArrayValues::from_numeric_storage(storage);
-            Ok((tensor.shape.clone(), values, None))
+            Ok((tensor.shape().to_vec(), values, None))
         }
         Value::Num(value) => Ok((vec![1, 1], DataArrayValues::F64(vec![*value]), None)),
         Value::Int(IntValue::I8(value)) => {
@@ -732,7 +732,7 @@ fn data_values_from_value(
             Some(DataArrayValues::F64(vec![*imag])),
         )),
         Value::ComplexTensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let (real, imag) = match tensor.clone().into_complex_storage() {
                 ComplexStorage::F64(values) => {
                     let (real, imag): (Vec<_>, Vec<_>) = values.into_iter().unzip();
@@ -2126,6 +2126,34 @@ pub fn remove_tx(tx_id: &str) -> BuiltinResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn typed_value_encoding_preserves_low_rank_shape_and_payload() {
+        for shape in [Vec::new(), vec![2]] {
+            let count = shape.iter().product::<usize>();
+            let values = vec![u64::MAX; count];
+            let input = Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(values.clone()), shape.clone()).unwrap(),
+            );
+            let (encoded_shape, real, imag) = data_values_from_value(&input).unwrap();
+            assert_eq!(encoded_shape, shape);
+            assert_eq!(real, DataArrayValues::U64(values));
+            assert_eq!(imag, None);
+
+            let complex = Value::ComplexTensor(
+                ComplexTensor::from_complex_storage(
+                    ComplexStorage::F32(vec![(1.25, 2.5); count].into()),
+                    shape.clone(),
+                )
+                .unwrap(),
+            );
+            let (encoded_shape, real, imag) = data_values_from_value(&complex).unwrap();
+            assert_eq!(encoded_shape, shape);
+            assert_eq!(real, DataArrayValues::F32(vec![1.25; count]));
+            assert_eq!(imag, Some(DataArrayValues::F32(vec![2.5; count])));
+        }
+    }
 
     #[path = "cooperation.rs"]
     mod cooperation;

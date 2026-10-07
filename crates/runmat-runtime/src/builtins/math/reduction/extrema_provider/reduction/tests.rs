@@ -128,6 +128,67 @@ fn provider(pending: bool) -> &'static Provider {
     }))
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn dimensional_publication_handles_rank_one_and_rejects_rank_zero_before_download() {
+    let provider = provider(false);
+    let _selected = ThreadProviderGuard::set(Some(provider));
+
+    let input = provider.allocate(vec![2], NumericElementType::F32, 0.0);
+    let values = provider.allocate(vec![1], NumericElementType::F32, 0.0);
+    let indices = provider.allocate(vec![1], NumericElementType::F32, 1.0);
+    let output = futures::executor::block_on(ExtremaKind::Min.adopt_reduction_result(
+        provider,
+        &input.handle,
+        0,
+        ReduceDimResult {
+            values: values.handle,
+            indices: indices.handle,
+        },
+        ExtremaDemand::ValuesAndIndices,
+    ))
+    .expect("rank-one reduction publication");
+    let (output, index) = output.into_pair(ExtremaKind::Min).expect("paired output");
+    let Value::GpuTensor(output) = output else {
+        panic!("values must remain resident")
+    };
+    assert_eq!(output.shape(), &[1]);
+    assert!(!output.shares_allocation_with(&input.handle));
+    assert!(runmat_accelerate_api::same_provider_instance(
+        gpu_helpers::exact_provider_for_handle(&output).expect("output owner"),
+        gpu_helpers::exact_provider_for_handle(&input.handle).expect("input owner"),
+    ));
+    assert_eq!(index, Value::Num(1.0));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
+    drop((output, index, input.handle));
+    assert_eq!(input.probe.retirements(), 1);
+    assert_eq!(values.probe.retirements(), 1);
+    assert_eq!(indices.probe.retirements(), 1);
+
+    let input = provider.allocate(Vec::new(), NumericElementType::F32, 0.0);
+    let values = provider.allocate(Vec::new(), NumericElementType::F32, 0.0);
+    let indices = provider.allocate(Vec::new(), NumericElementType::F32, 1.0);
+    let before = provider.downloads.load(Ordering::SeqCst);
+    let error = futures::executor::block_on(ExtremaKind::Max.adopt_reduction_result(
+        provider,
+        &input.handle,
+        0,
+        ReduceDimResult {
+            values: values.handle,
+            indices: indices.handle,
+        },
+        ExtremaDemand::ValuesAndIndices,
+    ))
+    .expect_err("rank-zero input has no reducible axis");
+    assert!(error.message().contains("outside the admitted input rank"));
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), before);
+    assert_eq!(values.probe.retirements(), 1);
+    assert_eq!(indices.probe.retirements(), 1);
+    assert_eq!(input.probe.retirements(), 0);
+    drop(input.handle);
+    assert_eq!(input.probe.retirements(), 1);
+}
+
 #[test]
 fn dimensional_publication_preserves_native_values_and_double_index_contract() {
     let provider = provider(false);

@@ -127,8 +127,8 @@ async fn resolve_subscript_end_in_scope(
 
 fn value_shape(value: &Value) -> Vec<usize> {
     match value {
-        Value::Tensor(value) => value.shape.clone(),
-        Value::ComplexTensor(value) => value.shape.clone(),
+        Value::Tensor(value) => value.shape().to_vec(),
+        Value::ComplexTensor(value) => value.shape().to_vec(),
         Value::SparseTensor(value) => value.shape(),
         Value::GpuTensor(value) => value.shape().to_vec(),
         Value::StringArray(value) => value.shape.clone(),
@@ -152,4 +152,24 @@ fn exact_double(value: usize) -> Result<Value, RuntimeError> {
         ));
     }
     Ok(Value::Num(value as f64))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn prepared_receiver_shape_keeps_low_rank_numeric_metadata() {
+        for shape in [Vec::new(), vec![2]] {
+            let count = shape.iter().product::<usize>();
+            let real =
+                Value::Tensor(runmat_value::Tensor::new(vec![1.0; count], shape.clone()).unwrap());
+            let complex = Value::ComplexTensor(
+                runmat_value::ComplexTensor::new(vec![(1.0, 2.0); count], shape.clone()).unwrap(),
+            );
+            assert_eq!(value_shape(&real), shape);
+            assert_eq!(value_shape(&complex), shape);
+        }
+    }
 }

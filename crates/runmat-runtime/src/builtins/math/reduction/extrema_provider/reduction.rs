@@ -122,7 +122,7 @@ impl ExtremaKind {
                     ))
                 }
             };
-            if host.shape != index_contract.shape
+            if host.shape() != index_contract.shape
                 || host.numeric_dtype() != runmat_value::NumericDType::F32
             {
                 let error = self.contract_error("index download changed native class or shape");

@@ -24,7 +24,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 
-use super::common::{tensor_to_surface_grid_matlab_xy, SurfaceDataInput};
+use super::common::{
+    surface_matrix_dimensions, tensor_to_surface_grid_matlab_xy, SurfaceDataInput,
+};
 use super::mesh::{
     numeric_plot_data_from_tensor, numeric_plot_data_from_value, retain_surface_source_data,
 };
@@ -429,7 +431,8 @@ fn build_parametric_surface_cpu(
     let SurfaceDataInput::Host(z) = z_input else {
         return Ok(None);
     };
-    if x.rows != rows || x.cols != cols || y.rows != rows || y.cols != cols {
+    if surface_matrix_dimensions(x) != (rows, cols) || surface_matrix_dimensions(y) != (rows, cols)
+    {
         return Ok(None);
     }
     if extract_meshgrid_axes_from_xy_matrices(x, y, rows, cols, BUILTIN_NAME).is_ok() {
@@ -719,6 +722,46 @@ pub(crate) mod tests {
         assert!(res.is_err());
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn parametric_cpu_surface_preserves_low_rank_grid_geometry() {
+        let style = parse_surface_style_args(
+            BUILTIN_NAME,
+            &[],
+            SurfaceStyleDefaults::new(
+                ColorMap::Parula,
+                ShadingMode::Smooth,
+                false,
+                1.0,
+                false,
+                true,
+            ),
+        )
+        .expect("default surface style");
+
+        let scalar = Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap());
+        let scalar_z = SurfaceDataInput::Host(Tensor::new(vec![1.0], vec![1, 1]).unwrap());
+        assert!(
+            build_parametric_surface_cpu(&scalar, &scalar, &scalar_z, 1, 1, &style)
+                .unwrap()
+                .is_none()
+        );
+
+        let rank_one = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2]).unwrap());
+        let rank_one_z = SurfaceDataInput::Host(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap());
+        assert_eq!(rank_one_z.grid_shape(BUILTIN_NAME).unwrap(), (1, 2));
+        assert!(
+            build_parametric_surface_cpu(&rank_one, &rank_one, &rank_one_z, 1, 2, &style,)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            build_parametric_surface_cpu(&rank_one, &rank_one, &rank_one_z, 2, 1, &style,)
+                .unwrap()
+                .is_none()
+        );
+    }
+
     #[test]
     fn surf_type_is_numeric_handle() {
         assert_eq!(
@@ -764,7 +807,8 @@ pub(crate) mod tests {
         let z =
             Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).expect("surface heights");
 
-        let (x_axis, y_axis) = crate::builtins::plotting::op_common::surface_inputs::extract_meshgrid_axes_from_xy_matrices(&x, &y, z.rows, z.cols, BUILTIN_NAME).expect("axes");
+        let (rows, cols) = surface_matrix_dimensions(&z);
+        let (x_axis, y_axis) = crate::builtins::plotting::op_common::surface_inputs::extract_meshgrid_axes_from_xy_matrices(&x, &y, rows, cols, BUILTIN_NAME).expect("axes");
         assert_eq!(x_axis.len(), 3);
         assert_eq!(y_axis.len(), 2);
 
@@ -861,7 +905,7 @@ pub(crate) mod tests {
             .expect("surface ZData");
 
         assert!(
-            matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.integer_storage() == Some(&expected))
+            matches!(value, Value::Tensor(tensor) if tensor.shape() == [2, 2] && tensor.integer_storage() == Some(&expected))
         );
     }
 

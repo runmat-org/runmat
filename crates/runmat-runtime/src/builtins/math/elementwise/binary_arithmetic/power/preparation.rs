@@ -58,7 +58,7 @@ fn classify(operands: &[Value]) -> BuiltinResult<NumericalDomainEvidence> {
             "power: admitted real pair is not a tensor pair",
         ));
     };
-    let plan = BroadcastPlan::new(&left.shape, &right.shape)
+    let plan = BroadcastPlan::new(left.shape(), right.shape())
         .map_err(|detail| power_error_with_detail(&POWER_ERROR_SIZE_MISMATCH, detail))?;
     let domain = super::domain::classify_pair(
         &plan,

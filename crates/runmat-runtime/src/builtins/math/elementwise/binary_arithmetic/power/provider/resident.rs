@@ -50,7 +50,7 @@ async fn power_gpu_host(
                 return Ok(output);
             }
         } else if let Some(host_tensor) = value_to_real_tensor(&host).await? {
-            if host_tensor.shape == resident.shape()
+            if host_tensor.shape() == resident.shape()
                 && tensor_matches_handle(&host_tensor, &resident)
             {
                 let uploaded = {

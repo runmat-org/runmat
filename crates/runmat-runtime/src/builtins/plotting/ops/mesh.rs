@@ -415,7 +415,7 @@ pub(crate) fn numeric_plot_data_from_tensor(tensor: &Tensor) -> NumericPlotData 
             .clone()
             .into_numeric_storage()
             .expect("surface source is numeric"),
-        tensor.shape.clone(),
+        tensor.shape().to_vec(),
     )
     .expect("surface source shape is validated")
 }
@@ -552,7 +552,7 @@ pub(crate) mod tests {
             .expect("mesh ZData");
 
         assert!(
-            matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.integer_storage() == Some(&expected))
+            matches!(value, Value::Tensor(tensor) if tensor.shape() == [2, 2] && tensor.integer_storage() == Some(&expected))
         );
     }
 
@@ -587,7 +587,7 @@ pub(crate) mod tests {
                 .expect("mesh ZData");
 
             assert!(
-                matches!(value, Value::Tensor(tensor) if tensor.shape == vec![2, 2] && tensor.integer_storage() == Some(&expected))
+                matches!(value, Value::Tensor(tensor) if tensor.shape() == [2, 2] && tensor.integer_storage() == Some(&expected))
             );
         });
     }

@@ -31,7 +31,7 @@ fn power_like_gpu_upload_reads_typed_integer_storage_exactly() {
         let uploaded = gpu_helpers::upload_tensor(provider, &tensor).expect("gpu upload");
         let gathered = test_support::gather(Value::GpuTensor(uploaded)).expect("gather");
 
-        assert_eq!(gathered.shape, vec![1, 2]);
+        assert_eq!(gathered.shape(), &[1, 2]);
         assert_eq!(
             gathered.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX, 2]))

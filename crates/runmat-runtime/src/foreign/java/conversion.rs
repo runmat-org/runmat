@@ -61,7 +61,7 @@ pub(super) fn value_to_java(value: Value) -> Result<JavaValue, RuntimeError> {
 
 fn tensor_to_java(value: Tensor) -> Result<JavaValue, RuntimeError> {
     if value
-        .shape
+        .shape()
         .iter()
         .filter(|dimension| **dimension > 1)
         .count()
@@ -300,6 +300,26 @@ fn value_kind(value: &Value) -> &'static str {
 mod tests {
     use super::*;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn java_numeric_array_admission_preserves_low_rank_exact_values() {
+        for shape in [Vec::new(), vec![2]] {
+            let count = shape.iter().product::<usize>();
+            let value = Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX; count]), shape).unwrap(),
+            );
+            assert_eq!(
+                value_to_java(value).unwrap(),
+                JavaValue::Array {
+                    component: JavaParameterType::Object("java.math.BigInteger".into()),
+                    elements: vec![JavaValue::UnsignedLong(u64::MAX); count],
+                }
+            );
+        }
+        let matrix = Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2]).unwrap());
+        assert!(value_to_java(matrix).is_err());
+    }
+
     #[test]
     fn preserves_signed_and_widened_unsigned_integer_values() {
         assert_eq!(
@@ -383,7 +403,7 @@ mod tests {
         let Value::Tensor(value) = value else {
             panic!("Java long[] must become a numeric tensor");
         };
-        assert_eq!(value.shape, vec![1, 2]);
+        assert_eq!(value.shape(), &[1, 2]);
         assert_eq!(
             value.integer_storage(),
             Some(&IntegerStorage::I64(vec![i64::MIN, i64::MAX]))

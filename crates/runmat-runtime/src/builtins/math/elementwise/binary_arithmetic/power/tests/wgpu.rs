@@ -26,7 +26,7 @@ fn power_wgpu_matches_cpu_elementwise() {
         runmat_accelerate_api::ProviderPrecision::F64 => 1e-9,
         runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
     };
-    assert_eq!(gathered.shape, cpu_tensor.shape);
+    assert_eq!(gathered.shape(), cpu_tensor.shape());
     assert_eq!(gathered.len(), cpu_tensor.len());
     for (a, b) in gathered
         .as_f64_slice()

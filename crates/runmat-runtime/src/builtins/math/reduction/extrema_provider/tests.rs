@@ -21,7 +21,7 @@ fn scalar_extrema_use_native_single_storage_selection() {
             let Value::Tensor(result) = result else {
                 panic!("{name}: Single scalar must retain its native carrier");
             };
-            assert_eq!(result.shape, shape);
+            assert_eq!(result.shape(), shape);
             assert_eq!(
                 result.into_numeric_storage().unwrap(),
                 NumericStorage::F32(vec![expected])
@@ -49,7 +49,7 @@ fn scalar_extrema_use_native_single_storage_selection() {
             let Value::ComplexTensor(result) = result else {
                 panic!("{name}: complex Single scalar must retain its native carrier");
             };
-            assert_eq!(result.shape, shape);
+            assert_eq!(result.shape(), shape);
             assert_eq!(
                 result.into_complex_storage(),
                 ComplexStorage::F32(vec![(expected, 0.0)].into())
@@ -293,7 +293,7 @@ fn elementwise_extrema_propagate_execution_failure_and_keep_capability_fallback(
                     let Value::Tensor(output) = result.unwrap() else {
                         panic!("host capability fallback");
                     };
-                    assert_eq!(output.shape, vec![2, 1]);
+                    assert_eq!(output.shape(), &[2, 1]);
                     let expected = if name == "max" && form != 0 { 2.0 } else { 0.0 };
                     assert_eq!(output.materialize_f64(), vec![expected, expected]);
                     assert_eq!(
