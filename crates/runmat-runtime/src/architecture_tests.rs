@@ -23,6 +23,101 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
+fn describes_removed_structure_cell_carrier(line: &str) -> bool {
+    const STRUCTURE_ARRAY_NAMES: [&str; 4] = [
+        "struct array",
+        "struct arrays",
+        "structure array",
+        "structure arrays",
+    ];
+    const CELL_CARRIER_PREDICATES: [&str; 10] = [
+        "as cell",
+        "represented as cell",
+        "represented by cell",
+        "represented using cell",
+        "stored in cell",
+        "implemented as cell",
+        "backed by cell",
+        "uses cells as",
+        "use cells as",
+        "uses cell arrays as",
+    ];
+
+    // A source line can contain multiple prose claims (including a FAQ question
+    // and answer). Only a relation within one clause describes the carrier.
+    line.split(['.', '?', '!', ';']).any(|clause| {
+        let normalized = clause.to_ascii_lowercase().replace('-', " ");
+        STRUCTURE_ARRAY_NAMES.iter().any(|identity| {
+            normalized.match_indices(identity).any(|(offset, _)| {
+                let before = &normalized[..offset];
+                let after = normalized[offset + identity.len()..].trim_start();
+                let predicate = after
+                    .strip_prefix("is ")
+                    .or_else(|| after.strip_prefix("are "))
+                    .unwrap_or(after);
+                let predicate = predicate.strip_prefix("a ").unwrap_or(predicate);
+                let cell_noun = matches!(
+                    predicate.trim_matches([' ', ',', ':']),
+                    "cell" | "cells" | "cell array" | "cell arrays"
+                );
+                let cells_instead_of_container = predicate
+                    .strip_prefix("cells instead of ")
+                    .is_some_and(|remainder| {
+                        remainder.starts_with("dedicated container")
+                            || remainder.starts_with("struct array container")
+                            || remainder.starts_with("structure array container")
+                    });
+                let names_container =
+                    after.starts_with("container") || after.starts_with("carrier");
+                let denies_container = ((after.contains("does not yet have")
+                    || after.contains("do not yet have"))
+                    && (after.contains("container") || after.contains("carrier")))
+                    || (names_container
+                        && (before.ends_with("no ") || after.contains("does not yet exist")));
+                denies_container
+                    || cell_noun
+                    || cells_instead_of_container
+                    || CELL_CARRIER_PREDICATES
+                        .iter()
+                        .any(|carrier| predicate.starts_with(carrier))
+                    || before.ends_with("cell backed ")
+                    || (before.contains("represent ") && after.starts_with("with cell"))
+                    || before.ends_with("cell arrays represent ")
+            })
+        })
+    })
+}
+
+#[test]
+fn structure_cell_carrier_guard_distinguishes_carriers_from_cell_fallbacks() {
+    for claim in [
+        "Struct arrays are represented as cells.",
+        "We represent structure arrays with cell arrays.",
+        "A cell-backed struct array remains a cell.",
+        "Struct arrays are backed by cells.",
+        "Struct arrays are represented using cells.",
+        "A structure array is stored in cells.",
+        "A struct array is a cell.",
+        "Struct arrays are cells instead of dedicated containers.",
+        "Struct arrays do not yet have a dedicated container; use cells.",
+        "There is no structure-array container; struct arrays use cells as their carrier.",
+        "Struct arrays as cells are an implementation detail.",
+    ] {
+        assert!(describes_removed_structure_cell_carrier(claim), "{claim}");
+    }
+    for accurate in [
+        "How are JSON objects represented? Objects become scalar structs. Rectangular arrays with common fields become struct arrays; differing fields remain cells.",
+        "Rectangular object arrays sharing one field set become typed struct arrays; differing field sets remain cells of scalar structs.",
+        "Differing-field objects remain cells instead of struct arrays.",
+        "Cell-valued fields contribute to struct-array elements.",
+        "Ordinary cell arrays are not structure arrays, regardless of their contents.",
+        "Struct array fields may contain cell values.",
+        "Struct arrays are cell-compatible containers.",
+    ] {
+        assert!(!describes_removed_structure_cell_carrier(accurate), "{accurate}");
+    }
+}
+
 #[test]
 fn structure_arrays_do_not_regain_content_based_cell_identity() {
     let root = workspace_root();
@@ -103,27 +198,8 @@ fn structure_surfaces_do_not_describe_the_removed_cell_carrier() {
                     );
                 }
                 for line in lower.lines() {
-                    let describes_structure_cell_carrier = [
-                        "struct array",
-                        "structure array",
-                        "struct-array",
-                        "structure-array",
-                    ]
-                    .iter()
-                    .any(|identity| line.contains(identity))
-                        && line.contains("cell")
-                        && [
-                            "represent",
-                            "backed",
-                            "instead of",
-                            "does not yet have",
-                            "structure-array container",
-                            "struct array container",
-                        ]
-                        .iter()
-                        .any(|marker| line.contains(marker));
                     assert!(
-                        !describes_structure_cell_carrier,
+                        !describes_removed_structure_cell_carrier(line),
                         "{} retains an obsolete cell-carrier claim: {line}",
                         path.display()
                     );
