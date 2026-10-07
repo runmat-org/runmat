@@ -47,6 +47,8 @@ pub(crate) struct RealizedStructuralInitialState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub(crate) enum StructuralInitialStateError {
+    #[error(transparent)]
+    Storage(crate::topology::storage::TopologyStorageError),
     #[error(
         "structural initial-state realization cannot resolve procedure step `{procedure_step_id}`"
     )]

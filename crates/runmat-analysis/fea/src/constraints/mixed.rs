@@ -266,16 +266,17 @@ pub(super) fn resolve_target(
 ) -> Result<(ResolvedConstraintTarget, Vec<usize>), ConstraintPlanError> {
     let ownership = if let Some(mesh) = mesh {
         resolve_mixed_structural_target(target, mesh, structural, topology).map_err(|error| {
+            if let crate::physics::structural::topology::target::MixedStructuralTargetError::Storage(storage) = error { return storage.into(); }
             ConstraintPlanError::Invalid(format!(
                 "constraint `{}` target resolution failed: {error}",
                 constraint.constraint_id
             ))
         })?
     } else {
-        let canonical_nodes = explicit_target_node_indices(structural, &target.region_id)
-            .into_iter()
-            .map(|node| topology.explicit_node_indices[node])
-            .collect::<Vec<_>>();
+        let mut canonical_nodes = explicit_target_node_indices(structural, &target.region_id)?;
+        for node in &mut canonical_nodes {
+            *node = topology.explicit_node_indices[*node];
+        }
         if canonical_nodes.is_empty() {
             return Err(ConstraintPlanError::EmptyTarget {
                 constraint_id: constraint.constraint_id.clone(),
@@ -284,41 +285,38 @@ pub(super) fn resolve_target(
         }
         MixedStructuralTargetOwnership::Explicit { canonical_nodes }
     };
-    let nodes = ownership.canonical_nodes().to_vec();
-    let resolved = match ownership {
-        MixedStructuralTargetOwnership::Solid { .. }
-        | MixedStructuralTargetOwnership::Shared { .. } => resolve_nodal_target(
+    let explicit_ownership = matches!(ownership, MixedStructuralTargetOwnership::Explicit { .. });
+    let nodes = ownership.into_canonical_nodes();
+    let resolved = if !explicit_ownership {
+        resolve_nodal_target(
             mesh.expect("solid target ownership requires a solver mesh"),
             target,
             &constraint.constraint_id,
-        )?,
-        MixedStructuralTargetOwnership::Explicit { .. } => {
-            let mut identities = nodes
-                .iter()
-                .map(|node| topology.nodes[*node].identity)
-                .collect::<Vec<_>>();
-            identities.sort_unstable();
-            identities.dedup();
-            if target.cardinality == TargetCardinality::One && identities.len() != 1 {
-                return Err(ConstraintPlanError::Cardinality {
-                    constraint_id: constraint.constraint_id.clone(),
-                    actual: identities.len(),
-                });
-            }
-            let selection_digest = super::plan::canonical_digest(
-                "resolved-constraint-target",
-                &(
-                    target,
-                    Vec::<runmat_meshing_core::PersistentEntityId>::new(),
-                    &identities,
-                ),
-            )?;
-            ResolvedConstraintTarget {
-                authored: target.clone(),
-                matched_entities: Vec::new(),
-                matched_node_identities: identities,
-                selection_digest,
-            }
+        )?
+    } else {
+        let mut identities = super::workspace::reserve(nodes.len())?;
+        identities.extend(nodes.iter().map(|node| topology.nodes[*node].identity));
+        identities.sort_unstable();
+        identities.dedup();
+        if target.cardinality == TargetCardinality::One && identities.len() != 1 {
+            return Err(ConstraintPlanError::Cardinality {
+                constraint_id: constraint.constraint_id.clone(),
+                actual: identities.len(),
+            });
+        }
+        let selection_digest = super::plan::canonical_digest(
+            "resolved-constraint-target",
+            &(
+                target,
+                Vec::<runmat_meshing_core::PersistentEntityId>::new(),
+                &identities,
+            ),
+        )?;
+        ResolvedConstraintTarget {
+            authored: target.clone(),
+            matched_entities: Vec::new(),
+            matched_node_identities: identities,
+            selection_digest,
         }
     };
     Ok((resolved, nodes))

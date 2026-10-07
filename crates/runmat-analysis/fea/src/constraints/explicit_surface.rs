@@ -1,21 +1,22 @@
 //! Constraint admissibility over shared explicit-shell geometry.
 
-use std::collections::{BTreeMap, BTreeSet};
+use crate::topology::storage::{self, SortedValues};
 
 use runmat_analysis_core::StructuralModel;
 use runmat_meshing_core::StableDigest;
 
 use crate::physics::structural::topology::{
-    explicit_surface::{explicit_shell_surface_geometry, ExplicitShellSurfaceError},
+    explicit_surface::{
+        explicit_shell_surface_geometry, ExplicitShellSurfaceError, ExplicitShellSurfaceNode,
+    },
     node_space::CanonicalStructuralNodeSpace,
 };
 
 use super::{ConstraintCouplingWeight, ConstraintPlanError, ResolvedConstraintTarget};
 
 pub(super) struct ExplicitSurfaceGeometry {
-    pub coordinates: BTreeMap<StableDigest, [f64; 3]>,
+    pub nodes: SortedValues<StableDigest, ExplicitShellSurfaceNode>,
     pub weights: Vec<ConstraintCouplingWeight>,
-    pub normals: BTreeMap<StableDigest, [f64; 3]>,
 }
 
 pub(super) fn resolve_explicit_surface(
@@ -26,12 +27,11 @@ pub(super) fn resolve_explicit_surface(
 ) -> Result<ExplicitSurfaceGeometry, ConstraintPlanError> {
     let surface = explicit_shell_surface_geometry(structural, topology, &target.authored.region_id)
         .map_err(|error| map_surface_error(error, constraint_id))?;
-    let selected = surface
-        .coordinates_m
+    if !surface
+        .nodes
         .keys()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    if selected != target.matched_node_identities.iter().copied().collect() {
+        .eq(target.matched_node_identities.iter())
+    {
         return Err(ConstraintPlanError::UnsupportedTarget {
             constraint_id: constraint_id.into(),
             reason: "constraint target is not one complete explicit shell region",
@@ -43,23 +43,25 @@ pub(super) fn resolve_explicit_surface(
             constraint_id: constraint_id.into(),
         });
     }
-    let weights = surface
-        .nodal_measures_m2
-        .into_iter()
-        .map(|(node_identity, measure)| ConstraintCouplingWeight {
-            node_identity,
-            weight: measure / total_measure,
-        })
-        .collect();
+    let mut weights = storage::reserve(surface.nodes.len())?;
+    weights.extend(
+        surface
+            .nodes
+            .entries()
+            .map(|(node_identity, node)| ConstraintCouplingWeight {
+                node_identity: *node_identity,
+                weight: node.nodal_measure_m2 / total_measure,
+            }),
+    );
     Ok(ExplicitSurfaceGeometry {
-        coordinates: surface.coordinates_m,
+        nodes: surface.nodes,
         weights,
-        normals: surface.oriented_node_normals,
     })
 }
 
 fn map_surface_error(error: ExplicitShellSurfaceError, constraint_id: &str) -> ConstraintPlanError {
     match error {
+        ExplicitShellSurfaceError::Storage(error) => error.into(),
         ExplicitShellSurfaceError::NonShellElement { .. }
         | ExplicitShellSurfaceError::EmptyRegion { .. } => ConstraintPlanError::UnsupportedTarget {
             constraint_id: constraint_id.into(),

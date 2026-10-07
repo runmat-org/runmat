@@ -52,7 +52,7 @@ pub(crate) fn compile_model_connector_plan(
                     ConnectorTargetRole::Point => resolve_point_target(
                         connector,
                         target,
-                        structural_target_nodes(structural, &target.region_id),
+                        structural_target_nodes(structural, &target.region_id)?,
                     ),
                     ConnectorTargetRole::Surface => {
                         resolve_explicit_surface(connector, target, structural, &topology)

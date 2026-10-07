@@ -482,6 +482,7 @@ pub(super) fn resolve_target(
 ) -> Result<MixedStructuralTargetOwnership, StructuralAssemblyError> {
     resolve_mixed_structural_target(target, mesh, structural, topology).map_err(|error| match error
     {
+        MixedStructuralTargetError::Storage(error) => error.into(),
         MixedStructuralTargetError::Unmapped { selector } => {
             StructuralAssemblyError::UnmappedMixedTarget {
                 target_id: target_id.into(),

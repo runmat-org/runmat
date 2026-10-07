@@ -1,10 +1,8 @@
+use crate::topology::storage::CanonicalNodeValues as NodeValues;
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 
 use super::vector::{add, magnitude, scale};
-use super::{
-    node_index::NodeValues, workspace::check_cancelled, ConstraintPlanError,
-    ResolvedConstraintTarget,
-};
+use super::{workspace::check_cancelled, ConstraintPlanError, ResolvedConstraintTarget};
 use crate::topology::AnalysisProjection;
 
 pub(super) fn boundary_node_normals(

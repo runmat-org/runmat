@@ -1,6 +1,6 @@
 //! Canonical geometry for an authored explicit triangular-shell region.
 
-use std::collections::BTreeMap;
+use crate::topology::storage::{self, SortedValues, TopologyStorageError};
 
 use runmat_analysis_core::{StructuralElementKind, StructuralModel};
 use runmat_meshing_core::StableDigest;
@@ -9,8 +9,8 @@ use thiserror::Error;
 use super::node_space::CanonicalStructuralNodeSpace;
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct ExplicitShellTriangle {
-    pub element_id: String,
+pub(crate) struct ExplicitShellTriangle<'a> {
+    pub element_id: &'a str,
     pub node_identities: [StableDigest; 3],
     pub coordinates_m: [[f64; 3]; 3],
     pub oriented_area_vector_m2: [f64; 3],
@@ -18,16 +18,42 @@ pub(crate) struct ExplicitShellTriangle {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct ExplicitShellSurfaceGeometry {
-    pub coordinates_m: BTreeMap<StableDigest, [f64; 3]>,
-    pub triangles: Vec<ExplicitShellTriangle>,
+pub(crate) struct ExplicitShellSurfaceNode {
+    pub coordinates_m: [f64; 3],
+    pub nodal_measure_m2: f64,
+    pub oriented_normal: [f64; 3],
+}
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ExplicitShellSurfaceGeometry<'a> {
+    pub nodes: SortedValues<StableDigest, ExplicitShellSurfaceNode>,
+    pub triangles: Vec<ExplicitShellTriangle<'a>>,
     pub area_m2: f64,
-    pub nodal_measures_m2: BTreeMap<StableDigest, f64>,
-    pub oriented_node_normals: BTreeMap<StableDigest, [f64; 3]>,
+}
+
+/// Requested vector slots, including overlapping raw candidates and retained nodes.
+/// Borrowed inputs/labels, allocator overhead and RSS are excluded.
+pub(crate) fn shell_surface_workspace_bytes(
+    structural: &StructuralModel,
+    region_id: &str,
+) -> Result<u64, TopologyStorageError> {
+    storage::check_cancelled()?;
+    let faces = structural
+        .elements
+        .iter()
+        .filter(|e| e.region_id == region_id)
+        .count();
+    let candidates = storage::multiply(faces, 3)?;
+    let index = storage::slots::<(u32, usize)>(structural.nodes.len())?;
+    let raw = storage::slots::<(StableDigest, [f64; 3])>(candidates)?;
+    let nodes = storage::slots::<(StableDigest, ExplicitShellSurfaceNode)>(candidates)?;
+    let triangles = storage::slots::<ExplicitShellTriangle<'_>>(faces)?;
+    storage::add(storage::add(index, raw)?, storage::add(nodes, triangles)?)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Error)]
 pub(crate) enum ExplicitShellSurfaceError {
+    #[error(transparent)]
+    Storage(#[from] TopologyStorageError),
     #[error("region `{region_id}` contains non-shell element `{element_id}`")]
     NonShellElement {
         region_id: String,
@@ -43,33 +69,34 @@ pub(crate) enum ExplicitShellSurfaceError {
     UndefinedNodeNormal { node_identity: StableDigest },
 }
 
-pub(crate) fn explicit_shell_surface_geometry(
-    structural: &StructuralModel,
+pub(crate) fn explicit_shell_surface_geometry<'a>(
+    structural: &'a StructuralModel,
     topology: &CanonicalStructuralNodeSpace,
     region_id: &str,
-) -> Result<ExplicitShellSurfaceGeometry, ExplicitShellSurfaceError> {
-    let authored_nodes = structural
-        .nodes
+) -> Result<ExplicitShellSurfaceGeometry<'a>, ExplicitShellSurfaceError> {
+    shell_surface_workspace_bytes(structural, region_id)?;
+    let face_count = structural
+        .elements
         .iter()
-        .enumerate()
-        .map(|(index, node)| (node.node_id, index))
-        .collect::<BTreeMap<_, _>>();
-    let canonical_coordinates = topology
-        .nodes
-        .iter()
-        .map(|node| (node.identity, node.coordinates_m))
-        .collect::<BTreeMap<_, _>>();
-    let mut coordinates_m = BTreeMap::new();
-    let mut nodal_measures_m2 = BTreeMap::<StableDigest, f64>::new();
-    let mut normal_sums = BTreeMap::<StableDigest, [f64; 3]>::new();
-    let mut triangles = Vec::new();
+        .filter(|e| e.region_id == region_id)
+        .count();
+    let authored_nodes = SortedValues::derive(
+        structural
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.node_id, i)),
+        structural.nodes.len(),
+    )?;
+    let mut candidates = storage::reserve(storage::multiply(face_count, 3)?)?;
+    let mut triangles = storage::reserve(face_count)?;
     let mut area_m2 = 0.0;
-
     for element in structural
         .elements
         .iter()
-        .filter(|element| element.region_id == region_id)
+        .filter(|e| e.region_id == region_id)
     {
+        storage::check_cancelled()?;
         let StructuralElementKind::Shell(shell) = &element.kind else {
             return Err(ExplicitShellSurfaceError::NonShellElement {
                 region_id: region_id.into(),
@@ -77,25 +104,20 @@ pub(crate) fn explicit_shell_surface_geometry(
             });
         };
         let mut identities = [StableDigest::ZERO; 3];
-        for (slot, node_id) in identities.iter_mut().zip(shell.node_ids) {
-            *slot = authored_nodes
+        let mut points = [[0.0; 3]; 3];
+        for ((identity, point), node_id) in
+            identities.iter_mut().zip(&mut points).zip(shell.node_ids)
+        {
+            let node = authored_nodes
                 .get(&node_id)
-                .and_then(|index| topology.explicit_node_indices.get(*index))
-                .and_then(|index| topology.nodes.get(*index))
-                .map(|node| node.identity)
+                .and_then(|i| topology.explicit_node_indices.get(*i))
+                .and_then(|i| topology.nodes.get(*i))
                 .ok_or_else(|| ExplicitShellSurfaceError::MissingNode {
                     element_id: element.element_id.clone(),
                     node_id,
                 })?;
-        }
-        let mut points = [[0.0; 3]; 3];
-        for ((point, identity), node_id) in points.iter_mut().zip(identities).zip(shell.node_ids) {
-            *point = *canonical_coordinates.get(&identity).ok_or_else(|| {
-                ExplicitShellSurfaceError::MissingNode {
-                    element_id: element.element_id.clone(),
-                    node_id,
-                }
-            })?;
+            *identity = node.identity;
+            *point = node.coordinates_m;
         }
         let area_vector = cross(
             subtract(points[1], points[0]),
@@ -108,56 +130,69 @@ pub(crate) fn explicit_shell_surface_geometry(
             });
         }
         let triangle_area = double_area * 0.5;
-        let nodal_measure = triangle_area / 3.0;
         area_m2 += triangle_area;
-        for (identity, node_id) in identities.into_iter().zip(shell.node_ids) {
-            let coordinate = canonical_coordinates
-                .get(&identity)
-                .copied()
-                .ok_or_else(|| ExplicitShellSurfaceError::MissingNode {
-                    element_id: element.element_id.clone(),
-                    node_id,
-                })?;
-            coordinates_m.insert(identity, coordinate);
-            *nodal_measures_m2.entry(identity).or_insert(0.0) += nodal_measure;
-            normal_sums
-                .entry(identity)
-                .and_modify(|normal| *normal = add(*normal, area_vector))
-                .or_insert(area_vector);
-        }
+        candidates.extend(identities.into_iter().zip(points));
         triangles.push(ExplicitShellTriangle {
-            element_id: element.element_id.clone(),
+            element_id: &element.element_id,
             node_identities: identities,
             coordinates_m: points,
             oriented_area_vector_m2: scale(area_vector, 0.5),
             area_m2: triangle_area,
         });
     }
-
     if triangles.is_empty() {
         return Err(ExplicitShellSurfaceError::EmptyRegion {
             region_id: region_id.into(),
         });
     }
-    let oriented_node_normals = normal_sums
-        .into_iter()
-        .map(|(identity, normal)| {
-            let length = magnitude(normal);
-            if !length.is_finite() || length <= 1.0e-12 {
-                return Err(ExplicitShellSurfaceError::UndefinedNodeNormal {
-                    node_identity: identity,
-                });
-            }
-            Ok((identity, scale(normal, length.recip())))
-        })
-        .collect::<Result<_, _>>()?;
-
+    candidates.sort_unstable_by_key(|v| v.0);
+    candidates.dedup_by_key(|v| v.0);
+    let mut nodes = SortedValues::derive(
+        candidates.iter().map(|(id, coordinates)| {
+            (
+                *id,
+                ExplicitShellSurfaceNode {
+                    coordinates_m: *coordinates,
+                    nodal_measure_m2: 0.0,
+                    oriented_normal: [0.0; 3],
+                },
+            )
+        }),
+        candidates.len(),
+    )?;
+    drop(candidates);
+    for triangle in &triangles {
+        storage::check_cancelled()?;
+        let points = triangle.coordinates_m;
+        // Recompute the original raw cross product; reversing the stored half-vector
+        // would change floating-point arithmetic. Accumulate in authored face order.
+        let area_vector = cross(
+            subtract(points[1], points[0]),
+            subtract(points[2], points[0]),
+        );
+        for id in triangle.node_identities {
+            let node = nodes.get_mut(&id).ok_or(TopologyStorageError::Index)?;
+            node.oriented_normal = if node.nodal_measure_m2 == 0.0 {
+                area_vector
+            } else {
+                add(node.oriented_normal, area_vector)
+            };
+            node.nodal_measure_m2 += triangle.area_m2 / 3.0;
+        }
+    }
+    for (identity, node) in nodes.entries_mut() {
+        let length = magnitude(node.oriented_normal);
+        if !length.is_finite() || length <= 1.0e-12 {
+            return Err(ExplicitShellSurfaceError::UndefinedNodeNormal {
+                node_identity: *identity,
+            });
+        }
+        node.oriented_normal = scale(node.oriented_normal, length.recip());
+    }
     Ok(ExplicitShellSurfaceGeometry {
-        coordinates_m,
+        nodes,
         triangles,
         area_m2,
-        nodal_measures_m2,
-        oriented_node_normals,
     })
 }
 
@@ -203,3 +238,6 @@ fn magnitude(vector: [f64; 3]) -> f64 {
         .sum::<f64>()
         .sqrt()
 }
+
+#[cfg(test)]
+mod tests;

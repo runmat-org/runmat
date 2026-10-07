@@ -1,6 +1,6 @@
 //! Canonical explicit-topology identity and its shared allocation estimate. Borrowed contracts
 //! preserve the established bytes without cloning topology, connectivity, or attachments.
-use std::collections::BTreeSet;
+use crate::topology::storage::{self, TopologyStorageError};
 
 use runmat_analysis_core::{
     ConformalSolidAttachment, StructuralElement, StructuralElementKind, StructuralModel,
@@ -67,6 +67,8 @@ fn node_ids(kind: &StructuralElementKind) -> &[u32] {
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub(crate) enum ExplicitStructuralTopologyError {
+    #[error(transparent)]
+    Storage(#[from] TopologyStorageError),
     #[error("explicit structural node id {node_id} is duplicated")]
     DuplicateNode { node_id: u32 },
     #[error("explicit structural node {node_id} has non-finite coordinates")]
@@ -80,9 +82,19 @@ pub(crate) enum ExplicitStructuralTopologyError {
 }
 
 fn validate(structural: &StructuralModel) -> Result<(), ExplicitStructuralTopologyError> {
-    let mut nodes = BTreeSet::new();
-    for node in &structural.nodes {
-        if !nodes.insert(node.node_id) {
+    let mut nodes = storage::reserve(structural.nodes.len())?;
+    nodes.extend(
+        structural
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(ordinal, node)| (node.node_id, ordinal)),
+    );
+    nodes.sort_unstable();
+    for (ordinal, node) in structural.nodes.iter().enumerate() {
+        storage::check_cancelled()?;
+        let first = nodes.partition_point(|(id, _)| *id < node.node_id);
+        if nodes[first].1 < ordinal {
             return Err(ExplicitStructuralTopologyError::DuplicateNode {
                 node_id: node.node_id,
             });
@@ -93,16 +105,26 @@ fn validate(structural: &StructuralModel) -> Result<(), ExplicitStructuralTopolo
             });
         }
     }
-    let mut elements = BTreeSet::new();
-    for element in &structural.elements {
-        if !elements.insert(element.element_id.as_str()) {
+    let mut elements = storage::reserve(structural.elements.len())?;
+    elements.extend(
+        structural
+            .elements
+            .iter()
+            .enumerate()
+            .map(|(ordinal, element)| (element.element_id.as_str(), ordinal)),
+    );
+    elements.sort_unstable();
+    for (ordinal, element) in structural.elements.iter().enumerate() {
+        storage::check_cancelled()?;
+        let first = elements.partition_point(|(id, _)| *id < element.element_id.as_str());
+        if elements[first].1 < ordinal {
             return Err(ExplicitStructuralTopologyError::DuplicateElement {
                 element_id: element.element_id.clone(),
             });
         }
         if let Some(node_id) = node_ids(&element.kind)
             .iter()
-            .find(|node| !nodes.contains(node))
+            .find(|id| nodes.binary_search_by_key(id, |(key, _)| key).is_err())
         {
             return Err(ExplicitStructuralTopologyError::MissingElementNode {
                 element_id: element.element_id.clone(),
@@ -187,6 +209,7 @@ pub(crate) fn explicit_identity_resource_bytes(
     .map_err(identity_error)?;
     let mut peak = topology;
     for element in &structural.elements {
+        storage::check_cancelled()?;
         // Digest's serialized width is fixed. This placeholder is used only for counting;
         // it is never published or used to construct a topology/element identity.
         let bytes = serialized_materialization_resident_bytes_estimate(
@@ -201,25 +224,13 @@ pub(crate) fn explicit_identity_resource_bytes(
         .map_err(identity_error)?;
         peak = peak.max(bytes);
     }
-    let nodes = lookup_bytes::<u32>(structural.nodes.len())?;
-    let elements = lookup_bytes::<&str>(structural.elements.len())?;
-    let validation = nodes
-        .checked_add(elements)
-        .and_then(|bytes| bytes.checked_add(64 * 1024))
-        .ok_or_else(|| identity_error("explicit validation residency overflow"))?;
+    let validation = storage::add(
+        storage::slots::<(u32, usize)>(structural.nodes.len())?,
+        storage::slots::<(&str, usize)>(structural.elements.len())?,
+    )?;
     Ok(peak.max(validation))
 }
 
-fn lookup_bytes<T>(count: usize) -> Result<u64, ExplicitStructuralTopologyError> {
-    u64::try_from(count)
-        .ok()
-        .and_then(|count| {
-            count.checked_mul(
-                3 * (std::mem::size_of::<T>() + 4 * std::mem::size_of::<usize>()) as u64,
-            )
-        })
-        .ok_or_else(|| identity_error("explicit validation index size overflow"))
-}
 fn identity_error(error: impl std::fmt::Display) -> ExplicitStructuralTopologyError {
     ExplicitStructuralTopologyError::Identity(error.to_string())
 }

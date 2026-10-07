@@ -62,3 +62,29 @@ fn cold_validation_rejects_evidence_overflow_and_undeclared_row_groups() {
         ));
     }
 }
+
+#[test]
+fn conservative_wire_bound_does_not_reject_a_valid_small_integer_payload() {
+    use serde::{ser::SerializeSeq, Serialize, Serializer};
+    struct Blocks;
+    impl Serialize for Blocks {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            let mut seq = serializer.serialize_seq(Some(8192))?;
+            for _ in 0..8192 {
+                seq.serialize_element(&[0u8; 1024][..])?;
+            }
+            seq.end()
+        }
+    }
+    // Actual canonical zero is one byte. Even repeating the complete block contract
+    // (including its envelope) gives a wire bound below the unchanged 64MiB cap.
+    let block = encode_contract(PLAN_PREFIX, PLAN_DOMAIN, &&[0u8; 1024][..], PLAN_LIMITS).unwrap();
+    assert!(block.len() * 8192 + 1024 < 64 * 1024 * 1024);
+    let profile = runmat_canonical_codec::profile_serialized(&Blocks, PROFILE_LIMITS).unwrap();
+    assert!(profile.encoded_bytes_upper_bound > 64 * 1024 * 1024);
+    assert!(runmat_canonical_codec::profile_serialized(&Blocks, PLAN_LIMITS).is_err());
+    assert_eq!(
+        canonical_value_workspace_bytes(&Blocks).unwrap(),
+        profile.materialization_resident_bytes_estimate
+    );
+}

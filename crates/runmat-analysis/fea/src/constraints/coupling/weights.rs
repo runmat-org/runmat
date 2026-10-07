@@ -13,7 +13,7 @@ pub(super) fn target_weights(
             weight: 1.0,
         }]);
     }
-    let identities = super::super::node_index::NodeIdentities::derive(mesh)?;
+    let identities = crate::topology::storage::solver_node_identities(mesh)?;
     let mut measures = NodeValues::derive(
         mesh.topology
             .nodes
@@ -32,8 +32,11 @@ pub(super) fn target_weights(
             BoundaryTriangleOrder::Tri6 => &[[0, 3, 5], [3, 1, 4], [5, 4, 2], [3, 4, 5]],
         };
         for indices in triangles {
-            let vertices =
-                indices.map(|index| face.node_ids.get(index).and_then(|id| identities.get(*id)));
+            let vertices = indices.map(|index| {
+                face.node_ids
+                    .get(index)
+                    .and_then(|id| identities.get(id).copied())
+            });
             let [Some(a), Some(b), Some(c)] = vertices else {
                 return Err(ConstraintPlanError::Invalid(format!(
                     "constraint `{constraint_id}` coupling facet is malformed"

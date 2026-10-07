@@ -18,7 +18,6 @@ mod frame;
 mod matrix_apply;
 mod mixed;
 mod mixed_surface;
-mod node_index;
 mod normal;
 mod pairing;
 mod phase;

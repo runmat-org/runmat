@@ -32,7 +32,7 @@ pub(super) fn compile_prescribed(
     let boundary_normals = if constraint.frame == CoordinateFrame::BoundaryNormalTangent {
         Some(
             resolve_explicit_surface(structural, topology, &resolved, &constraint.constraint_id)?
-                .normals,
+                .nodes,
         )
     } else {
         None
@@ -46,7 +46,7 @@ pub(super) fn compile_prescribed(
             boundary_normals
                 .as_ref()
                 .and_then(|normals| normals.get(&canonical.identity))
-                .copied(),
+                .map(|node| node.oriented_normal),
             &constraint.constraint_id,
         )?;
         for prescribed in &values.translations {
@@ -117,7 +117,7 @@ pub(super) fn compile_normal(
             row::new_direction(
                 &constraint.constraint_id,
                 *identity,
-                surface.normals[identity],
+                surface.nodes[identity].oriented_normal,
                 right_hand_side,
             )
         })
@@ -140,9 +140,13 @@ pub(super) fn compile_directions(
     let mut rows = Vec::new();
     for identity in &resolved.matched_node_identities {
         let directions = if tangential {
-            boundary_tangent_basis(surface.normals[identity], &constraint.constraint_id)?.to_vec()
+            boundary_tangent_basis(
+                surface.nodes[identity].oriented_normal,
+                &constraint.constraint_id,
+            )?
+            .to_vec()
         } else {
-            vec![surface.normals[identity]]
+            vec![surface.nodes[identity].oriented_normal]
         };
         for direction in directions {
             rows.push(row::new_direction(
@@ -173,7 +177,7 @@ pub(super) fn compile_coupling(
         coupling.reference_point.position.meters,
     )?;
     let (rows, evidence) = compile_reference_coupling_for_nodes(
-        &surface.coordinates,
+        &surface.nodes,
         surface.weights,
         &coupling.reference_point,
         identity,

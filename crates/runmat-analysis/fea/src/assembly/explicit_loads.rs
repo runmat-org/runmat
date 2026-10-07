@@ -92,7 +92,7 @@ pub(super) fn apply_projected_explicit_structural_loads(
                 load_kind: super::explicit_load_kind(&load.kind),
             }
         })?;
-        let explicit_target_nodes = structural_target_nodes(structural, region_id);
+        let explicit_target_nodes = structural_target_nodes(structural, region_id)?;
         if explicit_target_nodes.is_empty() {
             return Err(StructuralAssemblyError::UnmappedStructuralLoad {
                 load_id: load.excitation_id.0.clone(),

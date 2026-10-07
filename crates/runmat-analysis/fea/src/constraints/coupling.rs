@@ -9,9 +9,9 @@ use super::contract::{
     CanonicalStructuralDofOwner, ConstraintCouplingEvidence, ConstraintCouplingKind,
     ConstraintCouplingWeight, ConstraintPlanError, ResolvedConstraintTarget,
 };
-use super::node_index::NodeValues;
 use super::row;
 use super::workspace::{check_cancelled, reserve};
+use crate::topology::storage::CanonicalNodeValues as NodeValues;
 mod coordinates;
 use coordinates::CoordinateLookup;
 mod geometry;

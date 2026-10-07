@@ -157,6 +157,39 @@ fn identity_profile_counts_large_selected_topology_metadata() {
     .unwrap();
     assert!(expanded >= canonical_payload_materialization_resident_bytes_estimate(&bytes).unwrap());
     if usize::BITS == 64 {
-        assert!(lookup_bytes::<u64>(usize::MAX).is_err());
+        assert!(storage::slots::<(u64, usize)>(usize::MAX).is_err());
     }
+}
+
+#[test]
+fn counted_validation_reports_first_authored_failure_before_later_duplicates() {
+    let mut structural = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference)
+        .structural
+        .unwrap();
+    let mut duplicate = structural.nodes[0].clone();
+    duplicate.coordinates_m[0] = f64::NAN;
+    structural.nodes.push(duplicate);
+    assert!(matches!(
+        explicit_topology_digest(&structural),
+        Err(ExplicitStructuralTopologyError::DuplicateNode { .. })
+    ));
+    structural.nodes[0].coordinates_m[0] = f64::NAN;
+    assert!(matches!(
+        explicit_topology_digest(&structural),
+        Err(ExplicitStructuralTopologyError::NonFiniteNode { .. })
+    ));
+    structural.nodes[0].coordinates_m[0] = 0.0;
+    structural.nodes.pop();
+    structural.elements.push(structural.elements[0].clone());
+    let StructuralElementKind::Beam(beam) = &mut structural.elements[0].kind else {
+        panic!("beam")
+    };
+    beam.node_ids[0] = u32::MAX;
+    assert!(matches!(
+        explicit_topology_digest(&structural),
+        Err(ExplicitStructuralTopologyError::MissingElementNode {
+            node_id: u32::MAX,
+            ..
+        })
+    ));
 }

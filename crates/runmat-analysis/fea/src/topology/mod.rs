@@ -12,6 +12,7 @@ mod point_location;
 pub(crate) mod quadrature;
 mod resources;
 mod solid_integration;
+pub(crate) mod storage;
 #[cfg(test)]
 pub(crate) mod test_meshes;
 

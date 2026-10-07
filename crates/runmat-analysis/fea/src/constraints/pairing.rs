@@ -17,7 +17,7 @@ mod tests;
 mod geometry;
 use geometry::{closest_triangle_point, identity, rotation_matrix, transform_position};
 mod profile;
-use super::node_index::{NodeIdentities, NodeValues};
+use crate::topology::storage::{solver_node_identities, CanonicalNodeValues as NodeValues};
 type NodeCoordinates = NodeValues<[f64; 3]>;
 use super::workspace::{check_cancelled, multiply, reserve};
 use profile::row_term_count;
@@ -271,7 +271,7 @@ fn pair_geometrically(
     tolerance: f64,
     constraint_id: &str,
 ) -> Result<Vec<ConstraintPairingEvidence>, ConstraintPlanError> {
-    let identities_by_id = NodeIdentities::derive(mesh)?;
+    let identities_by_id = solver_node_identities(mesh)?;
     let faces = mesh.topology.boundary_faces.iter().filter(|face| {
         face.provenance
             .iter()
@@ -299,7 +299,7 @@ fn pair_geometrically(
             }
             let mut face_nodes = [(StableDigest::ZERO, [0.0; 3]); 6];
             for (slot, node_id) in face_nodes.iter_mut().zip(&face.node_ids) {
-                let identity = identities_by_id.get(*node_id).ok_or(
+                let identity = identities_by_id.get(node_id).copied().ok_or(
                     ConstraintPlanError::PairingUnavailable {
                         constraint_id: constraint_id.into(),
                         secondary_node_identity: *secondary_identity,

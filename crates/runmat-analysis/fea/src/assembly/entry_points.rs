@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod construction_storage;
+
 enum StructuralCouplingInput<'a> {
     Authored {
         solved_nodal_temperature_k: Option<&'a [f64]>,

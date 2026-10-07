@@ -186,8 +186,8 @@ Normals reuse one buffer for accumulation and normalized output. Projection stor
 uses the existing topology owner's construction estimate; facet coordinate and vector
 scratch are counted separately. Original area-vector recovery, curved-facet orientation,
 subtriangle coupling weights, geometric thresholds and rigid/distributing equations
-remain unchanged. Explicit-surface coupling borrows its original coordinate map;
-this slice does not account for constructing that separate topology owner's geometry.
+remain unchanged. Explicit-surface coupling borrows the shared shell-node coordinate authority;
+its counted construction inventory is described below.
 Coupling equations and rotational checks are in focused modules under constraints.
 The superseded pairing-only node index is removed in favor of the shared compact index.
 
@@ -240,3 +240,43 @@ phase inventory, not a pre-lowering whole-compilation receipt. Mixed/explicit to
 complete lowering/evidence construction and overlap, adaptive evaluation/output, scheduled
 execution, semantic publication, measured resources and scientific qualification remain
 separate requirements. No resource ceiling or original failed acceptance target changed.
+
+
+## Counted explicit and mixed topology construction
+
+One analysis topology owner now supplies fallible counted sorted indexes to topology,
+constraints and their surface consumers. Explicit identity validation uses authored
+ordinals to preserve duplicate/nonfinite/missing-node error precedence. Its requested
+validation inventory counts actual reference/index vector slots rather than tree-node
+multipliers; resource estimation revision is81. Canonical topology and element bytes
+remain unchanged, including signed zero and attachment metadata.
+
+Solid, explicit and conformal mixed node-space construction profiles requested nodes,
+explicit indexes, attachment ownership and uniqueness scratch before allocation. The
+inventory composes the existing mesh validation and shared codec estimates, including
+mixed identity materialization. Attached nodes upgrade original solid ownership in
+place; unmatched explicit nodes retain authored order. Attachment resolution streams
+its match count, allocates labels only for errors and rejects duplicate ownership.
+The focused constructor and resource modules replace the oversized node-space parent.
+
+Shell surface construction retains one sorted node record for original coordinates,
+nodal area measure and normal, plus authored-order triangles with borrowed labels.
+The inventory includes overlapping raw candidates and retained records. Loads,
+connectors, normal supports and reference-point coupling consume this shared geometry.
+Area thresholds, cross products, authored accumulation order, first normal signed zero
+and normalization thresholds remain original. Mixed target selection uses counted
+vectors with sorted/deduplicated canonical indexes; initial-state and constraint callers
+move their owned node selection rather than clone it.
+
+Constraint codec profiling now separates a conservative size bound from the actual
+wire limits. A streaming small-integer inventory proves the upper bound can exceed
+64MiB while the actual encoding remains below that unchanged limit. Actual encoding
+and cold decoding still enforce their original limits; no payload limit was raised.
+
+Independent references cover orthogonal shell areas/normals/weights, mixed ownership,
+exact canonical identities, error precedence and cancellation. The original shell and
+resource regressions remain required. These component requested-storage inventories
+exclude borrowed inputs, allocator overhead and RSS. Complete lowering/evidence overlap,
+pre-expansion whole-compilation admission, adaptive working/output composition, scheduled
+execution and atomic semantic publication remain separate gates. The original cantilever
+refinement failure remains open; no numerical tolerance or resource cap changed.

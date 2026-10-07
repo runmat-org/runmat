@@ -60,7 +60,12 @@ pub(crate) fn validate_rotational_dof_targets(
             .kind
             .target()
             .expect("rotation constraint has a target");
-        let target_nodes = explicit_target_node_indices(structural, &target.region_id);
+        let target_nodes = explicit_target_node_indices(structural, &target.region_id).map_err(
+            |error| match error {
+                crate::topology::storage::TopologyStorageError::Cancelled => FeaRunError::Cancelled,
+                other => FeaRunError::InvalidModel(other.to_string()),
+            },
+        )?;
         if target_nodes.is_empty()
             || target_nodes.iter().any(|node_index| {
                 summary

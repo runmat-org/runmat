@@ -31,6 +31,8 @@ pub use profile::{
 };
 
 pub(super) const PLAN_PREFIX: &[u8] = b"runmat-analysis-structural-constraint-plan/v1\0";
+const PROFILE_LIMITS: CanonicalLimits =
+    CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64);
 const PLAN_DOMAIN: &str = "structural-constraint-plan";
 const SOURCE_DOMAIN: &str = "structural-constraint-source";
 pub(super) const PLAN_LIMITS: CanonicalLimits =
@@ -234,14 +236,17 @@ pub(super) fn canonical_value_workspace_bytes<T: Serialize + ?Sized>(
     value: &T,
 ) -> Result<u64, ConstraintPlanError> {
     super::workspace::check_cancelled()?;
-    runmat_canonical_codec::serialized_materialization_resident_bytes_estimate(value, PLAN_LIMITS)
-        .map_err(|e| {
-            if crate::is_fea_cancelled() {
-                ConstraintPlanError::Cancelled
-            } else {
-                ConstraintPlanError::Encoding(e.to_string())
-            }
-        })
+    runmat_canonical_codec::serialized_materialization_resident_bytes_estimate(
+        value,
+        PROFILE_LIMITS,
+    )
+    .map_err(|e| {
+        if crate::is_fea_cancelled() {
+            ConstraintPlanError::Cancelled
+        } else {
+            ConstraintPlanError::Encoding(e.to_string())
+        }
+    })
 }
 
 #[cfg(test)]
