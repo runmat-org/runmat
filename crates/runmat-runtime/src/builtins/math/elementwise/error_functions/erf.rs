@@ -182,7 +182,7 @@ fn erf_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn erf_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|e| builtin_error(format!("erf: {e}")))?;
@@ -264,7 +264,7 @@ pub(crate) mod tests {
         let result = erf_builtin(Value::Tensor(tensor)).expect("erf");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.shape(), &[2, 2]);
                 assert_eq!(t.numeric_dtype(), NumericDType::F64);
                 let expected = [
                     -0.520_499_877_813_046_5,
@@ -293,6 +293,29 @@ pub(crate) mod tests {
                 approx_eq(values[1], 0.842_700_779_438_018_8, 1e-7);
             }
             other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn erf_preserves_rank_zero_and_rank_one_single_tensors() {
+        for (shape, input, expected) in [
+            (Vec::new(), vec![0.0_f32], vec![0.0_f64]),
+            (
+                vec![2],
+                vec![0.0_f32, 1.0],
+                vec![0.0_f64, 0.842_700_779_438_018_8],
+            ),
+        ] {
+            let tensor = Tensor::from_f32(input, shape.clone()).expect("low-rank single");
+            let Value::Tensor(output) = erf_builtin(Value::Tensor(tensor)).expect("erf") else {
+                panic!("expected native single tensor");
+            };
+            assert_eq!(output.shape(), shape.as_slice());
+            assert_eq!(output.numeric_dtype(), NumericDType::F32);
+            for (actual, expected) in output.materialize_f64().iter().zip(expected) {
+                approx_eq(*actual, expected, 1e-7);
+            }
         }
     }
 
@@ -360,7 +383,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![-1.0, 0.0, 0.5, 1.0], vec![1, 4]).unwrap();
             let view = HostTensorView {
                 data: tensor.as_f64_slice().expect("double input"),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider
                 .upload(&view)
@@ -376,7 +399,7 @@ pub(crate) mod tests {
                 Some(GpuHandleProvenance::Explicit)
             );
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 4]);
+            assert_eq!(gathered.shape(), &[1, 4]);
             for (got, input) in gathered
                 .materialize_f64()
                 .iter()
@@ -444,12 +467,12 @@ pub(crate) mod tests {
         };
         let view = HostTensorView {
             data: tensor.as_f64_slice().expect("double input"),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_value = block_on(erf_gpu(handle)).expect("gpu erf");
         let gathered = test_support::gather(gpu_value).expect("gather");
-        assert_eq!(gathered.shape, cpu.shape);
+        assert_eq!(gathered.shape(), cpu.shape());
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,
             runmat_accelerate_api::ProviderPrecision::F32 => 3e-5,

@@ -146,7 +146,7 @@ pub(in crate::builtins) async fn initialise_layers_in_runtime(
             };
             staged.value = Tensor::new_with_dtype(
                 tensor.materialize_f64(),
-                tensor.shape.clone(),
+                tensor.shape().to_vec(),
                 NumericDType::F32,
             )
             .map(Value::Tensor)

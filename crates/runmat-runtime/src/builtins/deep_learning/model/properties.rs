@@ -63,7 +63,7 @@ pub(in crate::builtins) fn tensor_property_shape<'a>(
 ) -> BuiltinResult<&'a [usize]> {
     let value = tensor_property_value(object, name, function)?;
     match value {
-        Value::Tensor(tensor) => Ok(&tensor.shape),
+        Value::Tensor(tensor) => Ok(tensor.shape()),
         Value::LogicalArray(array) => Ok(&array.shape),
         Value::GpuTensor(handle)
             if runmat_accelerate_api::handle_storage(handle)
@@ -153,4 +153,45 @@ pub(super) fn normalize_numeric_tensor(
     function: &'static str,
 ) -> BuiltinResult<Tensor> {
     tensor::integer_tensor_to_f64(tensor).map_err(|err| deep_learning_error(function, err))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn dense_property_admission_preserves_rank_one_weights_and_rank_zero_bias() {
+        let mut layer = ObjectInstance::new(
+            runmat_builtins::DeepLearningLayerKind::FullyConnected
+                .class()
+                .owned(),
+        );
+        layer.properties.insert("OutputSize".into(), Value::Num(1.));
+        layer.properties.insert(
+            "Weights".into(),
+            Value::Tensor(Tensor::from_f32(vec![1., 2.], vec![2]).unwrap()),
+        );
+        layer.properties.insert(
+            "Bias".into(),
+            Value::Tensor(Tensor::from_f32(vec![0.], Vec::new()).unwrap()),
+        );
+        assert_eq!(
+            tensor_property_shape(&layer, "Weights", "forward").unwrap(),
+            &[2]
+        );
+        assert_eq!(
+            tensor_property_shape(&layer, "Bias", "forward").unwrap(),
+            &[]
+        );
+        assert_eq!(
+            fully_connected_output_width(&layer, 2, "forward").unwrap(),
+            1
+        );
+        layer.properties.insert(
+            "Weights".into(),
+            Value::Tensor(Tensor::from_f32(vec![1.], Vec::new()).unwrap()),
+        );
+        assert!(fully_connected_output_width(&layer, 1, "forward").is_err());
+    }
 }

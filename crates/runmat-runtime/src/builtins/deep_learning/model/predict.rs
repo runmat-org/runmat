@@ -133,8 +133,8 @@ fn prepare_input(input: Value, observations: ObservationsIn) -> BuiltinResult<Va
                 ));
             }
             let shape = match data {
-                Value::Tensor(tensor) => Some(tensor.shape.as_slice()),
-                Value::ComplexTensor(tensor) => Some(tensor.shape.as_slice()),
+                Value::Tensor(tensor) => Some(tensor.shape()),
+                Value::ComplexTensor(tensor) => Some(tensor.shape()),
                 Value::GpuTensor(handle) => Some(handle.shape()),
                 _ => None,
             };

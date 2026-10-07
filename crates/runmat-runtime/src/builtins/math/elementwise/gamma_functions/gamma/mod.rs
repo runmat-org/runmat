@@ -143,7 +143,7 @@ async fn gamma_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 }
 
 fn gamma_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|detail| gamma_error_with_detail(&GAMMA_ERROR_INTERNAL, detail))?;

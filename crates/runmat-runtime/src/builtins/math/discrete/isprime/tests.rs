@@ -19,6 +19,30 @@ fn classifies_scalars_and_full_width_integers() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn tensor_inputs_preserve_rank_zero_and_rank_one_logical_shapes() {
+    for (input, shape, expected) in [
+        (
+            Tensor::from_f32(vec![2.0], vec![]).expect("rank-zero single"),
+            Vec::new(),
+            vec![1],
+        ),
+        (
+            Tensor::new_integer(IntegerStorage::U64(vec![2, 4]), vec![2])
+                .expect("rank-one integer"),
+            vec![2],
+            vec![1, 0],
+        ),
+    ] {
+        let Value::LogicalArray(output) = call(Value::Tensor(input)).expect("isprime") else {
+            panic!("expected logical array");
+        };
+        assert_eq!(output.shape, shape);
+        assert_eq!(output.data.as_slice(), expected.as_slice());
+    }
+}
+
 #[test]
 fn supports_every_numeric_storage_class_and_preserves_shape() {
     let storages = [

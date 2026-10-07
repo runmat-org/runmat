@@ -11,7 +11,7 @@ fn double_array_and_scalar_preserve_shape() {
     else {
         panic!("expected tensor")
     };
-    assert_eq!(output.shape, vec![2, 2]);
+    assert_eq!(output.shape(), &[2, 2]);
     assert_eq!(output.materialize_f64(), vec![45.0, 765.0, 90.0, 180.0]);
 }
 

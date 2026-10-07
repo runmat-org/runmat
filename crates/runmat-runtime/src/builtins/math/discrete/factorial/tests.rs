@@ -31,13 +31,39 @@ mod cases {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn factorial_preserves_low_rank_shape_and_native_storage() {
+        let scalar = Tensor::from_f32(vec![5.0], vec![]).expect("rank-zero single");
+        let Value::Tensor(scalar) =
+            factorial_builtin(Value::Tensor(scalar), Vec::new()).expect("scalar factorial")
+        else {
+            panic!("expected native single tensor");
+        };
+        assert_eq!(scalar.shape(), &[]);
+        assert_eq!(scalar.as_f32_slice().expect("single storage"), &[120.0]);
+
+        let vector =
+            Tensor::new_integer(IntegerStorage::U16(vec![3, 5]), vec![2]).expect("rank one");
+        let Value::Tensor(vector) =
+            factorial_builtin(Value::Tensor(vector), Vec::new()).expect("vector factorial")
+        else {
+            panic!("expected integer tensor");
+        };
+        assert_eq!(vector.shape(), &[2]);
+        assert_eq!(
+            vector.integer_storage(),
+            Some(&IntegerStorage::U16(vec![6, 120]))
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn factorial_vector_inputs() {
         let tensor = Tensor::new(vec![0.0, 1.0, 3.0, 5.0], vec![4, 1]).unwrap();
         let result = factorial_builtin(Value::Tensor(tensor), Vec::new()).expect("factorial");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![4, 1]);
+                assert_eq!(out.shape(), &[4, 1]);
                 assert_eq!(out.materialize_f64(), vec![1.0, 1.0, 6.0, 120.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -53,7 +79,7 @@ mod cases {
         let result = factorial_builtin(Value::Tensor(tensor), Vec::new()).expect("factorial");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), &[3, 1]);
                 assert_eq!(
                     out.into_numeric_storage().unwrap(),
                     NumericStorage::U64(vec![6, 120, u64::MAX])
@@ -128,7 +154,7 @@ mod cases {
         else {
             panic!("expected empty single tensor");
         };
-        assert_eq!(output.shape, vec![0, 3]);
+        assert_eq!(output.shape(), &[0, 3]);
         assert_eq!(
             output.into_numeric_storage().unwrap(),
             NumericStorage::F32(Vec::new())
@@ -245,7 +271,7 @@ mod cases {
             match result {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    assert_eq!(gathered.shape, vec![2, 1]);
+                    assert_eq!(gathered.shape(), &[2, 1]);
                     assert_eq!(gathered.materialize_f64(), vec![6.0, 24.0]);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
@@ -283,12 +309,12 @@ mod cases {
             let tensor = Tensor::new(vec![0.0, 1.0, 3.0, 5.0], vec![4, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = factorial_builtin(Value::GpuTensor(handle), Vec::new()).expect("fact");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![4, 1]);
+            assert_eq!(gathered.shape(), &[4, 1]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 1.0, 6.0, 120.0]);
         });
     }
@@ -301,7 +327,7 @@ mod cases {
             let tensor = Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap();
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = factorial_builtin(
@@ -421,7 +447,7 @@ mod cases {
         let cpu = factorial_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("cpu");
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).unwrap();
         let gpu = block_on(factorial_gpu(handle)).expect("gpu");
@@ -431,7 +457,7 @@ mod cases {
             Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).unwrap(),
             other => panic!("unexpected cpu result {other:?}"),
         };
-        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert_eq!(gathered.shape(), cpu_tensor.shape());
         assert_eq!(gathered.materialize_f64(), cpu_tensor.materialize_f64());
     }
 }

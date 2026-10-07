@@ -168,7 +168,7 @@ fn one_public_step(single: bool, bidirectional: bool, trainnet: bool) {
     }
     let bias = parameter(&trained, ParameterRole::Bias);
     assert_eq!(bias.numeric_dtype(), expected_dtype);
-    assert_eq!(bias.shape, vec![rows, 1]);
+    assert_eq!(bias.shape(), &[rows, 1]);
     let actual = bias.materialize_f64();
     let finite_difference = candidate_gradient(channels, if single { 0.002 } else { 1.0e-5 });
     let tolerance = if single { 2.0e-5 } else { 2.0e-9 };

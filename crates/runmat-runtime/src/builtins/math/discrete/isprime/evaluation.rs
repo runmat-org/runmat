@@ -9,7 +9,7 @@ pub(super) fn evaluate(value: Value) -> BuiltinResult<Value> {
         Value::Num(value) => Ok(Value::Bool(test_float(value)?)),
         Value::Int(value) => Ok(Value::Bool(test_int(value)?)),
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let storage = tensor
                 .into_numeric_storage()
                 .map_err(|detail| isprime_error(IsPrimeError::Internal, detail))?;

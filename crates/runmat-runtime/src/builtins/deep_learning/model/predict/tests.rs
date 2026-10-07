@@ -211,7 +211,7 @@ fn documented_integer_predictors_do_not_inherit_forward_extension_gate() {
     let Value::Tensor(output) = output else {
         panic!("host score tensor expected")
     };
-    assert_eq!(output.shape, vec![2, 1]);
+    assert_eq!(output.shape(), &[2, 1]);
     assert_eq!(output.materialize_f64(), vec![0.5, 2.5]);
 }
 
@@ -249,7 +249,7 @@ fn formatted_predictor_keeps_its_typed_axis_order() {
     let Some(Value::Tensor(data)) = output.properties.get("Data") else {
         panic!("host score data expected")
     };
-    assert_eq!(data.shape, vec![1, 3]);
+    assert_eq!(data.shape(), &[1, 3]);
     assert_eq!(data.materialize_f64(), vec![0.5, 2.5, 4.5]);
 }
 
@@ -283,7 +283,7 @@ fn unformatted_dlarray_keeps_wrapper_and_same_rank_input_order() {
     let Some(Value::Tensor(data)) = output.properties.get("Data") else {
         panic!("unformatted host score expected")
     };
-    assert_eq!(data.shape, vec![3, 1]);
+    assert_eq!(data.shape(), &[3, 1]);
     assert_eq!(data.materialize_f64(), vec![0.5, 2.5, 4.5]);
 }
 

@@ -1,6 +1,28 @@
 use super::*;
 use crate::builtins::deep_learning::layer_helpers::parse_layer_options;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn recurrent_gate_factor_admission_requires_a_row_or_scalar() {
+    for kind in [DeepLearningLayerKind::Lstm, DeepLearningLayerKind::Bilstm] {
+        let gates = kind.recurrent_gate_count().unwrap();
+        for (shape, admitted) in [
+            (vec![1, gates], true),
+            (vec![gates], false),
+            (vec![gates, 1], false),
+        ] {
+            let factor =
+                Value::Tensor(runmat_value::Tensor::from_f32(vec![1.; gates], shape).unwrap());
+            assert_eq!(
+                recurrent_factor(&factor, kind, "lstmLayer", "WeightLearnRateFactor").is_ok(),
+                admitted
+            );
+        }
+        let scalar = Value::Tensor(runmat_value::Tensor::from_f32(vec![1.], Vec::new()).unwrap());
+        assert!(recurrent_factor(&scalar, kind, "lstmLayer", "WeightLearnRateFactor").is_ok());
+    }
+}
+
 #[test]
 fn constructor_admission_uses_the_canonical_convolution_modes() {
     let kind = DeepLearningLayerKind::Convolution1D;

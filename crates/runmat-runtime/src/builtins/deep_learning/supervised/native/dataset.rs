@@ -68,7 +68,7 @@ impl<'a> BatchSelection<'a> {
     }
 
     pub(super) fn select(&self, data: &Tensor, function: &'static str) -> BuiltinResult<Tensor> {
-        if data.shape != self.source.shape() || data.len() != self.source.element_count() {
+        if data.shape() != self.source.shape() || data.len() != self.source.element_count() {
             return Err(fail(
                 function,
                 "training tensor differs from admitted geometry",
@@ -155,5 +155,22 @@ mod tests {
         let cb = axes("CB", &[2, 3]);
         assert!(BatchSelection::admit(&cb, &[3], "test").is_err());
         assert!(BatchSelection::admit(&cb, &[], "test").is_err());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn singleton_batch_selection_preserves_admitted_axes_and_rejects_equal_count_reshape() {
+        let cb = axes("CB", &[2, 1]);
+        let selected = BatchSelection::admit(&cb, &[0], "test").unwrap();
+        let data = Tensor::from_f32(vec![1., 2.], vec![2, 1]).unwrap();
+        let output = selected.select(&data, "test").unwrap();
+        assert_eq!(output.shape(), &[2, 1]);
+        assert_eq!(output.as_f32_slice(), Some(&[1., 2.][..]));
+
+        let reshaped = Tensor::from_f32(vec![1., 2.], vec![1, 2]).unwrap();
+        let error = selected.select(&reshaped, "test").err().unwrap();
+        assert!(error
+            .message()
+            .contains("training tensor differs from admitted geometry"));
     }
 }

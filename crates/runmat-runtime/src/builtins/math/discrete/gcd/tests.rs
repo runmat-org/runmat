@@ -12,8 +12,25 @@ fn handles_negative_and_zero_values() {
     else {
         panic!("expected tensor")
     };
-    assert_eq!(output.shape, vec![2, 2]);
+    assert_eq!(output.shape(), &[2, 2]);
     assert_eq!(output.materialize_f64(), vec![5.0, 1.0, 10.0, 0.0]);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rank_zero_integer_tensor_broadcasts_over_rank_one_without_losing_class() {
+    let scalar = Tensor::new_integer(IntegerStorage::U16(vec![6]), vec![]).expect("rank zero");
+    let vector = Tensor::new_integer(IntegerStorage::U16(vec![12, 18]), vec![2]).expect("rank one");
+    let Value::Tensor(output) =
+        block_on(gcd_builtin(Value::Tensor(scalar), Value::Tensor(vector))).expect("low-rank gcd")
+    else {
+        panic!("expected integer tensor");
+    };
+    assert_eq!(output.shape(), &[2]);
+    assert_eq!(
+        output.integer_storage(),
+        Some(&IntegerStorage::U16(vec![6, 6]))
+    );
 }
 
 #[test]

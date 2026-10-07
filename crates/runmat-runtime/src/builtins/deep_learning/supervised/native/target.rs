@@ -56,7 +56,7 @@ impl<'a> NumericTargetPlan<'a> {
             value => (value, None),
         };
         let (shape, dtype) = match data {
-            Value::Tensor(tensor) => (tensor.shape.as_slice(), tensor.numeric_dtype()),
+            Value::Tensor(tensor) => (tensor.shape(), tensor.numeric_dtype()),
             Value::GpuTensor(handle) => {
                 if handle_is_explicit(handle) {
                     return Err(fail(
@@ -175,7 +175,7 @@ impl<'a> NumericTargetPlan<'a> {
         };
         let tensor = crate::builtins::common::tensor::value_into_tensor_for(self.function, value)
             .map_err(|error| fail(self.function, error))?;
-        if tensor.shape != self.source.shape() || tensor.numeric_dtype() != self.dtype {
+        if tensor.shape() != self.source.shape() || tensor.numeric_dtype() != self.dtype {
             return Err(fail(
                 self.function,
                 "target payload changed after admission",
@@ -250,5 +250,24 @@ mod tests {
             .properties
             .insert("Labels".into(), Value::String("BCT".into()));
         assert!(NumericTargetPlan::admit(&Value::Object(object), &output, "test").is_err());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn singleton_observation_target_preserves_axes_and_rejects_equal_count_wrong_rows() {
+        let output = axes("CB", &[2, 1]);
+        let raw = Value::Tensor(Tensor::from_f32(vec![1., 2.], vec![1, 2]).unwrap());
+        let plan = NumericTargetPlan::admit(&raw, &output, "test").unwrap();
+        let prepared = futures::executor::block_on(plan.prepare(NumericDType::F32)).unwrap();
+        assert_eq!(prepared.shape(), &[2, 1]);
+        assert_eq!(prepared.as_f32_slice(), Some(&[1., 2.][..]));
+
+        let wrong_rows = Value::Tensor(Tensor::from_f32(vec![1., 2.], vec![2, 1]).unwrap());
+        let error = NumericTargetPlan::admit(&wrong_rows, &output, "test")
+            .err()
+            .unwrap();
+        assert!(error
+            .message()
+            .contains("Y must have one row per observation"));
     }
 }

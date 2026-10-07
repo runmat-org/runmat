@@ -18,7 +18,7 @@ static DOUBLE_TABLE: Lazy<[f64; MAX_DOUBLE_FACTORIAL_N + 1]> = Lazy::new(|| {
 });
 
 pub(super) fn factorial_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| factorial_error(FactorialError::Internal, error))?;

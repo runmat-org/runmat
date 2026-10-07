@@ -66,8 +66,8 @@ fn public_complex_predict_preserves_precision_and_presents_raw_and_formatted_out
             wrapped.properties.get("Labels"),
             Some(&Value::String("CB".into()))
         );
-        assert_eq!(raw.shape, vec![2, 2]);
-        assert_eq!(data.shape, vec![2, 2]);
+        assert_eq!(raw.shape(), &[2, 2]);
+        assert_eq!(data.shape(), &[2, 2]);
         assert_eq!(raw.numeric_dtype(), dtype);
         assert_eq!(data.numeric_dtype(), dtype);
         match dtype {

@@ -64,12 +64,31 @@ fn double_tensor_preserves_shape_and_values() {
     let output = call(Value::Tensor(input), Vec::new()).unwrap();
     match output {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![2, 2]);
+            assert_eq!(tensor.shape(), &[2, 2]);
             for (actual, expected) in tensor.materialize_f64().iter().zip([1.0, 1.0, 2.0, 6.0]) {
                 approx_eq(*actual, expected, 1e-12);
             }
         }
         other => panic!("expected tensor, got {other:?}"),
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn low_rank_single_tensors_preserve_shape_class_and_values() {
+    for (shape, input, expected) in [
+        (Vec::new(), vec![3.0_f32], vec![2.0_f64]),
+        (vec![2], vec![1.0_f32, 3.0], vec![1.0_f64, 2.0]),
+    ] {
+        let tensor = Tensor::from_f32(input, shape.clone()).expect("low-rank single");
+        let Value::Tensor(output) = call(Value::Tensor(tensor), Vec::new()).expect("gamma") else {
+            panic!("expected native single tensor");
+        };
+        assert_eq!(output.shape(), shape.as_slice());
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        for (actual, expected) in output.materialize_f64().iter().zip(expected) {
+            approx_eq(*actual, expected, 1e-6);
+        }
     }
 }
 
@@ -160,7 +179,7 @@ fn gpu_provider_roundtrip_preserves_residency() {
             Some(GpuHandleProvenance::Explicit)
         );
         let gathered = test_support::gather(output).unwrap();
-        assert_eq!(gathered.shape, vec![2, 2]);
+        assert_eq!(gathered.shape(), &[2, 2]);
         assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
         for (actual, expected) in gathered.materialize_f64().iter().zip([1.0, 1.0, 2.0, 6.0]) {
             approx_eq(*actual, expected, 1e-12);
@@ -235,7 +254,7 @@ fn wgpu_gamma_matches_host_for_real_inputs() {
     let output = call(Value::GpuTensor(handle), Vec::new()).expect("wgpu gamma");
     let actual = test_support::gather(output).expect("gather wgpu gamma");
 
-    assert_eq!(actual.shape, expected.shape);
+    assert_eq!(actual.shape(), expected.shape());
     let tolerance = match provider.precision() {
         runmat_accelerate_api::ProviderPrecision::F64 => 1e-8,
         runmat_accelerate_api::ProviderPrecision::F32 => 2e-4,

@@ -231,7 +231,7 @@ fn gammaln_tensor(tensor: Tensor) -> BuiltinResult<Value> {
             }
         }
     }
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|detail| error_with_detail(&GAMMALN_ERROR_INTERNAL, detail))?;

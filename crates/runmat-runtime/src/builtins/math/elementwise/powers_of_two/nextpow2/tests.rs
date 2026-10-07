@@ -32,7 +32,7 @@ fn tensors_preserve_shape_and_floating_class() {
     else {
         panic!("expected tensor");
     };
-    assert_eq!(output.shape, vec![2, 2]);
+    assert_eq!(output.shape(), &[2, 2]);
     assert_eq!(output.materialize_f64(), vec![0.0, 0.0, 2.0, 4.0]);
 
     let single = Tensor::from_f32(vec![0.0, -3.0, 9.0], vec![1, 3]).expect("single tensor");
@@ -52,10 +52,36 @@ fn tensors_preserve_shape_and_floating_class() {
     else {
         panic!("expected empty tensor");
     };
-    assert_eq!(output.shape, vec![0, 3]);
+    assert_eq!(output.shape(), &[0, 3]);
     assert_eq!(
         output.into_numeric_storage().expect("numeric storage"),
         NumericStorage::F32(Vec::new())
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn low_rank_tensors_preserve_shape_class_and_values() {
+    let scalar = Tensor::from_f32(vec![9.0], vec![]).expect("rank-zero single");
+    let Value::Tensor(scalar) =
+        block_on(nextpow2_builtin(Value::Tensor(scalar))).expect("scalar nextpow2")
+    else {
+        panic!("expected native single tensor");
+    };
+    assert_eq!(scalar.shape(), &[]);
+    assert_eq!(scalar.as_f32_slice().expect("single storage"), &[4.0]);
+
+    let vector =
+        Tensor::new_integer(IntegerStorage::U16(vec![3, 9]), vec![2]).expect("rank-one integer");
+    let Value::Tensor(vector) =
+        block_on(nextpow2_builtin(Value::Tensor(vector))).expect("vector nextpow2")
+    else {
+        panic!("expected integer tensor");
+    };
+    assert_eq!(vector.shape(), &[2]);
+    assert_eq!(
+        vector.integer_storage(),
+        Some(&IntegerStorage::U16(vec![2, 4]))
     );
 }
 
@@ -133,13 +159,13 @@ fn provider_results_preserve_class_shape_and_residency() {
             ),
         ] {
             let expected_class = tensor.numeric_dtype();
-            let expected_shape = tensor.shape.clone();
+            let expected_shape = tensor.shape().to_vec();
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = block_on(nextpow2_builtin(Value::GpuTensor(handle))).expect("provider");
             assert!(matches!(result, Value::GpuTensor(_)));
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.numeric_dtype(), expected_class);
-            assert_eq!(gathered.shape, expected_shape);
+            assert_eq!(gathered.shape(), expected_shape.as_slice());
             assert_eq!(
                 gathered.into_numeric_storage().expect("numeric storage"),
                 expected

@@ -53,7 +53,7 @@ fn shape(layer: &Value, name: &str) -> Vec<usize> {
     let Value::Tensor(value) = property(layer, name) else {
         panic!("tensor property")
     };
-    value.shape.clone()
+    value.shape().to_vec()
 }
 
 #[test]
@@ -127,7 +127,7 @@ fn initializes_all_admitted_parameter_roles_from_canonical_geometry() {
             let Value::Tensor(state) = value else {
                 panic!("State tensor")
             };
-            assert_eq!(state.shape, [channels, 1]);
+            assert_eq!(state.shape(), &[channels, 1]);
             assert!(state
                 .host_buffer()
                 .materialize_f64()
@@ -191,7 +191,7 @@ fn callback_initializer_is_invoked_once_and_published_atomically() {
     let Value::Tensor(weights) = property(&layers[1], "Weights") else {
         unreachable!()
     };
-    assert_eq!(weights.shape, [3, 2]);
+    assert_eq!(weights.shape(), &[3, 2]);
     assert_eq!(weights.host_buffer().materialize_f64(), vec![0.25; 6]);
     assert_eq!(weights.numeric_dtype(), NumericDType::F32);
     assert_eq!(shape(&layers[1], "Bias"), [3, 1]);

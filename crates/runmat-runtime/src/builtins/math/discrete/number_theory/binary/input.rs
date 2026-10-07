@@ -107,7 +107,7 @@ impl BinaryInput {
     }
 
     fn from_tensor(tensor: Tensor, context: &'static BinaryContext) -> BuiltinResult<Self> {
-        let shape = tensor.shape.clone();
+        let shape = tensor.shape().to_vec();
         let storage = tensor
             .into_numeric_storage()
             .map_err(|error| binary_error(context, context.internal, error))?;

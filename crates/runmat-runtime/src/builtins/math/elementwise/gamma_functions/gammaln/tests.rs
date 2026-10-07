@@ -25,6 +25,29 @@ fn approx_eq(got: f64, expected: f64, tol: f64) {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn low_rank_single_tensors_preserve_shape_class_and_values() {
+    for (shape, input, expected) in [
+        (Vec::new(), vec![3.0_f32], vec![std::f64::consts::LN_2]),
+        (
+            vec![2],
+            vec![1.0_f32, 3.0],
+            vec![0.0_f64, std::f64::consts::LN_2],
+        ),
+    ] {
+        let tensor = Tensor::from_f32(input, shape.clone()).expect("low-rank single");
+        let Value::Tensor(output) = call(Value::Tensor(tensor)).expect("gammaln") else {
+            panic!("expected native single tensor");
+        };
+        assert_eq!(output.shape(), shape.as_slice());
+        assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        for (actual, expected) in output.materialize_f64().iter().zip(expected) {
+            approx_eq(*actual, expected, 1e-6);
+        }
+    }
+}
+
 fn values_f64(tensor: &Tensor) -> Vec<f64> {
     tensor.materialize_f64()
 }
@@ -76,7 +99,7 @@ fn gammaln_tensor_shape_and_single_dtype() {
     let result = call(Value::Tensor(tensor)).expect("gammaln");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![2, 2]);
+            assert_eq!(t.shape(), &[2, 2]);
             assert_eq!(t.numeric_dtype(), NumericDType::F32);
             let values = values_f64(&t);
             approx_eq(values[0], std::f32::consts::PI.sqrt().ln() as f64, 1e-7);
@@ -104,7 +127,7 @@ fn gammaln_integer_bool_logical_and_char_promote() {
     let logical = LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap();
     match call(Value::LogicalArray(logical)).expect("gammaln") {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), &[1, 2]);
             let values = values_f64(&t);
             approx_eq(values[0], 0.0, 1e-14);
             assert_eq!(values[1], f64::INFINITY);
@@ -115,7 +138,7 @@ fn gammaln_integer_bool_logical_and_char_promote() {
     let chars = CharArray::new(vec!['\0', '\u{1}'], 1, 2).unwrap();
     match call(Value::CharArray(chars)).expect("gammaln") {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), &[1, 2]);
             let values = values_f64(&t);
             assert_eq!(values[0], f64::INFINITY);
             approx_eq(values[1], 0.0, 1e-14);
@@ -138,7 +161,7 @@ fn gammaln_reads_typed_integer_storage() {
         Tensor::new_integer(IntegerStorage::U16(vec![5, 1]), vec![1, 2]).expect("int tensor");
     match call(Value::Tensor(tensor)).expect("gammaln") {
         Value::Tensor(t) => {
-            assert_eq!(t.shape, vec![1, 2]);
+            assert_eq!(t.shape(), &[1, 2]);
             assert_eq!(t.numeric_dtype(), NumericDType::F64);
             let values = values_f64(&t);
             approx_eq(values[0], 24.0_f64.ln(), 1e-13);
@@ -245,7 +268,7 @@ fn gammaln_gpu_provider_roundtrip() {
         let tensor = Tensor::new(vec![0.5, 1.0, 2.0, 5.0, 171.0], vec![1, 5]).unwrap();
         let view = HostTensorView {
             data: tensor.as_f64_slice().expect("double input"),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider
             .upload(&view)
@@ -261,7 +284,7 @@ fn gammaln_gpu_provider_roundtrip() {
             Some(GpuHandleProvenance::Explicit)
         );
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![1, 5]);
+        assert_eq!(gathered.shape(), &[1, 5]);
         for (got, input) in gathered
             .materialize_f64()
             .iter()
@@ -279,7 +302,7 @@ fn gammaln_gpu_negative_errors() {
         let tensor = Tensor::new(vec![1.0, -0.5], vec![1, 2]).unwrap();
         let view = HostTensorView {
             data: tensor.as_f64_slice().expect("double input"),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let err = call(Value::GpuTensor(handle)).expect_err("negative gpu should error");
@@ -338,12 +361,12 @@ fn gammaln_wgpu_matches_cpu_elementwise() {
     };
     let view = HostTensorView {
         data: tensor.as_f64_slice().expect("double input"),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let handle = provider.upload(&view).expect("upload");
     let gpu_value = block_on(gammaln_gpu(handle)).expect("gpu gammaln");
     let gathered = test_support::gather(gpu_value).expect("gather");
-    assert_eq!(gathered.shape, cpu.shape);
+    assert_eq!(gathered.shape(), cpu.shape());
     let tol = match provider.precision() {
         runmat_accelerate_api::ProviderPrecision::F64 => 1e-9,
         runmat_accelerate_api::ProviderPrecision::F32 => 2e-4,

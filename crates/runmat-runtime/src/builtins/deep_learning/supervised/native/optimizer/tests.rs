@@ -180,7 +180,7 @@ fn rejected_later_gradient_does_not_advance_earlier_private_slots() {
                 };
                 (
                     row.key.clone(),
-                    Tensor::new(entries, value.shape.clone()).unwrap(),
+                    Tensor::new(entries, value.shape().to_vec()).unwrap(),
                 )
             })
             .collect::<Vec<_>>()

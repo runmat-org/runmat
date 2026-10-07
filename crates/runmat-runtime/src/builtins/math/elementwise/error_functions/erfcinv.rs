@@ -178,7 +178,7 @@ fn erfcinv_real(value: Value) -> BuiltinResult<Value> {
 }
 
 fn erfcinv_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = match tensor.into_numeric_storage().map_err(internal_error)? {
         NumericStorage::F64(values) => {
             NumericStorage::F64(values.into_iter().map(erfcinv_scalar).collect::<Vec<_>>())
@@ -330,7 +330,7 @@ mod tests {
                 .unwrap();
         match erfcinv_builtin(Value::Tensor(tensor)).unwrap() {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), &[2, 2]);
                 assert_eq!(out.numeric_dtype(), NumericDType::F32);
                 let NumericStorage::F32(values) =
                     out.into_numeric_storage().expect("single storage")
@@ -343,6 +343,23 @@ mod tests {
                 assert!(values[3].is_nan());
             }
             other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn erfcinv_preserves_rank_zero_and_rank_one_single_tensors() {
+        for (shape, input) in [(Vec::new(), vec![1.0_f32]), (vec![2], vec![0.5_f32, 1.5])] {
+            let tensor = Tensor::from_f32(input.clone(), shape.clone()).expect("low-rank single");
+            let Value::Tensor(output) = erfcinv_builtin(Value::Tensor(tensor)).expect("erfcinv")
+            else {
+                panic!("expected native single tensor");
+            };
+            assert_eq!(output.shape(), shape.as_slice());
+            assert_eq!(output.numeric_dtype(), NumericDType::F32);
+            for (actual, input) in output.materialize_f64().iter().zip(input) {
+                assert_close(libm::erfc(*actual), f64::from(input), 1e-6);
+            }
         }
     }
 
@@ -382,7 +399,7 @@ mod tests {
             };
             let view = HostTensorView {
                 data: host.as_f64_slice().expect("double host"),
-                shape: &host.shape,
+                shape: host.shape(),
             };
             let handle = provider
                 .upload(&view)
@@ -398,7 +415,7 @@ mod tests {
                 Some(GpuHandleProvenance::Explicit)
             );
             let gpu = test_support::gather(resident).expect("gather");
-            assert_eq!(gpu.shape, cpu.shape);
+            assert_eq!(gpu.shape(), cpu.shape());
             for (actual, expected) in gpu
                 .as_f64_slice()
                 .expect("double gpu result")
@@ -467,7 +484,7 @@ mod tests {
         };
         let view = HostTensorView {
             data: tensor.as_f64_slice().expect("double tensor"),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_value = block_on(super::erfcinv_gpu(handle)).expect("gpu erfcinv");
@@ -476,7 +493,7 @@ mod tests {
             "erfcinv should keep WGPU provider results resident"
         );
         let gathered = test_support::gather(gpu_value).expect("gather");
-        assert_eq!(gathered.shape, cpu.shape);
+        assert_eq!(gathered.shape(), cpu.shape());
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-8,
             runmat_accelerate_api::ProviderPrecision::F32 => 2e-4,

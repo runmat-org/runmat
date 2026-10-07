@@ -150,7 +150,7 @@ fn decode(
         let factor = if decoded.len() == 1 {
             FactorValues::Uniform(decoded[0])
         } else {
-            let valid_shape = matches!(value, Value::Tensor(tensor) if tensor.shape.as_slice() == [1, gate_count]);
+            let valid_shape = matches!(value, Value::Tensor(tensor) if tensor.shape() == [1, gate_count].as_slice());
             if gate_rows.is_none() || decoded.len() != gate_count || !valid_shape {
                 return Err(fail(
                     function,

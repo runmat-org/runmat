@@ -89,7 +89,7 @@ impl NativeOptimizer {
                 .value
                 .ok_or_else(|| fail(function, "parameter is uninitialized"))?;
             let shape = parameters::numeric_payload_shape(value, row.key.role.name(), function)?;
-            if shape != gradient.shape || gradient.is_empty() {
+            if shape != gradient.shape() || gradient.is_empty() {
                 return Err(fail(
                     function,
                     "parameter gradient geometry differs from Learnables",
@@ -123,7 +123,7 @@ impl NativeOptimizer {
                     "explicit gpuArray parameter cannot enter host optimizer",
                 ));
             }
-            if source.shape.as_slice() != shape || source.numeric_dtype() != dtype {
+            if source.shape() != shape || source.numeric_dtype() != dtype {
                 return Err(fail(
                     function,
                     "prepared parameter differs from admitted Learnables",
@@ -214,7 +214,7 @@ impl NativeOptimizer {
                 }
                 _ => unreachable!("admitted native precision"),
             };
-            let value = Tensor::from_numeric_storage(storage, source.shape.clone())
+            let value = Tensor::from_numeric_storage(storage, source.shape().to_vec())
                 .map_err(|error| fail(function, error))?;
             staged_slots.push((key.clone(), next_slot));
             updates.push(ParameterUpdate { key, value });

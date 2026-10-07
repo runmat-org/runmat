@@ -299,7 +299,7 @@ fn recurrent_factor(
         .recurrent_gate_count()
         .ok_or_else(|| invalid_value(function, label))?;
     if let Value::Tensor(tensor) = value {
-        if tensor.shape.as_slice() == [1, count] {
+        if tensor.shape() == [1, count] {
             let values = numeric_values(value, function, label)?;
             return if values
                 .iter()
