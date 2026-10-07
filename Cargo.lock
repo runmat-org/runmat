@@ -7290,6 +7290,7 @@ dependencies = [
  "bytes",
  "calamine",
  "chrono",
+ "compression-codecs",
  "encoding_rs",
  "flate2",
  "futures",

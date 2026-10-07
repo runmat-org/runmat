@@ -11,7 +11,8 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
 "Character text allows trailing singleton dimensions but rejects genuine pages. Filesystem operations use the active provider; unsupported host capabilities report errors.",
 "Calls are effectful runtime boundaries, not fusion kernels. VM and native/JIT/AOT execution use the same canonical binding.",
 "The gzip header filename is ignored: destination names come from the supplied path or URL. Only a final .gz suffix is removed. No tar/zip member extraction occurs. Input and output buffers are materialized in host memory; no decompression quota is currently imposed.",
-"HTTP/HTTPS uses the shared RunMat transport and its platform restrictions. Local filesystem examples do not claim network or browser transport verification."] },
+"HTTP/HTTPS uses the shared RunMat transport and its platform restrictions. Local filesystem examples do not claim network or browser transport verification.",
+"Decompression cooperates with the session's task scheduler. Cancellation during decompression prevents that input's output write; outputs already written for earlier inputs remain. Filesystem writes are not transactional."] },
         BuiltinDocumentationSection { heading: "Placement and compatibility", paragraphs: &["Host text and filesystem operation; no accelerator kernel, upload, implicit gather, broadcast, or fusion. Numeric precision controls do not apply.", "No optional feature is required. Unsupported active-filesystem or HTTP capabilities fail rather than bypassing the configured provider."] },
     ],
     examples: &[BuiltinExample {
@@ -33,7 +34,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     media: &[],
     evidence: BuiltinDocumentationEvidence {
         implementation: &[BuiltinDocumentationLink { label: "Runtime domain", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/archive/gzip.rs") }],
-        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Domain admission and filesystem behavior", location: "builtins::io::archive::gzip::tests" }],
+        verification: &[
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Domain admission and filesystem behavior", location: "builtins::io::archive::gzip::tests" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Codec interoperability and bounded cooperation", location: "builtins::io::archive::gzip::codec::tests" },
+            BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Selected-session cancellation and output publication", location: "builtins::io::archive::gzip::cooperation_tests" },
+        ],
         notes: &["Typed isolated-filesystem examples verify content and result representation; provider, native, browser, and transport qualification is tracked by the exact-revision integrated gates."],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Stable),

@@ -68,6 +68,7 @@ rustfft = "6.2"
 futures = "0.3"
 async-recursion = "1.1"
 flate2 = "1.1"
+compression-codecs = { version = "0.4.38", default-features = false, features = ["gzip"] }
 
 # BLAS/LAPACK bindings for high-performance linear algebra (optional)
 blas = { version = "0.22", optional = true }
