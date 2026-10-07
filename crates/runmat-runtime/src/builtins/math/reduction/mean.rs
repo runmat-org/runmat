@@ -373,7 +373,7 @@ fn mean_native_integer(value: &Value, parsed: &ParsedArguments) -> BuiltinResult
             let Some(storage) = tensor.integer_storage() else {
                 return Ok(None);
             };
-            (storage.clone(), tensor.shape.clone())
+            (storage.clone(), tensor.shape().to_vec())
         }
         _ => return Ok(None),
     };
@@ -560,7 +560,7 @@ async fn parse_weights(value: &Value) -> BuiltinResult<MeanWeights> {
             ));
         }
     };
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = match tensor.into_numeric_storage().map_err(mean_internal_error)? {
         NumericStorage::F64(values) => MeanWeightStorage::F64(values),
         NumericStorage::F32(values) => MeanWeightStorage::F32(values),
@@ -766,16 +766,17 @@ fn weighted_real_mean(
     if dim == 0 {
         return Err(mean_invalid_argument("mean: dimension must be >= 1"));
     }
-    let reduce_len = if dim <= tensor.shape.len() {
-        tensor.shape[dim - 1]
+    let reduce_len = if dim <= tensor.shape().len() {
+        tensor.shape()[dim - 1]
     } else {
         1
     };
-    let layout = validate_weight_shape(weights, &tensor.shape, reduce_len)?;
-    if dim > tensor.shape.len() {
+    let layout = validate_weight_shape(weights, tensor.shape(), reduce_len)?;
+    if dim > tensor.shape().len() {
         return Ok(tensor::coerce_tensor_dtype(tensor.clone(), dtype));
     }
-    let output_shape = reduction_shape(&tensor.shape, dim).unwrap_or_else(|| tensor.shape.clone());
+    let output_shape =
+        reduction_shape(tensor.shape(), dim).unwrap_or_else(|| tensor.shape().to_vec());
     if reduce_len == 0 || tensor.is_empty() {
         return match dtype {
             NumericDType::F32 => Tensor::from_f32(
@@ -807,9 +808,9 @@ fn weighted_real_mean_f64(
     output_shape: Vec<usize>,
 ) -> BuiltinResult<Tensor> {
     let dim_index = dim - 1;
-    let reduce_len = tensor.shape[dim_index];
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
+    let reduce_len = tensor.shape()[dim_index];
+    let stride_before = dim_product(&tensor.shape()[..dim_index]);
+    let stride_after = dim_product(&tensor.shape()[dim..]);
     let mut output = Vec::with_capacity(tensor::element_count(&output_shape));
 
     for after in 0..stride_after {
@@ -869,9 +870,9 @@ fn weighted_real_mean_f32(
     output_shape: Vec<usize>,
 ) -> BuiltinResult<Tensor> {
     let dim_index = dim - 1;
-    let reduce_len = tensor.shape[dim_index];
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
+    let reduce_len = tensor.shape()[dim_index];
+    let stride_before = dim_product(&tensor.shape()[..dim_index]);
+    let stride_after = dim_product(&tensor.shape()[dim..]);
     let mut output = Vec::with_capacity(tensor::element_count(&output_shape));
 
     for after in 0..stride_after {
@@ -1114,16 +1115,17 @@ fn weighted_complex_mean(
     if dim == 0 {
         return Err(mean_invalid_argument("mean: dimension must be >= 1"));
     }
-    let reduce_len = if dim <= tensor.shape.len() {
-        tensor.shape[dim - 1]
+    let reduce_len = if dim <= tensor.shape().len() {
+        tensor.shape()[dim - 1]
     } else {
         1
     };
-    let layout = validate_weight_shape(weights, &tensor.shape, reduce_len)?;
-    if dim > tensor.shape.len() {
+    let layout = validate_weight_shape(weights, tensor.shape(), reduce_len)?;
+    if dim > tensor.shape().len() {
         return coerce_complex_tensor_dtype(tensor.clone(), dtype);
     }
-    let output_shape = reduction_shape(&tensor.shape, dim).unwrap_or_else(|| tensor.shape.clone());
+    let output_shape =
+        reduction_shape(tensor.shape(), dim).unwrap_or_else(|| tensor.shape().to_vec());
     if reduce_len == 0 || tensor.is_empty() {
         return match dtype {
             NumericDType::F32 => ComplexTensor::from_f32(
@@ -1154,9 +1156,9 @@ fn weighted_complex_mean_f64(
     output_shape: Vec<usize>,
 ) -> BuiltinResult<ComplexTensor> {
     let dim_index = dim - 1;
-    let reduce_len = tensor.shape[dim_index];
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
+    let reduce_len = tensor.shape()[dim_index];
+    let stride_before = dim_product(&tensor.shape()[..dim_index]);
+    let stride_after = dim_product(&tensor.shape()[dim..]);
     let mut output = Vec::with_capacity(tensor::element_count(&output_shape));
     for after in 0..stride_after {
         for before in 0..stride_before {
@@ -1220,9 +1222,9 @@ fn weighted_complex_mean_f32(
     output_shape: Vec<usize>,
 ) -> BuiltinResult<ComplexTensor> {
     let dim_index = dim - 1;
-    let reduce_len = tensor.shape[dim_index];
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
+    let reduce_len = tensor.shape()[dim_index];
+    let stride_before = dim_product(&tensor.shape()[..dim_index]);
+    let stride_after = dim_product(&tensor.shape()[dim..]);
     let mut output = Vec::with_capacity(tensor::element_count(&output_shape));
     for after in 0..stride_after {
         for before in 0..stride_before {
@@ -1281,7 +1283,7 @@ fn coerce_complex_tensor_dtype(
     tensor: ComplexTensor,
     dtype: NumericDType,
 ) -> BuiltinResult<ComplexTensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     match (tensor.into_complex_storage(), dtype) {
         (ComplexStorage::F64(values), NumericDType::F64) => {
             ComplexTensor::new(values.into_iter().collect(), shape).map_err(mean_internal_error)
@@ -1326,7 +1328,7 @@ fn mean_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {
         tensor
     };
     let reduced = if let Some(weights) = args.weights.as_ref() {
-        let dim = weighted_dimension(&tensor.shape, &args.axes)?;
+        let dim = weighted_dimension(tensor.shape(), &args.axes)?;
         let dtype = weighted_computation_dtype(tensor.numeric_dtype(), &args.output);
         weighted_real_mean(&tensor, dim, args.nan_mode, weights, dtype)?
     } else {
@@ -1343,7 +1345,7 @@ fn mean_host_complex_scalar(re: f64, im: f64, args: &ParsedArguments) -> Builtin
 
 fn mean_host_complex_tensor(tensor: ComplexTensor, args: &ParsedArguments) -> BuiltinResult<Value> {
     let reduced = if let Some(weights) = args.weights.as_ref() {
-        let dim = weighted_dimension(&tensor.shape, &args.axes)?;
+        let dim = weighted_dimension(tensor.shape(), &args.axes)?;
         let dtype = weighted_computation_dtype(tensor.numeric_dtype(), &args.output);
         weighted_complex_mean(&tensor, dim, args.nan_mode, weights, dtype)?
     } else {
@@ -1392,7 +1394,7 @@ async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinRes
                     "mean: expected gathered complex GPU storage",
                 ));
             };
-            let dim = weighted_dimension(&gathered.shape, &args.axes)?;
+            let dim = weighted_dimension(gathered.shape(), &args.axes)?;
             let input_dtype = numeric_dtype_from_value(&Value::GpuTensor(handle.clone()))
                 .unwrap_or_else(|| gathered.numeric_dtype());
             let dtype = weighted_computation_dtype(input_dtype, &args.output);
@@ -1410,7 +1412,7 @@ async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinRes
             return gpu_helpers::complex_gpu_value(uploaded);
         }
         let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
-        let dim = weighted_dimension(&gathered.shape, &args.axes)?;
+        let dim = weighted_dimension(gathered.shape(), &args.axes)?;
         let input_dtype = numeric_dtype_from_value(&Value::GpuTensor(handle.clone()))
             .unwrap_or_else(|| gathered.numeric_dtype());
         let dtype = weighted_computation_dtype(input_dtype, &args.output);
@@ -1482,12 +1484,12 @@ fn mean_tensor(tensor: Tensor, axes: MeanAxes, nan_mode: ReductionNaN) -> Builti
 }
 
 fn mean_tensor_all(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<Tensor> {
-    if is_scalar_shape(&tensor.shape) {
+    if is_scalar_shape(tensor.shape()) {
         return reduce_tensor_mean_dim(tensor, 1, nan_mode);
     }
     let values = tensor::tensor_values_f64(tensor);
     let total_elems = tensor
-        .shape
+        .shape()
         .iter()
         .copied()
         .map(|dim| dim.max(1))
@@ -1544,7 +1546,7 @@ fn reduce_tensor_mean_dim(
         return Err(mean_internal_error("mean: dimension must be >= 1"));
     }
 
-    if is_scalar_shape(&tensor.shape) {
+    if is_scalar_shape(tensor.shape()) {
         let value = tensor::tensor_values_f64(tensor)
             .into_iter()
             .next()
@@ -1563,7 +1565,7 @@ fn reduce_tensor_mean_dim(
             .map_err(|e| mean_internal_error(format!("mean: {e}")));
     }
 
-    let Some(output_shape) = reduction_shape(&tensor.shape, dim) else {
+    let Some(output_shape) = reduction_shape(tensor.shape(), dim) else {
         return Ok(tensor.clone());
     };
 
@@ -1575,9 +1577,9 @@ fn reduce_tensor_mean_dim(
     }
 
     let dim_index = dim - 1;
-    let reduce_len = tensor.shape[dim_index];
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim..]);
+    let reduce_len = tensor.shape()[dim_index];
+    let stride_before = dim_product(&tensor.shape()[..dim_index]);
+    let stride_after = dim_product(&tensor.shape()[dim..]);
     let out_len = tensor::element_count(&output_shape);
     let mut output = vec![0.0f64; out_len];
 
@@ -1638,7 +1640,7 @@ fn mean_complex_tensor(
 ) -> BuiltinResult<ComplexTensor> {
     match axes {
         MeanAxes::Default => {
-            let dim = default_dimension_from_shape(&tensor.shape);
+            let dim = default_dimension_from_shape(tensor.shape());
             reduce_complex_tensor_mean_dim(&tensor, dim, nan_mode)
         }
         MeanAxes::Dim(dim) => reduce_complex_tensor_mean_dim(&tensor, dim, nan_mode),
@@ -1660,7 +1662,7 @@ fn mean_complex_tensor_all(
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<ComplexTensor> {
     let values = tensor.materialize_f64();
-    if is_scalar_shape(&tensor.shape) {
+    if is_scalar_shape(tensor.shape()) {
         let (real, imaginary) = values.first().copied().unwrap_or((f64::NAN, f64::NAN));
         let value = if nan_mode == ReductionNaN::Omit && (real.is_nan() || imaginary.is_nan()) {
             (f64::NAN, f64::NAN)
@@ -1708,10 +1710,10 @@ fn reduce_complex_tensor_mean_dim(
         return Err(mean_internal_error("mean: dimension must be >= 1"));
     }
 
-    let shape = if is_scalar_shape(&tensor.shape) {
-        normalize_scalar_shape(&tensor.shape)
+    let shape = if is_scalar_shape(tensor.shape()) {
+        normalize_scalar_shape(tensor.shape())
     } else {
-        tensor.shape.clone()
+        tensor.shape().to_vec()
     };
 
     if is_scalar_shape(&shape) {
@@ -1835,7 +1837,7 @@ fn dim_product(dims: &[usize]) -> usize {
 }
 
 fn default_dimension(tensor: &Tensor) -> usize {
-    default_dimension_from_shape(&tensor.shape)
+    default_dimension_from_shape(tensor.shape())
 }
 
 fn default_dimension_from_shape(shape: &[usize]) -> usize {
@@ -2003,7 +2005,7 @@ pub(crate) mod tests {
         let Value::Tensor(result) = result else {
             panic!("expected row-wise reduction tensor");
         };
-        assert_eq!(result.shape, vec![3, 1]);
+        assert_eq!(result.shape(), [3, 1]);
         assert_eq!(values(&result), vec![5.5, 6.5, 7.5]);
     }
 
@@ -2021,7 +2023,7 @@ pub(crate) mod tests {
         let result = mean_builtin(Value::Tensor(tensor), Vec::new()).expect("mean");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(values(&out), vec![2.5, 3.5, 4.5]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -2044,7 +2046,7 @@ pub(crate) mod tests {
         let Value::Tensor(vector) = vector else {
             panic!("expected tensor weighted vector result");
         };
-        assert_eq!(vector.shape, vec![1, 2]);
+        assert_eq!(vector.shape(), [1, 2]);
         assert_eq!(values(&vector), vec![2.5, 3.5]);
 
         let full_weights = Tensor::new(vec![1.0, 3.0, 2.0, 1.0], vec![2, 2]).unwrap();
@@ -2060,7 +2062,7 @@ pub(crate) mod tests {
         let Value::Tensor(full) = full else {
             panic!("expected tensor weighted full-size result");
         };
-        assert_eq!(full.shape, vec![1, 2]);
+        assert_eq!(full.shape(), [1, 2]);
         assert!((values(&full)[0] - 2.5).abs() < 1e-12);
         assert!((values(&full)[1] - (8.0 / 3.0)).abs() < 1e-12);
     }
@@ -2326,7 +2328,7 @@ pub(crate) mod tests {
 
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), [1, 2]);
                 assert_eq!(values(&out), vec![1.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -2362,7 +2364,7 @@ pub(crate) mod tests {
             mean_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(2))]).expect("mean");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_eq!(values(&out), vec![2.0, 5.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -2472,7 +2474,7 @@ pub(crate) mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected typed tensor result");
         };
-        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.shape(), [1, 2]);
         assert_eq!(
             output.integer_storage(),
             Some(&runmat_value::IntegerStorage::U16(vec![2, 5]))
@@ -2602,7 +2604,7 @@ pub(crate) mod tests {
         .expect("mean");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), [1, 2]);
                 assert_eq!(values(&out), vec![1.0, 3.5]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -2633,7 +2635,7 @@ pub(crate) mod tests {
         match (a, b) {
             (Value::Num(x), Value::Num(y)) => assert!((x - y).abs() < 1e-12),
             (Value::Tensor(tx), Value::Tensor(ty)) => {
-                assert_eq!(tx.shape, ty.shape);
+                assert_eq!(tx.shape(), ty.shape());
                 for (x, y) in values(&tx).iter().zip(values(&ty).iter()) {
                     assert!((x - y).abs() < 1e-12);
                 }
@@ -2718,14 +2720,14 @@ pub(crate) mod tests {
                     .unwrap();
             let included = mean_complex_tensor_all(&tensor, ReductionNaN::Include).unwrap();
             assert_eq!(included.numeric_dtype(), dtype);
-            assert_eq!(included.shape, vec![1, 1]);
+            assert_eq!(included.shape(), [1, 1]);
             let (real, imaginary) = included.materialize_f64()[0];
             assert!(real.is_nan());
             assert_eq!(imaginary, 4.0);
 
             let omitted = mean_complex_tensor_all(&tensor, ReductionNaN::Omit).unwrap();
             assert_eq!(omitted.numeric_dtype(), dtype);
-            assert_eq!(omitted.shape, vec![1, 1]);
+            assert_eq!(omitted.shape(), [1, 1]);
             let (real, imaginary) = omitted.materialize_f64()[0];
             assert!(real.is_nan() && imaginary.is_nan());
         }
@@ -2743,7 +2745,7 @@ pub(crate) mod tests {
             mean_builtin(Value::ComplexTensor(tensor), vec![Value::Num(1.0)]).expect("mean");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), [1, 2]);
                 let expected = [(3.0, 0.0), (4.0, 0.0)];
                 for (got, exp) in out.materialize_f64().iter().zip(expected.iter()) {
                     assert!((got.0 - exp.0).abs() < 1e-12);
@@ -2789,7 +2791,7 @@ pub(crate) mod tests {
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = mean_builtin(Value::GpuTensor(handle), Vec::new()).expect("mean");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), [1, 3]);
             assert_eq!(values(&gathered), vec![2.5, 3.5, 4.5]);
         });
     }
@@ -2810,7 +2812,7 @@ pub(crate) mod tests {
             };
             let gathered =
                 test_support::gather(Value::GpuTensor(handle)).expect("gather weighted mean");
-            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.shape(), [1, 2]);
             assert_eq!(values(&gathered), vec![2.5, 3.5]);
         });
     }
@@ -2903,7 +2905,7 @@ pub(crate) mod tests {
                 let Value::ComplexTensor(gathered) = gathered else {
                     panic!("complex GPU mean must preserve complex storage");
                 };
-                assert_eq!(gathered.shape, vec![1, 2]);
+                assert_eq!(gathered.shape(), [1, 2]);
                 assert_eq!(gathered.materialize_f64(), vec![(2.0, 3.0), (6.0, 7.0)]);
                 input.allocation_lease().validate_live().unwrap();
             }
@@ -2934,7 +2936,7 @@ pub(crate) mod tests {
                 panic!("complex omitnan result must retain its class");
             };
             assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
-            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.shape(), [1, 2]);
             assert_eq!(gathered.materialize_f64(), vec![(1.0, 2.0), (6.0, 7.0)]);
             input.allocation_lease().validate_live().unwrap();
         });
@@ -2959,7 +2961,7 @@ pub(crate) mod tests {
                 block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(result))).unwrap();
             match gathered {
                 Value::ComplexTensor(gathered) => {
-                    assert_eq!(gathered.shape, vec![1, 1]);
+                    assert_eq!(gathered.shape(), [1, 1]);
                     assert_eq!(gathered.materialize_f64(), vec![(4.0, 5.0)]);
                 }
                 Value::Complex(real, imaginary) => assert_eq!((real, imaginary), (4.0, 5.0)),
@@ -3028,7 +3030,7 @@ pub(crate) mod tests {
                     block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(result))).unwrap();
                 match gathered {
                     Value::ComplexTensor(gathered) => {
-                        assert_eq!(gathered.shape, shape);
+                        assert_eq!(gathered.shape(), shape);
                         assert_eq!(gathered.materialize_f64(), values);
                     }
                     Value::Complex(real, imaginary) if shape == [1, 1] => {
@@ -3101,7 +3103,7 @@ pub(crate) mod tests {
             let result =
                 mean_builtin(Value::GpuTensor(handle), vec![Value::from("omitnan")]).expect("mean");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 2]);
+            assert_eq!(gathered.shape(), [1, 2]);
             assert_eq!(values(&gathered), vec![2.0, 4.0]);
         });
     }
@@ -3115,7 +3117,7 @@ pub(crate) mod tests {
             let result =
                 mean_builtin(Value::GpuTensor(handle), vec![Value::from("all")]).expect("mean");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.shape(), [1, 1]);
             assert_eq!(values(&gathered), vec![2.5]);
         });
     }
@@ -3143,7 +3145,7 @@ pub(crate) mod tests {
                 other => panic!("unexpected cpu result {other:?}"),
             };
             let gpu_tensor = test_support::gather(gpu_result).expect("gather");
-            assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
+            assert_eq!(gpu_tensor.shape(), cpu_tensor.shape());
             for (a, b) in values(&gpu_tensor).iter().zip(values(&cpu_tensor).iter()) {
                 assert!((a - b).abs() < 1e-12);
             }
@@ -3281,7 +3283,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
-                assert_eq!(gt.shape, ct.shape);
+                assert_eq!(gt.shape(), ct.shape());
                 for (a, b) in values(&gt).iter().zip(values(&ct).iter()) {
                     assert!((a - b).abs() < 1e-12);
                 }

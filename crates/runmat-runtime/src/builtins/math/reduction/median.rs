@@ -293,7 +293,7 @@ async fn parse_weights(
         ));
     }
 
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let values = tensor.materialize_f64();
     for (index, &weight) in values.iter().enumerate() {
         if weight.is_nan() || weight < 0.0 {
@@ -354,7 +354,7 @@ fn logical_value_from_reduction(tensor: Tensor) -> BuiltinResult<Value> {
 // Consume the native payload while retaining the complete reduction shape.
 // Resident restoration must not apply the host wrapper's scalar collapse.
 fn logical_array_from_reduction(tensor: Tensor) -> BuiltinResult<LogicalArray> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(median_internal_error)?;
@@ -367,7 +367,7 @@ fn logical_array_from_reduction(tensor: Tensor) -> BuiltinResult<LogicalArray> {
 }
 
 fn logical_tensor_from_gathered(tensor: Tensor) -> BuiltinResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let values = tensor
         .materialize_f64()
         .into_iter()
@@ -470,7 +470,7 @@ fn median_tensor(
             Ok(current)
         }
         MedianAxes::All => {
-            if tensor.shape.is_empty() {
+            if tensor.shape().is_empty() {
                 Ok(tensor)
             } else {
                 let len = tensor.len();
@@ -620,7 +620,7 @@ fn reduce_tensor_weighted_median_dim(
         return Err(median_invalid_argument("median: dimension must be >= 1"));
     }
 
-    let input_shape = tensor.shape.clone();
+    let input_shape = tensor.shape().to_vec();
     let reduce_len = if input_shape.is_empty() {
         1
     } else if dim <= input_shape.len() {
@@ -833,19 +833,19 @@ fn reduce_tensor_median_dim(
         return Err(median_invalid_argument("median: dimension must be >= 1"));
     }
 
-    if tensor.shape.is_empty() {
+    if tensor.shape().is_empty() {
         return tensor
             .reshape(vec![1, 1])
             .map_err(|e| median_internal_error(format!("median: {e}")));
     }
 
-    if dim > tensor.shape.len() {
+    if dim > tensor.shape().len() {
         return Ok(tensor);
     }
 
     let dim_index = dim - 1;
-    let reduce_len = tensor.shape[dim_index];
-    let Some(output_shape) = reduction_shape(&tensor.shape, dim) else {
+    let reduce_len = tensor.shape()[dim_index];
+    let Some(output_shape) = reduction_shape(tensor.shape(), dim) else {
         return Ok(tensor);
     };
 
@@ -856,7 +856,7 @@ fn reduce_tensor_median_dim(
     }
 
     if tensor.integer_storage().is_some() {
-        let input_shape = tensor.shape.clone();
+        let input_shape = tensor.shape().to_vec();
         let storage = tensor
             .into_numeric_storage()
             .map_err(median_internal_error)?
@@ -875,7 +875,7 @@ fn reduce_tensor_median_dim(
         return Ok(tensor);
     }
 
-    let input_shape = tensor.shape.clone();
+    let input_shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(median_internal_error)?;
@@ -1106,7 +1106,7 @@ fn dim_product(dims: &[usize]) -> usize {
 }
 
 fn default_dimension(tensor: &Tensor) -> usize {
-    default_dimension_from_shape(&tensor.shape)
+    default_dimension_from_shape(tensor.shape())
 }
 
 fn default_dimension_from_shape(shape: &[usize]) -> usize {
@@ -1387,7 +1387,7 @@ pub(crate) mod tests {
         let Value::Tensor(result) = result else {
             panic!("expected matrix result");
         };
-        assert_eq!(result.shape, vec![1, 2]);
+        assert_eq!(result.shape(), [1, 2]);
         assert_eq!(result.materialize_f64(), vec![10.0, 2.0]);
     }
 
@@ -1485,7 +1485,7 @@ pub(crate) mod tests {
         let result = median_builtin(Value::Tensor(tensor), Vec::new()).expect("median");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.shape(), [1, 2]);
                 assert_eq!(out.materialize_f64(), vec![2.0, 9.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1500,7 +1500,7 @@ pub(crate) mod tests {
             .expect("median");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), [3, 1]);
                 assert_eq!(out.materialize_f64(), vec![4.0, 6.0, 8.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1529,7 +1529,7 @@ pub(crate) mod tests {
             median_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("median");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 2, 1]);
+                assert_eq!(out.shape(), [1, 2, 1]);
                 assert_eq!(out.materialize_f64().len(), 2);
                 assert!((out.materialize_f64()[0] - 3.5).abs() < 1e-12);
                 assert!((out.materialize_f64()[1] - 5.5).abs() < 1e-12);
@@ -1653,12 +1653,12 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![1.0, 4.0, 9.0, 16.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = median_builtin(Value::GpuTensor(handle), Vec::new()).expect("median");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.shape(), [1, 1]);
             assert_eq!(gathered.materialize_f64()[0], 6.5);
         });
     }
@@ -1670,14 +1670,14 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![f64::NAN, 2.0, f64::NAN, 4.0], vec![4, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = median_builtin(Value::GpuTensor(handle), vec![Value::from("omitnan")])
                 .expect("median");
             assert!(matches!(result, Value::GpuTensor(_)));
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.shape(), [1, 1]);
             assert_eq!(gathered.materialize_f64()[0], 3.0);
         });
     }
@@ -1803,14 +1803,14 @@ pub(crate) mod tests {
         let cpu = median_host(Value::Tensor(tensor.clone()), &args_dim1).expect("cpu median");
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let gpu_value = block_on(median_gpu(handle, &args_dim1, &[])).expect("gpu median");
         let gathered = test_support::gather(gpu_value).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
-                assert_eq!(ct.shape, gt.shape);
+                assert_eq!(ct.shape(), gt.shape());
                 let tol = match provider.precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 5e-5,
@@ -1834,7 +1834,7 @@ pub(crate) mod tests {
             provider
                 .upload(&runmat_accelerate_api::HostTensorView {
                     data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 })
                 .expect("upload"),
             &args_all,

@@ -172,7 +172,7 @@ fn sum_native_integer(value: &Value, parsed: &ParsedArguments) -> BuiltinResult<
             let Some(storage) = tensor.integer_storage() else {
                 return Ok(None);
             };
-            (storage.clone(), tensor.shape.clone())
+            (storage.clone(), tensor.shape().to_vec())
         }
         _ => return Ok(None),
     };
@@ -435,7 +435,7 @@ async fn parse_dimension_spec(value: &Value) -> BuiltinResult<Option<DimSelectio
                 .map_err(sum_invalid_argument)?;
             Ok(dim.map(DimSelection::Dim))
         }
-        Value::Tensor(t) => parse_dimension_tensor(value, &t.shape).await,
+        Value::Tensor(t) => parse_dimension_tensor(value, t.shape()).await,
         Value::LogicalArray(logical) => parse_dimension_tensor(value, &logical.shape).await,
         Value::GpuTensor(handle) => parse_dimension_tensor(value, handle.shape()).await,
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Ok(None),
@@ -499,13 +499,13 @@ fn is_vector_shape(shape: &[usize]) -> bool {
 
 fn sum_host(value: Value, parsed: &ParsedArguments) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor(value).map_err(sum_invalid_input)?;
-    let resolved = resolve_dims(&tensor.shape, &parsed.selection)?;
+    let resolved = resolve_dims(tensor.shape(), &parsed.selection)?;
     let reduced = sum_tensor(&tensor, &resolved, parsed.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
 
 fn sum_host_complex_tensor(ct: ComplexTensor, parsed: &ParsedArguments) -> BuiltinResult<Value> {
-    let resolved = resolve_dims(&ct.shape, &parsed.selection)?;
+    let resolved = resolve_dims(ct.shape(), &parsed.selection)?;
     let reduced = sum_complex_tensor(&ct, &resolved, parsed.nan_mode)?;
     Ok(complex_tensor_into_value(reduced))
 }
@@ -847,10 +847,10 @@ fn sum_tensor(
     dims: &ResolvedDims,
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<Tensor> {
-    let shape = if is_scalar_shape(&tensor.shape) {
-        normalize_scalar_shape(&tensor.shape)
+    let shape = if is_scalar_shape(tensor.shape()) {
+        normalize_scalar_shape(tensor.shape())
     } else {
-        tensor.shape.clone()
+        tensor.shape().to_vec()
     };
 
     if dims.dims_in_bounds.is_empty() {
@@ -938,10 +938,10 @@ fn sum_complex_tensor(
     dims: &ResolvedDims,
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<ComplexTensor> {
-    let shape = if is_scalar_shape(&tensor.shape) {
-        normalize_scalar_shape(&tensor.shape)
+    let shape = if is_scalar_shape(tensor.shape()) {
+        normalize_scalar_shape(tensor.shape())
     } else {
-        tensor.shape.clone()
+        tensor.shape().to_vec()
     };
 
     if dims.dims_in_bounds.is_empty() {
@@ -1099,7 +1099,7 @@ async fn apply_double_template(value: Value, meta: &InputMeta) -> BuiltinResult<
             Value::Tensor(tensor::logical_to_tensor(&logical).map_err(sum_internal_error)?)
         }
         Value::ComplexTensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => {
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             ComplexTensor::from_f64_values_with_dtype(
                 tensor.materialize_f64(),
                 shape,
@@ -1173,7 +1173,7 @@ async fn coerce_value_to_dtype(
                 Ok(Value::ComplexTensor(tensor))
             }
             Value::ComplexTensor(tensor) if matches!(dtype, NumericDType::F32) => {
-                let shape = tensor.shape.clone();
+                let shape = tensor.shape().to_vec();
                 ComplexTensor::from_f64_values_with_dtype(tensor.materialize_f64(), shape, dtype)
                     .map(Value::ComplexTensor)
                     .map_err(sum_internal_error)
@@ -1203,7 +1203,7 @@ async fn coerce_value_to_dtype(
                         Ok(Value::Tensor(tensor::coerce_tensor_dtype(tensor, dtype)))
                     }
                     Value::ComplexTensor(tensor) if dtype == NumericDType::F32 => {
-                        let shape = tensor.shape.clone();
+                        let shape = tensor.shape().to_vec();
                         ComplexTensor::from_f64_values_with_dtype(
                             tensor.materialize_f64(),
                             shape,
@@ -1267,7 +1267,7 @@ pub(crate) mod tests {
         let result = sum_builtin(Value::Tensor(tensor), Vec::new()).expect("sum");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(values(&out), vec![5.0, 7.0, 9.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1282,7 +1282,7 @@ pub(crate) mod tests {
             sum_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(2))]).expect("sum");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.shape(), [2, 1]);
                 assert_eq!(values(&out), vec![6.0, 15.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1297,7 +1297,7 @@ pub(crate) mod tests {
         let result = sum_builtin(Value::Tensor(tensor), Vec::new()).expect("sum");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(values(&out), vec![5.0, 7.0, 9.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1414,7 +1414,7 @@ pub(crate) mod tests {
         let result = sum_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("sum");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 4, 1]);
+                assert_eq!(out.shape(), [1, 4, 1]);
                 assert_eq!(values(&out), vec![48.0, 66.0, 84.0, 102.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1501,7 +1501,7 @@ pub(crate) mod tests {
                 let Value::Tensor(output) = result else {
                     panic!("expected tensor output");
                 };
-                assert_eq!(output.shape, vec![1, 2]);
+                assert_eq!(output.shape(), [1, 2]);
                 assert_eq!(output.numeric_dtype(), NumericDType::F64);
                 assert_eq!(values(&output), vec![2.0, 3.0]);
             }
@@ -1537,7 +1537,7 @@ pub(crate) mod tests {
             let Value::Tensor(default) = default else {
                 panic!("expected default tensor output");
             };
-            assert_eq!(default.shape, vec![1, 3]);
+            assert_eq!(default.shape(), [1, 3]);
             assert_eq!(default.numeric_dtype(), NumericDType::F64);
             assert_eq!(values(&default), vec![0.0; 3]);
 
@@ -1546,7 +1546,7 @@ pub(crate) mod tests {
             let Value::Tensor(native) = native else {
                 panic!("expected native tensor output");
             };
-            assert_eq!(native.shape, vec![1, 3]);
+            assert_eq!(native.shape(), [1, 3]);
             assert_eq!(native.integer_storage(), Some(&storage.zeros_like(3)));
 
             let default_dim_two = sum_builtin(
@@ -1557,7 +1557,7 @@ pub(crate) mod tests {
             let Value::Tensor(default_dim_two) = default_dim_two else {
                 panic!("expected default empty tensor output");
             };
-            assert_eq!(default_dim_two.shape, vec![0, 1]);
+            assert_eq!(default_dim_two.shape(), [0, 1]);
             assert_eq!(default_dim_two.numeric_dtype(), NumericDType::F64);
             assert!(default_dim_two.is_empty());
 
@@ -1569,7 +1569,7 @@ pub(crate) mod tests {
             let Value::Tensor(native_dim_two) = native_dim_two else {
                 panic!("expected native empty tensor output");
             };
-            assert_eq!(native_dim_two.shape, vec![0, 1]);
+            assert_eq!(native_dim_two.shape(), [0, 1]);
             assert_eq!(native_dim_two.integer_storage(), Some(&storage));
 
             let default_all = sum_builtin(Value::Tensor(tensor.clone()), vec![Value::from("all")])
@@ -1594,7 +1594,7 @@ pub(crate) mod tests {
             let Value::Tensor(zero_by_zero) = zero_by_zero else {
                 panic!("expected zero-by-zero tensor output");
             };
-            assert_eq!(zero_by_zero.shape, vec![1, 0]);
+            assert_eq!(zero_by_zero.shape(), [1, 0]);
             assert_eq!(zero_by_zero.integer_storage(), Some(&storage));
         }
     }
@@ -1615,7 +1615,7 @@ pub(crate) mod tests {
         let result = sum_builtin(Value::Tensor(tensor), vec![Value::from("native")]).expect("sum");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(
                     out.integer_storage(),
                     Some(&IntegerStorage::I16(vec![5, 7, 9]))
@@ -1647,7 +1647,7 @@ pub(crate) mod tests {
         .expect("sum vecdim");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3, 1]);
+                assert_eq!(out.shape(), [1, 3, 1]);
                 assert_eq!(
                     out.integer_storage(),
                     Some(&IntegerStorage::I16(vec![18, 26, 34]))
@@ -1738,7 +1738,7 @@ pub(crate) mod tests {
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = sum_builtin(Value::GpuTensor(handle), Vec::new()).expect("sum");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), [1, 3]);
             assert_eq!(values(&gathered), vec![5.0, 7.0, 9.0]);
         });
     }
@@ -1796,7 +1796,7 @@ pub(crate) mod tests {
         else {
             panic!("expected single tensor");
         };
-        assert_eq!(host.shape, [1, 1]);
+        assert_eq!(host.shape(), [1, 1]);
         assert_eq!(host.numeric_dtype(), NumericDType::F32);
         test_support::with_test_provider(|provider| {
             let handle = gpu_helpers::upload_tensor(provider, &single).unwrap();
@@ -1804,7 +1804,7 @@ pub(crate) mod tests {
                 sum_builtin(Value::GpuTensor(handle), vec![Value::from("all")]).unwrap(),
             )
             .unwrap();
-            assert_eq!(gathered.shape, [1, 1]);
+            assert_eq!(gathered.shape(), [1, 1]);
             assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
             assert_eq!(values(&gathered), vec![8.0]);
         });
@@ -1817,7 +1817,7 @@ pub(crate) mod tests {
         .unwrap() else {
             panic!("expected complex tensor");
         };
-        assert_eq!(host.shape, [1, 1]);
+        assert_eq!(host.shape(), [1, 1]);
         assert_eq!(host.materialize_f64(), vec![(8.0, 16.0)]);
         test_support::with_test_provider(|provider| {
             let handle = gpu_helpers::upload_complex_tensor(provider, &complex).unwrap();
@@ -1827,7 +1827,7 @@ pub(crate) mod tests {
             else {
                 panic!("expected complex resident reduction");
             };
-            assert_eq!(gathered.shape, [1, 1]);
+            assert_eq!(gathered.shape(), [1, 1]);
             assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
             assert_eq!(gathered.materialize_f64(), vec![(8.0, 16.0)]);
         });
@@ -1866,7 +1866,7 @@ pub(crate) mod tests {
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let result = sum_builtin(Value::GpuTensor(handle), Vec::new()).expect("sum");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.shape(), [1, 1]);
             assert_eq!(values(&gathered), vec![10.0]);
         });
     }
@@ -1881,7 +1881,7 @@ pub(crate) mod tests {
             let result =
                 sum_builtin(Value::GpuTensor(handle), vec![Value::from("all")]).expect("sum");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.shape(), [1, 1]);
             assert_eq!(values(&gathered), vec![36.0]);
         });
     }
@@ -2157,7 +2157,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu).expect("gather");
         match cpu {
             Value::Tensor(ct) => {
-                assert_eq!(gathered.shape, ct.shape);
+                assert_eq!(gathered.shape(), ct.shape());
                 assert_eq!(values(&gathered), values(&ct));
             }
             other => panic!("unexpected shapes {other:?}"),

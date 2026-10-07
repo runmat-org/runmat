@@ -791,9 +791,9 @@ fn validate_coordinate_spacing(coords: &[f64], dim_len: usize) -> BuiltinResult<
 
 fn value_shape(value: &Value) -> &[usize] {
     match value {
-        Value::Tensor(tensor) => &tensor.shape,
+        Value::Tensor(tensor) => tensor.shape(),
         Value::LogicalArray(logical) => &logical.shape,
-        Value::ComplexTensor(tensor) => &tensor.shape,
+        Value::ComplexTensor(tensor) => tensor.shape(),
         Value::GpuTensor(handle) => handle.shape(),
         _ => &[],
     }
@@ -903,7 +903,7 @@ fn gradient_real_tensor_host_with_spacing(
     dim: usize,
     spacing: &GradientSpacing,
 ) -> GradientKernelResult<Tensor> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = tensor
         .into_numeric_storage()
         .map_err(|error| GradientKernelError::new(format!("gradient: {error}")))?;
@@ -1013,7 +1013,7 @@ fn gradient_complex_tensor_host_with_spacing(
     } else {
         NumericDType::F64
     };
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let data = tensor.materialize_f64();
     let dim_index = dim.saturating_sub(1);
     let mut shape = matlab_gradient_shape(&shape, data.len());
@@ -1221,7 +1221,7 @@ mod tests {
             gradient_builtin(Value::Tensor(tensor), vec![Value::Num(2.0)]).expect("gradient");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(out.materialize_f64(), vec![1.5, 2.0, 2.5]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1277,7 +1277,7 @@ mod tests {
         let result = gradient_builtin(Value::Tensor(tensor), Vec::new()).expect("gradient");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(out.numeric_dtype(), NumericDType::F64);
                 assert!(out.integer_storage().is_none());
                 assert_eq!(out.materialize_f64(), vec![3.0, 4.0, 5.0]);
@@ -1297,11 +1297,11 @@ mod tests {
             Value::OutputList(outputs) => {
                 let fx = test_support::gather(outputs[0].clone()).expect("fx");
                 let fy = test_support::gather(outputs[1].clone()).expect("fy");
-                assert_eq!(fx.shape, vec![2, 2]);
+                assert_eq!(fx.shape(), [2, 2]);
                 assert_eq!(fx.numeric_dtype(), NumericDType::F64);
                 assert!(fx.integer_storage().is_none());
                 assert_eq!(fx.materialize_f64(), vec![1.0, 1.0, 1.0, 1.0]);
-                assert_eq!(fy.shape, vec![2, 2]);
+                assert_eq!(fy.shape(), [2, 2]);
                 assert_eq!(fy.numeric_dtype(), NumericDType::F64);
                 assert!(fy.integer_storage().is_none());
                 assert_eq!(fy.materialize_f64(), vec![2.0, 2.0, 2.0, 2.0]);
@@ -1348,7 +1348,7 @@ mod tests {
             .expect("gradient");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(out.materialize_f64(), vec![3.0, 8.0 / 3.0, 2.5]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1365,7 +1365,7 @@ mod tests {
             .expect("gradient");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(out.materialize_f64(), vec![3.0, 8.0 / 3.0, 2.5]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1386,9 +1386,9 @@ mod tests {
             Value::OutputList(outputs) => {
                 let fx = test_support::gather(outputs[0].clone()).expect("fx");
                 let fy = test_support::gather(outputs[1].clone()).expect("fy");
-                assert_eq!(fx.shape, vec![2, 3]);
+                assert_eq!(fx.shape(), [2, 3]);
                 assert_eq!(fx.materialize_f64(), vec![1.0, 1.0, 3.0, 3.0, 4.0, 4.0]);
-                assert_eq!(fy.shape, vec![2, 3]);
+                assert_eq!(fy.shape(), [2, 3]);
                 assert_eq!(
                     fy.materialize_f64(),
                     vec![10.0, 10.0, 10.0, 10.0, 10.0, 10.0]
@@ -1407,7 +1407,7 @@ mod tests {
             .expect("gradient");
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 assert_eq!(
                     out.materialize_f64(),
                     vec![(3.0, 2.0), (8.0 / 3.0, 2.0), (2.5, 2.0)]
@@ -1471,7 +1471,7 @@ mod tests {
             Tensor::new_with_dtype(vec![1.0, 4.0, 9.0], vec![1, 3], NumericDType::F32).unwrap();
         let view = HostTensorView {
             data: &host.materialize_f64(),
-            shape: &host.shape,
+            shape: host.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result =
@@ -1499,7 +1499,7 @@ mod tests {
             Tensor::new_with_dtype(vec![1.0, 4.0, 9.0], vec![1, 3], NumericDType::F32).unwrap();
         let view = HostTensorView {
             data: &host.materialize_f64(),
-            shape: &host.shape,
+            shape: host.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let spacing = Tensor::new(vec![0.0, 1.0, 3.0], vec![1, 3]).unwrap();
@@ -1508,7 +1508,7 @@ mod tests {
         match result {
             Value::GpuTensor(out) => {
                 let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
-                assert_eq!(gathered.shape, vec![1, 3]);
+                assert_eq!(gathered.shape(), [1, 3]);
                 assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
                 let expected = [3.0, 8.0 / 3.0, 2.5];
                 for (idx, (actual, expected)) in
@@ -1543,7 +1543,7 @@ mod tests {
         let result =
             gradient_builtin(Value::GpuTensor(handle), vec![Value::Num(2.0)]).expect("gradient");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![1, 3]);
+        assert_eq!(gathered.shape(), [1, 3]);
         assert_eq!(gathered.materialize_f64(), vec![1.5, 2.0, 2.5]);
     }
 
@@ -1559,7 +1559,7 @@ mod tests {
         let host = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let view = HostTensorView {
             data: &host.materialize_f64(),
-            shape: &host.shape,
+            shape: host.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let _out_guard = crate::output_count::push_output_count(Some(2));
@@ -1579,7 +1579,7 @@ mod tests {
             let host = Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).unwrap();
             let view = HostTensorView {
                 data: &host.materialize_f64(),
-                shape: &host.shape,
+                shape: host.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let spacing = Tensor::new(vec![0.0, 1.0, 3.0], vec![1, 3]).unwrap();
@@ -1588,7 +1588,7 @@ mod tests {
             match result {
                 Value::GpuTensor(out_handle) => {
                     let out = test_support::gather(Value::GpuTensor(out_handle)).expect("gather");
-                    assert_eq!(out.shape, vec![1, 3]);
+                    assert_eq!(out.shape(), [1, 3]);
                     assert_eq!(out.materialize_f64(), vec![3.0, 8.0 / 3.0, 2.5]);
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
@@ -1602,7 +1602,7 @@ mod tests {
             let host = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
             let view = HostTensorView {
                 data: &host.materialize_f64(),
-                shape: &host.shape,
+                shape: host.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let spacing = Tensor::new(vec![0.0, 2.0], vec![2, 1]).unwrap();
@@ -1618,9 +1618,9 @@ mod tests {
                     assert!(matches!(outputs[1], Value::GpuTensor(_)));
                     let first = test_support::gather(outputs[0].clone()).expect("gather first");
                     let second = test_support::gather(outputs[1].clone()).expect("gather second");
-                    assert_eq!(first.shape, vec![2, 2]);
+                    assert_eq!(first.shape(), [2, 2]);
                     assert_eq!(first.materialize_f64(), vec![0.5, 0.5, 0.5, 0.5]);
-                    assert_eq!(second.shape, vec![2, 2]);
+                    assert_eq!(second.shape(), [2, 2]);
                     assert_eq!(second.materialize_f64(), vec![1.0, 1.0, 1.0, 1.0]);
                 }
                 other => panic!("expected output list, got {other:?}"),
@@ -1659,7 +1659,7 @@ mod tests {
                 crate::builtins::math::fft::common::gather_gpu_complex_tensor(&out_handle, NAME),
             )
             .expect("gather complex gradient");
-            assert_eq!(gathered.shape, expected.shape);
+            assert_eq!(gathered.shape(), expected.shape());
             assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
         });
     }
@@ -1700,7 +1700,7 @@ mod tests {
             crate::builtins::math::fft::common::gather_gpu_complex_tensor(&out_handle, NAME),
         )
         .expect("gather complex gradient");
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         for (idx, (actual, expected)) in gathered
             .materialize_f64()
             .iter()

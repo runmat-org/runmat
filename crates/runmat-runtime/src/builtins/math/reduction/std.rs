@@ -426,13 +426,13 @@ fn std_tensor(
     normalization: StdNormalization,
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<Tensor> {
-    let (dims, _) = resolve_axes(&tensor.shape, axes)?;
+    let (dims, _) = resolve_axes(tensor.shape(), axes)?;
     if dims.is_empty() {
         if tensor::is_scalar_tensor(&tensor) {
             return std_scalar_tensor(&tensor, nan_mode);
         }
         if !matches!(axes, StdAxes::Default) {
-            return tensor::zeros_with_dtype(&tensor.shape, tensor.numeric_dtype())
+            return tensor::zeros_with_dtype(tensor.shape(), tensor.numeric_dtype())
                 .map_err(|error| std_internal_error(format!("std: {error}")));
         }
         return Ok(tensor);
@@ -468,7 +468,7 @@ fn std_tensor_reduce(
         return Ok(tensor.clone());
     }
 
-    let output_shape = reduced_shape(&tensor.shape, &dims_sorted);
+    let output_shape = reduced_shape(tensor.shape(), &dims_sorted);
     let out_len = tensor::element_count(&output_shape);
     let values = tensor::tensor_values_f64(tensor);
     if values.is_empty() {
@@ -481,9 +481,9 @@ fn std_tensor_reduce(
     let mut means = vec![0.0f64; out_len];
     let mut m2 = vec![0.0f64; out_len];
     let mut saw_nan = vec![false; out_len];
-    let mut coords = vec![0usize; tensor.shape.len()];
-    let mut out_coords = vec![0usize; tensor.shape.len()];
-    let mut reduce_mask = vec![false; tensor.shape.len()];
+    let mut coords = vec![0usize; tensor.shape().len()];
+    let mut out_coords = vec![0usize; tensor.shape().len()];
+    let mut reduce_mask = vec![false; tensor.shape().len()];
     for &dim in &dims_sorted {
         if dim < reduce_mask.len() {
             reduce_mask[dim] = true;
@@ -491,7 +491,7 @@ fn std_tensor_reduce(
     }
 
     for (linear, value) in values.into_iter().enumerate() {
-        linear_to_multi(linear, &tensor.shape, &mut coords);
+        linear_to_multi(linear, tensor.shape(), &mut coords);
         for (i, coord) in coords.iter().enumerate() {
             out_coords[i] = if reduce_mask[i] { 0 } else { *coord };
         }
@@ -833,7 +833,7 @@ pub(crate) mod tests {
             std_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(1))]).expect("std");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 3]);
+                assert_eq!(out.shape(), [1, 3]);
                 for value in values(&out) {
                     let diff = (value - 0.5).abs();
                     assert!(diff < 1e-12, "value={value}, diff={diff}");
@@ -870,7 +870,7 @@ pub(crate) mod tests {
         let Value::Tensor(output) = result else {
             panic!("expected column tensor");
         };
-        assert_eq!(output.shape, vec![3, 1]);
+        assert_eq!(output.shape(), [3, 1]);
         for value in values(&output) {
             assert!((value - 15.0_f64.sqrt()).abs() < 1e-12);
         }
@@ -888,7 +888,7 @@ pub(crate) mod tests {
         let result = std_builtin(Value::Tensor(tensor), vec![Value::Tensor(dims)]).expect("std");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 4, 1]);
+                assert_eq!(out.shape(), [1, 4, 1]);
                 for value in values(&out) {
                     let diff = (value - 6.63324958071).abs();
                     assert!(diff < 1e-8, "value={value}, diff={diff}");
@@ -913,7 +913,7 @@ pub(crate) mod tests {
         .expect("std");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), [3, 1]);
                 let expected = [FRAC_1_SQRT_2, 0.0, 0.0];
                 for (value, exp) in values(&out).iter().zip(expected.iter()) {
                     let diff = (value - exp).abs();
@@ -1030,7 +1030,7 @@ pub(crate) mod tests {
         .expect("std");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.shape(), [3, 1]);
                 assert_eq!(values(&out), vec![0.0, 0.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -1079,7 +1079,7 @@ pub(crate) mod tests {
             let host = std_builtin(Value::Tensor(tensor), Vec::new()).expect("std");
             match (host, gathered) {
                 (Value::Num(expected), actual) => {
-                    assert_eq!(actual.shape, vec![1, 1]);
+                    assert_eq!(actual.shape(), [1, 1]);
                     assert!((values(&actual)[0] - expected).abs() < 1e-10);
                 }
                 _ => panic!("unexpected shapes"),
@@ -1121,7 +1121,7 @@ pub(crate) mod tests {
             )
             .expect("std");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.shape(), [1, 1]);
             let value = values(&gathered)[0];
             let diff = (value - 3.45205252953).abs();
             assert!(diff < 1e-6, "value={value}, diff={diff}");
@@ -1141,7 +1141,7 @@ pub(crate) mod tests {
             )
             .expect("std");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 1]);
+            assert_eq!(gathered.shape(), [1, 1]);
             assert!((values(&gathered)[0] - SQRT_2).abs() < 1e-8);
             handle.release().unwrap();
         });
@@ -1169,7 +1169,7 @@ pub(crate) mod tests {
         let gpu_tensor = test_support::gather(gpu_value).expect("gather gpu");
         handle.release().unwrap();
 
-        assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
+        assert_eq!(gpu_tensor.shape(), cpu_tensor.shape());
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

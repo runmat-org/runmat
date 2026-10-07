@@ -1040,7 +1040,7 @@ async fn parse_dimension_value(value: &Value) -> BuiltinResult<Option<DimSelecti
             .await
             .map_err(map_scalar_dim_error)
             .map(|dim| dim.map(DimSelection::Dim)),
-        Value::Tensor(t) => parse_dimension_tensor(value, &t.shape).await,
+        Value::Tensor(t) => parse_dimension_tensor(value, t.shape()).await,
         Value::LogicalArray(logical) => parse_dimension_tensor(value, &logical.shape).await,
         Value::GpuTensor(_) => Err(max_invalid_argument(
             "max: dimension arguments must reside on the host",
@@ -1198,7 +1198,7 @@ fn native_integer_input(value: &Value) -> Option<(&runmat_value::IntegerStorage,
     match value {
         Value::Tensor(tensor) => tensor
             .integer_storage()
-            .map(|storage| (storage, tensor.shape.clone())),
+            .map(|storage| (storage, tensor.shape().to_vec())),
         _ => None,
     }
 }
@@ -1342,7 +1342,7 @@ fn materialize_for_max(name: &str, value: Value) -> BuiltinResult<InputData> {
 }
 
 fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> BuiltinResult<MaxEvaluation> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let dtype = tensor.numeric_dtype();
     let storage = tensor
         .into_numeric_storage()
@@ -1447,7 +1447,7 @@ fn reduce_complex_tensor(
     tensor: ComplexTensor,
     args: &ReductionArgs,
 ) -> BuiltinResult<MaxEvaluation> {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let dtype = tensor.numeric_dtype();
     let data = tensor.materialize_f64();
     if data.is_empty() {
@@ -2156,7 +2156,7 @@ fn elementwise_real_max(
     nan_mode: ReductionNaN,
     comparison: ComparisonMethod,
 ) -> BuiltinResult<MaxEvaluation> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())
         .map_err(|err| max_size_mismatch(format!("max: {err}")))?;
     let mut indices = vec![0.0f64; plan.len()];
     let lhs_storage = lhs
@@ -2242,7 +2242,7 @@ fn elementwise_complex_max(
     nan_mode: ReductionNaN,
     comparison: ComparisonMethod,
 ) -> BuiltinResult<MaxEvaluation> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+    let plan = BroadcastPlan::new(lhs.shape(), rhs.shape())
         .map_err(|err| max_size_mismatch(format!("max: {err}")))?;
     let mut indices = vec![0.0f64; plan.len()];
     let lhs_storage = lhs.into_complex_storage();
@@ -2300,7 +2300,7 @@ fn elementwise_complex_max(
 }
 
 fn promote_real_tensor_to_complex(tensor: Tensor) -> ComplexTensor {
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let storage = match tensor
         .into_numeric_storage()
         .expect("real extrema input has numeric storage")
@@ -2637,7 +2637,7 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), [1, 3]);
                 assert_eq!(t.materialize_f64(), vec![4.0, 2.0, 6.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -2707,7 +2707,7 @@ pub(crate) mod tests {
         let result = nanmax_builtin(Value::Tensor(tensor), Vec::new()).expect("nanmax");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), [1, 2]);
                 assert_eq!(t.materialize_f64()[0], 4.0);
                 assert_eq!(t.materialize_f64()[1], 2.0);
             }
@@ -2751,7 +2751,7 @@ pub(crate) mod tests {
             .expect("nanmax dim");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.shape(), [2, 1]);
                 assert_eq!(t.materialize_f64()[0], 2.0);
                 assert_eq!(t.materialize_f64()[1], 4.0);
             }
@@ -2793,7 +2793,7 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 2]);
+                assert_eq!(t.shape(), [1, 2]);
                 assert_eq!(t.materialize_f64(), vec![-3.0, 4.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -2853,7 +2853,7 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
+                assert_eq!(t.shape(), [3, 3]);
                 assert_eq!(
                     [
                         t.materialize_f64()[0],
@@ -2883,7 +2883,7 @@ pub(crate) mod tests {
         }
         match indices {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
+                assert_eq!(t.shape(), [3, 3]);
                 assert_eq!(
                     [
                         t.materialize_f64()[0],
@@ -3092,7 +3092,7 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), [3, 1]);
                 assert_eq!(t.materialize_f64()[0], 3.0);
                 assert_eq!(t.materialize_f64()[1], 2.0);
                 assert!(t.materialize_f64()[2].is_nan());
@@ -3129,13 +3129,13 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = nanmax_builtin(Value::GpuTensor(handle), Vec::new()).expect("nanmax gpu");
             match result {
                 Value::Tensor(t) => {
-                    assert_eq!(t.shape, vec![1, 2]);
+                    assert_eq!(t.shape(), [1, 2]);
                     assert_eq!(t.materialize_f64(), vec![4.0, 2.0]);
                 }
                 other => panic!("expected host tensor fallback, got {other:?}"),
@@ -3261,7 +3261,7 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let eval_gpu = evaluate(Value::GpuTensor(handle), &[]).expect("gpu");
@@ -3280,12 +3280,12 @@ pub(crate) mod tests {
                 Value::Tensor(t) => t,
                 other => panic!("expected tensor indices from cpu eval, got {other:?}"),
             };
-            assert_eq!(gathered_vals.shape, expected_vals.shape);
+            assert_eq!(gathered_vals.shape(), expected_vals.shape());
             assert_eq!(
                 gathered_vals.materialize_f64(),
                 expected_vals.materialize_f64()
             );
-            assert_eq!(gathered_idx.shape, expected_idx.shape);
+            assert_eq!(gathered_idx.shape(), expected_idx.shape());
             assert_eq!(
                 gathered_idx.materialize_f64(),
                 expected_idx.materialize_f64()
@@ -3358,7 +3358,7 @@ pub(crate) mod tests {
         let (values, indices) = eval.into_pair();
         match values {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 1]);
+                assert_eq!(t.shape(), [2, 1]);
                 assert_eq!(t.materialize_f64(), vec![3.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),

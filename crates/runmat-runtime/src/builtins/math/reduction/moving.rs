@@ -1111,14 +1111,14 @@ fn moving_real(
 ) -> BuiltinResult<Tensor> {
     let dim = parsed
         .dim
-        .unwrap_or_else(|| default_dimension(&tensor.shape));
+        .unwrap_or_else(|| default_dimension(tensor.shape()));
     if dim == 0 {
         return Err(invalid_argument(
             name,
             format!("{name}: dimension must be >= 1"),
         ));
     }
-    let input_shape = shape_with_trailing_singletons(&tensor.shape, dim);
+    let input_shape = shape_with_trailing_singletons(tensor.shape(), dim);
     let shape = output_shape(name, &input_shape, dim, parsed)?;
     let count = checked_element_count(name, &shape)?;
     let dim_index = dim - 1;
@@ -1378,14 +1378,14 @@ fn moving_complex(
 ) -> BuiltinResult<ComplexTensor> {
     let dim = parsed
         .dim
-        .unwrap_or_else(|| default_dimension(&tensor.shape));
+        .unwrap_or_else(|| default_dimension(tensor.shape()));
     if dim == 0 {
         return Err(invalid_argument(
             name,
             format!("{name}: dimension must be >= 1"),
         ));
     }
-    let input_shape = shape_with_trailing_singletons(&tensor.shape, dim);
+    let input_shape = shape_with_trailing_singletons(tensor.shape(), dim);
     let shape = output_shape(name, &input_shape, dim, parsed)?;
     let count = checked_element_count(name, &shape)?;
     let dim_index = dim - 1;
@@ -2938,7 +2938,7 @@ mod tests {
             let sum =
                 crate::builtins::common::test_support::gather(Value::GpuTensor(sum_handle.clone()))
                     .expect("gather sum");
-            assert_eq!(sum.shape, vec![1, 4]);
+            assert_eq!(sum.shape(), [1, 4]);
             assert_eq!(sum.materialize_f64(), vec![3.0, 3.0, 6.0, 4.0]);
 
             let var_input = provider
@@ -2965,7 +2965,7 @@ mod tests {
             let var =
                 crate::builtins::common::test_support::gather(Value::GpuTensor(var_handle.clone()))
                     .expect("gather var");
-            assert_eq!(var.shape, vec![1, 2]);
+            assert_eq!(var.shape(), [1, 2]);
             assert_eq!(var.materialize_f64(), vec![1.0, 1.0]);
 
             let median_input = provider
@@ -2992,7 +2992,7 @@ mod tests {
                 median_handle.clone(),
             ))
             .expect("gather median");
-            assert_eq!(median.shape, vec![1, 4]);
+            assert_eq!(median.shape(), [1, 4]);
             assert_eq!(median.materialize_f64(), vec![1.0, 2.0, 6.0, 6.0]);
 
             input.release().unwrap();
@@ -3013,7 +3013,7 @@ mod tests {
         )
         .expect("movsum");
         let out = expect_tensor(result);
-        assert_eq!(out.shape, vec![1, 4]);
+        assert_eq!(out.shape(), [1, 4]);
         assert_eq!(out.materialize_f64(), vec![3.0, 6.0, 9.0, 7.0]);
     }
 
@@ -3043,7 +3043,7 @@ mod tests {
         )
         .expect("movmean");
         let out = expect_tensor(result);
-        assert_eq!(out.shape, vec![2, 3]);
+        assert_eq!(out.shape(), [2, 3]);
         assert_eq!(out.materialize_f64(), vec![2.0, 3.0, 3.0, 4.0, 4.0, 5.0]);
     }
 
@@ -3132,7 +3132,7 @@ mod tests {
         )
         .expect("movmax");
         let out = expect_tensor(result);
-        assert_eq!(out.shape, vec![1, 2]);
+        assert_eq!(out.shape(), [1, 2]);
         assert_eq!(out.materialize_f64(), vec![9.0, 9.0]);
     }
 
@@ -3226,7 +3226,7 @@ mod tests {
         )
         .expect("movstd dim");
         let out = expect_tensor(result);
-        assert_eq!(out.shape, vec![3, 3]);
+        assert_eq!(out.shape(), [3, 3]);
         assert!((out.materialize_f64()[0] - 8.0_f64.sqrt()).abs() < 1e-12);
         assert!((out.materialize_f64()[1] - (0.5_f64).sqrt()).abs() < 1e-12);
         assert!((out.materialize_f64()[2] - 8.0_f64.sqrt()).abs() < 1e-12);
@@ -3254,7 +3254,7 @@ mod tests {
         )
         .expect("movstd dim omitnan");
         let out = expect_tensor(result);
-        assert_eq!(out.shape, vec![3, 3]);
+        assert_eq!(out.shape(), [3, 3]);
         assert_eq!(out.materialize_f64()[0], 0.0);
         assert!((out.materialize_f64()[1] - 0.5_f64.sqrt()).abs() < 1e-12);
         assert!((out.materialize_f64()[2] - 8.0_f64.sqrt()).abs() < 1e-12);
@@ -3335,7 +3335,7 @@ mod tests {
         )
         .expect("movvar stable fill");
         let out = expect_tensor(result);
-        assert_eq!(out.shape, vec![1, 1]);
+        assert_eq!(out.shape(), [1, 1]);
         assert_eq!(out.materialize_f64(), vec![0.0]);
     }
 
@@ -3353,7 +3353,7 @@ mod tests {
         )
         .expect("movstd discard");
         let out = expect_tensor(result);
-        assert_eq!(out.shape, vec![1, 2]);
+        assert_eq!(out.shape(), [1, 2]);
         assert_eq!(out.materialize_f64(), vec![1.0, 1.0]);
     }
 
@@ -3367,7 +3367,7 @@ mod tests {
         let Value::ComplexTensor(out) = result else {
             panic!("expected complex tensor");
         };
-        assert_eq!(out.shape, vec![1, 3]);
+        assert_eq!(out.shape(), [1, 3]);
         assert!((out.materialize_f64()[0].0 - 2.0).abs() < 1e-12);
         assert_eq!(out.materialize_f64()[0].1, 0.0);
         assert!((out.materialize_f64()[1].0 - 20.0 / 3.0).abs() < 1e-12);
@@ -3634,7 +3634,7 @@ mod tests {
         )
         .expect("movsum trailing dim");
         let out = expect_tensor(result);
-        assert_eq!(out.shape, vec![1, 2, 1, 1]);
+        assert_eq!(out.shape(), [1, 2, 1, 1]);
         assert_eq!(out.materialize_f64(), vec![22.0, 23.0]);
     }
 
