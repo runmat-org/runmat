@@ -26,7 +26,7 @@ pub(crate) fn slice_value_for_preview(
 }
 
 fn gather_tensor_slice(tensor: &Tensor, slice: &WorkspaceSliceOptions) -> Option<NumericStorage> {
-    if tensor.shape.is_empty() || slice.shape.contains(&0) {
+    if tensor.shape().is_empty() || slice.shape.contains(&0) {
         return None;
     }
     let total: usize = slice.shape.iter().product();
@@ -34,9 +34,9 @@ fn gather_tensor_slice(tensor: &Tensor, slice: &WorkspaceSliceOptions) -> Option
         return None;
     }
     let mut indices = Vec::with_capacity(total);
-    let mut coords = vec![0usize; tensor.shape.len()];
-    visit_slice_coords(&tensor.shape, slice, 0, &mut coords, &mut |coords| {
-        indices.push(column_major_index(&tensor.shape, coords));
+    let mut coords = vec![0usize; tensor.shape().len()];
+    visit_slice_coords(tensor.shape(), slice, 0, &mut coords, &mut |coords| {
+        indices.push(column_major_index(tensor.shape(), coords));
     });
     if indices.len() != total {
         None
@@ -243,7 +243,7 @@ mod tests {
             panic!("expected tensor preview");
         };
 
-        assert_eq!(preview.shape, vec![2, 1]);
+        assert_eq!(preview.shape(), &[2, 1]);
         assert_eq!(
             preview.integer_storage(),
             Some(&IntegerStorage::U64(vec![values[2], values[3]]))
@@ -264,7 +264,7 @@ mod tests {
         else {
             panic!("expected tensor preview");
         };
-        assert_eq!(preview.shape, vec![2, 1]);
+        assert_eq!(preview.shape(), &[2, 1]);
         assert_eq!(
             preview.into_numeric_storage(),
             Ok(NumericStorage::F32(vec![values[2], values[3]]))

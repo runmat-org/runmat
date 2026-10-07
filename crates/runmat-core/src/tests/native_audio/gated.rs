@@ -220,7 +220,7 @@ fn native_audio_pending_open_resumes_without_replaying_source_effects() {
             panic!("expected effect count and native PCM16 samples");
         };
         assert_eq!(*effect_count, 1.0);
-        assert_eq!(samples.shape, vec![2, 2]);
+        assert_eq!(samples.shape(), &[2, 2]);
         assert_eq!(
             samples.integer_storage(),
             Some(&IntegerStorage::I16(vec![-4, 10, 5, -10]))

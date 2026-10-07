@@ -752,7 +752,7 @@ fn test_sequence_counts_and_integer_limit_like_match_documented_forms() {
         let Some(runmat_value::Value::Tensor(values)) = outcome.value else {
             panic!("expected linspace tensor")
         };
-        assert_eq!(values.shape, vec![1, 3]);
+        assert_eq!(values.shape(), &[1, 3]);
         assert_eq!(values.materialize_f64(), vec![0.0, 0.5, 1.0]);
 
         let outcome = runmat_core::execute_text_request_for_testing(
@@ -764,7 +764,7 @@ fn test_sequence_counts_and_integer_limit_like_match_documented_forms() {
         let Some(runmat_value::Value::Tensor(values)) = outcome.value else {
             panic!("expected scalar NaN tensor")
         };
-        assert_eq!(values.shape, vec![1, 1]);
+        assert_eq!(values.shape(), &[1, 1]);
         assert!(values.materialize_f64()[0].is_nan());
 
         let outcome = runmat_core::execute_text_request_for_testing(

@@ -116,7 +116,7 @@ fn check_audio_forms(
     let [Value::Tensor(pcm)] = pcm.as_slice() else {
         panic!("expected one PCM16 tensor, got {pcm:?}");
     };
-    assert_eq!(pcm.shape, vec![2, 2]);
+    assert_eq!(pcm.shape(), &[2, 2]);
     assert_eq!(
         pcm.integer_storage(),
         Some(&IntegerStorage::I16(vec![-4, 10, 5, -10]))
@@ -131,7 +131,7 @@ fn check_audio_forms(
     let [Value::Tensor(float), Value::Num(rate)] = float.as_slice() else {
         panic!("expected Float32 tensor and sample rate, got {float:?}");
     };
-    assert_eq!(float.shape, vec![3, 1]);
+    assert_eq!(float.shape(), &[3, 1]);
     assert_eq!(*rate, 48_000.0);
     assert_eq!(
         float
@@ -356,7 +356,7 @@ fn audioinfo_and_audioread_execute_across_interpreter_generic_native_and_jit() {
         let [Value::Tensor(samples), Value::Num(rate)] = selected_float.as_slice() else {
             panic!("selected Float32 entry lost its two outputs");
         };
-        assert_eq!(samples.shape, vec![3, 1]);
+        assert_eq!(samples.shape(), &[3, 1]);
         assert_eq!(*rate, 48_000.0);
         assert_eq!(
             samples

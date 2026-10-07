@@ -755,7 +755,7 @@ fn assign_logical(
                 .into_iter()
                 .map(|value| u8::from(value != 0.0))
                 .collect();
-            LogicalArray::new(data, value.shape)
+            LogicalArray::new(data, value.shape().to_vec())
                 .map(Value::LogicalArray)
                 .map_err(|error| NativeExecutorError::from(shape_error(error)))
         }
@@ -881,8 +881,8 @@ fn normalize_output_values(
 
 fn value_shape(value: &Value) -> Vec<usize> {
     match value {
-        Value::Tensor(value) => value.shape.clone(),
-        Value::ComplexTensor(value) => value.shape.clone(),
+        Value::Tensor(value) => value.shape().to_vec(),
+        Value::ComplexTensor(value) => value.shape().to_vec(),
         Value::SparseTensor(value) => value.shape(),
         Value::GpuTensor(value) => value.shape().to_vec(),
         Value::StringArray(value) => value.shape.clone(),

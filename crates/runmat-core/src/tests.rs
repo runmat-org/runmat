@@ -16260,7 +16260,7 @@ fn specialized_native_tiering_executes_eligible_numeric_regions_through_shared_p
         let [runmat_value::Value::Tensor(output)] = value.as_slice() else {
             panic!("vectorized region must return a dense tensor")
         };
-        assert_eq!(output.shape, vec![1, 4096]);
+        assert_eq!(output.shape(), &[1, 4096]);
         assert_eq!(output.as_f64_slice().unwrap()[0], 6.0);
         assert_eq!(output.as_f64_slice().unwrap()[4095], 8196.0);
     }

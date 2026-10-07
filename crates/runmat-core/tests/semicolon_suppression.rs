@@ -167,7 +167,7 @@ fn test_matrix_semicolon_suppression() {
     let Some(Value::Tensor(tensor)) = result.value else {
         panic!("expected tensor result for row-vector literal");
     };
-    assert_eq!(tensor.shape, vec![1, 3]);
+    assert_eq!(tensor.shape(), &[1, 3]);
     assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0, 3.0]);
 
     // Matrix creation with semicolon should suppress output

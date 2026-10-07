@@ -63,9 +63,9 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
         Value::StringArray(sa) => Some(sa.shape.clone()),
         Value::String(s) => Some(vec![1, s.chars().count()]),
         Value::CharArray(ca) => Some(ca.shape.clone()),
-        Value::Tensor(t) => Some(t.shape.clone()),
+        Value::Tensor(t) => Some(t.shape().to_vec()),
         Value::SparseTensor(s) => Some(vec![s.rows, s.cols]),
-        Value::ComplexTensor(t) => Some(t.shape.clone()),
+        Value::ComplexTensor(t) => Some(t.shape().to_vec()),
         Value::Cell(ca) => Some(ca.shape.clone()),
         Value::StructArray(array) => Some(array.shape().to_vec()),
         Value::GpuTensor(handle) => Some(handle.shape().to_vec()),
@@ -80,7 +80,7 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
         Value::ObjectArray(array) => Some(array.shape().to_vec()),
         Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             match obj.properties.get("__serial") {
-                Some(Value::Tensor(tensor)) => Some(tensor.shape.clone()),
+                Some(Value::Tensor(tensor)) => Some(tensor.shape().to_vec()),
                 Some(Value::Num(_)) => Some(vec![1, 1]),
                 _ => None,
             }
