@@ -1,6 +1,9 @@
 //! Word embedding compatibility objects and lookup helpers.
 use runmat_types::MemberAccess;
 
+mod geometry;
+use geometry::embedding_matrix_dimensions;
+
 use runmat_builtins::{
     BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
     BuiltinIntegerAuditKind,
@@ -928,12 +931,13 @@ async fn vec2word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let gathered = gather_args(args, "vec2word").await?;
     let (object, matrix, options) = parse_vec2word_args(gathered)?;
     let embedding = embedding_from_object(&object, "vec2word")?;
-    if matrix.cols != embedding.dimension {
+    let (matrix_rows, matrix_cols) = embedding_matrix_dimensions(&matrix);
+    if matrix_cols != embedding.dimension {
         return Err(embedding_error(
             "vec2word",
             format!(
                 "vec2word: input matrix must have {} columns, got {}",
-                embedding.dimension, matrix.cols
+                embedding.dimension, matrix_cols
             ),
         ));
     }
@@ -947,9 +951,9 @@ async fn vec2word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
 
-    let mut row_words = Vec::with_capacity(matrix.rows);
-    let mut row_distances = Vec::with_capacity(matrix.rows);
-    for row in 0..matrix.rows {
+    let mut row_words = Vec::with_capacity(matrix_rows);
+    let mut row_distances = Vec::with_capacity(matrix_rows);
+    for row in 0..matrix_rows {
         let query = row_slice(&matrix, row);
         let mut scored = embedding
             .vectors
@@ -977,14 +981,14 @@ async fn vec2word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     }
 
     let word_shape = if options.k == 1 {
-        vec![matrix.rows, 1]
+        vec![matrix_rows, 1]
     } else {
-        vec![matrix.rows, options.k]
+        vec![matrix_rows, options.k]
     };
-    let mut words = Vec::with_capacity(matrix.rows * options.k);
-    let mut distances = Vec::with_capacity(matrix.rows * options.k);
+    let mut words = Vec::with_capacity(matrix_rows * options.k);
+    let mut distances = Vec::with_capacity(matrix_rows * options.k);
     for col in 0..options.k {
-        for row in 0..matrix.rows {
+        for row in 0..matrix_rows {
             words.push(row_words[row][col].clone());
             distances.push(row_distances[row][col]);
         }
@@ -993,7 +997,7 @@ async fn vec2word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         StringArray::new(words, word_shape).map_err(|err| embedding_error("vec2word", err))?,
     );
     let dist = Value::Tensor(
-        Tensor::new(distances, vec![matrix.rows, options.k])
+        Tensor::new(distances, vec![matrix_rows, options.k])
             .map_err(|err| embedding_error("vec2word", err))?,
     );
     Ok(Value::OutputList(vec![words, dist]))
@@ -1431,7 +1435,7 @@ fn embedding_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResul
         })?;
     let vectors = match object.properties.get(VECTOR_PROPERTY) {
         Some(Value::Tensor(tensor))
-            if tensor.rows == vocabulary.len() && tensor.cols == dimension =>
+            if embedding_matrix_dimensions(tensor) == (vocabulary.len(), dimension) =>
         {
             tensor_utils::tensor_values_f64(tensor)
         }
@@ -2747,9 +2751,8 @@ pub(in crate::builtins::strings::text_analytics) fn build_word_lookup(
 
 fn row_slice(tensor: &Tensor, row: usize) -> Vec<f64> {
     let values = tensor_utils::tensor_values_f64_cow(tensor);
-    (0..tensor.cols)
-        .map(|col| values[row + col * tensor.rows])
-        .collect()
+    let (rows, cols) = embedding_matrix_dimensions(tensor);
+    (0..cols).map(|col| values[row + col * rows]).collect()
 }
 
 fn cosine_distance(lhs: &[f64], rhs: &[f64]) -> f64 {
@@ -3337,8 +3340,7 @@ mod tests {
         let Value::Tensor(tensor) = lookup else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.rows, 1);
-        assert_eq!(tensor.cols, 8);
+        assert_eq!(tensor.shape(), [1, 8]);
         assert!(tensor
             .materialize_f64()
             .iter()
@@ -3393,13 +3395,13 @@ mod tests {
         let Value::Tensor(first) = &cell.data[0] else {
             panic!("expected first tensor");
         };
-        assert_eq!(first.shape, vec![2, 2]);
+        assert_eq!(first.shape(), [2, 2]);
         assert_eq!(first.materialize_f64(), vec![1.0, 10.0, 2.0, 20.0]);
 
         let Value::Tensor(second) = &cell.data[1] else {
             panic!("expected second tensor");
         };
-        assert_eq!(second.shape, vec![2, 2]);
+        assert_eq!(second.shape(), [2, 2]);
         assert_eq!(second.materialize_f64(), vec![0.0, 0.0, 2.0, 20.0]);
     }
 
@@ -3436,7 +3438,7 @@ mod tests {
         let Value::Tensor(first) = &cell.data[0] else {
             panic!("expected first tensor");
         };
-        assert_eq!(first.shape, vec![2, 3]);
+        assert_eq!(first.shape(), [2, 3]);
         assert_eq!(first.materialize_f64()[0..2], [1.0, 10.0]);
         assert!(first.materialize_f64()[2].is_nan());
         assert!(first.materialize_f64()[3].is_nan());
@@ -3480,13 +3482,13 @@ mod tests {
         let Value::Tensor(first) = &cell.data[0] else {
             panic!("expected first tensor");
         };
-        assert_eq!(first.shape, vec![2, 2]);
+        assert_eq!(first.shape(), [2, 2]);
         assert_eq!(first.materialize_f64(), vec![1.0, 11.0, 2.0, 22.0]);
 
         let Value::Tensor(second) = &cell.data[1] else {
             panic!("expected second tensor");
         };
-        assert_eq!(second.shape, vec![2, 1]);
+        assert_eq!(second.shape(), [2, 1]);
         assert_eq!(second.materialize_f64(), vec![1.0, 11.0]);
     }
 
@@ -3535,14 +3537,14 @@ mod tests {
         let Value::Tensor(first) = &cell.data[0] else {
             panic!("expected first tensor");
         };
-        assert_eq!(first.shape, vec![1, 4]);
+        assert_eq!(first.shape(), [1, 4]);
         assert_eq!(first.materialize_f64()[0], 1.0);
         assert!(first.materialize_f64()[1].is_nan());
         assert_eq!(first.materialize_f64()[2..4], [2.0, 0.0]);
         let Value::Tensor(second) = &cell.data[1] else {
             panic!("expected second tensor");
         };
-        assert_eq!(second.shape, vec![1, 4]);
+        assert_eq!(second.shape(), [1, 4]);
         assert_eq!(second.materialize_f64(), vec![2.0, 0.0, 0.0, 0.0]);
 
         let err = doc2sequence_builtin(vec![Value::Num(1.0), documents.clone()])
@@ -3598,12 +3600,12 @@ mod tests {
         let Value::Tensor(first) = &left.data[0] else {
             panic!("expected first tensor");
         };
-        assert_eq!(first.shape, vec![1, 3]);
+        assert_eq!(first.shape(), [1, 3]);
         assert_eq!(first.materialize_f64(), vec![1.0, 2.0, 3.0]);
         let Value::Tensor(second) = &left.data[1] else {
             panic!("expected second tensor");
         };
-        assert_eq!(second.shape, vec![1, 3]);
+        assert_eq!(second.shape(), [1, 3]);
         assert_eq!(second.materialize_f64(), vec![0.0, 0.0, 3.0]);
 
         let none = doc2sequence_builtin(vec![
@@ -3620,7 +3622,7 @@ mod tests {
         let Value::Tensor(second) = &none.data[1] else {
             panic!("expected second tensor");
         };
-        assert_eq!(second.shape, vec![1, 1]);
+        assert_eq!(second.shape(), [1, 1]);
         assert_eq!(second.materialize_f64(), vec![3.0]);
 
         let shortest = doc2sequence_builtin(vec![
@@ -3637,12 +3639,12 @@ mod tests {
         let Value::Tensor(first) = &shortest.data[0] else {
             panic!("expected first tensor");
         };
-        assert_eq!(first.shape, vec![1, 1]);
+        assert_eq!(first.shape(), [1, 1]);
         assert_eq!(first.materialize_f64(), vec![1.0]);
         let Value::Tensor(second) = &shortest.data[1] else {
             panic!("expected second tensor");
         };
-        assert_eq!(second.shape, vec![1, 1]);
+        assert_eq!(second.shape(), [1, 1]);
         assert_eq!(second.materialize_f64(), vec![3.0]);
     }
 
@@ -3673,7 +3675,7 @@ mod tests {
         let Value::Tensor(sequence) = &cell.data[0] else {
             panic!("expected tensor");
         };
-        assert_eq!(sequence.shape, vec![2, 2]);
+        assert_eq!(sequence.shape(), [2, 2]);
         assert!(sequence.materialize_f64()[0].is_nan());
         assert!(sequence.materialize_f64()[1].is_nan());
         assert_eq!(sequence.materialize_f64()[2..4], [1.0, 10.0]);
@@ -3822,8 +3824,7 @@ mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected tensor");
         };
-        assert_eq!(tensor.rows, 2);
-        assert_eq!(tensor.cols, 2);
+        assert_eq!(tensor.shape(), [2, 2]);
         assert_eq!(tensor.materialize_f64()[0], 0.0);
         assert_eq!(tensor.materialize_f64()[2], 1.0);
         assert!(tensor.materialize_f64()[1].is_nan());
@@ -3906,6 +3907,48 @@ mod tests {
             panic!("expected distances");
         };
         assert!(dist.materialize_f64()[0] < dist.materialize_f64()[1]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    async fn vec2word_rank_boundaries_preserve_embedding_matrix_geometry() {
+        let embedding = || {
+            let Value::Object(mut object) = embedding_object(EmbeddingModel {
+                vocabulary: vec!["east".into()],
+                vectors: vec![1.0, 0.0],
+                dimension: 2,
+            })
+            .unwrap() else {
+                panic!("embedding object")
+            };
+            object.properties.insert(
+                VECTOR_PROPERTY.to_string(),
+                Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![2]).unwrap()),
+            );
+            Value::Object(object)
+        };
+
+        let result = vec2word_builtin(vec![
+            embedding(),
+            Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![2]).unwrap()),
+        ])
+        .await
+        .expect("rank-one model storage and query are one embedding row");
+        let Value::OutputList(outputs) = result else {
+            panic!("nearest-word outputs")
+        };
+        let Value::StringArray(words) = &outputs[0] else {
+            panic!("nearest words")
+        };
+        assert_eq!(words.data, vec!["east"]);
+
+        let error = vec2word_builtin(vec![
+            embedding(),
+            Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap()),
+        ])
+        .await
+        .expect_err("rank-zero query has no embedding columns");
+        assert!(error.message().contains("must have 2 columns, got 0"));
     }
 
     #[tokio::test]
