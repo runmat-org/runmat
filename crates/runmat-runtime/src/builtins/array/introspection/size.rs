@@ -167,7 +167,7 @@ mod tests {
         let Value::Tensor(value) = value else {
             panic!("expected tensor")
         };
-        assert_eq!(value.shape, vec![1, expected.len()]);
+        assert_eq!(value.shape(), [1, expected.len()]);
         assert_eq!(value.materialize_f64(), expected);
     }
 

@@ -53,6 +53,6 @@ mod tests {
         let Value::Tensor(value) = row_vector(&[]).expect("empty row") else {
             panic!("expected tensor");
         };
-        assert_eq!(value.shape, vec![1, 0]);
+        assert_eq!(value.shape(), [1, 0]);
     }
 }

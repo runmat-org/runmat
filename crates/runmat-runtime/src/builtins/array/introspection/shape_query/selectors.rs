@@ -70,7 +70,7 @@ pub(in crate::builtins::array::introspection) fn parse_dimension_arguments(
 
 fn ensure_vector(tensor: &Tensor) -> Result<(), DimensionSelectorError> {
     let non_unit_dimensions = tensor
-        .shape
+        .shape()
         .iter()
         .filter(|dimension| **dimension > 1)
         .count();
