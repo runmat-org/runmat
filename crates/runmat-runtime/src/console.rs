@@ -7,13 +7,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-/// Identifies the console stream that received the text.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ConsoleStream {
-    Stdout,
-    Stderr,
-    ClearScreen,
-}
+pub use runmat_execution::console::ConsoleStream;
 
 /// Single console write (line or chunk) captured during execution.
 #[derive(Clone, Debug)]
@@ -110,14 +104,19 @@ pub fn record_console_output(stream: ConsoleStream, text: impl Into<String>) {
         return;
     }
 
-    with_console_state(|state| state.buffer.push(entry.clone()));
+    let host = crate::context::legacy::active()
+        .and_then(|context| context.service_ports().host().cloned());
+    if host
+        .as_ref()
+        .is_none_or(|host| !host.owns_console_retention())
+    {
+        with_console_state(|state| state.buffer.push(entry.clone()));
+    }
     write_diary_entry(&entry);
 
-    if let Some(context) = crate::context::legacy::active() {
-        if let Some(host) = context.service_ports().host() {
-            host.console(entry.stream, entry.text.clone());
-            return;
-        }
+    if let Some(host) = host {
+        host.console(entry.stream, entry.text);
+        return;
     }
 
     if let Some(forwarder) = FORWARDER

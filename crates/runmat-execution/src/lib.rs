@@ -2,6 +2,7 @@
 
 mod cancellation;
 pub use cancellation::CancellationToken;
+pub mod console;
 mod environment;
 pub use environment::{EnvironmentSnapshot, EnvironmentStorageProfile};
 mod error;

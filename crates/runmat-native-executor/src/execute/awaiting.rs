@@ -27,7 +27,7 @@ enum AwaitWork {
     Poll(Value),
     Execute {
         handle: runmat_execution::FutureHandle,
-        call: DeferredCall,
+        call: Box<DeferredCall>,
     },
 }
 

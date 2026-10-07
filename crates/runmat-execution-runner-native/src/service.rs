@@ -184,12 +184,15 @@ impl RuntimeExecutionServices for NativeExecutionService {
             let mut state = self.state.lock().expect("native service poisoned");
             let record = state.future_mut(&future)?;
             match &mut record.state {
-                FutureState::Deferred(call) => {
-                    let call = call.clone();
-                    record.state = FutureState::ExecutingInCaller;
+                FutureState::Deferred(_) => {
+                    let FutureState::Deferred(call) =
+                        std::mem::replace(&mut record.state, FutureState::ExecutingInCaller)
+                    else {
+                        unreachable!("deferred state matched while holding its owner lock")
+                    };
                     return Ok(AwaitAction::ExecuteFuture {
                         handle: future,
-                        call,
+                        call: Box::new(call),
                     });
                 }
                 FutureState::ExecutingInCaller => {

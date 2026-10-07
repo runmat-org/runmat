@@ -200,3 +200,37 @@ JSON encoding without allocating a wire copy. Scheduling rejects a reservation s
 than this component; standalone native/browser requests add it to their base reservation.
 This is a minimum component reservation. Allocator overhead, retained copies, runtime
 maps, other execution storage and measured process RSS remain distinct obligations.
+
+## Bounded console source contract
+
+`runmat_execution::console` owns ordered stdout, stderr and clear-screen records.
+Records retain original chunks and UTF-8 text without newline insertion, timestamp
+sorting or mixing console data into return-value ordinals. A transcript states complete,
+interrupted or rejected capture. Decoding and validating its ordered inventory does not
+authenticate a producer's completion claim. Progress buffers are not transcript authority.
+
+`PortableConsoleHost` implements the existing runtime host port, and sessions install it
+with `RunMatSession::install_host_service`. The caller supplies admitted record/text limits;
+there is no implicit limit policy or independent reservation. The host owns the normal
+console inventory, avoiding a duplicate unbounded runtime buffer. `evalc` remains a separate
+language capture and does not appear in the host transcript. Interleaved invocations keep
+their respective hosts; nested calls inherit the original session service.
+
+Overflow rejects the write before append, latches failure and preserves the accepted
+prefix. Builtin dispatch and the portable invocation boundary check that failure, so a
+caught language exception cannot turn lost output into successful completion. The host
+seals once and moves its original inventory. It rejects interactive line/key requests,
+including requests with an ambient queued response, without changing user cancellation.
+
+The capture storage component counts requested record slots and UTF-8 payload bytes.
+It excludes allocator overhead, formatting and `evalc` buffers, warning/diary state,
+retained copies and wire encoding; it is not whole-task admission or measured RSS.
+Worker streaming, request-bound limits, original attempt fencing, durable/cold transcript
+reads and browser/remote transport remain required integration gates. Existing worker
+routes do not acquire a complete transcript merely because this source API is available.
+
+Caller-executed await handoffs now move the original deferred call out of serial,
+native and browser service state. The await action and native suspension keep one
+boxed carrier instead of cloning captured arguments, program bytes and environment.
+The original handle and Running/ExecutingInCaller transition still govern completion,
+cancellation and rejection of a second concurrent await.

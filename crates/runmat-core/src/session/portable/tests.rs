@@ -5,6 +5,8 @@ use runmat_execution::OutputContract;
 use runmat_execution_artifact::*;
 use runmat_value::Value;
 
+mod console;
+
 fn request(text: &str, selected: Option<&str>, outputs: u16) -> ProgramExecutionRequest {
     let mut session = RunMatSession::with_options(false, false).unwrap();
     let directory = tempfile::tempdir().unwrap();

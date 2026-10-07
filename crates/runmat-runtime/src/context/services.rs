@@ -68,6 +68,21 @@ pub enum HostInteraction {
 pub trait RuntimeHostService {
     fn console(&self, stream: crate::console::ConsoleStream, text: String);
 
+    /// A retaining host owns the normal console inventory. `evalc` is separate.
+    fn owns_console_retention(&self) -> bool {
+        false
+    }
+
+    /// Sticky host failures cannot be hidden by a caught language exception.
+    fn check_execution(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
+    /// Portable hosts reject interaction even when an ambient response is queued.
+    fn accepts_queued_interaction(&self) -> bool {
+        true
+    }
+
     fn interact(
         &self,
         request: HostInteraction,

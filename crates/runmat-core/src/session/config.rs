@@ -54,6 +54,20 @@ impl RunMatSession {
         self.runtime_context = self.runtime_context.clone().with_execution(services);
     }
 
+    /// Install the invocation host. Nested calls share its console and input
+    /// owner without consulting a process-global listener.
+    pub fn install_host_service(
+        &mut self,
+        service: std::rc::Rc<dyn runmat_runtime::context::RuntimeHostService>,
+    ) {
+        let ports = self
+            .runtime_context
+            .service_ports()
+            .clone()
+            .with_host(service);
+        self.runtime_context = self.runtime_context.clone().with_service_ports(ports);
+    }
+
     /// Install the host's parallel/resource authority. Placement consumes the
     /// service's current allocation lease; it does not reserve or schedule
     /// work independently of that authority.

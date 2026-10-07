@@ -406,20 +406,20 @@ impl RuntimeExecutionServices for BrowserExecutionService {
         };
         self.validate_scope(future.scope_id)?;
         let mut state = self.state.borrow_mut();
-        match state
+        let record = state
             .futures
             .get_mut(&future.id)
-            .ok_or(ExecutionServiceError::UnknownHandle)?
-        {
-            FutureState::Deferred(call) => {
-                let call = call.clone();
-                *state
-                    .futures
-                    .get_mut(&future.id)
-                    .expect("future was just resolved") = FutureState::ExecutingInCaller;
+            .ok_or(ExecutionServiceError::UnknownHandle)?;
+        match record {
+            FutureState::Deferred(_) => {
+                let FutureState::Deferred(call) =
+                    std::mem::replace(record, FutureState::ExecutingInCaller)
+                else {
+                    unreachable!("deferred state matched while holding its owner borrow")
+                };
                 Ok(AwaitAction::ExecuteFuture {
                     handle: future,
-                    call,
+                    call: Box::new(call),
                 })
             }
             FutureState::Scheduled(_) => Ok(AwaitAction::Pending(original)),

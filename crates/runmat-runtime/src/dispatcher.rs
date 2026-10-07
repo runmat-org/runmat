@@ -754,7 +754,10 @@ fn normalize_constructor_result(
 }
 
 pub async fn call_builtin_async(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
-    call_builtin_async_impl(name, args, None).await
+    crate::context::check_active_host()?;
+    let result = call_builtin_async_impl(name, args, None).await;
+    crate::context::check_active_host()?;
+    result
 }
 
 pub async fn call_builtin_async_with_outputs(
@@ -762,7 +765,10 @@ pub async fn call_builtin_async_with_outputs(
     args: &[Value],
     output_count: usize,
 ) -> Result<Value, RuntimeError> {
-    call_builtin_async_impl(name, args, Some(output_count)).await
+    crate::context::check_active_host()?;
+    let result = call_builtin_async_impl(name, args, Some(output_count)).await;
+    crate::context::check_active_host()?;
+    result
 }
 
 fn should_retry_with_gpu_gather(err: &RuntimeError, args: &[Value]) -> bool {

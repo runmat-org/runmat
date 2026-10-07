@@ -44,7 +44,7 @@ pub enum AwaitAction {
     Pending(Value),
     ExecuteFuture {
         handle: FutureHandle,
-        call: DeferredCall,
+        call: Box<DeferredCall>,
     },
     Completed(Value),
 }
@@ -237,12 +237,14 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
             .get_mut(&future.id)
             .ok_or(ExecutionServiceError::UnknownHandle)?;
         match record {
-            FutureState::Deferred(call) => {
-                let call = call.clone();
-                *record = FutureState::Running;
+            FutureState::Deferred(_) => {
+                let FutureState::Deferred(call) = std::mem::replace(record, FutureState::Running)
+                else {
+                    unreachable!("deferred state matched while holding its owner lock")
+                };
                 Ok(AwaitAction::ExecuteFuture {
                     handle: future,
-                    call,
+                    call: Box::new(call),
                 })
             }
             FutureState::Running => Err(ExecutionServiceError::Failed(
@@ -378,6 +380,46 @@ mod tests {
         assert_eq!(
             service.begin_await(Value::Task(task)),
             Err(ExecutionServiceError::UnknownHandle)
+        );
+    }
+
+    #[test]
+    fn await_handoff_moves_the_original_program_and_environment_without_cloning() {
+        let program = vec![7; 1024];
+        let program_pointer = program.as_ptr();
+        let environment =
+            runmat_execution::EnvironmentSnapshot::new(vec![("NAME".into(), "original".into())])
+                .unwrap();
+        let environment_pointer = environment.entries()[0].1.as_ptr();
+        let service = RuntimeExecutionService::new();
+        let future = service
+            .create_future(DeferredCall {
+                function: 7,
+                arguments: vec![Value::Num(3.0)],
+                requested_outputs: 1,
+                environment,
+                program_revision: None,
+                program: Some(program),
+            })
+            .unwrap();
+        let AwaitAction::ExecuteFuture { handle, call } =
+            service.begin_await(Value::Future(future.clone())).unwrap()
+        else {
+            panic!("original future did not enter execution")
+        };
+        assert_eq!(handle, future);
+        assert_eq!(call.program.as_ref().unwrap().as_ptr(), program_pointer);
+        assert_eq!(
+            call.environment.entries()[0].1.as_ptr(),
+            environment_pointer
+        );
+        assert!(service.begin_await(Value::Future(future.clone())).is_err());
+        service
+            .complete_future(&future, Ok(Value::Num(9.0)))
+            .unwrap();
+        assert_eq!(
+            service.begin_await(Value::Future(future)).unwrap(),
+            AwaitAction::Completed(Value::Num(9.0))
         );
     }
 
