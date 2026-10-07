@@ -1343,7 +1343,7 @@ mod tests {
             ),
             (
                 "nested user calls",
-                include_str!("../interpreter/dispatch/calls/dispatch/user.rs"),
+                include_str!("../interpreter/dispatch/calls/dispatch/user/nested.rs"),
             ),
             (
                 "catch variables",

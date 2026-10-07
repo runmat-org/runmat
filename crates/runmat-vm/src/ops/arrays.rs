@@ -292,7 +292,7 @@ mod tests {
         let Value::Tensor(output) = stack.pop().expect("output") else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![1, 3]);
+        assert_eq!(output.shape(), vec![1, 3]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX, 4, 9]))
@@ -312,7 +312,7 @@ mod tests {
         let Value::Tensor(output) = stack.pop().expect("output") else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![3, 1]);
+        assert_eq!(output.shape(), vec![3, 1]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::I8(vec![12, i8::MAX, i8::MIN]))
@@ -335,7 +335,7 @@ mod tests {
         let Value::Tensor(output) = stack.pop().expect("output") else {
             panic!("expected tensor");
         };
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), vec![2, 2]);
         assert_eq!(
             output.integer_storage(),
             Some(&IntegerStorage::U64(vec![1_u64 << 63, 7, u64::MAX, 11]))
