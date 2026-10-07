@@ -30,7 +30,7 @@ fn nested_resident_handle_moves_without_gather() {
         let handle = provider
             .upload(&HostTensorView {
                 data: &values,
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             })
             .unwrap();
         let cells = CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1).unwrap();

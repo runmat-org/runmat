@@ -217,21 +217,16 @@ fn move_reports_resource_lease_retirement_after_provider_rename() {
         writes: Arc::new(AtomicUsize::new(0)),
         pending_rename_dropped: None,
     });
-    let captured = runmat_filesystem::with_provider_override(provider, || {
-        super::super::super::authority::TransferFilesystem::capture(
-            super::super::super::authority::TransferOperation::Move,
+    let outcome = runmat_filesystem::with_provider_override(provider, || {
+        futures::executor::block_on(super::super::super::movefile::execute::evaluate(
+            &[
+                runmat_value::Value::from("source.bin"),
+                runmat_value::Value::from("target.bin"),
+            ],
             None,
-        )
-        .expect("capture move lease")
+        ))
+        .expect("lease retirement is a filesystem status result")
     });
-
-    let outcome = futures::executor::block_on(super::super::super::movefile::single::move_path(
-        &captured,
-        "source.bin",
-        "target.bin",
-        false,
-    ))
-    .expect("lease retirement is a filesystem status result");
 
     assert_eq!(outcome.status(), 0.0);
     assert!(memory.read_project_path("/selected/source.bin").is_err());

@@ -36,7 +36,7 @@ fn sums_vector_and_matrix_subscripts() {
     let Value::Tensor(matrix) = matrix else {
         panic!("expected tensor");
     };
-    assert_eq!(matrix.shape, vec![4, 2]);
+    assert_eq!(matrix.shape(), vec![4, 2]);
     assert_eq!(
         matrix.materialize_f64(),
         vec![5.0, 0.0, 0.0, 6.0, 0.0, 7.0, 3.0, 0.0]
@@ -175,7 +175,7 @@ fn every_integer_class_is_exact_for_indices_and_sizes() {
         let Value::Tensor(output) = output else {
             panic!("expected dense output");
         };
-        assert_eq!(output.shape, vec![3, 1]);
+        assert_eq!(output.shape(), vec![3, 1]);
         assert_eq!(output.materialize_f64(), vec![1.0, 1.0, 0.0]);
     }
 }

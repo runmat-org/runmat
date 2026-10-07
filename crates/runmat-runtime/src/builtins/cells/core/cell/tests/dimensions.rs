@@ -85,7 +85,7 @@ fn compatible_elements_are_independent_empty_double_arrays() {
         let Value::Tensor(value) = value else {
             panic!("expected double empty")
         };
-        assert_eq!(value.shape, vec![0, 0]);
+        assert_eq!(value.shape(), vec![0, 0]);
         assert!(value.is_empty());
     }
 }

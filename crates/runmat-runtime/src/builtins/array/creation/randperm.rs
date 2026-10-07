@@ -655,7 +655,7 @@ pub(crate) mod tests {
         let args = vec![Value::from(5)];
         let result = randperm_builtin(args).expect("randperm");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![1, 5]);
+        assert_eq!(gathered.shape(), vec![1, 5]);
         let expected = expected_randperm(5, 5);
         assert_eq!(gathered.materialize_f64(), expected);
     }
@@ -701,7 +701,7 @@ pub(crate) mod tests {
         let args = vec![Value::from(10), Value::from(4)];
         let result = randperm_builtin(args).expect("randperm");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![1, 4]);
+        assert_eq!(gathered.shape(), vec![1, 4]);
         let data = gathered.materialize_f64();
         let expected = expected_randperm(10, 4);
         assert_eq!(data, expected);
@@ -720,7 +720,7 @@ pub(crate) mod tests {
         let args = vec![Value::from(0)];
         let result = randperm_builtin(args).expect("randperm");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![1, 0]);
+        assert_eq!(gathered.shape(), vec![1, 0]);
         assert!(gathered.materialize_f64().is_empty());
     }
 
@@ -800,7 +800,7 @@ pub(crate) mod tests {
                 panic!("zero-count randperm must return a tensor");
             };
             assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F64);
-            assert_eq!(output.shape, vec![1, 0]);
+            assert_eq!(output.shape(), vec![1, 0]);
         }
     }
 
@@ -813,7 +813,7 @@ pub(crate) mod tests {
         let args = vec![Value::from(5), Value::from("double")];
         let result = randperm_builtin(args).expect("randperm");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![1, 5]);
+        assert_eq!(gathered.shape(), vec![1, 5]);
         let expected = expected_randperm(5, 5);
         assert_eq!(gathered.materialize_f64(), expected);
     }
@@ -832,7 +832,7 @@ pub(crate) mod tests {
         ];
         let result = randperm_builtin(args).expect("randperm");
         let gathered = test_support::gather(result).expect("gather");
-        assert_eq!(gathered.shape, vec![1, 4]);
+        assert_eq!(gathered.shape(), vec![1, 4]);
         let expected = expected_randperm(4, 4);
         assert_eq!(gathered.materialize_f64(), expected);
     }
@@ -847,7 +847,7 @@ pub(crate) mod tests {
             let proto_tensor = Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap();
             let view = HostTensorView {
                 data: &proto_tensor.materialize_f64(),
-                shape: &proto_tensor.shape,
+                shape: proto_tensor.shape(),
             };
             let proto_handle = provider.upload(&view).expect("upload prototype");
             let args = vec![
@@ -862,7 +862,7 @@ pub(crate) mod tests {
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), vec![1, 3]);
             let expected = expected_randperm(6, 3);
             assert_eq!(gathered.materialize_f64(), expected);
         });
@@ -925,7 +925,7 @@ pub(crate) mod tests {
 
         let host =
             test_support::gather(Value::GpuTensor(gpu_handle.clone())).expect("gather permutation");
-        assert_eq!(host.shape, vec![1, 7]);
+        assert_eq!(host.shape(), vec![1, 7]);
         assert_eq!(host.len(), 7);
 
         let mut sorted = host.materialize_f64();

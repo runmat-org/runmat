@@ -49,7 +49,7 @@ async fn every_fixed_width_integer_class_preserves_its_level_storage() {
             panic!("expected typed levels")
         };
         assert_eq!(levels.numeric_dtype(), class, "{class:?}");
-        assert_eq!(levels.shape, vec![2, 1], "{class:?}");
+        assert_eq!(levels.shape(), vec![2, 1], "{class:?}");
     }
 }
 

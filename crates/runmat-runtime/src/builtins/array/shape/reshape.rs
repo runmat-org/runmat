@@ -691,7 +691,7 @@ pub(crate) mod tests {
         .expect("reshape");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 4]);
+                assert_eq!(out.shape(), vec![3, 4]);
                 assert_eq!(
                     out.materialize_f64(),
                     (1..=12).map(|v| v as f64).collect::<Vec<_>>()
@@ -711,7 +711,7 @@ pub(crate) mod tests {
         let result = reshape_builtin(Value::Tensor(tensor), args).expect("reshape");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![3, 6]);
+                assert_eq!(out.shape(), vec![3, 6]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -758,7 +758,7 @@ pub(crate) mod tests {
 
             match result {
                 Value::Tensor(out) => {
-                    assert_eq!(out.shape, vec![2, 2]);
+                    assert_eq!(out.shape(), vec![2, 2]);
                     assert_eq!(out.integer_storage(), Some(&expected));
                 }
                 other => panic!("expected typed integer tensor, got {other:?}"),
@@ -785,7 +785,7 @@ pub(crate) mod tests {
 
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), vec![2, 2]);
                 assert_eq!(out.integer_storage().cloned(), Some(storage));
             }
             other => panic!("expected typed complex integer tensor, got {other:?}"),
@@ -853,7 +853,7 @@ pub(crate) mod tests {
             let tensor = tensor_from_slice(&data, &[3, 4]);
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = reshape_builtin(
@@ -905,7 +905,7 @@ pub(crate) mod tests {
                 crate::builtins::math::fft::common::gather_gpu_complex_tensor(&reshaped, "reshape"),
             )
             .expect("gather complex");
-            assert_eq!(gathered.shape, vec![3, 2]);
+            assert_eq!(gathered.shape(), vec![3, 2]);
             assert_eq!(gathered.materialize_f64(), complex.materialize_f64());
         });
     }
@@ -925,7 +925,7 @@ pub(crate) mod tests {
         let tensor = tensor_from_slice(&data, &[3, 4]);
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let result = reshape_builtin(
@@ -938,7 +938,7 @@ pub(crate) mod tests {
         };
         assert_eq!(reshaped.shape(), vec![2, 6]);
         let host = test_support::gather(Value::GpuTensor(reshaped.clone())).expect("gather");
-        assert_eq!(host.shape, vec![2, 6]);
+        assert_eq!(host.shape(), vec![2, 6]);
         assert_eq!(host.materialize_f64(), tensor.materialize_f64());
         drop(reshaped);
     }
@@ -984,7 +984,7 @@ pub(crate) mod tests {
             crate::builtins::math::fft::common::gather_gpu_complex_tensor(&reshaped, "reshape"),
         )
         .expect("gather complex reshape");
-        assert_eq!(host.shape, vec![3, 2]);
+        assert_eq!(host.shape(), vec![3, 2]);
         assert_eq!(host.materialize_f64(), complex.materialize_f64());
         drop(reshaped);
     }
@@ -1026,7 +1026,7 @@ pub(crate) mod tests {
         )
         .expect("reshape zero");
         match result {
-            Value::Tensor(out) => assert_eq!(out.shape, vec![0, 3]),
+            Value::Tensor(out) => assert_eq!(out.shape(), vec![0, 3]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -1054,7 +1054,7 @@ pub(crate) mod tests {
 
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![1, 1, 1]);
+                assert_eq!(out.shape(), vec![1, 1, 1]);
                 assert_eq!(
                     out.integer_storage(),
                     Some(&IntegerStorage::U64(vec![9_007_199_254_740_993]))
@@ -1074,7 +1074,7 @@ pub(crate) mod tests {
         .expect("reshape complex");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![1, 1, 1]);
+                assert_eq!(ct.shape(), vec![1, 1, 1]);
                 assert_eq!(ct.materialize_f64(), vec![(1.0, 2.0)]);
             }
             other => panic!("expected complex tensor, got {other:?}"),

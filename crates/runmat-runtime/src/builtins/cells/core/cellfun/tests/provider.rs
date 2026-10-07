@@ -10,7 +10,7 @@ fn gathers_provider_resident_cell_contents() {
         let handle = provider
             .upload(&HostTensorView {
                 data: &materialized,
-                shape: &value.shape,
+                shape: value.shape(),
             })
             .unwrap();
         let result = call(
@@ -30,7 +30,7 @@ fn nonuniform_output_preserves_callback_residency() {
         let handle = provider
             .upload(&HostTensorView {
                 data: &materialized,
-                shape: &value.shape,
+                shape: value.shape(),
             })
             .unwrap();
         let callback = Value::FunctionHandle("gpuArray".into());
@@ -66,7 +66,7 @@ fn gathers_cell_contents_from_an_actual_wgpu_provider() {
     let handle = provider
         .upload(&HostTensorView {
             data: &materialized,
-            shape: &value.shape,
+            shape: value.shape(),
         })
         .unwrap();
     let precision = runmat_accelerate_api::handle_precision(&handle).expect("floating upload");

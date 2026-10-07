@@ -11,7 +11,7 @@ fn sorts_text_and_preserves_orientation() {
     let Value::Tensor(groups) = &outputs[0] else {
         panic!("expected group numbers");
     };
-    assert_eq!(groups.shape, vec![1, 3]);
+    assert_eq!(groups.shape(), vec![1, 3]);
     assert_eq!(groups.materialize_f64(), vec![2.0, 1.0, 2.0]);
     assert!(matches!(&outputs[1], Value::StringArray(ids) if ids.data == ["a", "b"]));
 }

@@ -821,7 +821,7 @@ pub(crate) mod tests {
             logspace_builtin(Value::Num(1.0), Value::Num(3.0), Vec::new()).expect("logspace");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 50]);
+                assert_eq!(t.shape(), vec![1, 50]);
                 assert!((t.materialize_f64()[0] - 10.0).abs() < 1e-12);
                 assert!((t.materialize_f64()[49] - 1000.0).abs() < 1e-9);
             }
@@ -903,7 +903,7 @@ pub(crate) mod tests {
         .expect("logspace");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), vec![1, 5]);
                 let expected = [1.0, 3.1622776601683795, 10.0, 31.622776601683793, 100.0];
                 for (a, b) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((a - b).abs() < 1e-12);
@@ -924,7 +924,7 @@ pub(crate) mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected host tensor");
         };
-        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(tensor.shape(), vec![1, 2]);
         assert!((tensor.materialize_f64()[0] - 1.0).abs() < 1e-12);
         assert!((tensor.materialize_f64()[1] - std::f64::consts::PI).abs() < 1e-12);
     }
@@ -940,7 +940,7 @@ pub(crate) mod tests {
         .expect("logspace");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 0]);
+                assert_eq!(t.shape(), vec![1, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -966,7 +966,7 @@ pub(crate) mod tests {
         .expect("logspace");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 1]);
+                assert_eq!(t.shape(), vec![1, 1]);
                 assert!((t.materialize_f64()[0] - 1.0).abs() < 1e-12);
             }
             other => panic!("expected tensor result, got {other:?}"),
@@ -984,7 +984,7 @@ pub(crate) mod tests {
         .expect("logspace");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![1, 4]);
+                assert_eq!(t.shape(), vec![1, 4]);
                 assert_eq!(t.materialize_f64().len(), 4);
                 let expected = generate_complex_log_sequence(0.0, 1.0, 0.0, 2.0, 4);
                 for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
@@ -1029,7 +1029,7 @@ pub(crate) mod tests {
         .expect("logspace");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), vec![1, 3]);
                 let expected = generate_real_log_sequence(2.0, 3.0, 3);
                 for (actual, exp) in t.materialize_f64().iter().zip(expected.iter()) {
                     assert!((actual - exp).abs() < 1e-12);
@@ -1092,7 +1092,7 @@ pub(crate) mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected tensor")
         };
-        assert_eq!(tensor.shape, vec![1, 3]);
+        assert_eq!(tensor.shape(), vec![1, 3]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1107,7 +1107,7 @@ pub(crate) mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected tensor")
         };
-        assert_eq!(tensor.shape, vec![1, 0]);
+        assert_eq!(tensor.shape(), vec![1, 0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1194,7 +1194,7 @@ pub(crate) mod tests {
             let result =
                 logspace_builtin(lo, hi, vec![Value::Int(IntValue::I32(3))]).expect("logspace");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), vec![1, 3]);
             let expected = [10.0, 100.0, 1000.0];
             for (a, b) in gathered.materialize_f64().iter().zip(expected.iter()) {
                 assert!((a - b).abs() < 1e-6);
@@ -1244,7 +1244,7 @@ pub(crate) mod tests {
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
-                assert_eq!(ct.shape, gt.shape);
+                assert_eq!(ct.shape(), gt.shape());
                 let tol = match runmat_accelerate_api::provider().unwrap().precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
                     runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,

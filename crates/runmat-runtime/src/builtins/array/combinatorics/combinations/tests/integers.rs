@@ -40,7 +40,7 @@ fn every_integer_class_is_repeated_without_numeric_conversion() {
             panic!("expected integer column")
         };
         assert_eq!(column.integer_storage(), Some(&expected));
-        assert_eq!(column.shape, vec![4, 1]);
+        assert_eq!(column.shape(), vec![4, 1]);
     }
 }
 

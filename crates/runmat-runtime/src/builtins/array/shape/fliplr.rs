@@ -327,7 +327,7 @@ pub(crate) mod tests {
         let result = fliplr_builtin(Value::Tensor(tensor)).expect("fliplr");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, expected.shape);
+                assert_eq!(out.shape(), expected.shape());
                 assert_eq!(out.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -366,7 +366,7 @@ pub(crate) mod tests {
         let result = fliplr_builtin(Value::Tensor(tensor)).expect("fliplr");
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, expected.shape);
+                assert_eq!(out.shape(), expected.shape());
                 assert_eq!(out.materialize_f64(), expected.materialize_f64());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -421,7 +421,7 @@ pub(crate) mod tests {
 
         match result {
             Value::Tensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), vec![2, 2]);
                 assert_eq!(
                     out.integer_storage(),
                     Some(&IntegerStorage::U64(vec![
@@ -451,7 +451,7 @@ pub(crate) mod tests {
 
         match result {
             Value::ComplexTensor(out) => {
-                assert_eq!(out.shape, vec![2, 2]);
+                assert_eq!(out.shape(), vec![2, 2]);
                 let storage = out.integer_storage().expect("typed complex integer output");
                 assert_eq!(storage.real, IntegerStorage::I16(vec![3, 4, 1, 2]));
                 assert_eq!(storage.imag, IntegerStorage::I16(vec![7, 8, 5, 6]));
@@ -488,13 +488,13 @@ pub(crate) mod tests {
                 Tensor::new((1..=12).map(|v| v as f64).collect(), vec![3, 4]).expect("tensor");
             let view = HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let result = fliplr_builtin(Value::GpuTensor(handle)).expect("fliplr gpu");
             let gathered = test_support::gather(result).expect("gather");
             let expected = flip_tensor(tensor, &LR_DIM).expect("expected");
-            assert_eq!(gathered.shape, expected.shape);
+            assert_eq!(gathered.shape(), expected.shape());
             assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
         });
     }
@@ -535,13 +535,13 @@ pub(crate) mod tests {
         let expected = flip_tensor(tensor.clone(), &LR_DIM).expect("expected");
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload");
         let value = fliplr_builtin(Value::GpuTensor(handle)).expect("fliplr gpu");
         let gathered = test_support::gather(value).expect("gather");
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 }

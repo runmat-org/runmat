@@ -369,7 +369,7 @@ pub(crate) mod tests {
         let result = horzcat_builtin(Vec::new()).expect("horzcat");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 0]);
+                assert_eq!(t.shape(), vec![0, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -400,7 +400,7 @@ pub(crate) mod tests {
             horzcat_builtin(vec![Value::Tensor(left), Value::Tensor(right)]).expect("horzcat");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 3]);
+                assert_eq!(t.shape(), vec![2, 3]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0, 10.0, 20.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -495,18 +495,18 @@ pub(crate) mod tests {
             let right = Tensor::new(vec![10.0, 30.0], vec![2, 1]).unwrap();
             let view_left = runmat_accelerate_api::HostTensorView {
                 data: &left.materialize_f64(),
-                shape: &left.shape,
+                shape: left.shape(),
             };
             let view_right = runmat_accelerate_api::HostTensorView {
                 data: &right.materialize_f64(),
-                shape: &right.shape,
+                shape: right.shape(),
             };
             let h_left = provider.upload(&view_left).expect("upload left");
             let h_right = provider.upload(&view_right).expect("upload right");
             let result = horzcat_builtin(vec![Value::GpuTensor(h_left), Value::GpuTensor(h_right)])
                 .expect("horzcat");
             let gathered = test_support::gather(result).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), vec![2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 10.0, 30.0]);
         });
     }
@@ -539,7 +539,7 @@ pub(crate) mod tests {
         .expect("horzcat complex");
         match result {
             Value::ComplexTensor(ct) => {
-                assert_eq!(ct.shape, vec![1, 4]);
+                assert_eq!(ct.shape(), vec![1, 4]);
                 assert_eq!(
                     ct.materialize_f64(),
                     vec![(1.0, 2.0), (3.0, 4.0), (5.0, 6.0), (7.0, 8.0)]
@@ -594,7 +594,7 @@ pub(crate) mod tests {
             let prototype = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let proto_view = runmat_accelerate_api::HostTensorView {
                 data: &prototype.materialize_f64(),
-                shape: &prototype.shape,
+                shape: prototype.shape(),
             };
             let proto_handle = provider.upload(&proto_view).expect("upload proto");
 
@@ -612,7 +612,7 @@ pub(crate) mod tests {
                 other => panic!("expected gpu tensor, got {other:?}"),
             };
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 2]);
+            assert_eq!(gathered.shape(), vec![2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 5.0, 7.0]);
         });
     }
@@ -644,18 +644,18 @@ pub(crate) mod tests {
         };
         let view_a = runmat_accelerate_api::HostTensorView {
             data: &a.materialize_f64(),
-            shape: &a.shape,
+            shape: a.shape(),
         };
         let view_b = runmat_accelerate_api::HostTensorView {
             data: &b.materialize_f64(),
-            shape: &b.shape,
+            shape: b.shape(),
         };
         let ha = provider.upload(&view_a).expect("upload a");
         let hb = provider.upload(&view_b).expect("upload b");
         let gpu_value =
             horzcat_builtin(vec![Value::GpuTensor(ha), Value::GpuTensor(hb)]).expect("gpu horzcat");
         let gathered = test_support::gather(gpu_value).expect("gather");
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 }

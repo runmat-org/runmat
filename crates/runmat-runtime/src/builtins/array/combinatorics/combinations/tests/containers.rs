@@ -93,7 +93,7 @@ fn variable_names_text_is_data_and_empty_products_keep_every_column() {
     assert!(
         matches!(&variables.fields["Var1"], Value::StringArray(value) if value.shape == [0, 1])
     );
-    assert!(matches!(&variables.fields["Var2"], Value::Tensor(value) if value.shape == [0, 1]));
+    assert!(matches!(&variables.fields["Var2"], Value::Tensor(value) if value.shape() == [0, 1]));
 }
 
 #[test]

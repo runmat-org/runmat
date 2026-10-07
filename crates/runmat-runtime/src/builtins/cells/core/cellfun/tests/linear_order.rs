@@ -47,7 +47,7 @@ fn asymmetric_uniform_and_cell_multioutputs_keep_linear_positions() {
                     .collect::<Vec<_>>();
                 match output {
                     Value::Tensor(tensor) if uniform => {
-                        assert_eq!(tensor.shape, shape);
+                        assert_eq!(tensor.shape(), shape);
                         assert_eq!(tensor.materialize_f64(), expected);
                     }
                     Value::Cell(cell) if !uniform => {

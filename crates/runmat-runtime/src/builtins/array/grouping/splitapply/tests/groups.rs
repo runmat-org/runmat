@@ -70,6 +70,6 @@ fn row_group_vector_preserves_trailing_dimensions() {
     let Value::Tensor(output) = output else {
         panic!("expected tensor output");
     };
-    assert_eq!(output.shape, vec![2, 1, 2]);
+    assert_eq!(output.shape(), vec![2, 1, 2]);
     assert_eq!(output.materialize_f64(), vec![11.0, 22.0, 33.0, 44.0]);
 }

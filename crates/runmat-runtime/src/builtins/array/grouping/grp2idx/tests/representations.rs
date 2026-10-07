@@ -120,7 +120,7 @@ async fn datetime_groups_use_first_appearance_and_preserve_datetime_levels() {
     };
     assert!(levels.is_class(runmat_types::standard::DATETIME));
     let serials = crate::builtins::datetime::serials_from_datetime_value(&values[2]).unwrap();
-    assert_eq!(serials.shape, vec![2, 1]);
+    assert_eq!(serials.shape(), vec![2, 1]);
     assert_eq!(serials.materialize_f64(), vec![738_522.0, 738_156.0]);
 }
 
@@ -141,6 +141,6 @@ async fn duration_groups_use_first_appearance_and_preserve_duration_levels() {
     };
     assert!(levels.is_class(runmat_types::standard::DURATION));
     let days = crate::builtins::duration::duration_tensor_from_duration_value(&values[2]).unwrap();
-    assert_eq!(days.shape, vec![2, 1]);
+    assert_eq!(days.shape(), vec![2, 1]);
     assert_eq!(days.materialize_f64(), vec![2.0, 1.0]);
 }

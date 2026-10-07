@@ -1138,7 +1138,7 @@ pub(crate) mod tests {
         let result = colon_builtin(Value::Num(1.0), Value::Num(5.0), Vec::new()).expect("colon");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), vec![1, 5]);
                 assert_eq!(t.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0, 5.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1338,7 +1338,7 @@ pub(crate) mod tests {
         let result = colon_builtin(Value::Num(5.0), Value::Num(1.0), Vec::new()).expect("colon");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 0]);
+                assert_eq!(t.shape(), vec![1, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1352,7 +1352,7 @@ pub(crate) mod tests {
             colon_builtin(Value::Num(5.0), Value::Num(-1.0), vec![Value::Num(1.0)]).expect("colon");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), vec![1, 5]);
                 assert_eq!(t.materialize_f64(), vec![5.0, 4.0, 3.0, 2.0, 1.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1366,7 +1366,7 @@ pub(crate) mod tests {
             colon_builtin(Value::Num(0.0), Value::Num(0.5), vec![Value::Num(2.0)]).expect("colon");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 5]);
+                assert_eq!(t.shape(), vec![1, 5]);
                 assert_eq!(t.materialize_f64(), vec![0.0, 0.5, 1.0, 1.5, 2.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1380,7 +1380,7 @@ pub(crate) mod tests {
             colon_builtin(Value::Num(0.0), Value::Num(2.0), vec![Value::Num(5.0)]).expect("colon");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 3]);
+                assert_eq!(t.shape(), vec![1, 3]);
                 assert_eq!(t.materialize_f64(), vec![0.0, 2.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1394,7 +1394,7 @@ pub(crate) mod tests {
             colon_builtin(Value::Num(0.0), Value::Num(1.0), vec![Value::Num(-1.0)]).expect("colon");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 0]);
+                assert_eq!(t.shape(), vec![1, 0]);
                 assert!(t.materialize_f64().is_empty());
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -1409,7 +1409,7 @@ pub(crate) mod tests {
         else {
             panic!("expected empty tensor");
         };
-        assert_eq!(result.shape, vec![1, 0]);
+        assert_eq!(result.shape(), vec![1, 0]);
         let Value::Tensor(typed) = colon_builtin(
             Value::Int(IntValue::U16(0)),
             Value::Num(0.0),
@@ -1686,7 +1686,7 @@ pub(crate) mod tests {
             let start = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let start_view = HostTensorView {
                 data: &start.materialize_f64(),
-                shape: &start.shape,
+                shape: start.shape(),
             };
             let start_handle = provider.upload(&start_view).expect("upload start");
 
@@ -1700,7 +1700,7 @@ pub(crate) mod tests {
             match result {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
-                    assert_eq!(gathered.shape, vec![1, 5]);
+                    assert_eq!(gathered.shape(), vec![1, 5]);
                     assert_eq!(gathered.materialize_f64(), vec![0.0, 0.5, 1.0, 1.5, 2.0]);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
@@ -1725,7 +1725,7 @@ pub(crate) mod tests {
         let start = Tensor::new(vec![-2.0], vec![1, 1]).unwrap();
         let start_view = HostTensorView {
             data: &start.materialize_f64(),
-            shape: &start.shape,
+            shape: start.shape(),
         };
         let start_handle = provider.upload(&start_view).expect("upload start");
         let gpu = colon_builtin(
@@ -1748,7 +1748,7 @@ pub(crate) mod tests {
             other => panic!("unexpected CPU result {other:?}"),
         };
 
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         assert_eq!(gathered.materialize_f64(), expected.materialize_f64());
     }
 
@@ -1892,7 +1892,7 @@ pub(crate) mod tests {
             let step = Tensor::new(vec![0.5], vec![1, 1]).unwrap();
             let view = HostTensorView {
                 data: &step.materialize_f64(),
-                shape: &step.shape,
+                shape: step.shape(),
             };
             let step_handle = provider.upload(&view).expect("upload step");
             let result = colon_builtin(

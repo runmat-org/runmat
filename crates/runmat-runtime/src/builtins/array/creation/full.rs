@@ -206,7 +206,7 @@ pub(crate) mod tests {
         for storage in every_integer_storage() {
             let tensor = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("integer tensor");
             let output = expect_tensor(run_full(Value::Tensor(tensor)).expect("full identity"));
-            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(output.shape(), vec![1, 2]);
             assert_eq!(output.integer_storage(), Some(&storage));
         }
     }
@@ -226,7 +226,7 @@ pub(crate) mod tests {
             expected
                 .set_value(2, storage.value_at(1).expect("second"))
                 .expect("second placement");
-            assert_eq!(output.shape, vec![2, 2]);
+            assert_eq!(output.shape(), vec![2, 2]);
             assert_eq!(output.integer_storage(), Some(&expected));
         }
     }
@@ -337,7 +337,7 @@ pub(crate) mod tests {
         let sparse =
             SparseTensor::new(3, 2, vec![0, 2, 3], vec![0, 2, 1], vec![10.0, 30.0, 20.0]).unwrap();
         let dense = expect_tensor(run_full(Value::SparseTensor(sparse)).unwrap());
-        assert_eq!(dense.shape, vec![3, 2]);
+        assert_eq!(dense.shape(), vec![3, 2]);
         assert_eq!(
             dense.materialize_f64(),
             vec![10.0, 0.0, 30.0, 0.0, 20.0, 0.0]
@@ -390,7 +390,7 @@ pub(crate) mod tests {
         else {
             panic!("expected dense complex tensor");
         };
-        assert_eq!(dense.shape, vec![3, 2]);
+        assert_eq!(dense.shape(), vec![3, 2]);
         assert_eq!(
             dense.materialize_f64(),
             vec![
@@ -410,7 +410,7 @@ pub(crate) mod tests {
         let dense = expect_tensor(
             run_full(Value::SparseTensor(SparseTensor::zeros(2, 3))).expect("full sparse"),
         );
-        assert_eq!(dense.shape, vec![2, 3]);
+        assert_eq!(dense.shape(), vec![2, 3]);
         assert_eq!(dense.materialize_f64(), vec![0.0; 6]);
     }
 
@@ -433,7 +433,7 @@ pub(crate) mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                    shape: tensor.shape(),
                 })
                 .expect("upload");
             let result = run_full(Value::GpuTensor(handle.clone())).expect("full gpu");

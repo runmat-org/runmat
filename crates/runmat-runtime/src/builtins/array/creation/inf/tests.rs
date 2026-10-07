@@ -30,7 +30,7 @@ fn inf_square_from_single_dimension() {
     let _guard = clear_accel_provider_state();
     let result = block_on(inf_builtin(vec![Value::Num(3.0)])).expect("inf");
     let tensor = test_support::gather(result).expect("gather tensor");
-    assert_eq!(tensor.shape, vec![3, 3]);
+    assert_eq!(tensor.shape(), vec![3, 3]);
     assert_all_pos_inf(&tensor);
 }
 
@@ -40,7 +40,7 @@ fn inf_rectangular_from_dims() {
     let _guard = clear_accel_provider_state();
     let result = block_on(inf_builtin(vec![Value::Num(2.0), Value::Num(4.0)])).expect("inf");
     let tensor = test_support::gather(result).expect("gather tensor");
-    assert_eq!(tensor.shape, vec![2, 4]);
+    assert_eq!(tensor.shape(), vec![2, 4]);
     assert_all_pos_inf(&tensor);
 }
 
@@ -51,7 +51,7 @@ fn inf_from_size_vector() {
     let size_vec = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
     let result = block_on(inf_builtin(vec![Value::Tensor(size_vec)])).expect("inf");
     let tensor = test_support::gather(result).expect("gather tensor");
-    assert_eq!(tensor.shape, vec![2, 3, 4]);
+    assert_eq!(tensor.shape(), vec![2, 3, 4]);
     assert_all_pos_inf(&tensor);
 }
 
@@ -67,14 +67,14 @@ fn inf_integer_dimensions_clamp_negative_and_normalize_trailing_singletons() {
     let Value::Tensor(tensor) = result else {
         panic!("expected empty host tensor");
     };
-    assert_eq!(tensor.shape, vec![0, 3]);
+    assert_eq!(tensor.shape(), vec![0, 3]);
 }
 
 #[test]
 fn inf_without_explicit_gpu_intent_remains_host_resident() {
     test_support::with_test_provider(|_| {
         let result = block_on(inf_builtin(vec![Value::Num(2.0)])).expect("inf");
-        assert!(matches!(result, Value::Tensor(tensor) if tensor.shape == vec![2, 2]));
+        assert!(matches!(result, Value::Tensor(tensor) if tensor.shape() == vec![2, 2]));
     });
 }
 
@@ -101,7 +101,7 @@ fn inf_single_output_marks_dtype() {
     ]))
     .expect("inf");
     let tensor = test_support::gather(result).expect("gather tensor");
-    assert_eq!(tensor.shape, vec![2, 2]);
+    assert_eq!(tensor.shape(), vec![2, 2]);
     assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
     assert_all_pos_inf(&tensor);
 }
@@ -126,7 +126,7 @@ fn inf_like_complex_scalar() {
     .expect("inf");
     match result {
         Value::ComplexTensor(tensor) => {
-            assert_eq!(tensor.shape, vec![3, 3]);
+            assert_eq!(tensor.shape(), vec![3, 3]);
             assert!(tensor
                 .materialize_f64()
                 .iter()
@@ -148,7 +148,7 @@ fn inf_like_complex_single_preserves_native_single() {
     let Value::ComplexTensor(output) = result else {
         panic!("expected complex tensor");
     };
-    assert_eq!(output.shape, vec![2, 2]);
+    assert_eq!(output.shape(), vec![2, 2]);
     assert_eq!(output.numeric_dtype(), NumericDType::F32);
 }
 
@@ -165,7 +165,7 @@ fn inf_like_uses_shape_argument_when_combined_with_like() {
     ]))
     .expect("inf");
     let tensor = test_support::gather(result).expect("gather tensor");
-    assert_eq!(tensor.shape, vec![2, 3]);
+    assert_eq!(tensor.shape(), vec![2, 3]);
     assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
     assert_all_pos_inf(&tensor);
 }

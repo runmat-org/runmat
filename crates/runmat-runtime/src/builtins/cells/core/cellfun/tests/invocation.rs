@@ -75,7 +75,7 @@ fn empty_inputs_preserve_shape_in_both_output_modes() {
     let Value::Tensor(uniform) = uniform else {
         panic!("expected an empty numeric array")
     };
-    assert_eq!(uniform.shape, vec![0, 3]);
+    assert_eq!(uniform.shape(), vec![0, 3]);
     assert!(uniform.is_empty());
 
     let nonuniform = call(

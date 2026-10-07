@@ -37,7 +37,7 @@ fn explicit_gpu_empty_keeps_shape_and_device_intent() {
         assert_eq!(handle.shape(), vec![0, 3]);
         let host = crate::builtins::common::test_support::gather(Value::GpuTensor(handle)).unwrap();
         assert!(host.is_empty());
-        assert_eq!(host.shape, vec![0, 3]);
+        assert_eq!(host.shape(), vec![0, 3]);
     });
 }
 
@@ -54,7 +54,7 @@ fn resident_integer_size_controls_preserve_host_receiver_class() {
             panic!("expected host empty");
         };
         assert_eq!(result.numeric_dtype(), NumericDType::I16);
-        assert_eq!(result.shape, vec![0, 7]);
+        assert_eq!(result.shape(), vec![0, 7]);
     });
 }
 
@@ -128,7 +128,7 @@ fn all_integer_receivers_preserve_exact_empty_storage() {
         .unwrap() else {
             panic!("expected tensor");
         };
-        assert_eq!(value.shape, vec![0, 7]);
+        assert_eq!(value.shape(), vec![0, 7]);
         assert_eq!(value.numeric_dtype(), dtype);
         assert!(value.integer_storage().is_some());
         assert!(value.is_empty());
@@ -149,7 +149,7 @@ fn signed_negative_dimensions_clamp_and_trailing_ones_trim() {
     .unwrap() else {
         panic!("expected tensor");
     };
-    assert_eq!(value.shape, vec![0, usize::MAX]);
+    assert_eq!(value.shape(), vec![0, usize::MAX]);
     assert_eq!(value.numeric_dtype(), NumericDType::I64);
 }
 
@@ -160,7 +160,7 @@ fn row_size_vectors_accept_exact_integer_storage_and_columns_reject() {
     else {
         panic!("expected tensor");
     };
-    assert_eq!(value.shape, vec![0, usize::MAX]);
+    assert_eq!(value.shape(), vec![0, usize::MAX]);
 
     let column = Tensor::new_integer(IntegerStorage::U8(vec![0, 3]), vec![2, 1]).unwrap();
     let err = run_static(EmptyClass::Uint8, vec![Value::Tensor(column)]).unwrap_err();
@@ -249,7 +249,7 @@ fn integer_static_names_are_registered() {
         let Value::Tensor(result) = result else {
             panic!("expected typed empty for {name}");
         };
-        assert_eq!(result.shape, vec![0, 7]);
+        assert_eq!(result.shape(), vec![0, 7]);
         assert_eq!(
             result.numeric_dtype().class_name(),
             name.strip_suffix(".empty").unwrap()
@@ -270,7 +270,7 @@ fn dotted_integer_static_dispatch_preserves_wide_shape_and_class() {
     let Value::Tensor(value) = value else {
         panic!("expected uint64 tensor");
     };
-    assert_eq!(value.shape, vec![0, usize::MAX]);
+    assert_eq!(value.shape(), vec![0, usize::MAX]);
     assert_eq!(value.numeric_dtype(), NumericDType::U64);
     assert!(value.integer_storage().is_some());
 }

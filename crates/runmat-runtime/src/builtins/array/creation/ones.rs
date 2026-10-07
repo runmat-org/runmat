@@ -816,7 +816,7 @@ pub(crate) mod tests {
         let result = block_on(ones_builtin(args)).expect("ones");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
+                assert_eq!(t.shape(), vec![3, 3]);
                 assert!(t.materialize_f64().iter().all(|&x| x == 1.0));
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -830,7 +830,7 @@ pub(crate) mod tests {
         let result = block_on(ones_builtin(args)).expect("ones");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![2, 4]);
+                assert_eq!(t.shape(), vec![2, 4]);
                 assert!(t.materialize_f64().iter().all(|&x| x == 1.0));
             }
             other => panic!("expected tensor, got {other:?}"),
@@ -844,7 +844,7 @@ pub(crate) mod tests {
         let args = vec![Value::Tensor(size_vec)];
         let result = block_on(ones_builtin(args)).expect("ones");
         match result {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![2, 3]),
+            Value::Tensor(t) => assert_eq!(t.shape(), vec![2, 3]),
             other => panic!("expected tensor, got {other:?}"),
         }
     }
@@ -860,7 +860,7 @@ pub(crate) mod tests {
         let Value::Tensor(tensor) = result else {
             panic!("expected empty host tensor");
         };
-        assert_eq!(tensor.shape, vec![0, 3]);
+        assert_eq!(tensor.shape(), vec![0, 3]);
     }
 
     #[test]
@@ -922,7 +922,7 @@ pub(crate) mod tests {
             let Value::Tensor(output) = result else {
                 panic!("expected integer tensor");
             };
-            assert_eq!(output.shape, vec![1, 2]);
+            assert_eq!(output.shape(), vec![1, 2]);
             assert_eq!(output.integer_storage(), Some(&storage.ones_like(2)));
         }
 
@@ -974,7 +974,7 @@ pub(crate) mod tests {
             let Value::Tensor(output) = result else {
                 panic!("expected integer tensor for {class_name}");
             };
-            assert_eq!(output.shape, vec![2, 3]);
+            assert_eq!(output.shape(), vec![2, 3]);
             assert_eq!(output.integer_storage(), Some(&expected));
         }
     }
@@ -990,7 +990,7 @@ pub(crate) mod tests {
         let result = block_on(ones_builtin(args)).expect("ones");
         match result {
             Value::ComplexTensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
+                assert_eq!(t.shape(), vec![3, 3]);
                 assert!(t
                     .materialize_f64()
                     .iter()
@@ -1013,7 +1013,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(output) = result else {
             panic!("expected complex tensor");
         };
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), vec![2, 2]);
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
     }
 
@@ -1145,7 +1145,7 @@ pub(crate) mod tests {
         match result {
             Value::GpuTensor(h) => {
                 let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather");
-                assert_eq!(gathered.shape, vec![2, 2]);
+                assert_eq!(gathered.shape(), vec![2, 2]);
                 assert!(gathered.materialize_f64().iter().all(|&x| x == 1.0));
             }
             other => panic!("expected gpu tensor, got {other:?}"),
@@ -1206,6 +1206,6 @@ pub(crate) mod tests {
             block_on(crate::call_builtin_async("sum", &[s, Value::Num(1.0)])).expect("sum");
         // Gather and validate shapes; values are deterministic for sin(1)
         let gathered = test_support::gather(summed).expect("gather");
-        assert_eq!(gathered.shape, vec![1, 2]);
+        assert_eq!(gathered.shape(), vec![1, 2]);
     }
 }

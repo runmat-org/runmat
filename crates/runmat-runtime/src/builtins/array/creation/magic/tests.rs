@@ -13,7 +13,7 @@ fn automatic_complex_control_materializes_without_losing_its_real_component() {
         let Value::Tensor(result) = result else {
             panic!("expected host square");
         };
-        assert_eq!(result.shape, vec![3, 3]);
+        assert_eq!(result.shape(), vec![3, 3]);
         assert_magic_properties(&result.materialize_f64(), 3);
     });
 }
@@ -70,7 +70,7 @@ fn magic_two_matches_documented_degenerate_square() {
     let Value::Tensor(tensor) = value else {
         panic!("expected tensor");
     };
-    assert_eq!(tensor.shape, vec![2, 2]);
+    assert_eq!(tensor.shape(), vec![2, 2]);
     assert_eq!(tensor.materialize_f64(), vec![1.0, 4.0, 3.0, 2.0]);
 }
 
@@ -81,7 +81,7 @@ fn magic_uses_floor_of_real_first_element() {
     let Value::Tensor(tensor) = value else {
         panic!("expected tensor");
     };
-    assert_eq!(tensor.shape, vec![3, 3]);
+    assert_eq!(tensor.shape(), vec![3, 3]);
 
     let complex =
         ComplexTensor::new(vec![(4.8, 7.0), (12.0, 0.0)], vec![1, 2]).expect("complex input");
@@ -89,7 +89,7 @@ fn magic_uses_floor_of_real_first_element() {
     let Value::Tensor(tensor) = value else {
         panic!("expected tensor");
     };
-    assert_eq!(tensor.shape, vec![4, 4]);
+    assert_eq!(tensor.shape(), vec![4, 4]);
 
     let logical = runmat_value::LogicalArray::new(vec![1, 0], vec![1, 2]).expect("logical input");
     assert_eq!(
@@ -110,7 +110,7 @@ fn magic_zero_is_empty() {
     let value = magic_builtin(vec![Value::Num(0.0)]).expect("magic");
     match value {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![0, 0]);
+            assert_eq!(tensor.shape(), vec![0, 0]);
             assert!(tensor.materialize_f64().is_empty());
         }
         other => panic!("expected empty tensor, got {other:?}"),
@@ -152,7 +152,7 @@ fn magic_three_matches_matlab() {
         Value::Tensor(tensor) => tensor,
         other => panic!("expected tensor, got {other:?}"),
     };
-    assert_eq!(tensor.shape, vec![3, 3]);
+    assert_eq!(tensor.shape(), vec![3, 3]);
     let expected = vec![8.0, 3.0, 4.0, 1.0, 5.0, 9.0, 6.0, 7.0, 2.0];
     assert_eq!(tensor.materialize_f64(), expected);
 }
@@ -164,7 +164,7 @@ fn magic_four_matches_matlab() {
         Value::Tensor(tensor) => tensor,
         other => panic!("expected tensor, got {other:?}"),
     };
-    assert_eq!(tensor.shape, vec![4, 4]);
+    assert_eq!(tensor.shape(), vec![4, 4]);
     let expected = vec![
         16.0, 5.0, 9.0, 4.0, 2.0, 11.0, 7.0, 14.0, 3.0, 10.0, 6.0, 15.0, 13.0, 8.0, 12.0, 1.0,
     ];
@@ -223,7 +223,7 @@ fn magic_six_matches_matlab() {
         Value::Tensor(tensor) => tensor,
         other => panic!("expected tensor, got {other:?}"),
     };
-    assert_eq!(tensor.shape, vec![6, 6]);
+    assert_eq!(tensor.shape(), vec![6, 6]);
     let expected = vec![
         35.0, 3.0, 31.0, 8.0, 30.0, 4.0, 1.0, 32.0, 9.0, 28.0, 5.0, 36.0, 6.0, 7.0, 2.0, 33.0,
         34.0, 29.0, 26.0, 21.0, 22.0, 17.0, 12.0, 13.0, 19.0, 23.0, 27.0, 10.0, 14.0, 18.0, 24.0,
@@ -239,7 +239,7 @@ fn magic_ten_is_valid_magic_square() {
         Value::Tensor(tensor) => tensor,
         other => panic!("expected tensor, got {other:?}"),
     };
-    assert_eq!(tensor.shape, vec![10, 10]);
+    assert_eq!(tensor.shape(), vec![10, 10]);
     assert_magic_properties(&tensor.materialize_f64(), 10);
 }
 
@@ -250,6 +250,6 @@ fn magic_fourteen_is_valid_magic_square() {
         Value::Tensor(tensor) => tensor,
         other => panic!("expected tensor, got {other:?}"),
     };
-    assert_eq!(tensor.shape, vec![14, 14]);
+    assert_eq!(tensor.shape(), vec![14, 14]);
     assert_magic_properties(&tensor.materialize_f64(), 14);
 }

@@ -299,7 +299,7 @@ pub(crate) mod tests {
         match indices {
             Value::Tensor(t) => {
                 assert_eq!(t.materialize_f64(), vec![2.0, 3.0, 1.0]);
-                assert_eq!(t.shape, vec![3, 1]);
+                assert_eq!(t.shape(), vec![3, 1]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
@@ -512,7 +512,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![3.0, 1.0, 2.0], vec![3, 1]).unwrap();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let indices = argsort_builtin(Value::GpuTensor(handle), Vec::new()).expect("argsort");
@@ -533,7 +533,7 @@ pub(crate) mod tests {
         let cpu_indices = argsort_builtin(Value::Tensor(tensor.clone()), Vec::new()).unwrap();
         let view = runmat_accelerate_api::HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let gpu_handle = runmat_accelerate_api::provider()
             .unwrap()
@@ -547,7 +547,7 @@ pub(crate) mod tests {
         };
         assert!(matches!(gpu_indices, Value::GpuTensor(_)));
         let gpu_tensor = test_support::gather(gpu_indices).expect("gather GPU indices");
-        assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
+        assert_eq!(gpu_tensor.shape(), cpu_tensor.shape());
         assert_eq!(gpu_tensor.materialize_f64(), cpu_tensor.materialize_f64());
     }
 }
