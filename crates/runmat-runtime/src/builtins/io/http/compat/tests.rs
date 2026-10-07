@@ -197,6 +197,27 @@ fn websave_query_values_preserve_exact_integer_vectors() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn websave_numeric_query_geometry_accepts_low_rank_values_and_rejects_matrices() {
+    let rank_one = Tensor::new_integer(
+        runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        vec![2],
+    )
+    .expect("rank-one query");
+    assert_eq!(
+        query_value_to_string(&Value::Tensor(rank_one), "id").expect("rank-one query text"),
+        "9007199254740993,18446744073709551615"
+    );
+    let rank_zero = Value::Tensor(Tensor::new(vec![7.0], Vec::new()).expect("rank-zero query"));
+    assert_eq!(query_value_to_string(&rank_zero, "id").unwrap(), "7");
+    let empty_matrix =
+        Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty query matrix"));
+    assert!(query_value_to_string(&empty_matrix, "id").is_err());
+    let matrix = Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2]).expect("query matrix"));
+    assert!(query_value_to_string(&matrix, "id").is_err());
+}
+
 #[test]
 fn sendmail_rejects_integer_payloads_before_transport() {
     let error = run(sendmail_builtin(

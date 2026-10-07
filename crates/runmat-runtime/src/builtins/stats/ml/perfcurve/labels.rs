@@ -28,7 +28,7 @@ pub(super) struct LabelVector {
 pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<LabelVector> {
     match value {
         Value::Tensor(tensor) => {
-            ensure_vector_shape(&tensor.shape, name)?;
+            ensure_vector_shape(tensor.shape(), name)?;
             let labels = if let Some(storage) = tensor.integer_storage() {
                 storage
                     .exact_values()
@@ -202,7 +202,7 @@ pub(super) fn ensure_categorical_vector_shape(
     name: &str,
 ) -> BuiltinResult<()> {
     match object.properties.get("Codes") {
-        Some(Value::Tensor(tensor)) => ensure_vector_shape(&tensor.shape, name),
+        Some(Value::Tensor(tensor)) => ensure_vector_shape(tensor.shape(), name),
         Some(_) => Err(invalid("perfcurve: categorical Codes must be numeric")),
         None => Ok(()),
     }

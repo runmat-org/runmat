@@ -29,7 +29,7 @@ pub(super) struct EncodedArray {
 pub(super) fn encoded_values(value: Value) -> BuiltinResult<EncodedArray> {
     match value {
         Value::Tensor(tensor) => {
-            let shape = normalized_shape(&tensor.shape);
+            let shape = normalized_shape(tensor.shape());
             Ok(EncodedArray {
                 data: tensor::tensor_into_values_f64(tensor),
                 shape,

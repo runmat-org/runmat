@@ -120,7 +120,7 @@ fn hash_value(
         }
         Value::Tensor(tensor) => {
             tag(hash, ValueTag::Tensor);
-            shape(hash, budget, &tensor.shape)?;
+            shape(hash, budget, tensor.shape())?;
             dtype(hash, tensor.numeric_dtype());
             for index in 0..tensor.len() {
                 numeric(hash, budget, tensor.numeric_value_at(index)?)?;
@@ -128,7 +128,7 @@ fn hash_value(
         }
         Value::ComplexTensor(tensor) => {
             tag(hash, ValueTag::ComplexTensor);
-            shape(hash, budget, &tensor.shape)?;
+            shape(hash, budget, tensor.shape())?;
             dtype(hash, tensor.numeric_dtype());
             for index in 0..tensor.len() {
                 let (real, imaginary) = tensor.numeric_value_at(index)?;

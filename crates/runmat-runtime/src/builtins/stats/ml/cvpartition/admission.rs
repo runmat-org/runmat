@@ -185,7 +185,7 @@ pub(super) fn inspect_host_observation_count(value: &Value) -> BuiltinResult<Opt
                 positive_integer_number(tensor::tensor_value_f64(tensor, 0), "n")?
             }
         }
-        Value::Tensor(tensor) => vector_len(&tensor.shape, tensor::tensor_element_len(tensor))?,
+        Value::Tensor(tensor) => vector_len(tensor.shape(), tensor::tensor_element_len(tensor))?,
         Value::LogicalArray(array) => vector_len(&array.shape, array.data.len())?,
         Value::StringArray(array) => vector_len(&array.shape, array.data.len())?,
         Value::CharArray(chars) if chars.rows > 0 => chars.rows,

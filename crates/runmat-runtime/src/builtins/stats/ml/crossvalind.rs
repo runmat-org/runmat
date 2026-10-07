@@ -478,7 +478,7 @@ fn classes_from_value(value: &Value, n: usize) -> BuiltinResult<Vec<Option<Parti
 }
 
 fn numeric_labels(tensor: &Tensor) -> BuiltinResult<Vec<Option<PartitionLabel>>> {
-    ensure_vector(&tensor.shape, tensor.len(), "Classes")?;
+    ensure_vector(tensor.shape(), tensor.len(), "Classes")?;
     if let Some(storage) = tensor.integer_storage() {
         return Ok(storage
             .exact_values()

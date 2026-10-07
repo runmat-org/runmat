@@ -77,7 +77,7 @@ pub(super) fn standardize_missing_value(
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => Ok(Value::Tensor(tensor)),
         Value::Tensor(tensor) => {
             let dtype = tensor.numeric_dtype();
-            let shape = tensor.shape.clone();
+            let shape = tensor.shape().to_vec();
             let mut values = tensor_utils::tensor_into_values_f64(tensor);
             for value in &mut values {
                 if indicators

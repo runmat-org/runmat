@@ -156,6 +156,27 @@ fn query_text_and_numeric_scalar_read_typed_integer_storage_exactly() {
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn numeric_query_geometry_accepts_low_rank_values_and_rejects_matrices() {
+    let rank_one = Tensor::new_integer(
+        runmat_value::IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        vec![2],
+    )
+    .expect("rank-one query");
+    assert_eq!(
+        value_to_query_string(&Value::Tensor(rank_one), "id").expect("rank-one query text"),
+        "9007199254740993,18446744073709551615"
+    );
+    let rank_zero = Value::Tensor(Tensor::new(vec![7.0], Vec::new()).expect("rank-zero query"));
+    assert_eq!(value_to_query_string(&rank_zero, "id").unwrap(), "7");
+    let empty_matrix =
+        Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty query matrix"));
+    assert_eq!(value_to_query_string(&empty_matrix, "id").unwrap(), "");
+    let matrix = Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2]).expect("query matrix"));
+    assert!(value_to_query_string(&matrix, "id").is_err());
+}
+
 fn error_message(err: RuntimeError) -> String {
     err.message().to_string()
 }
@@ -308,7 +329,7 @@ fn webread_fetches_binary_payload() {
 
     match result {
         Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, vec![1, 5]);
+            assert_eq!(tensor.shape(), &[1, 5]);
             assert_eq!(
                 tensor.integer_storage(),
                 Some(&IntegerStorage::U8(payload.to_vec()))

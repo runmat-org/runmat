@@ -173,7 +173,7 @@ async fn value_to_tensor(value: Value, role: QqplotInputRole) -> BuiltinResult<T
     let tensor = tensor::value_into_tensor_for(NAME, gathered)
         .map_err(|err| invalid(format!("qqplot: {err}")))?;
     if tensor.integer_storage().is_some() {
-        return Tensor::new(tensor_values_f64(&tensor), tensor.shape.clone())
+        return Tensor::new(tensor_values_f64(&tensor), tensor.shape().to_vec())
             .map_err(|err| internal(format!("qqplot: {err}")));
     }
     Ok(tensor)

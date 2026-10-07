@@ -60,7 +60,7 @@ pub(super) fn moving_mad(
         .dim
         .unwrap_or_else(|| first_nonsingleton_dim(rows, cols));
     validate_matrix_dim(dim, "movmad")?;
-    let shape = tensor.shape.clone();
+    let shape = tensor.shape().to_vec();
     let output_dtype = if tensor.integer_storage().is_some() {
         NumericDType::F64
     } else {

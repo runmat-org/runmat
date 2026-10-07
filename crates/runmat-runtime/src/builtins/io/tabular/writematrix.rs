@@ -276,7 +276,7 @@ impl MatrixData {
                             format!("writematrix: {msg}"),
                         )
                     })?;
-                ensure_matrix_shape(&tensor.shape, "numeric")?;
+                ensure_matrix_shape(tensor.shape(), "numeric")?;
                 Ok(MatrixData::Numeric(tensor))
             }
         }
@@ -331,7 +331,7 @@ enum MatrixCell<'a> {
 fn preflight_data(value: &Value) -> BuiltinResult<()> {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => Ok(()),
-        Value::Tensor(tensor) => ensure_matrix_shape(&tensor.shape, "numeric"),
+        Value::Tensor(tensor) => ensure_matrix_shape(tensor.shape(), "numeric"),
         Value::LogicalArray(array) => ensure_matrix_shape(&array.shape, "logical"),
         Value::StringArray(array) => ensure_matrix_shape(&array.shape, "string"),
         Value::GpuTensor(handle) => {

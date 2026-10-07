@@ -106,6 +106,41 @@ fn writematrix_preserves_typed_integer_matrix_values_exactly() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn writematrix_preserves_public_low_rank_numeric_projection() {
+    let rank_zero_path = temp_path("csv");
+    let rank_zero = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), Vec::new())
+        .expect("rank-zero integer");
+    block_on(writematrix_builtin(
+        Value::Tensor(rank_zero),
+        vec![Value::from(rank_zero_path.to_string_lossy().into_owned())],
+    ))
+    .expect("write rank-zero tensor");
+    assert_eq!(
+        fs::read_to_string(&rank_zero_path).unwrap(),
+        "18446744073709551615\n"
+    );
+    let _ = fs::remove_file(rank_zero_path);
+
+    let rank_one_path = temp_path("csv");
+    let rank_one = Tensor::new_integer(
+        IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        vec![2],
+    )
+    .expect("rank-one integer");
+    block_on(writematrix_builtin(
+        Value::Tensor(rank_one),
+        vec![Value::from(rank_one_path.to_string_lossy().into_owned())],
+    ))
+    .expect("write rank-one tensor");
+    assert_eq!(
+        fs::read_to_string(&rank_one_path).unwrap(),
+        "9007199254740993\n18446744073709551615\n"
+    );
+    let _ = fs::remove_file(rank_one_path);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn writematrix_honours_write_mode_append() {
     let path = temp_path("txt");
@@ -200,7 +235,7 @@ fn writematrix_accepts_gpu_tensor_inputs() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
         let filename = path.to_string_lossy().into_owned();

@@ -192,7 +192,7 @@ pub(super) fn query_value_to_string(value: &Value, name: &str) -> BuiltinResult<
         Value::Int(value) => Ok(value.decimal_string()),
         Value::Bool(value) => Ok(if *value { "true" } else { "false" }.to_string()),
         Value::Tensor(tensor)
-            if tensor.shape.len() <= 2 && (tensor.rows() == 1 || tensor.cols() == 1) =>
+            if tensor.shape().len() <= 2 && (tensor.rows() == 1 || tensor.cols() == 1) =>
         {
             Ok((0..tensor.len())
                 .map(|index| {

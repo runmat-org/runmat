@@ -45,6 +45,13 @@ fn handle_controls_do_not_alias_same_shape_literals_or_certify_unknown_payloads(
         handle_admission::input(&changed).identity_digest,
         "same-class and same-shape native payloads need exact identity"
     );
+    let rank_zero = Value::Tensor(Tensor::from_f32(vec![1.0], Vec::new()).unwrap());
+    let matrix_scalar = Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap());
+    assert_ne!(
+        handle_admission::input(&rank_zero).identity_digest,
+        handle_admission::input(&matrix_scalar).identity_digest,
+        "exact identity includes the full low-rank shape"
+    );
     let large = Value::Tensor(Tensor::from_f32(vec![0.0; 4_097], vec![1, 4_097]).unwrap());
     assert!(handle_admission::input(&large).identity_digest.is_none());
     let first_slice = Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap());

@@ -504,7 +504,7 @@ fn scatterhist_renders_three_axes_with_histograms() {
     let Value::Tensor(handles) = handles else {
         panic!("expected handle tensor");
     };
-    assert_eq!(handles.shape, vec![3, 1]);
+    assert_eq!(handles.shape(), &[3, 1]);
     let decoded = handles
         .materialize_f64()
         .iter()
@@ -563,7 +563,7 @@ fn scatterhist_documented_group_overlay_has_two_series_and_both_marginal_layers(
     let Value::Tensor(handles) = handles else {
         panic!("expected axes handle tensor");
     };
-    assert_eq!(handles.shape, vec![3, 1]);
+    assert_eq!(handles.shape(), &[3, 1]);
 
     let figure = clone_figure(current_figure_handle()).unwrap();
     assert_eq!(figure.axes_grid(), (2, 2));

@@ -122,7 +122,7 @@ pub(super) fn value_to_query_string(value: &Value, name: &str) -> BuiltinResult<
         Value::Int(i) => Ok(i.decimal_string()),
         Value::Bool(b) => Ok(if *b { "true".into() } else { "false".into() }),
         Value::Tensor(tensor) => {
-            if tensor.shape.len() > 2 || (tensor.rows() > 1 && tensor.cols() > 1) {
+            if tensor.shape().len() > 2 || (tensor.rows() > 1 && tensor.cols() > 1) {
                 Err(webread_error(format!(
                     "webread: query parameter '{}' must be a scalar or vector",
                     name

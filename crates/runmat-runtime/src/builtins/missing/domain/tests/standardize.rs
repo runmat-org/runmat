@@ -1,6 +1,31 @@
 use super::super::entrypoints::standardize_missing_builtin;
 use super::*;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn standardize_missing_retains_single_class_and_low_rank_shape() {
+    for (shape, values) in [
+        (Vec::new(), vec![-99.0_f32]),
+        (vec![2], vec![-99.0_f32, 2.0]),
+    ] {
+        let input = Tensor::from_f32(values, shape.clone()).unwrap();
+        let output = block_on(standardize_missing_builtin(
+            Value::Tensor(input),
+            vec![Value::Num(-99.0)],
+        ))
+        .unwrap();
+        let Value::Tensor(output) = output else {
+            panic!("missing-value conversion must retain tensor representation");
+        };
+        assert_eq!(output.shape(), shape);
+        let values = output.as_f32_slice().expect("single output storage");
+        assert!(values[0].is_nan());
+        if values.len() == 2 {
+            assert_eq!(values[1], 2.0);
+        }
+    }
+}
+
 #[test]
 fn standardize_missing_replaces_indicators() {
     let result = block_on(standardize_missing_builtin(

@@ -27,7 +27,7 @@ pub(super) fn admit_host_visible(args: &[Value]) -> BuiltinResult<usize> {
         let name = if index == 0 { "x" } else { "y" };
         let (shape, count): (Option<&[usize]>, usize) = match value {
             Value::Num(_) | Value::Int(_) | Value::Bool(_) => (None, 1),
-            Value::Tensor(tensor) => (Some(&tensor.shape), tensor.len()),
+            Value::Tensor(tensor) => (Some(tensor.shape()), tensor.len()),
             Value::LogicalArray(array) => (Some(&array.shape), array.len()),
             Value::GpuTensor(handle) => {
                 if handle.physical().storage() != GpuTensorStorage::Real {
@@ -117,7 +117,14 @@ pub(super) fn parse_xy_and_rest(
 pub(super) fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>> {
     let tensor = tensor::value_into_tensor_for(NAME, value)
         .map_err(|_| invalid(format!("scatterhist: {name} must be numeric")))?;
-    if tensor.shape.iter().copied().filter(|dim| *dim > 1).count() > 1 {
+    if tensor
+        .shape()
+        .iter()
+        .copied()
+        .filter(|dim| *dim > 1)
+        .count()
+        > 1
+    {
         return Err(invalid(format!("scatterhist: {name} must be a vector")));
     }
     Ok(tensor_values_f64(&tensor))

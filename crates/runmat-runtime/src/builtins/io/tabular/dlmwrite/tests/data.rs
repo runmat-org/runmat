@@ -70,6 +70,47 @@ fn dlmwrite_preserves_typed_integer_matrix_values_exactly_by_default() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn dlmwrite_preserves_public_low_rank_matrix_projection() {
+    let rank_zero_path = temp_path("csv");
+    let rank_zero = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), Vec::new())
+        .expect("rank-zero integer");
+    dlmwrite_builtin(
+        Value::from(rank_zero_path.to_string_lossy().into_owned()),
+        Value::Tensor(rank_zero),
+        Vec::new(),
+    )
+    .expect("write rank-zero tensor");
+    assert_eq!(
+        fs::read_to_string(&rank_zero_path).unwrap(),
+        format!("18446744073709551615{}", platform_newline())
+    );
+    let _ = fs::remove_file(rank_zero_path);
+
+    let rank_one_path = temp_path("csv");
+    let rank_one = Tensor::new_integer(
+        IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        vec![2],
+    )
+    .expect("rank-one integer");
+    dlmwrite_builtin(
+        Value::from(rank_one_path.to_string_lossy().into_owned()),
+        Value::Tensor(rank_one),
+        Vec::new(),
+    )
+    .expect("write rank-one tensor");
+    assert_eq!(
+        fs::read_to_string(&rank_one_path).unwrap(),
+        format!(
+            "9007199254740993{}18446744073709551615{}",
+            platform_newline(),
+            platform_newline()
+        )
+    );
+    let _ = fs::remove_file(rank_one_path);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn dlmwrite_accepts_positional_delimiter_and_offsets() {
     let path = temp_path("txt");

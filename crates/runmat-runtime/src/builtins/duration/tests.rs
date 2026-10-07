@@ -41,6 +41,13 @@ fn duration_low_rank_components_and_indexing_preserve_admitted_geometry() {
     let vector = run_duration(vec![hours.clone(), Value::Num(0.0), Value::Num(0.0)]);
     let days = duration_tensor_from_duration_value(&vector).unwrap();
     assert_eq!(days.shape(), &[2]);
+    let strings = duration_string_array(&vector).unwrap().unwrap();
+    assert_eq!(strings.shape, vec![2]);
+    assert_eq!(strings.data.len(), 2);
+    assert_eq!(
+        duration_summary(&vector).unwrap(),
+        Some("[2 duration]".into())
+    );
     let selectors = Value::Cell(
         runmat_value::CellArray::new(
             vec![integer_tensor(

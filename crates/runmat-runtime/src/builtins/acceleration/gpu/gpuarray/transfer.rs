@@ -28,7 +28,7 @@ pub(super) fn upload_real_tensor(
             provider,
             &runmat_accelerate_api::HostLogicalTensorView {
                 data: &bits,
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             },
             protected,
         )
@@ -52,7 +52,12 @@ mod tests {
     use crate::builtins::common::test_support;
 
     fn check_logical_producer(provider: &'static dyn runmat_accelerate_api::AccelProvider) {
-        for (data, shape) in [(vec![0.0, 1.0], vec![2, 1]), (vec![], vec![0, 3])] {
+        for (data, shape) in [
+            (vec![0.0, 1.0], vec![2, 1]),
+            (vec![], vec![0, 3]),
+            (vec![1.0], Vec::new()),
+            (vec![0.0, 1.0], vec![2]),
+        ] {
             let tensor = Tensor::new(data.clone(), shape.clone()).unwrap();
             let handle = upload_real_tensor(provider, &tensor, true, &[]).unwrap();
             assert!(runmat_accelerate_api::handle_is_logical(&handle));
@@ -100,7 +105,7 @@ mod tests {
                 gathered.integer_storage(),
                 Some(&IntegerStorage::U32(vec![1, 257]))
             );
-            assert_eq!(gathered.shape, vec![2, 1]);
+            assert_eq!(gathered.shape(), &[2, 1]);
             drop(converted);
             assert!(weak.acquire().is_ok());
             drop(source);

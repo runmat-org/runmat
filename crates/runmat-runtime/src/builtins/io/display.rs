@@ -131,7 +131,7 @@ fn implicit_integer_summary(value: &Value) -> Option<String> {
             if tensor.len() == 1 {
                 return Some(tensor.numeric_dtype().class_name().to_string());
             }
-            let shape = tensor.shape.as_slice();
+            let shape = tensor.shape();
             let dimensions = shape
                 .iter()
                 .map(usize::to_string)

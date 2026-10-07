@@ -120,7 +120,7 @@ fn vector(shape: &[usize], role: &str) -> BuiltinResult<usize> {
 
 fn numeric_shape(value: &Value, role: &str) -> BuiltinResult<usize> {
     match value {
-        Value::Tensor(tensor) => vector(&tensor.shape, role),
+        Value::Tensor(tensor) => vector(tensor.shape(), role),
         Value::Num(_) | Value::Int(_) => Ok(1),
         Value::GpuTensor(handle)
             if handle.physical().storage() == GpuTensorStorage::Real
@@ -136,7 +136,7 @@ fn numeric_shape(value: &Value, role: &str) -> BuiltinResult<usize> {
 
 fn labels_shape(value: &Value, role: &str) -> BuiltinResult<Option<usize>> {
     match value {
-        Value::Tensor(tensor) => vector(&tensor.shape, role).map(Some),
+        Value::Tensor(tensor) => vector(tensor.shape(), role).map(Some),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => Ok(Some(1)),
         Value::LogicalArray(array) => vector(&array.shape, role).map(Some),
         Value::StringArray(array) => vector(&array.shape, role).map(Some),

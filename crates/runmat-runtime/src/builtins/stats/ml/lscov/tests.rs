@@ -57,6 +57,21 @@ fn rank_one_response_matches_tensor_row_vector_admission() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rank_one_design_uses_historical_one_by_n_matrix_geometry() {
+    let design = Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![2]).unwrap());
+    let response = Value::Tensor(Tensor::new(vec![2.0], vec![1]).unwrap());
+    let Value::Tensor(coefficients) =
+        block_on(lscov_builtin(design, response, Vec::new())).unwrap()
+    else {
+        panic!("rank-one design must return a coefficient tensor")
+    };
+    assert_eq!(coefficients.shape(), &[2, 1]);
+    assert_close(coefficients.materialize_f64()[0], 2.0);
+    assert_close(coefficients.materialize_f64()[1], 0.0);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn dense_rank_boundaries_preserve_design_and_weight_admission() {
     let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
     let b = tensor(vec![1.0, 3.0, 5.0], 3, 1);

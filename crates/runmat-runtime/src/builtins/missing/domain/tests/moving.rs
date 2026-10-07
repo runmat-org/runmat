@@ -1,6 +1,27 @@
 use super::super::entrypoints::movmad_builtin;
 use super::*;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn moving_mad_retains_single_precision_and_low_rank_geometry() {
+    for (shape, values, expected) in [
+        (Vec::new(), vec![3.0_f32], vec![0.0_f32]),
+        (vec![3], vec![1.0_f32, 3.0, 5.0], vec![1.0_f32, 2.0, 1.0]),
+    ] {
+        let input = Tensor::from_f32(values, shape.clone()).unwrap();
+        let Value::Tensor(output) = block_on(movmad_builtin(
+            Value::Tensor(input),
+            Value::Num(3.0),
+            Vec::new(),
+        ))
+        .unwrap() else {
+            panic!("moving MAD must retain tensor representation");
+        };
+        assert_eq!(output.shape(), shape);
+        assert_eq!(output.as_f32_slice(), Some(expected.as_slice()));
+    }
+}
+
 #[test]
 fn movmad_computes_centered_median_absolute_deviation() {
     let result = block_on(movmad_builtin(

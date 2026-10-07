@@ -449,10 +449,10 @@ pub(super) fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
 }
 
 pub(super) fn ensure_matrix_shape(tensor: &Tensor) -> BuiltinResult<()> {
-    if tensor.shape.len() <= 2 {
+    if tensor.shape().len() <= 2 {
         return Ok(());
     }
-    if tensor.shape[2..].iter().all(|&dim| dim == 1) {
+    if tensor.shape()[2..].iter().all(|&dim| dim == 1) {
         return Ok(());
     }
     Err(dlmwrite_error_with(

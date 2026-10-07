@@ -84,7 +84,7 @@ pub fn duration_string_array(value: &Value) -> BuiltinResult<Option<StringArray>
     for value in day_values.iter() {
         strings.push(format_duration_value(*value, &format)?);
     }
-    let array = StringArray::new(strings, days.shape.clone())
+    let array = StringArray::new(strings, days.shape().to_vec())
         .map_err(|err| duration_error(DurationErrorKind::Internal, format!("duration: {err}")))?;
     Ok(Some(array))
 }
@@ -140,7 +140,7 @@ pub fn duration_summary(value: &Value) -> BuiltinResult<Option<String>> {
     if len == 1 {
         return duration_display_text(value);
     }
-    let shape = days.shape.clone();
+    let shape = days.shape();
     Ok(Some(format!(
         "[{} duration]",
         shape

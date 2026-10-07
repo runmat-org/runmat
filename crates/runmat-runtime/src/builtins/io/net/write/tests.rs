@@ -240,6 +240,13 @@ fn write_extensions_are_gated_before_client_access() {
         WRITE_NONVECTOR_EXTENSION.error_identifier
     );
 
+    for (shape, values) in [(Vec::new(), vec![1.0]), (vec![2], vec![1.0, 2.0])] {
+        let data = Value::Tensor(Tensor::new(values, shape).expect("low-rank payload"));
+        let error = run_write(&host, Value::Num(0.0), data, Vec::new())
+            .expect_err("vector payload reaches client admission");
+        assert_eq!(error.identifier(), WRITE_ERROR_INVALID_CLIENT.identifier);
+    }
+
     let sparse =
         SparseTensor::new_integer(2, 1, vec![0, 1], vec![0], IntegerStorage::U8(vec![1])).unwrap();
     let error = run_write(

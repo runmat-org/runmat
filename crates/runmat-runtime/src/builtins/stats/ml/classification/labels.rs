@@ -66,7 +66,7 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
 }
 
 pub(super) fn vector_values(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<NumericScalar>> {
-    if tensor.shape.iter().filter(|dim| **dim > 1).count() > 1 {
+    if tensor.shape().iter().filter(|dim| **dim > 1).count() > 1 {
         return Err(invalid_argument(format!(
             "classify: {name} must be a vector"
         )));
@@ -83,7 +83,7 @@ pub(super) fn vector_values(tensor: &Tensor, name: &str) -> BuiltinResult<Vec<Nu
 pub(super) fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
-            if tensor.shape.iter().filter(|dim| **dim > 1).count() > 1 {
+            if tensor.shape().iter().filter(|dim| **dim > 1).count() > 1 {
                 return Err(invalid_argument(format!(
                     "classify: {name} must be a vector"
                 )));

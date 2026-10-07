@@ -1,5 +1,21 @@
 use super::*;
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn logical_scalar_tensor_conversion_preserves_low_rank_geometry() {
+    for shape in [Vec::new(), vec![1]] {
+        let input =
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), shape.clone()).unwrap();
+        let Value::LogicalArray(output) =
+            normalize_logical_value(Value::Tensor(input), BUILTIN_CONSTRUCTOR).unwrap()
+        else {
+            panic!("tensor conversion must retain logical array representation");
+        };
+        assert_eq!(output.shape, shape);
+        assert_eq!(output.data, vec![1]);
+    }
+}
+
 #[test]
 fn typed_map_keys_preserve_full_uint64_range() {
     assert_eq!(

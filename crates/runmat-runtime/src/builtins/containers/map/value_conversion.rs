@@ -91,7 +91,7 @@ pub(super) fn normalize_logical_value(value: Value, builtin: &'static str) -> Bu
                     })
                     .collect()
             };
-            let logical = LogicalArray::new(flags, t.shape.clone())
+            let logical = LogicalArray::new(flags, t.shape().to_vec())
                 .map_err(|e| map_error(format!("containers.Map: {e}"), builtin))?;
             Ok(Value::LogicalArray(logical))
         }

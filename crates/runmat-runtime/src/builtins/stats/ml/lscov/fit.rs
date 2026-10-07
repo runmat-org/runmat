@@ -37,8 +37,7 @@ pub(super) fn lscov_real(
     rhs_cols: usize,
     requested_outputs: usize,
 ) -> BuiltinResult<Vec<Value>> {
-    let rows = a.rows;
-    let cols = a.cols;
+    let (rows, cols) = lscov_dense_dimensions(&a);
     let a_values = tensor::tensor_values_f64_cow(&a);
     let a_mat = DMatrix::from_column_slice(rows, cols, a_values.as_ref());
     let b_mat = real_rhs_matrix(&b, rows, rhs_cols)?;
