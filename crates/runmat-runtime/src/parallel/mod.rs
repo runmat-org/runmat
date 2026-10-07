@@ -2,6 +2,7 @@
 
 pub mod assembly;
 pub mod codistributor;
+pub mod composite;
 pub mod current;
 pub mod distribution;
 pub mod future;

@@ -5056,6 +5056,45 @@ fn expand_all_elements_in_args() {
 }
 
 #[test]
+fn scalar_brace_read_requires_exactly_one_cell_value() {
+    let single = execute_source_result("C = {42}; x = C{:};")
+        .expect("one selected cell value is valid in a scalar RHS");
+    assert!(has_num(&single, 42.0));
+
+    for source in [
+        "C = {}; x = C{:};",
+        "C = {1, 2}; x = C{:};",
+        "C = {1, 2}; x = C{1:2};",
+    ] {
+        let error = execute_source_result(source)
+            .expect_err("scalar RHS must reject non-singleton cell contents");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:CommaSeparatedListRequiresSingleValue"),
+            "{source}: {error}"
+        );
+    }
+}
+
+#[test]
+fn prepared_cell_destination_and_bracketed_aggregate_keep_expansion() {
+    let values = execute_source_result(
+        "C = {0, 0}; [C{:}] = deal(4, 5); A = [C{:}]; first = C{1}; second = C{2};",
+    )
+    .expect("prepared cell destination and aggregate expansion");
+    assert!(has_num(&values, 4.0));
+    assert!(has_num(&values, 5.0));
+    assert!(has_numeric_tensor(&values, &[4.0, 5.0]));
+}
+
+#[test]
+fn bracketed_cell_aggregate_still_assigns_to_numeric_slice() {
+    let values = execute_source_result("A = zeros(1, 2); C = {7, 8}; A(1, 1:2) = [C{:}];")
+        .expect("bracketed cell contents expand before numeric slice assignment");
+    assert!(has_numeric_tensor(&values, &[7.0, 8.0]));
+}
+
+#[test]
 fn mixed_cell_colon_expansion_in_call_args() {
     let program = r#"
         C = {1,2;3,4};

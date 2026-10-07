@@ -7,6 +7,7 @@ use runmat_value::Value;
 use crate::object::indexing::{
     ObjectIndexKind, ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath,
 };
+use crate::runtime_error::semantic_error;
 use crate::sequence::{ResolveValueSequence, SequenceResolutionContext, ValueSequence};
 use crate::RuntimeError;
 
@@ -33,15 +34,7 @@ pub(super) async fn read_default_step_sequence(
             )
             .await
         }
-        ObjectIndexKind::Brace => Ok(ValueSequence::comma_separated(
-            crate::call::arguments::expand_brace_values(
-                base,
-                &protocol_values(index_values(step)?),
-                None,
-            )
-            .await?,
-        )
-        .map_err(crate::sequence::sequence_error_to_runtime)?),
+        ObjectIndexKind::Brace => read_brace_sequence(runtime, base, step).await,
         ObjectIndexKind::Paren => read_default_step(runtime, base, step, caller)
             .await
             .and_then(|value| {
@@ -106,18 +99,55 @@ pub(super) async fn read_default_step(
             crate::indexing::value::read_with_plan(base, &plan)
         }
         ObjectIndexKind::Brace => {
-            let values = crate::call::arguments::expand_brace_values(
-                base,
-                &protocol_values(index_values(step)?),
-                Some(1),
-            )
-            .await?;
-            match values.as_slice() {
-                [value] => Ok(value.clone()),
-                _ => Err(single_value_error()),
-            }
+            let mut values = read_brace_sequence(runtime, base, step).await?.resolve(
+                runmat_types::SequenceUse::RequireSingle,
+                SequenceResolutionContext::default(),
+            )?;
+            values.pop().ok_or_else(single_value_error)
         }
     }
+}
+
+async fn read_brace_sequence(
+    runtime: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    step: &ObjectSubscript,
+) -> Result<ValueSequence, RuntimeError> {
+    let indices = protocol_values(index_values(step)?);
+    let values = match base {
+        Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
+        | Value::Closure(_) => {
+            return Err(semantic_error(
+                "UnsupportedFunctionHandleSelector",
+                "Function handle call does not support brace selector syntax",
+            ));
+        }
+        Value::Composite(handle) => {
+            let runtime = runtime.ok_or_else(|| {
+                semantic_error(
+                    "RuntimeCapabilityUnavailable",
+                    "Composite brace indexing requires a selected runtime",
+                )
+            })?;
+            vec![
+                crate::parallel::composite::read_composite_entry(runtime, *handle, &indices)
+                    .await?,
+            ]
+        }
+        base @ (Value::Cell(_) | Value::Object(_) | Value::HandleObject(_)) => {
+            crate::call::arguments::expand_brace_values(base, &indices, None).await?
+        }
+        _ => {
+            return Err(semantic_error(
+                "CellIndexingOnNonCell",
+                "Cell indexing on non-cell",
+            ));
+        }
+    };
+    ValueSequence::comma_separated(values).map_err(crate::sequence::sequence_error_to_runtime)
 }
 
 async fn write_default_step(

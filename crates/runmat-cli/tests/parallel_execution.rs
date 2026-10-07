@@ -226,12 +226,15 @@ end
 assembled = gather(built);
 mapped_assembled = gather(mapped);
 assert(wide_output{3} == wide_input);
+selected_second = assigned_on_second{2};
+assert(selected_second == uint16(22));
+assert(isa(selected_second, "uint16"));
 fprintf("SPMD_RANKS %.0f %.0f %.0f\n", rank{:});
 fprintf("SPMD_COUNT %.0f %.0f %.0f\n", count{[1, 2, 3]});
 fprintf("SPMD_EXCHANGE %.0f %.0f %.0f\n", exchanged{1}, exchanged{2}, exchanged{3});
 fprintf("SPMD_JOINED %.0f %.0f %.0f\n", joined{1});
 fprintf("SPMD_TOTAL %.0f\n", total{1});
-fprintf("SPMD_OPTIONAL %.0f\n", assigned_on_second{2});
+fprintf("SPMD_OPTIONAL %.0f\n", selected_second);
 fprintf("SPMD_PARTS %.0f %.0f %.0f %.0f %.0f %.0f\n", retained_part{1}, retained_part{2}, retained_part{3});
 fprintf("SPMD_MAPPED_PARTS %.0f %.0f %.0f %.0f %.0f %.0f\n", mapped_part{1}, mapped_part{2}, mapped_part{3});
 fprintf("SPMD_INDICES %.0f %.0f %.0f %.0f %.0f %.0f\n", retained_indices{1}, retained_indices{2}, retained_indices{3});

@@ -473,7 +473,12 @@ async fn execute_brace_operation(
                     runmat_runtime::object::cell::index_cell_value(&ca, &indices)?
                 }
                 Value::Composite(handle) => {
-                    read_composite_entry(runtime, *handle, raw_indices).await?
+                    runmat_runtime::parallel::composite::read_composite_entry(
+                        runtime,
+                        *handle,
+                        raw_indices,
+                    )
+                    .await?
                 }
                 _ => {
                     return Err(crate::interpreter::errors::mex(
@@ -493,7 +498,12 @@ async fn execute_brace_operation(
                     ));
                 }
                 return Ok(BraceIndexOutcome::Expanded(vec![
-                    read_composite_entry(runtime, *handle, raw_indices).await?,
+                    runmat_runtime::parallel::composite::read_composite_entry(
+                        runtime,
+                        *handle,
+                        raw_indices,
+                    )
+                    .await?,
                 ]));
             }
             let values = expand_brace_values(base, raw_indices, Some(out_count)).await?;
@@ -501,9 +511,13 @@ async fn execute_brace_operation(
         }
         BraceIndexOperation::List => {
             if let Value::Composite(handle) = base {
-                return read_composite_entry(runtime, *handle, raw_indices)
-                    .await
-                    .map(|value| BraceIndexOutcome::Expanded(vec![value]));
+                return runmat_runtime::parallel::composite::read_composite_entry(
+                    runtime,
+                    *handle,
+                    raw_indices,
+                )
+                .await
+                .map(|value| BraceIndexOutcome::Expanded(vec![value]));
             }
             if !matches!(
                 base,
@@ -630,49 +644,6 @@ async fn execute_brace_operation(
             Ok(BraceIndexOutcome::Value(value))
         }
     }
-}
-
-async fn read_composite_entry(
-    runtime: &runmat_runtime::context::RuntimeContext,
-    handle: runmat_execution::CompositeHandle,
-    raw_indices: &[Value],
-) -> Result<Value, RuntimeError> {
-    runmat_runtime::parallel::lease::validate_composite(runtime, &handle)?;
-    if raw_indices.len() != 1 {
-        return Err(crate::interpreter::errors::mex(
-            "CompositeIndexArity",
-            "Composite brace indexing requires one lab index",
-        ));
-    }
-    let rank = index_scalar_from_value(&raw_indices[0])
-        .await?
-        .and_then(|index| index.positive_usize())
-        .and_then(|index| u32::try_from(index).ok())
-        .filter(|rank| *rank <= handle.gang.labs.0)
-        .map(runmat_types::LabRank)
-        .ok_or_else(|| {
-            crate::interpreter::errors::mex(
-                "CompositeIndexOutOfBounds",
-                "Composite lab index must be a positive integer within the SPMD gang",
-            )
-        })?;
-    runtime
-        .service_ports()
-        .require_distributed("Composite brace indexing")
-        .map_err(|error| {
-            runmat_runtime::runtime_error::semantic_error(
-                "RunMat:RuntimeCapabilityUnavailable",
-                error.to_string(),
-            )
-        })?
-        .composite_entry(handle, rank)
-        .await?
-        .ok_or_else(|| {
-            crate::interpreter::errors::mex(
-                "CompositeEntryUnavailable",
-                "the selected lab did not assign this Composite value",
-            )
-        })
 }
 
 async fn execute_brace_operation_from_stack(

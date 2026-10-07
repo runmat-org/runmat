@@ -4000,16 +4000,24 @@ impl Compiler {
                 .with_identifier(IDENT_MIR_INDEX_CONTEXT_INVALID));
         }
 
+        if indexing.kind == IndexKind::Brace
+            && indexing.result_context == IndexResultContext::ReadCommaList
+        {
+            let chain = runmat_mir::MirSubscriptChain {
+                root: base.clone(),
+                steps: vec![runmat_mir::MirSubscriptStep::Index(indexing.clone())],
+                sequence_use: runmat_types::SequenceUse::RequireSingle,
+                context: runmat_types::ObjectIndexingContext::Expression,
+            };
+            return self.compile_subscript_chain(&chain, None);
+        }
+
         self.compile_mir_operand(base)?;
         match indexing.kind {
             IndexKind::Paren => self.compile_mir_slice_index(indexing)?,
             IndexKind::Brace => {
-                // A generic rvalue has a scalar stack contract even when the HIR
-                // records that brace syntax can denote a comma-separated list.
-                // Sequence-aware owners (argument capture and prepared output
-                // assignment) lower that syntax through their explicit carriers;
-                // emitting IndexCellList here would leave the transient sequence
-                // register live across the scalar consumer's store instructions.
+                // ReadCommaList returned through the validated sequence path;
+                // this remaining ReadSingle branch keeps its scalar cell read.
                 self.compile_mir_cell_index_components(indexing, indexing.result_context)?;
                 self.emit(Instr::IndexCell {
                     num_indices: indexing.components.len(),

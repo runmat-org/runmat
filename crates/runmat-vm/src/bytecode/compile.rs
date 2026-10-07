@@ -6471,11 +6471,25 @@ y = x^[1 2; 3 4];\n",
         assert!(function
             .instructions
             .iter()
-            .any(|instruction| matches!(instruction, Instr::IndexCell { .. })));
+            .any(|instruction| matches!(instruction,
+                Instr::ReadSubscriptPath {
+                    steps,
+                    selection: runmat_types::SequenceUse::RequireSingle,
+                    context: runmat_types::ObjectIndexingContext::Expression,
+                    to_sequence_register: false,
+                } if matches!(steps.as_slice(),
+                    [crate::bytecode::BytecodeSubscriptStep::Braces { .. }]))));
         assert!(!function
             .instructions
             .iter()
             .any(|instruction| matches!(instruction, Instr::IndexCellList { .. })));
+        assert!(!function.instructions.iter().any(|instruction| matches!(
+            instruction,
+            Instr::ReadSubscriptPath {
+                to_sequence_register: true,
+                ..
+            }
+        )));
     }
 
     #[test]
@@ -6523,6 +6537,79 @@ y = x^[1 2; 3 4];\n",
                 bytecode.instructions.get(producer + 1),
                 Some(Instr::CommitPreparedOutputTargets { .. })
             ));
+        }
+    }
+
+    #[test]
+    fn scalar_cell_contents_read_uses_validated_single_value_subscript_path() {
+        let ast = runmat_parser::parse("c = {7}; x = c{:};").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile scalar cell read");
+
+        assert!(bytecode.instructions.iter().any(|instruction| matches!(
+            instruction,
+            Instr::ReadSubscriptPath {
+                steps,
+                selection: runmat_types::SequenceUse::RequireSingle,
+                context: runmat_types::ObjectIndexingContext::Expression,
+                to_sequence_register: false,
+            } if matches!(steps.as_slice(),
+                [crate::bytecode::BytecodeSubscriptStep::Braces { selectors }]
+                    if selectors == &[crate::bytecode::BytecodeSubscriptSelector::Colon])
+        )));
+        assert!(!bytecode
+            .instructions
+            .iter()
+            .any(|instruction| matches!(instruction, Instr::IndexCell { .. })));
+        let x_export = bytecode.layout.as_ref().unwrap().entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "x")
+            .expect("x export");
+        let vars = block_on(crate::interpret(&bytecode)).expect("single cell value");
+        assert_eq!(vars[x_export.slot.0], Value::Num(7.0));
+    }
+
+    #[test]
+    fn scalar_cell_contents_read_rejects_mutated_plan_and_expansion_marker() {
+        for (mutate, expected) in [
+            (0, "RunMat:MirCellIndexPlanInvalid"),
+            (1, "RunMat:MirCellExpandPlanInvalid"),
+        ] {
+            let ast = runmat_parser::parse("c = {7}; x = c{:};").expect("parse");
+            let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+            let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+            let entrypoint = hir.assembly.entrypoints[0].id;
+            let body = mir
+                .bodies
+                .get_mut(&hir.assembly.entrypoints[0].target)
+                .unwrap();
+            let indexing = body
+                .blocks
+                .iter_mut()
+                .flat_map(|block| &mut block.statements)
+                .find_map(|statement| match &mut statement.kind {
+                    MirStmtKind::Assign {
+                        value: MirRvalue::Index { indexing, .. },
+                        ..
+                    } if indexing.kind == runmat_hir::IndexKind::Brace
+                        && indexing.result_context == IndexResultContext::ReadCommaList =>
+                    {
+                        Some(indexing)
+                    }
+                    _ => None,
+                })
+                .expect("scalar brace read in MIR");
+            if mutate == 0 {
+                indexing.plan = MirIndexPlan::Scalar;
+            } else {
+                indexing.cell_expand_all = false;
+            }
+            let error = compile(&hir.assembly, &mir, entrypoint)
+                .expect_err("mutated scalar brace read must fail validation");
+            assert_eq!(error.identifier.as_deref(), Some(expected));
         }
     }
 

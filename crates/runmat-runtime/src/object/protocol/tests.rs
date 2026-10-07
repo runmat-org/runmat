@@ -1,6 +1,6 @@
 use futures::executor::block_on;
 use runmat_types::{ObjectIndexingContext, SequenceUse};
-use runmat_value::{StructValue, Tensor, Value};
+use runmat_value::{CellArray, StructValue, Tensor, Value};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -35,6 +35,128 @@ fn read(path: ObjectSubscriptPath, base: Value) -> Value {
         ))
         .expect("path read"),
     )
+}
+
+fn brace_path(index: crate::object::indexing::ObjectIndexComponent) -> ObjectSubscriptPath {
+    ObjectSubscriptPath::new(vec![ObjectSubscript::braces(
+        crate::object::indexing::ObjectIndexSelector::IndexValues {
+            components: vec![index],
+        },
+    )])
+    .expect("brace path")
+}
+
+#[test]
+fn brace_read_and_argument_expansion_keep_distinct_noncell_errors() {
+    let path = brace_path(Value::Num(1.0).into());
+    for base in [Value::Num(10.0), Value::ClassRef("Example".into())] {
+        let error = block_on(read_subscript_path_with_access(
+            base,
+            path.clone(),
+            ObjectAccessContext::default(),
+        ))
+        .expect_err("non-cell brace read");
+        assert_eq!(error.identifier(), Some("RunMat:CellIndexingOnNonCell"));
+    }
+    let callable = block_on(read_subscript_path_with_access(
+        Value::FunctionHandle("sin".into()),
+        path,
+        ObjectAccessContext::default(),
+    ))
+    .expect_err("callable brace selector");
+    assert_eq!(
+        callable.identifier(),
+        Some("RunMat:UnsupportedFunctionHandleSelector")
+    );
+    let expansion = block_on(crate::call::arguments::expand_brace_values(
+        Value::Num(10.0),
+        &[Value::Num(1.0)],
+        None,
+    ))
+    .expect_err("argument expansion remains separate");
+    assert_eq!(
+        expansion.identifier(),
+        Some("RunMat:CellExpansionOnNonCell")
+    );
+}
+
+#[test]
+fn intermediate_brace_read_requires_exactly_one_cell_value() {
+    let path = ObjectSubscriptPath::new(vec![
+        ObjectSubscript::braces(crate::object::indexing::ObjectIndexSelector::IndexValues {
+            components: vec![crate::object::indexing::ObjectIndexComponent::Colon],
+        }),
+        ObjectSubscript::member("payload"),
+    ])
+    .expect("chained brace path");
+    for values in [vec![], vec![Value::Num(1.0), Value::Num(2.0)]] {
+        let length = values.len();
+        let cell = CellArray::new_with_shape(values, vec![1, length]).expect("cell cardinality");
+        let error = block_on(read_subscript_path_with_access(
+            Value::Cell(cell),
+            path.clone(),
+            ObjectAccessContext::default(),
+        ))
+        .expect_err("zero or many values cannot supply a chained receiver");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:CommaSeparatedListRequiresSingleValue")
+        );
+    }
+    let mut member = StructValue::new();
+    member.insert("payload", Value::Num(7.0));
+    let single =
+        CellArray::new_with_shape(vec![Value::Struct(member)], vec![1, 1]).expect("single cell");
+    assert_eq!(read(path, Value::Cell(single)), Value::Num(7.0));
+}
+
+#[test]
+fn composite_brace_read_uses_exact_selected_runtime_lease_and_lab_selector() {
+    use crate::execution::RuntimeExecutionServices;
+    use runmat_execution::{CompositeHandle, CompositeId, GangHandle, GangId, PoolRequest};
+    use runmat_types::{
+        LabCount, NumericClass, NumericDomain, NumericFact, ParallelRegionId, ProgramFunctionId,
+        RegionId, ValueFact, ValueKindFact,
+    };
+
+    let execution = std::rc::Rc::new(crate::execution::RuntimeExecutionService::new());
+    let pool = execution
+        .ensure_pool(PoolRequest::automatic())
+        .expect("selected pool");
+    let runtime = crate::context::RuntimeContext::new(execution);
+    let handle = CompositeHandle {
+        id: CompositeId::derive(&[b"brace-read-composite"]),
+        owner_region: ParallelRegionId(RegionId {
+            function: ProgramFunctionId(1),
+            ordinal: 1,
+        }),
+        scope_id: pool.handle.scope_id,
+        generation: 1,
+        gang: GangHandle {
+            id: GangId::derive(&[b"brace-read-gang"]),
+            scope_id: pool.handle.scope_id,
+            generation: 1,
+            pool: pool.handle,
+            labs: LabCount(1),
+        },
+        value: ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })),
+    };
+    for (selector, expected) in [
+        (Value::Num(2.0), "RunMat:CompositeIndexOutOfBounds"),
+        (Value::Num(1.0), "RunMat:RuntimeCapabilityUnavailable"),
+    ] {
+        let error = block_on(read_subscript_path_sequence_with_access_in_context(
+            &runtime,
+            Value::Composite(Box::new(handle.clone())),
+            brace_path(selector.into()),
+            SubscriptReadRequest::require_single(ObjectAccessContext::default()),
+        ))
+        .expect_err("Composite access must retain exact selector and selected service checks");
+        assert_eq!(error.identifier(), Some(expected));
+    }
 }
 
 #[test]
