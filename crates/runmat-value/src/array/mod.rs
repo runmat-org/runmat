@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt;
 
+mod admission;
 mod character;
 mod complex;
 mod conversion;
@@ -22,6 +23,10 @@ mod sparse;
 mod string;
 mod symbolic;
 
+pub use admission::{
+    ComplexTensorAdmission, NumericTensorAdmission, ValidatedComplexTensorParts,
+    ValidatedNumericTensorParts,
+};
 pub use character::CharArray;
 pub use complex::{ComplexElement, ComplexStorage, ComplexTensor, IntegerComplexStorage};
 pub use copy_accounting::{host_copy_metrics, record_host_copy, HostCopyMetrics, HostCopyReason};

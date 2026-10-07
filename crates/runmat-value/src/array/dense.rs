@@ -21,21 +21,9 @@ impl Tensor {
         storage: NumericStorage,
         shape: Vec<usize>,
     ) -> Result<Self, String> {
-        storage.validate_shape(&shape)?;
-        let (rows, cols) = if shape.len() >= 2 {
-            (shape[0], shape[1])
-        } else if shape.len() == 1 {
-            (1, shape[0])
-        } else {
-            (0, 0)
-        };
-        let storage = HostNumericBuffer::from_numeric_storage(storage);
-        Ok(Tensor {
-            storage,
-            shape,
-            rows,
-            cols,
-        })
+        Ok(NumericTensorAdmission::from_numeric_storage(storage, shape)
+            .finish_synchronously()?
+            .into_tensor())
     }
 
     pub fn new_2d(data: Vec<f64>, rows: usize, cols: usize) -> Result<Self, String> {
@@ -87,30 +75,19 @@ impl Tensor {
     }
 
     pub fn from_host_buffer(storage: HostNumericBuffer, shape: Vec<usize>) -> Result<Self, String> {
-        let expected = shape
-            .iter()
-            .try_fold(1usize, |count, &dimension| count.checked_mul(dimension));
-        if expected != Some(storage.len()) {
-            return Err(format!(
-                "{} tensor data length {} doesn't match shape {:?}",
-                storage.numeric_dtype().class_name(),
-                storage.len(),
-                shape
-            ));
-        }
-        let (rows, cols) = if shape.len() >= 2 {
-            (shape[0], shape[1])
-        } else if shape.len() == 1 {
-            (1, shape[0])
-        } else {
-            (0, 0)
-        };
-        Ok(Self {
+        Ok(NumericTensorAdmission::from_host_buffer(storage, shape)
+            .finish_synchronously()?
+            .into_tensor())
+    }
+
+    pub(super) fn from_validated_parts(parts: ValidatedNumericTensorParts) -> Self {
+        let (storage, shape, rows, cols) = parts.into_components();
+        Self {
             storage,
             shape,
             rows,
             cols,
-        })
+        }
     }
 
     pub fn numeric_dtype(&self) -> NumericDType {

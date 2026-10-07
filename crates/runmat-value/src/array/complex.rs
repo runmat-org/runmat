@@ -123,20 +123,19 @@ impl ComplexTensor {
         storage: ComplexStorage,
         shape: Vec<usize>,
     ) -> Result<Self, String> {
-        storage.validate_shape(&shape)?;
-        let (rows, cols) = if shape.len() >= 2 {
-            (shape[0], shape[1])
-        } else if shape.len() == 1 {
-            (1, shape[0])
-        } else {
-            (0, 0)
-        };
-        Ok(ComplexTensor {
+        Ok(ComplexTensorAdmission::new(storage, shape)?
+            .finish_synchronously()?
+            .into_tensor())
+    }
+
+    pub(super) fn from_validated_parts(parts: ValidatedComplexTensorParts) -> Self {
+        let (storage, shape, rows, cols) = parts.into_components();
+        Self {
             storage,
             shape,
             rows,
             cols,
-        })
+        }
     }
     pub fn new_integer(storage: IntegerComplexStorage, shape: Vec<usize>) -> Result<Self, String> {
         Self::from_complex_storage(ComplexStorage::Integer(storage), shape)

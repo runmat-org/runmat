@@ -1,21 +1,37 @@
 use super::super::*;
 use super::text::ShapeCopy;
 use runmat_execution::value::{DenseValue, ElementType};
+use runmat_value::{
+    ComplexElement, ComplexStorage, ComplexTensorAdmission, NumericStorage, NumericTensorAdmission,
+};
+use std::num::NonZeroUsize;
+
+#[path = "dense/admission.rs"]
+mod admission;
+use admission::DenseAdmission;
 
 pub(in crate::execution::value_codec::decode::machine) struct DenseTask<'a> {
     source: &'a DenseValue,
     path: String,
     offset: usize,
-    output: DenseOutput,
-    shape: ShapeCopy<'a>,
+    state: DenseState<'a>,
+}
+
+enum DenseState<'a> {
+    Decode {
+        output: DenseOutput,
+        shape: ShapeCopy<'a>,
+    },
+    Admit(DenseAdmission),
+    Complete(Value),
 }
 
 pub(super) enum DenseOutput {
     Logical(Vec<u8>),
     F32(Vec<f32>),
     F64(Vec<f64>),
-    ComplexF32(Vec<(f32, f32)>),
-    ComplexF64(Vec<(f64, f64)>),
+    ComplexF32(Vec<ComplexElement<f32>>),
+    ComplexF64(Vec<ComplexElement<f64>>),
     I8(Vec<i8>),
     I16(Vec<i16>),
     I32(Vec<i32>),
@@ -54,8 +70,7 @@ impl<'a> DenseTask<'a> {
             source,
             path,
             offset: 0,
-            output,
-            shape,
+            state: DenseState::Decode { output, shape },
         })
     }
 
@@ -64,28 +79,62 @@ impl<'a> DenseTask<'a> {
     }
 
     pub(super) fn is_complete(&self) -> bool {
-        self.offset == self.source.little_endian_data.len() && self.shape.is_complete()
+        matches!(&self.state, DenseState::Complete(_))
     }
 
     pub(super) fn advance(&mut self, maximum_work: usize) -> Result<usize, ValueCodecError> {
-        let width = element_width(self.source.element_type);
-        let available = self.source.little_endian_data.len() - self.offset;
-        if available == 0 {
-            return self.shape.advance(maximum_work);
+        if self.offset < self.source.little_endian_data.len() {
+            let width = element_width(self.source.element_type);
+            let available = self.source.little_endian_data.len() - self.offset;
+            let available_elements = available / width;
+            let elements = available_elements.min(maximum_work);
+            let end = self.offset + elements * width;
+            let DenseState::Decode { output, .. } = &mut self.state else {
+                unreachable!("dense bytes are decoded before admission")
+            };
+            for element in self.source.little_endian_data[self.offset..end].chunks_exact(width) {
+                output.push(element);
+            }
+            self.offset = end;
+            return Ok(elements);
         }
-        let available_elements = available / width;
-        let elements = available_elements.min(maximum_work);
-        let end = self.offset + elements * width;
-        for element in self.source.little_endian_data[self.offset..end].chunks_exact(width) {
-            self.output.push(element);
+        if let DenseState::Decode { shape, .. } = &mut self.state {
+            if !shape.is_complete() {
+                return shape.advance(maximum_work);
+            }
         }
-        self.offset = end;
-        Ok(elements)
+        if matches!(&self.state, DenseState::Decode { .. }) {
+            let DenseState::Decode { output, shape } =
+                std::mem::replace(&mut self.state, DenseState::Complete(Value::Bool(false)))
+            else {
+                unreachable!("dense decode state")
+            };
+            self.state = DenseState::Admit(output.into_admission(shape.finish(), &self.path)?);
+        }
+        let quantum = NonZeroUsize::new(maximum_work).expect("decode work quantum is nonzero");
+        let DenseState::Admit(admission) = &mut self.state else {
+            unreachable!("incomplete dense task owns admission")
+        };
+        let completed = admission.advance(quantum, &self.path)?;
+        if admission.is_complete() {
+            let DenseState::Admit(admission) =
+                std::mem::replace(&mut self.state, DenseState::Complete(Value::Bool(false)))
+            else {
+                unreachable!("completed dense admission")
+            };
+            self.state = DenseState::Complete(admission.into_value());
+        }
+        Ok(completed)
     }
 
     pub(super) fn finish(self) -> Result<Value, ValueCodecError> {
-        let shape = self.shape.finish();
-        self.output.finish(shape, &self.path)
+        match self.state {
+            DenseState::Complete(value) => Ok(value),
+            DenseState::Decode { .. } | DenseState::Admit(_) => Err(ValueCodecError::invalid(
+                &self.path,
+                "dense admission unexpectedly incomplete",
+            )),
+        }
     }
 }
 
@@ -182,11 +231,11 @@ impl DenseOutput {
             Self::U16(values) => values.push(word!(2, u16)),
             Self::U32(values) => values.push(word!(4, u32)),
             Self::U64(values) => values.push(word!(8, u64)),
-            Self::ComplexF32(values) => values.push((
+            Self::ComplexF32(values) => values.push(ComplexElement(
                 f32::from_bits(u32::from_le_bytes(bytes[..4].try_into().unwrap())),
                 f32::from_bits(u32::from_le_bytes(bytes[4..].try_into().unwrap())),
             )),
-            Self::ComplexF64(values) => values.push((
+            Self::ComplexF64(values) => values.push(ComplexElement(
                 f64::from_bits(u64::from_le_bytes(bytes[..8].try_into().unwrap())),
                 f64::from_bits(u64::from_le_bytes(bytes[8..].try_into().unwrap())),
             )),
@@ -297,63 +346,6 @@ impl DenseOutput {
         }
         .map_err(|error| ValueCodecError::invalid(path, error))?;
         Ok(Value::SparseTensor(sparse))
-    }
-
-    fn finish(self, shape: Vec<usize>, path: &str) -> Result<Value, ValueCodecError> {
-        macro_rules! tensor_int {
-            ($v:expr, $k:ident) => {
-                Value::Tensor(
-                    Tensor::new_integer(IntegerStorage::$k($v), shape)
-                        .map_err(|e| ValueCodecError::invalid(path, e))?,
-                )
-            };
-        }
-        macro_rules! complex_int {
-            ($r:expr,$i:expr,$k:ident) => {
-                Value::ComplexTensor(
-                    ComplexTensor::new_integer(
-                        IntegerComplexStorage::new(IntegerStorage::$k($r), IntegerStorage::$k($i))
-                            .map_err(|e| ValueCodecError::invalid(path, e))?,
-                        shape,
-                    )
-                    .map_err(|e| ValueCodecError::invalid(path, e))?,
-                )
-            };
-        }
-        Ok(match self {
-            Self::Logical(v) => Value::LogicalArray(LogicalArray {
-                data: runmat_value::HostLogicalBuffer::new(v),
-                shape,
-            }),
-            Self::F32(v) => Value::Tensor(
-                Tensor::from_f32(v, shape).map_err(|e| ValueCodecError::invalid(path, e))?,
-            ),
-            Self::F64(v) => {
-                Value::Tensor(Tensor::new(v, shape).map_err(|e| ValueCodecError::invalid(path, e))?)
-            }
-            Self::ComplexF32(v) => Value::ComplexTensor(
-                ComplexTensor::from_f32(v, shape).map_err(|e| ValueCodecError::invalid(path, e))?,
-            ),
-            Self::ComplexF64(v) => Value::ComplexTensor(
-                ComplexTensor::new(v, shape).map_err(|e| ValueCodecError::invalid(path, e))?,
-            ),
-            Self::I8(v) => tensor_int!(v, I8),
-            Self::I16(v) => tensor_int!(v, I16),
-            Self::I32(v) => tensor_int!(v, I32),
-            Self::I64(v) => tensor_int!(v, I64),
-            Self::U8(v) => tensor_int!(v, U8),
-            Self::U16(v) => tensor_int!(v, U16),
-            Self::U32(v) => tensor_int!(v, U32),
-            Self::U64(v) => tensor_int!(v, U64),
-            Self::ComplexI8(r, i) => complex_int!(r, i, I8),
-            Self::ComplexI16(r, i) => complex_int!(r, i, I16),
-            Self::ComplexI32(r, i) => complex_int!(r, i, I32),
-            Self::ComplexI64(r, i) => complex_int!(r, i, I64),
-            Self::ComplexU8(r, i) => complex_int!(r, i, U8),
-            Self::ComplexU16(r, i) => complex_int!(r, i, U16),
-            Self::ComplexU32(r, i) => complex_int!(r, i, U32),
-            Self::ComplexU64(r, i) => complex_int!(r, i, U64),
-        })
     }
 }
 

@@ -159,6 +159,74 @@ fn pending_turn_drop_retires_partial_numeric_machine_without_replay() {
 }
 
 #[test]
+fn complex_shape_admission_uses_selected_budget_and_retires_pending_turn() {
+    struct PendingTurn(Rc<Cell<usize>>);
+    impl Future for PendingTurn {
+        type Output = Result<(), ExecutionServiceError>;
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Pending
+        }
+    }
+    impl Drop for PendingTurn {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
+    // The first machine quantum creates the dense task and copies all but one
+    // shape entry. The second copies that final entry and then traverses the
+    // owned shape through ComplexTensorAdmission, so its selected turn cannot
+    // be reached by payload copying alone.
+    let payload = ValuePayload::Inline(Box::new(InlineValue::Dense(DenseValue {
+        element_type: ElementType::ComplexF64,
+        shape: std::iter::once(0)
+            .chain(std::iter::repeat_n(1, DECODE_WORK_QUANTUM.get() - 1))
+            .collect(),
+        little_endian_data: Vec::new(),
+    })));
+    let source = CancellationSource::new();
+    let turns = Rc::new(Cell::new(0));
+    let observed_turns = turns.clone();
+    let dropped = Rc::new(Cell::new(0));
+    let dropped_turn = dropped.clone();
+    let mut budget = CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(
+            NonZeroU64::new(DECODE_WORK_QUANTUM.get() as u64).unwrap(),
+        ),
+        source.token(),
+        move || {
+            let turn = observed_turns.get() + 1;
+            observed_turns.set(turn);
+            if turn == 1 {
+                Box::pin(std::future::ready(Ok(())))
+            } else {
+                Box::pin(PendingTurn(dropped_turn.clone()))
+            }
+        },
+    );
+    let payloads = [payload];
+    let mut cooperation = Some(&mut budget);
+    // Enter below canonical payload validation so validation work cannot be
+    // mistaken for the two decoder turns asserted by this admission witness.
+    let mut future = Box::pin(decode_validated_values(&payloads, None, &mut cooperation));
+    let waker = noop_waker();
+    assert!(future
+        .as_mut()
+        .poll(&mut Context::from_waker(&waker))
+        .is_pending());
+    assert_eq!(turns.get(), 2);
+    source.cancel(CancellationReason::User);
+    assert!(matches!(
+        future.as_mut().poll(&mut Context::from_waker(&waker)),
+        Poll::Ready(Err(CooperativeValueCodecError::Execution(
+            ExecutionServiceError::Cancelled
+        )))
+    ));
+    drop(future);
+    assert_eq!(dropped.get(), 1);
+}
+
+#[test]
 fn selected_cancellation_is_typed_and_drops_the_pending_turn() {
     let payload = large_dense(DECODE_WORK_QUANTUM.get() * 2);
     let source = CancellationSource::new();
