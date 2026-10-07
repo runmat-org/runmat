@@ -137,7 +137,8 @@ pub(super) async fn constructor_arguments(
     // the constructor itself.
     if args.len() == 1 || is_adjacency_form(&args) {
         if let Some(Value::Tensor(matrix)) = args.first() {
-            if matrix.shape.len() != 2 || matrix.rows != matrix.cols {
+            let shape = matrix.shape();
+            if shape.len() != 2 || shape[0] != shape[1] {
                 return Err(graph_error(
                     name,
                     format!("{name}: adjacency matrix must be square"),
@@ -281,8 +282,8 @@ fn preflight_graph_host_fields(object: &ObjectInstance, name: &'static str) -> B
             .map_err(|error| graph_error(name, format!("{name}: invalid Edges table: {error}")))?;
         let endpoints = vars.fields.get("EndNodes");
         let endpoint_rows = match endpoints {
-            Some(Value::Tensor(tensor)) if tensor.shape.len() == 2 && tensor.cols == 2 => {
-                Some(tensor.rows)
+            Some(Value::Tensor(tensor)) if tensor.shape().len() == 2 && tensor.shape()[1] == 2 => {
+                Some(tensor.shape()[0])
             }
             Some(Value::StringArray(array)) if array.shape.len() == 2 && array.cols == 2 => {
                 Some(array.rows)

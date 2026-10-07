@@ -313,7 +313,7 @@ fn parse_args(args: Vec<Value>) -> BuiltinResult<ParsedArgs> {
         return Ok(ParsedArgs {
             lengths: lengths.clone().unwrap_or_else(|| vec![2]),
             source: NgramSource::Unique {
-                ngrams: unique_ngrams_from_value(&args[0], counts.cols)?,
+                ngrams: unique_ngrams_from_value(&args[0], count_matrix_dimensions(&counts).1)?,
                 counts,
                 requested_lengths: lengths,
             },
@@ -487,10 +487,11 @@ fn bag_from_unique_ngrams(
     counts: Tensor,
     requested_lengths: Option<Vec<usize>>,
 ) -> BuiltinResult<Value> {
-    if counts.cols != raw_ngrams.len() {
+    let (count_rows, count_cols) = count_matrix_dimensions(&counts);
+    if count_cols != raw_ngrams.len() {
         return Err(ngrams_error(format!(
             "bagOfNgrams: counts columns ({}) must match uniqueNgrams rows ({})",
-            counts.cols,
+            count_cols,
             raw_ngrams.len()
         )));
     }
@@ -538,18 +539,30 @@ fn bag_from_unique_ngrams(
     }
 
     let mut filtered_counts = Vec::with_capacity(checked_count_len(
-        counts.rows,
+        count_rows,
         keep_cols.len(),
         "bagOfNgrams",
     )?);
     let values = tensor_utils::tensor_values_f64_cow(&counts);
     for col in keep_cols {
-        for row in 0..counts.rows {
-            filtered_counts.push(values[row + col * counts.rows]);
+        for row in 0..count_rows {
+            filtered_counts.push(values[row + col * count_rows]);
         }
     }
     let lengths = requested_lengths.unwrap_or_else(|| infer_ngram_lengths(&ngrams));
-    bag_object(ngrams, lengths, filtered_counts, counts.rows)
+    bag_object(ngrams, lengths, filtered_counts, count_rows)
+}
+
+/// `bagOfNgrams` treats a numeric vector of counts as one document row. This
+/// is the matrix projection historically carried by dense tensor metadata,
+/// rather than the public vector projection used by general array APIs.
+fn count_matrix_dimensions(counts: &Tensor) -> (usize, usize) {
+    let shape = counts.shape();
+    match shape {
+        [] => (0, 0),
+        [columns] => (1, *columns),
+        [rows, columns, ..] => (*rows, *columns),
+    }
 }
 
 fn infer_ngram_lengths(ngrams: &[Vec<String>]) -> Vec<usize> {
@@ -966,7 +979,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         let counts = tensor_property(&bag, "Counts");
-        assert_eq!(counts.shape, vec![2, 3]);
+        assert_eq!(counts.shape(), [2, 3]);
         assert_eq!(counts.materialize_f64(), vec![1.0, 1.0, 1.0, 0.0, 0.0, 1.0]);
     }
 
@@ -1008,7 +1021,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn accepts_native_single_and_rejects_negative_exact_integer_counts() {
         let ngrams = StringArray::new(
             vec!["a".into(), "b".into(), "b".into(), "c".into()],
@@ -1031,6 +1045,18 @@ mod tests {
 
         let negative = Tensor::new_integer(IntegerStorage::I64(vec![1, -1]), vec![1, 2]).unwrap();
         assert!(run(vec![Value::StringArray(ngrams), Value::Tensor(negative),]).is_err());
+
+        let one_ngram = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap();
+        let rank_zero = Tensor::new(vec![1.0], Vec::new()).expect("rank-zero counts");
+        let error = run(vec![
+            Value::StringArray(one_ngram),
+            Value::Tensor(rank_zero),
+        ])
+        .expect_err("rank-zero counts retain zero-column matrix geometry");
+        assert!(
+            error.message().contains("counts columns (0)"),
+            "unexpected error: {error}"
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1146,7 +1172,7 @@ mod tests {
             object(run(vec![Value::StringArray(ngrams), Value::Tensor(counts)]).expect("bag"));
         assert_eq!(bag.properties.get("NumNgrams"), Some(&Value::Num(1.0)));
         let counts = tensor_property(&bag, "Counts");
-        assert_eq!(counts.shape, vec![2, 1]);
+        assert_eq!(counts.shape(), [2, 1]);
         assert_eq!(counts.materialize_f64(), vec![4.0, 9.0]);
     }
 

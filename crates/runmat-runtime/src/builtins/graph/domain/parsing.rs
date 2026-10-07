@@ -37,7 +37,7 @@ pub(super) fn weights_from_value(
 
 pub(super) fn numeric_vector(value: &Value, name: &'static str) -> BuiltinResult<Vec<usize>> {
     if let Value::Tensor(tensor) = value {
-        if !is_vector_shape(&tensor.shape) {
+        if !is_vector_shape(tensor.shape()) {
             return Err(graph_error(
                 name,
                 format!("{name}: expected a vector of node indices"),
@@ -78,7 +78,7 @@ pub(super) fn numeric_vector(value: &Value, name: &'static str) -> BuiltinResult
 
 pub(super) fn numeric_f64_vector(value: &Value, name: &'static str) -> BuiltinResult<Vec<f64>> {
     if let Value::Tensor(tensor) = value {
-        if !is_vector_shape(&tensor.shape) {
+        if !is_vector_shape(tensor.shape()) {
             return Err(graph_error(
                 name,
                 format!("{name}: expected a numeric vector"),

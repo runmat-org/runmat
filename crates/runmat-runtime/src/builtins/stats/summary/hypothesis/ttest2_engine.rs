@@ -175,18 +175,18 @@ pub(super) fn scalar_usize(value: &Value) -> Option<usize> {
 
 pub(super) fn evaluate(x: &Tensor, y: &Tensor, options: Options) -> BuiltinResult<Evaluation> {
     let vector_collapse = options.dim.is_none()
-        && is_nonempty_vector_shape(&x.shape)
-        && is_nonempty_vector_shape(&y.shape);
+        && is_nonempty_vector_shape(x.shape())
+        && is_nonempty_vector_shape(y.shape());
     let dim = if vector_collapse {
         0
     } else {
         options
             .dim
-            .unwrap_or_else(|| first_nonsingleton_dim(&x.shape))
+            .unwrap_or_else(|| first_nonsingleton_dim(x.shape()))
     };
-    let rank = x.shape.len().max(y.shape.len()).max(dim + 1).max(2);
-    let x_shape = normalized_shape(&x.shape, rank);
-    let y_shape = normalized_shape(&y.shape, rank);
+    let rank = x.shape().len().max(y.shape().len()).max(dim + 1).max(2);
+    let x_shape = normalized_shape(x.shape(), rank);
+    let y_shape = normalized_shape(y.shape(), rank);
     let out_shape = if vector_collapse {
         vec![1, 1]
     } else {
@@ -251,6 +251,20 @@ pub(super) fn evaluate(x: &Tensor, y: &Tensor, options: Options) -> BuiltinResul
         ci,
         stats: Value::Struct(stats),
     })
+}
+
+#[cfg(test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rank_zero_samples_retain_scalar_vector_collapse() {
+    let x = Tensor::new(vec![1.0], Vec::new()).unwrap();
+    let y = Tensor::new(vec![2.0], Vec::new()).unwrap();
+    let result = evaluate(&x, &y, Options::default()).unwrap();
+    assert!(matches!(result.p, Value::Num(value) if value.is_nan()));
+    let Value::Tensor(interval) = result.ci else {
+        panic!("expected tensor confidence interval");
+    };
+    assert_eq!(interval.shape(), [2, 1]);
 }
 
 fn compatible_output_shape(

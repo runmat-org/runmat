@@ -301,7 +301,7 @@ fn raw_boundary_shape(value: &Value) -> Option<Vec<usize>> {
         Value::CharArray(array) if array.rows <= 1 => Some(vec![1, 1]),
         Value::CharArray(array) => Some(vec![array.rows, 1]),
         Value::Cell(cell) => Some(cell.shape.clone()),
-        Value::Tensor(tensor) => Some(tensor.shape.clone()),
+        Value::Tensor(tensor) => Some(tensor.shape().to_vec()),
         Value::GpuTensor(handle) => Some(handle.shape().to_vec()),
         _ => None,
     }
@@ -818,6 +818,14 @@ impl BoundaryPositions {
                 shape: vec![1, 1],
             }),
             Value::Tensor(t) => {
+                // Position vectors retain their full tensor shape. The empty
+                // rank uses the historical boundary-domain projection [0, 1]
+                // rather than the general scalar matrix projection.
+                let shape = if t.shape().is_empty() {
+                    vec![0, 1]
+                } else {
+                    t.shape().to_vec()
+                };
                 let mut data = Vec::with_capacity(t.len());
                 for idx in 0..t.len() {
                     let entry = t.numeric_value_at(idx).ok_or_else(|| {
@@ -833,14 +841,7 @@ impl BoundaryPositions {
                         )?,
                     });
                 }
-                Ok(Self {
-                    data,
-                    shape: if t.shape.is_empty() {
-                        vec![t.rows, t.cols.max(1)]
-                    } else {
-                        t.shape
-                    },
-                })
+                Ok(Self { data, shape })
             }
             _ => Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_BOUNDARY_TYPE)),
         }

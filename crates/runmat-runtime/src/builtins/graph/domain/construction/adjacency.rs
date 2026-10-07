@@ -5,7 +5,9 @@ use crate::builtins::common::tensor;
 
 pub(in crate::builtins::graph::domain) fn is_adjacency_form(args: &[Value]) -> bool {
     args.first().is_some_and(|value| match value {
-        Value::Tensor(tensor) => tensor.shape.len() == 2 && tensor.rows == tensor.cols,
+        Value::Tensor(tensor) => {
+            tensor.shape().len() == 2 && tensor.shape()[0] == tensor.shape()[1]
+        }
         Value::LogicalArray(array) => array.shape.len() == 2 && array.shape[0] == array.shape[1],
         Value::GpuTensor(handle) => {
             handle.shape().len() == 2 && handle.shape()[0] == handle.shape()[1]
@@ -24,7 +26,8 @@ pub(super) fn graph_from_adjacency(
 ) -> BuiltinResult<Value> {
     let node_count = match &args[0] {
         Value::Tensor(matrix) => {
-            if matrix.shape.len() != 2 || matrix.rows != matrix.cols {
+            let shape = matrix.shape();
+            if shape.len() != 2 || shape[0] != shape[1] {
                 return Err(graph_error(
                     name,
                     format!("{name}: adjacency matrix must be square"),
@@ -45,7 +48,7 @@ pub(super) fn graph_from_adjacency(
                     ));
                 }
             }
-            matrix.rows
+            shape[0]
         }
         Value::LogicalArray(array) => {
             if array.shape.len() != 2 || array.shape[0] != array.shape[1] {
@@ -138,5 +141,30 @@ fn adjacency_weight(value: &Value, index: usize) -> f64 {
             }
         }
         _ => unreachable!("adjacency storage was validated before edge construction"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::entrypoints::graph_builtin;
+    use futures::executor::block_on;
+    use runmat_value::{Tensor, Value};
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn graph_adjacency_requires_exact_rank_two_geometry() {
+        let rank_zero = Tensor::new(vec![0.0], Vec::new()).expect("rank-zero tensor");
+        let rank_one = Tensor::new(vec![0.0, 0.0], vec![2]).expect("rank-one tensor");
+        for tensor in [rank_zero, rank_one] {
+            let error = block_on(graph_builtin(vec![Value::Tensor(tensor)]))
+                .expect_err("non-matrix adjacency must be rejected");
+            assert_eq!(error.identifier(), Some("RunMat:graph:InvalidArgument"));
+            assert!(error.message().contains("adjacency matrix must be square"));
+        }
+
+        let matrix =
+            Tensor::new(vec![0.0, 1.0, 1.0, 0.0], vec![2, 2]).expect("two-by-two adjacency");
+        block_on(graph_builtin(vec![Value::Tensor(matrix)]))
+            .expect("rank-two square adjacency remains accepted");
     }
 }

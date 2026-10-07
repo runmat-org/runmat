@@ -39,6 +39,29 @@ fn extractBetween_position_vectors_read_native_single_storage() {
     assert_eq!(parsed.data, vec![2, 4]);
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn extractBetween_rank_zero_position_retains_boundary_domain_shape() {
+    let positions = || Tensor::new(vec![2.0], Vec::new()).expect("rank-zero position");
+    let parsed = BoundaryPositions::from_value(Value::Tensor(positions())).expect("positions");
+
+    assert_eq!(parsed.data, vec![2]);
+    assert_eq!(parsed.shape, vec![0, 1]);
+
+    let text = StringArray::new(Vec::new(), vec![0, 1]).expect("empty text array");
+    let output = extract_between_builtin(
+        Value::StringArray(text),
+        Value::Tensor(positions()),
+        Value::Tensor(positions()),
+        Vec::new(),
+    )
+    .expect("extractBetween rank-zero positions");
+    let Value::StringArray(output) = output else {
+        panic!("expected string array");
+    };
+    assert_eq!(output.shape, vec![0, 1]);
+}
+
 #[test]
 fn extractBetween_position_vectors_reject_nonpositive_integer_storage() {
     let positions =

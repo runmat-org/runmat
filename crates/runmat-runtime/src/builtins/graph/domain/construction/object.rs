@@ -243,11 +243,12 @@ pub(super) fn edge_pairs_from_value(
     name: &'static str,
 ) -> BuiltinResult<Vec<(usize, usize)>> {
     match value {
-        Value::Tensor(tensor) if tensor.shape.len() == 2 && tensor.cols == 2 => {
-            let mut out = Vec::with_capacity(tensor.rows);
-            for row in 0..tensor.rows {
+        Value::Tensor(tensor) if tensor.shape().len() == 2 && tensor.shape()[1] == 2 => {
+            let rows = tensor.shape()[0];
+            let mut out = Vec::with_capacity(rows);
+            for row in 0..rows {
                 let source = node_index_from_tensor(tensor, row, node_count, name)?;
-                let target = node_index_from_tensor(tensor, row + tensor.rows, node_count, name)?;
+                let target = node_index_from_tensor(tensor, row + rows, node_count, name)?;
                 out.push((source, target));
             }
             Ok(out)

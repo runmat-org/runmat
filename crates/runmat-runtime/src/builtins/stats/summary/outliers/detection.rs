@@ -2,6 +2,32 @@
 use super::*;
 use std::cmp::Ordering;
 
+#[cfg(test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn outlier_masks_preserve_exact_scalar_and_vector_shapes() {
+    for (shape, values, mask) in [
+        (vec![], vec![1.0], vec![0]),
+        (vec![3], vec![1.0, 1.0, 9.0], vec![0, 0, 1]),
+    ] {
+        let input = Tensor::new(values, shape.clone()).unwrap();
+        let options = DetectionOptions {
+            dim: Some(0),
+            ..DetectionOptions::default()
+        };
+        let result = detect_outliers(&input, &options, "isoutlier").unwrap();
+        assert_eq!(result.mask_shape, shape);
+        assert_eq!(result.mask, mask);
+        let mismatched = DetectionOptions {
+            forced_mask: Some((vec![0; input.len()], vec![1, input.len()])),
+            ..options
+        };
+        assert!(detect_outliers(&input, &mismatched, "isoutlier")
+            .unwrap_err()
+            .contains("exactly the same shape"));
+    }
+}
+
 pub(super) fn detect_outliers(
     input: &Tensor,
     options: &DetectionOptions,
@@ -9,14 +35,14 @@ pub(super) fn detect_outliers(
 ) -> BuiltinResult<DetectionResult> {
     let (input_values, integer_offset) = statistical_values(input, builtin)?;
     if let Some((_, mask_shape)) = &options.forced_mask {
-        if mask_shape != &input.shape {
+        if mask_shape.as_slice() != input.shape() {
             return Err(invalid_argument(
                 builtin,
                 "OutlierLocations must have exactly the same shape as the input",
             ));
         }
     }
-    let shape = tensor::default_shape_for(&input.shape, input_values.len());
+    let shape = tensor::default_shape_for(input.shape(), input_values.len());
     let dim = options.dim.unwrap_or_else(|| first_non_singleton(&shape));
     let mut result = if dim == 0 {
         detect_all(input, &input_values, options)?
@@ -73,14 +99,14 @@ fn detect_trailing_singleton(
     }
     Ok(DetectionResult {
         mask,
-        mask_shape: input.shape.clone(),
+        mask_shape: input.shape().to_vec(),
         lower: lower.clone(),
         upper: upper.clone(),
         center: center.clone(),
         lower_full: lower,
         upper_full: upper,
         center_full: center,
-        threshold_shape: input.shape.clone(),
+        threshold_shape: input.shape().to_vec(),
     })
 }
 
@@ -152,7 +178,7 @@ fn detect_all(
         .collect();
     Ok(DetectionResult {
         mask,
-        mask_shape: input.shape.clone(),
+        mask_shape: input.shape().to_vec(),
         lower: vec![stats.lower],
         upper: vec![stats.upper],
         center: vec![stats.center],
@@ -207,7 +233,7 @@ fn detect_by_slice(
     }
     Ok(DetectionResult {
         mask,
-        mask_shape: input.shape.clone(),
+        mask_shape: input.shape().to_vec(),
         lower,
         upper,
         center,
@@ -264,7 +290,7 @@ fn detect_moving(
     }
     Ok(DetectionResult {
         mask,
-        mask_shape: input.shape.clone(),
+        mask_shape: input.shape().to_vec(),
         lower: lower.clone(),
         upper: upper.clone(),
         center: center.clone(),
