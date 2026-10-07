@@ -163,6 +163,12 @@ impl ComplexTensor {
         self.storage
     }
 
+    /// Validate retained dimensions against the current component storage
+    /// without cloning either owner.
+    pub fn validate_shape(&self) -> Result<(), String> {
+        self.storage.validate_shape(&self.shape)
+    }
+
     pub fn len(&self) -> usize {
         self.storage.len()
     }
@@ -260,6 +266,93 @@ impl ComplexTensor {
         Ok(())
     }
 
+    /// Atomically replace shape metadata after canonical checked admission.
+    pub fn reshape_in_place(&mut self, shape: Vec<usize>) -> Result<(), String> {
+        let class = self.numeric_dtype().class_name();
+        let len = self.len();
+        let shape = admit_shape(
+            shape,
+            len,
+            |shape| format!("complex {class} tensor shape {shape:?} overflows usize"),
+            |shape, expected| {
+                format!(
+                    "complex {class} storage length {len} doesn't match shape {shape:?} ({expected} elements)"
+                )
+            },
+        )?;
+        self.apply_validated_shape(shape);
+        Ok(())
+    }
+
+    /// Resize in the current complex class and publish admitted dimensions
+    /// only after both component stores have grown successfully.
+    pub fn resize_zeroed_for_shape(&mut self, shape: Vec<usize>) -> Result<(), String> {
+        let class = self.numeric_dtype().class_name();
+        let shape = admit_shape_for_resize(shape, |shape| {
+            format!("complex {class} tensor shape {shape:?} overflows usize")
+        })?;
+        let target_len = shape.elements();
+        self.storage.resize_zeroed(target_len);
+        self.apply_validated_shape(shape);
+        Ok(())
+    }
+
+    /// Resize exact integer components and assign one destination-class value
+    /// without cloning or materializing the component buffers.
+    pub fn resize_and_set_integer_assignment(
+        &mut self,
+        shape: Vec<usize>,
+        index: usize,
+        real: IntValue,
+        imag: IntValue,
+    ) -> Result<(), String> {
+        let storage = self
+            .integer_storage()
+            .ok_or_else(|| "complex integer assignment requires integer storage".to_string())?;
+        let dtype = storage.numeric_dtype();
+        if real.numeric_dtype() != dtype || imag.numeric_dtype() != dtype {
+            return Err(format!(
+                "complex integer assignment components must match {} storage",
+                dtype.class_name()
+            ));
+        }
+        let shape = admit_shape_for_resize(shape, |shape| {
+            format!(
+                "complex {} tensor shape {shape:?} overflows usize",
+                dtype.class_name()
+            )
+        })?;
+        if index >= shape.elements() {
+            return Err(format!(
+                "ComplexTensor index {index} out of bounds for {} elements",
+                shape.elements()
+            ));
+        }
+
+        let ComplexStorage::Integer(storage) = &mut self.storage else {
+            unreachable!("integer storage checked before mutation")
+        };
+        storage.real.resize_zeroed(shape.elements());
+        storage.imag.resize_zeroed(shape.elements());
+        storage
+            .real
+            .set_value(index, real)
+            .expect("destination class and index validated before mutation");
+        storage
+            .imag
+            .set_value(index, imag)
+            .expect("destination class and index validated before mutation");
+        self.apply_validated_shape(shape);
+        Ok(())
+    }
+
+    fn apply_validated_shape(&mut self, shape: ValidatedShape) {
+        let (shape, rows, cols) = shape.into_components();
+        self.shape = shape;
+        self.rows = rows;
+        self.cols = cols;
+    }
+
     /// Formats one element using its exact integer components when present.
     ///
     pub fn format_element(&self, index: usize) -> String {
@@ -298,6 +391,17 @@ impl ComplexStorage {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    fn resize_zeroed(&mut self, len: usize) {
+        match self {
+            Self::F64(values) => values.resize(len, ComplexElement(0.0, 0.0)),
+            Self::F32(values) => values.resize(len, ComplexElement(0.0, 0.0)),
+            Self::Integer(storage) => {
+                storage.real.resize_zeroed(len);
+                storage.imag.resize_zeroed(len);
+            }
+        }
     }
 
     pub fn numeric_dtype(&self) -> NumericDType {

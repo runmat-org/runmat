@@ -491,6 +491,39 @@ mod integer_storage_tests {
     }
 
     #[test]
+    fn integer_storage_resize_zeroed_preserves_every_native_class_exactly() {
+        let cases = [
+            IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
+            IntegerStorage::I16(vec![i16::MIN, i16::MAX]),
+            IntegerStorage::I32(vec![i32::MIN, i32::MAX]),
+            IntegerStorage::I64(vec![i64::MIN, i64::MAX]),
+            IntegerStorage::U8(vec![0, u8::MAX]),
+            IntegerStorage::U16(vec![0, u16::MAX]),
+            IntegerStorage::U32(vec![0, u32::MAX]),
+            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+        ];
+
+        for mut storage in cases {
+            let class = storage.integer_class();
+            let first = storage.value_at(0);
+            let second = storage.value_at(1);
+            storage.resize_zeroed(4);
+            assert_eq!(storage.integer_class(), class);
+            assert_eq!(storage.value_at(0), first);
+            assert_eq!(storage.value_at(1), second);
+            assert!(storage.value_at(2).is_some_and(|value| value.is_zero()));
+            assert!(storage.value_at(3).is_some_and(|value| value.is_zero()));
+
+            storage.resize_zeroed(1);
+            assert_eq!(storage.integer_class(), class);
+            assert_eq!(
+                storage.exact_values(),
+                first.into_iter().collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
     fn numeric_storage_floating_materialization_is_explicit_and_may_be_lossy() {
         let exact =
             NumericStorage::U64(vec![9_007_199_254_740_992, 9_007_199_254_740_993, u64::MAX]);
@@ -672,6 +705,121 @@ mod integer_storage_tests {
             tensor.integer_storage(),
             Some(&IntegerStorage::I64(vec![-1, i64::MAX]))
         );
+    }
+
+    #[test]
+    fn tensor_shape_mutation_is_checked_before_payload_or_metadata_changes() {
+        let mut tensor = Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).expect("single tensor");
+        let pointer = tensor.as_f32_slice().unwrap().as_ptr();
+
+        assert_eq!(
+            tensor.reshape_in_place(vec![3]).unwrap_err(),
+            "single tensor data length 2 doesn't match shape [3] (3 elements)"
+        );
+        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(tensor.rows, 1);
+        assert_eq!(tensor.cols, 2);
+        assert_eq!(tensor.as_f32_slice().unwrap().as_ptr(), pointer);
+        assert_eq!(tensor.as_f32_slice(), Some([1.0, 2.0].as_slice()));
+
+        assert_eq!(
+            tensor
+                .resize_zeroed_for_shape(vec![usize::MAX, 2])
+                .unwrap_err(),
+            format!(
+                "single tensor shape {:?} overflows usize",
+                vec![usize::MAX, 2]
+            )
+        );
+        assert_eq!(tensor.shape, vec![1, 2]);
+        assert_eq!(tensor.as_f32_slice().unwrap().as_ptr(), pointer);
+        assert_eq!(tensor.as_f32_slice(), Some([1.0, 2.0].as_slice()));
+
+        tensor
+            .resize_zeroed_for_shape(vec![1, 4])
+            .expect("checked vector growth");
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+        assert_eq!(tensor.shape, vec![1, 4]);
+        assert_eq!(tensor.as_f32_slice(), Some([1.0, 2.0, 0.0, 0.0].as_slice()));
+    }
+
+    #[test]
+    fn complex_shape_mutation_is_checked_before_component_changes() {
+        let mut tensor =
+            ComplexTensor::from_f32(vec![(1.0, -1.0)], vec![1, 1]).expect("single complex tensor");
+        let pointer = tensor.as_f32_slice().unwrap().as_ptr();
+
+        assert_eq!(
+            tensor.reshape_in_place(vec![2]).unwrap_err(),
+            "complex single storage length 1 doesn't match shape [2] (2 elements)"
+        );
+        assert_eq!(tensor.shape, vec![1, 1]);
+        assert_eq!(tensor.as_f32_slice().unwrap().as_ptr(), pointer);
+        assert_eq!(
+            tensor.as_f32_slice(),
+            Some([ComplexElement(1.0, -1.0)].as_slice())
+        );
+
+        assert_eq!(
+            tensor
+                .resize_zeroed_for_shape(vec![usize::MAX, 2])
+                .unwrap_err(),
+            format!(
+                "complex single tensor shape {:?} overflows usize",
+                vec![usize::MAX, 2]
+            )
+        );
+        assert_eq!(tensor.shape, vec![1, 1]);
+        assert_eq!(tensor.as_f32_slice().unwrap().as_ptr(), pointer);
+
+        tensor
+            .resize_zeroed_for_shape(vec![1, 3])
+            .expect("checked complex growth");
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+        assert_eq!(tensor.shape, vec![1, 3]);
+        assert_eq!(
+            tensor.as_f32_slice(),
+            Some(
+                [
+                    ComplexElement(1.0, -1.0),
+                    ComplexElement(0.0, 0.0),
+                    ComplexElement(0.0, 0.0),
+                ]
+                .as_slice()
+            )
+        );
+
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX]),
+            IntegerStorage::U64(vec![1]),
+        )
+        .expect("paired storage");
+        let mut exact = ComplexTensor::new_integer(storage.clone(), vec![1, 1])
+            .expect("integer complex tensor");
+        assert_eq!(
+            exact
+                .resize_and_set_integer_assignment(vec![1, 2], 1, IntValue::I8(2), IntValue::I8(3),)
+                .unwrap_err(),
+            "complex integer assignment components must match uint64 storage"
+        );
+        assert_eq!(exact.shape, vec![1, 1]);
+        assert_eq!(exact.integer_storage(), Some(&storage));
+        assert_eq!(
+            exact
+                .resize_and_set_integer_assignment(
+                    vec![usize::MAX, 2],
+                    1,
+                    IntValue::U64(2),
+                    IntValue::U64(3),
+                )
+                .unwrap_err(),
+            format!(
+                "complex uint64 tensor shape {:?} overflows usize",
+                vec![usize::MAX, 2]
+            )
+        );
+        assert_eq!(exact.shape, vec![1, 1]);
+        assert_eq!(exact.integer_storage(), Some(&storage));
     }
 
     #[test]

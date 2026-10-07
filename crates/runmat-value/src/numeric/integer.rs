@@ -214,6 +214,21 @@ impl IntegerStorage {
         }
     }
 
+    /// Resizes this exact native integer buffer in place, filling any new
+    /// elements with the zero of the existing MATLAB integer class.
+    pub fn resize_zeroed(&mut self, len: usize) {
+        match self {
+            Self::I8(values) => values.resize(len, 0),
+            Self::I16(values) => values.resize(len, 0),
+            Self::I32(values) => values.resize(len, 0),
+            Self::I64(values) => values.resize(len, 0),
+            Self::U8(values) => values.resize(len, 0),
+            Self::U16(values) => values.resize(len, 0),
+            Self::U32(values) => values.resize(len, 0),
+            Self::U64(values) => values.resize(len, 0),
+        }
+    }
+
     /// Stores a same-class exact scalar without floating-point conversion.
     pub fn set_value(&mut self, index: usize, value: IntValue) -> Result<(), String> {
         match (self, value) {

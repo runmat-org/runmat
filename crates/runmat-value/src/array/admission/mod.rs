@@ -49,6 +49,60 @@ impl ShapeAdmission {
     fn dimensions(&self) -> (usize, usize) {
         ShapeProgress::dimensions(&self.shape)
     }
+
+    fn finish_synchronously(
+        mut self,
+        overflow: impl Fn(&[usize]) -> String,
+    ) -> Result<Self, String> {
+        while !self.is_complete() {
+            self.advance(synchronous_quantum(), &overflow)?;
+        }
+        Ok(self)
+    }
+}
+
+pub(in crate::array) struct ValidatedShape {
+    shape: Vec<usize>,
+    rows: usize,
+    cols: usize,
+    elements: usize,
+}
+
+impl ValidatedShape {
+    pub(in crate::array) fn elements(&self) -> usize {
+        self.elements
+    }
+
+    pub(in crate::array) fn into_components(self) -> (Vec<usize>, usize, usize) {
+        (self.shape, self.rows, self.cols)
+    }
+}
+
+pub(in crate::array) fn admit_shape_for_resize(
+    shape: Vec<usize>,
+    overflow: impl Fn(&[usize]) -> String,
+) -> Result<ValidatedShape, String> {
+    let shape = ShapeAdmission::new(shape).finish_synchronously(overflow)?;
+    let (rows, cols) = shape.dimensions();
+    Ok(ValidatedShape {
+        elements: shape.elements(),
+        shape: shape.shape,
+        rows,
+        cols,
+    })
+}
+
+pub(in crate::array) fn admit_shape(
+    shape: Vec<usize>,
+    storage_len: usize,
+    overflow: impl Fn(&[usize]) -> String,
+    mismatch: impl Fn(&[usize], usize) -> String,
+) -> Result<ValidatedShape, String> {
+    let shape = admit_shape_for_resize(shape, overflow)?;
+    if shape.elements != storage_len {
+        return Err(mismatch(&shape.shape, shape.elements));
+    }
+    Ok(shape)
 }
 
 fn synchronous_quantum() -> NonZeroUsize {

@@ -12,8 +12,8 @@ use crate::indexing::write_slice::{
 use crate::runtime_error::semantic_error as mex;
 use crate::RuntimeError;
 use runmat_value::{
-    ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericScalar, NumericStorage,
-    SparseTensor, Tensor, Value,
+    ComplexTensor, IntValue, IntegerStorage, NumericDType, NumericScalar, SparseTensor, Tensor,
+    Value,
 };
 
 fn map_assignment_shape_error(err: impl std::fmt::Display) -> RuntimeError {
@@ -115,81 +115,6 @@ async fn rhs_to_complex_integer_assignment_scalar(
             real: rhs_to_integer_assignment_scalar(rhs).await?,
             imag: IntegerAssignmentValue::Float(0.0),
         }),
-    }
-}
-
-fn assign_integer_storage(
-    storage: IntegerStorage,
-    index: usize,
-    target_len: usize,
-    rhs: &IntegerAssignmentValue,
-) -> IntegerStorage {
-    let value = integer_assignment::scalar_value(&storage, rhs);
-    match storage {
-        IntegerStorage::I8(mut values) => {
-            let IntValue::I8(value) = value else {
-                unreachable!()
-            };
-            values.resize(target_len, 0);
-            values[index] = value;
-            IntegerStorage::I8(values)
-        }
-        IntegerStorage::I16(mut values) => {
-            let IntValue::I16(value) = value else {
-                unreachable!()
-            };
-            values.resize(target_len, 0);
-            values[index] = value;
-            IntegerStorage::I16(values)
-        }
-        IntegerStorage::I32(mut values) => {
-            let IntValue::I32(value) = value else {
-                unreachable!()
-            };
-            values.resize(target_len, 0);
-            values[index] = value;
-            IntegerStorage::I32(values)
-        }
-        IntegerStorage::I64(mut values) => {
-            let IntValue::I64(value) = value else {
-                unreachable!()
-            };
-            values.resize(target_len, 0);
-            values[index] = value;
-            IntegerStorage::I64(values)
-        }
-        IntegerStorage::U8(mut values) => {
-            let IntValue::U8(value) = value else {
-                unreachable!()
-            };
-            values.resize(target_len, 0);
-            values[index] = value;
-            IntegerStorage::U8(values)
-        }
-        IntegerStorage::U16(mut values) => {
-            let IntValue::U16(value) = value else {
-                unreachable!()
-            };
-            values.resize(target_len, 0);
-            values[index] = value;
-            IntegerStorage::U16(values)
-        }
-        IntegerStorage::U32(mut values) => {
-            let IntValue::U32(value) = value else {
-                unreachable!()
-            };
-            values.resize(target_len, 0);
-            values[index] = value;
-            IntegerStorage::U32(values)
-        }
-        IntegerStorage::U64(mut values) => {
-            let IntValue::U64(value) = value else {
-                unreachable!()
-            };
-            values.resize(target_len, 0);
-            values[index] = value;
-            IntegerStorage::U64(values)
-        }
     }
 }
 
@@ -302,7 +227,7 @@ pub async fn assign_tensor_scalar(
     delete: bool,
 ) -> Result<Value, RuntimeError> {
     if indices.len() == 1 {
-        let total = t.rows * t.cols;
+        let total = t.len();
         let idx = indices[0];
         if idx == 0 {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
@@ -516,39 +441,31 @@ pub async fn assign_sparse_scalar(
 }
 
 async fn assign_real_tensor_scalar(
-    t: Tensor,
+    mut t: Tensor,
     index: usize,
     shape: Vec<usize>,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
-    let mut storage = t
-        .into_numeric_storage()
-        .map_err(map_assignment_shape_error)?;
-    let target_len = shape.iter().product();
-    storage.resize_zeroed(target_len);
-    storage = match storage.into_integer_storage() {
-        Ok(storage) => {
-            let rhs = rhs_to_integer_assignment_scalar(rhs).await?;
-            NumericStorage::from_integer_storage(assign_integer_storage(
-                storage, index, target_len, &rhs,
-            ))
-        }
-        Err(mut storage) => {
-            let rhs = rhs_to_real_scalar(rhs).await?;
-            let value = match storage.numeric_dtype() {
-                NumericDType::F64 => NumericScalar::F64(rhs),
-                NumericDType::F32 => NumericScalar::F32(rhs as f32),
-                _ => unreachable!("non-integer storage must be floating"),
-            };
-            storage
-                .set_value(index, value)
-                .map_err(map_assignment_shape_error)?;
-            storage
+    t.validate_shape().map_err(map_assignment_shape_error)?;
+    let value = if t.integer_storage().is_some() {
+        let rhs = rhs_to_integer_assignment_scalar(rhs).await?;
+        let storage = t
+            .integer_storage()
+            .expect("integer tensor classification is stable");
+        NumericScalar::from(integer_assignment::scalar_value(storage, &rhs))
+    } else {
+        let rhs = rhs_to_real_scalar(rhs).await?;
+        match t.numeric_dtype() {
+            NumericDType::F64 => NumericScalar::F64(rhs),
+            NumericDType::F32 => NumericScalar::F32(rhs as f32),
+            _ => unreachable!("integer storage handled above"),
         }
     };
-    Tensor::from_numeric_storage(storage, shape)
-        .map(Value::Tensor)
-        .map_err(map_assignment_shape_error)
+    t.resize_zeroed_for_shape(shape)
+        .map_err(map_assignment_shape_error)?;
+    t.set_numeric_assignment_at(index, value)
+        .map_err(map_assignment_shape_error)?;
+    Ok(Value::Tensor(t))
 }
 
 pub async fn assign_complex_scalar(
@@ -558,7 +475,7 @@ pub async fn assign_complex_scalar(
     delete: bool,
 ) -> Result<Value, RuntimeError> {
     if indices.len() == 1 {
-        let total = t.rows * t.cols;
+        let total = t.len();
         let idx = indices[0];
         if idx == 0 {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
@@ -579,27 +496,24 @@ pub async fn assign_complex_scalar(
             return assign_typed_complex_integer_scalar(t, idx, rhs).await;
         }
         let val = rhs_to_complex_scalar(rhs).await?;
-        let dtype = t.numeric_dtype();
-        let mut values = t.materialize_f64();
-        if idx > total {
+        t.validate_shape().map_err(map_assignment_shape_error)?;
+        let shape = if idx > total {
             if !(t.rows == 1 || t.cols == 1) {
                 return Err(mex("IndexOutOfBounds", "Index out of bounds"));
             }
-            let target_len = idx;
             if t.rows == 1 {
-                values.resize(target_len, (0.0, 0.0));
-                t.cols = target_len;
-                t.shape = vec![1, t.cols];
+                vec![1, idx]
             } else {
-                values.resize(target_len, (0.0, 0.0));
-                t.rows = target_len;
-                t.shape = vec![t.rows, 1];
+                vec![idx, 1]
             }
-        }
-        values[idx - 1] = val;
-        ComplexTensor::from_f64_values_with_dtype(values, t.shape, dtype)
-            .map(Value::ComplexTensor)
-            .map_err(map_assignment_shape_error)
+        } else {
+            t.shape.clone()
+        };
+        t.resize_zeroed_for_shape(shape)
+            .map_err(map_assignment_shape_error)?;
+        t.set_f64_assignment_at(idx - 1, val.0, val.1)
+            .map_err(map_assignment_shape_error)?;
+        Ok(Value::ComplexTensor(t))
     } else if indices.len() == 2 {
         let i = indices[0];
         let mut j = indices[1];
@@ -625,6 +539,7 @@ pub async fn assign_complex_scalar(
             return assign_typed_complex_integer_scalar(t, idx + 1, rhs).await;
         }
         let val = rhs_to_complex_scalar(rhs).await?;
+        t.validate_shape().map_err(map_assignment_shape_error)?;
         t.set_f64_assignment_at(idx, val.0, val.1)
             .map_err(map_assignment_shape_error)?;
         Ok(Value::ComplexTensor(t))
@@ -641,43 +556,35 @@ async fn assign_typed_complex_integer_scalar(
     index: usize,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
-    let total = tensor.rows * tensor.cols;
+    let total = tensor.len();
     if index == 0 {
         return Err(mex("IndexOutOfBounds", "Index out of bounds"));
     }
-    if index > total {
+    let shape = if index > total {
         if !(tensor.rows == 1 || tensor.cols == 1) {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
         }
         if tensor.rows == 1 {
-            tensor.cols = index;
-            tensor.shape = vec![1, tensor.cols];
+            vec![1, index]
         } else {
-            tensor.rows = index;
-            tensor.shape = vec![tensor.rows, 1];
+            vec![index, 1]
         }
-    }
+    } else {
+        tensor.shape.clone()
+    };
     let rhs = rhs_to_complex_integer_assignment_scalar(rhs).await?;
+    tensor
+        .validate_shape()
+        .map_err(map_assignment_shape_error)?;
     let storage = tensor
         .integer_storage()
-        .cloned()
         .expect("typed complex assignment requires exact storage");
-    let real = assign_integer_storage(
-        storage.real,
-        index - 1,
-        tensor.rows * tensor.cols,
-        &rhs.real,
-    );
-    let imag = assign_integer_storage(
-        storage.imag,
-        index - 1,
-        tensor.rows * tensor.cols,
-        &rhs.imag,
-    );
-    runmat_value::IntegerComplexStorage::new(real, imag)
-        .and_then(|storage| ComplexTensor::new_integer(storage, tensor.shape))
-        .map(Value::ComplexTensor)
-        .map_err(map_assignment_shape_error)
+    let real = integer_assignment::scalar_value(&storage.real, &rhs.real);
+    let imag = integer_assignment::scalar_value(&storage.imag, &rhs.imag);
+    tensor
+        .resize_and_set_integer_assignment(shape, index - 1, real, imag)
+        .map_err(map_assignment_shape_error)?;
+    Ok(Value::ComplexTensor(tensor))
 }
 
 pub async fn assign_gpu_scalar(
@@ -968,6 +875,41 @@ mod tests {
     }
 
     #[test]
+    fn integer_complex_vector_growth_uses_checked_owner_shape() {
+        let storage = IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![u64::MAX]),
+            IntegerStorage::U64(vec![1]),
+        )
+        .expect("paired storage");
+        let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex tensor");
+        let rhs = Value::ComplexTensor(
+            ComplexTensor::new_integer(
+                IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![9_007_199_254_740_993]),
+                    IntegerStorage::U64(vec![u64::MAX]),
+                )
+                .expect("rhs storage"),
+                vec![1, 1],
+            )
+            .expect("rhs tensor"),
+        );
+
+        let Value::ComplexTensor(grown) =
+            block_on(assign_complex_scalar(tensor, &[3], &rhs, false)).expect("growth")
+        else {
+            panic!("expected complex tensor");
+        };
+        assert_eq!(grown.shape, vec![1, 3]);
+        assert_eq!(
+            grown.integer_storage(),
+            Some(&IntegerComplexStorage {
+                real: IntegerStorage::U64(vec![u64::MAX, 0, 9_007_199_254_740_993]),
+                imag: IntegerStorage::U64(vec![1, 0, u64::MAX]),
+            })
+        );
+    }
+
+    #[test]
     fn sparse_integer_assignment_preserves_exact_uint64_and_elides_zero() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let sparse = runmat_value::SparseTensor::new_integer(
@@ -1223,6 +1165,68 @@ mod tests {
     fn assignment_shape_error_mapping_reports_identifier() {
         let err = map_assignment_shape_error("invalid shape");
         assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn poisoned_retained_shape_fails_before_rhs_resolution() {
+        let mut tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
+        tensor.shape = vec![3];
+        let error = block_on(assign_tensor_scalar(
+            tensor,
+            &[1],
+            &Value::String("not numeric".into()),
+            false,
+        ))
+        .expect_err("retained shape must be validated first");
+        assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+        assert!(error
+            .to_string()
+            .contains("double storage length 2 doesn't match shape [3] (3 elements)"));
+    }
+
+    #[test]
+    fn poisoned_complex_shape_preserves_rhs_then_shape_error_order() {
+        let mut floating =
+            ComplexTensor::new(vec![(1.0, -1.0)], vec![1, 1]).expect("complex tensor");
+        floating.shape = vec![2];
+        let rhs_error = block_on(assign_complex_scalar(
+            floating.clone(),
+            &[1],
+            &Value::String("not numeric".into()),
+            false,
+        ))
+        .expect_err("rhs conversion remains first");
+        assert_eq!(rhs_error.identifier(), Some("RunMat:NumericRequired"));
+
+        let shape_error = block_on(assign_complex_scalar(
+            floating,
+            &[1],
+            &Value::Complex(2.0, 3.0),
+            false,
+        ))
+        .expect_err("retained floating shape must be validated");
+        assert_eq!(shape_error.identifier(), Some("RunMat:ShapeMismatch"));
+        assert!(shape_error
+            .to_string()
+            .contains("complex double storage length 1 doesn't match shape [2] (2 elements)"));
+
+        let storage =
+            IntegerComplexStorage::new(IntegerStorage::U64(vec![1]), IntegerStorage::U64(vec![2]))
+                .expect("paired storage");
+        let mut exact =
+            ComplexTensor::new_integer(storage, vec![1, 1]).expect("integer complex tensor");
+        exact.shape = vec![2];
+        let exact_error = block_on(assign_complex_scalar(
+            exact,
+            &[1],
+            &Value::Complex(4.0, 5.0),
+            false,
+        ))
+        .expect_err("retained exact shape must be validated");
+        assert_eq!(exact_error.identifier(), Some("RunMat:ShapeMismatch"));
+        assert!(exact_error
+            .to_string()
+            .contains("complex uint64 storage length 1 doesn't match shape [2] (2 elements)"));
     }
 
     #[test]

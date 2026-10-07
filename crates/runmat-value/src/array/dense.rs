@@ -145,29 +145,70 @@ impl Tensor {
         Ok(storage)
     }
 
-    /// Change only shape metadata while retaining the underlying numeric storage.
-    pub fn reshape(mut self, shape: Vec<usize>) -> Result<Self, String> {
-        let expected = shape.iter().product::<usize>();
+    /// Validate retained dimensions against the current payload without
+    /// cloning either owner. This preserves the pre-mutation guard used by
+    /// indexing while dimension fields remain publicly writable.
+    pub fn validate_shape(&self) -> Result<(), String> {
+        let expected = BorrowedShapeAdmission::new(&self.shape).finish_synchronously(|shape| {
+            format!("numeric tensor shape {shape:?} overflows usize")
+        })?;
         if self.len() != expected {
             return Err(format!(
-                "{} tensor data length {} doesn't match shape {:?} ({} elements)",
+                "{} storage length {} doesn't match shape {:?} ({} elements)",
                 self.numeric_dtype().class_name(),
                 self.len(),
-                shape,
+                self.shape,
                 expected
             ));
         }
-        let (rows, cols) = if shape.len() >= 2 {
-            (shape[0], shape[1])
-        } else if shape.len() == 1 {
-            (1, shape[0])
-        } else {
-            (0, 0)
-        };
+        Ok(())
+    }
+
+    /// Change only shape metadata while retaining the underlying numeric storage.
+    pub fn reshape(mut self, shape: Vec<usize>) -> Result<Self, String> {
+        self.reshape_in_place(shape)?;
+        Ok(self)
+    }
+
+    /// Atomically replace shape metadata after canonical checked admission.
+    ///
+    /// A failed admission leaves both the payload and existing dimensions
+    /// unchanged.
+    pub fn reshape_in_place(&mut self, shape: Vec<usize>) -> Result<(), String> {
+        let class = self.numeric_dtype().class_name();
+        let len = self.len();
+        let shape = admit_shape(
+            shape,
+            len,
+            |shape| format!("{class} tensor shape {shape:?} overflows usize"),
+            |shape, expected| {
+                format!(
+                    "{class} tensor data length {len} doesn't match shape {shape:?} ({expected} elements)"
+                )
+            },
+        )?;
+        self.apply_validated_shape(shape);
+        Ok(())
+    }
+
+    /// Resize in the current numeric class and atomically publish the admitted
+    /// shape after storage growth succeeds.
+    pub fn resize_zeroed_for_shape(&mut self, shape: Vec<usize>) -> Result<(), String> {
+        let class = self.numeric_dtype().class_name();
+        let shape = admit_shape_for_resize(shape, |shape| {
+            format!("{class} tensor shape {shape:?} overflows usize")
+        })?;
+        let target_len = shape.elements();
+        self.storage.resize_zeroed(target_len);
+        self.apply_validated_shape(shape);
+        Ok(())
+    }
+
+    fn apply_validated_shape(&mut self, shape: ValidatedShape) {
+        let (shape, rows, cols) = shape.into_components();
         self.shape = shape;
         self.rows = rows;
         self.cols = cols;
-        Ok(self)
     }
 
     pub fn zeros(shape: Vec<usize>) -> Self {
