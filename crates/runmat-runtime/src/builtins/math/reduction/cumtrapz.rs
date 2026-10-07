@@ -999,7 +999,7 @@ pub(crate) mod tests {
                         .expect("fixture canonical integration");
                     self.upload(&HostTensorView {
                         data: &result.materialize_f64(),
-                        shape: &result.shape,
+                        shape: result.shape(),
                     })
                 }
                 NativeBehavior::Error => anyhow::bail!("deliberate cumtrapz failure"),
@@ -1059,7 +1059,7 @@ pub(crate) mod tests {
         let Value::Tensor(out) = value else {
             panic!("expected tensor result");
         };
-        assert_eq!(out.shape, vec![1, 3]);
+        assert_eq!(out.shape(), &[1, 3]);
         assert_eq!(out.materialize_f64(), vec![0.0, 1.5, 4.0]);
     }
 
@@ -1097,7 +1097,7 @@ pub(crate) mod tests {
         let Value::Tensor(out) = value else {
             panic!("expected tensor result");
         };
-        assert_eq!(out.shape, vec![2, 3]);
+        assert_eq!(out.shape(), &[2, 3]);
         assert_eq!(out.materialize_f64(), vec![0.0, 0.0, 1.5, 4.5, 4.0, 10.0]);
     }
 
@@ -1166,7 +1166,7 @@ pub(crate) mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: &y.materialize_f64(),
-                    shape: &y.shape,
+                    shape: y.shape(),
                 })
                 .expect("upload");
             let result = run_cumtrapz(Value::GpuTensor(handle), Vec::new()).expect("cumtrapz gpu");
@@ -1174,7 +1174,7 @@ pub(crate) mod tests {
                 panic!("expected gpu result");
             };
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), &[1, 3]);
             assert_eq!(gathered.materialize_f64(), vec![0.0, 1.5, 4.0]);
         });
     }
@@ -1219,7 +1219,7 @@ pub(crate) mod tests {
             let handle = provider
                 .upload(&HostTensorView {
                     data: &y.materialize_f64(),
-                    shape: &y.shape,
+                    shape: y.shape(),
                 })
                 .expect("upload y");
             let result = run_cumtrapz(Value::Tensor(x), vec![Value::GpuTensor(handle)])
@@ -1228,7 +1228,7 @@ pub(crate) mod tests {
                 panic!("expected gpu result");
             };
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
-            assert_eq!(gathered.shape, vec![1, 3]);
+            assert_eq!(gathered.shape(), &[1, 3]);
             assert_eq!(gathered.materialize_f64(), vec![0.0, 0.5, 3.5]);
         });
     }
@@ -1242,13 +1242,13 @@ pub(crate) mod tests {
             let y_handle = provider
                 .upload(&HostTensorView {
                     data: &y.materialize_f64(),
-                    shape: &y.shape,
+                    shape: y.shape(),
                 })
                 .expect("upload y");
             let x_handle = provider
                 .upload(&HostTensorView {
                     data: &x.materialize_f64(),
-                    shape: &x.shape,
+                    shape: x.shape(),
                 })
                 .expect("upload x");
             let result = run_cumtrapz(
@@ -1260,7 +1260,7 @@ pub(crate) mod tests {
                 panic!("expected gpu result");
             };
             let gathered = test_support::gather(Value::GpuTensor(out)).expect("gather");
-            assert_eq!(gathered.shape, vec![2, 3]);
+            assert_eq!(gathered.shape(), &[2, 3]);
             assert_eq!(
                 gathered.materialize_f64(),
                 vec![0.0, 0.0, 1.5, 4.5, 6.5, 15.5]
@@ -1487,7 +1487,7 @@ pub(crate) mod tests {
         let y_handle = provider
             .upload(&HostTensorView {
                 data: &y.materialize_f64(),
-                shape: &y.shape,
+                shape: y.shape(),
             })
             .unwrap();
         let gpu = run_cumtrapz(Value::Tensor(x), vec![Value::GpuTensor(y_handle)]).unwrap();
@@ -1500,7 +1500,7 @@ pub(crate) mod tests {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-9,
             runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
         };
-        assert_eq!(gathered.shape, expected.shape);
+        assert_eq!(gathered.shape(), expected.shape());
         for (actual, expected) in gathered
             .materialize_f64()
             .iter()
