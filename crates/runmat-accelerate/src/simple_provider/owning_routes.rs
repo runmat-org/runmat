@@ -98,7 +98,7 @@ fn structure_hooks_preserve_native_storage_or_request_typed_fallback() {
 }
 
 #[test]
-fn linear_indexing_distinguishes_unsupported_storage_from_invalid_owner() {
+fn linear_indexing_preserves_native_single_gather_and_rejects_invalid_owner() {
     let provider = InProcessProvider::new();
     let foreign = InProcessProvider::new();
     let single = provider
@@ -108,9 +108,17 @@ fn linear_indexing_distinguishes_unsupported_storage_from_invalid_owner() {
             storage: GpuTensorStorage::Real,
         })
         .unwrap();
-    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-        &provider.gather_linear(&single, &[0], &[1, 1]).unwrap_err()
-    ));
+    let gathered = provider
+        .gather_linear(&single, &[1, 0, 1], &[3, 1])
+        .expect("native single gather");
+    assert_eq!(gathered.shape(), &[3, 1]);
+    assert_eq!(gathered.physical().element_type(), NumericElementType::F32);
+    assert_eq!(gathered.physical().storage(), GpuTensorStorage::Real);
+    assert_ne!(gathered.buffer_id(), single.buffer_id());
+    assert_eq!(
+        block_on(provider.download_numeric(&gathered)).unwrap().data,
+        HostNumericDataOwned::F32(vec![2.0, 1.0, 2.0])
+    );
     assert!(runmat_accelerate_api::is_unsupported_provider_operation(
         &provider
             .scatter_linear(&single, &[0, 1], &single)
@@ -122,16 +130,22 @@ fn linear_indexing_distinguishes_unsupported_storage_from_invalid_owner() {
             shape: &[1, 1],
         })
         .unwrap();
+    let scatter_error = provider.scatter_linear(&single, &[0], &other).unwrap_err();
     assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
-        &provider.scatter_linear(&single, &[0], &other).unwrap_err()
+        &scatter_error
     ));
+    assert!(scatter_error.to_string().contains("unknown buffer"));
+    let gather_error = foreign.gather_linear(&single, &[0], &[1, 1]).unwrap_err();
     assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
-        &foreign.gather_linear(&single, &[0], &[1, 1]).unwrap_err()
+        &gather_error
     ));
+    assert!(gather_error.to_string().contains("unknown buffer"));
     assert_eq!(
         block_on(provider.download_numeric(&single)).unwrap().data,
         HostNumericDataOwned::F32(vec![1.0, 2.0])
     );
+    assert!(single.allocation_lease().validate_live().is_ok());
+    assert!(gathered.allocation_lease().validate_live().is_ok());
 }
 
 #[test]
