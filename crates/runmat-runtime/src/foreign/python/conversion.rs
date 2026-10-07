@@ -130,7 +130,7 @@ fn value_to_python_inner(value: Value) -> Result<PythonValue, RuntimeError> {
         )),
         Value::Tensor(value) => {
             let dtype = python_dtype(value.numeric_dtype());
-            let shape = value.shape.clone();
+            let shape = value.shape().to_vec();
             let owner = Arc::new(NumericOwner(value.host_buffer().clone()));
             Ok(PythonValue::Array(PythonArray {
                 dtype,
@@ -152,7 +152,7 @@ fn value_to_python_inner(value: Value) -> Result<PythonValue, RuntimeError> {
             }))
         }
         Value::ComplexTensor(value) => {
-            let shape = value.shape.clone();
+            let shape = value.shape().to_vec();
             let (dtype, owner): (PythonDType, Arc<dyn PythonBufferOwner>) =
                 match value.complex_storage() {
                     ComplexStorage::F64(owner) => (
@@ -420,7 +420,7 @@ fn datetime_to_python(value: &runmat_value::ObjectInstance) -> Result<PythonValu
     }
     Ok(temporal_array(
         PythonDType::DateTime64Micros,
-        tensor.shape,
+        tensor.shape().to_vec(),
         micros,
     ))
 }
@@ -443,7 +443,7 @@ fn duration_to_python(value: Value) -> Result<PythonValue, RuntimeError> {
     }
     Ok(temporal_array(
         PythonDType::TimeDelta64Micros,
-        tensor.shape,
+        tensor.shape().to_vec(),
         micros,
     ))
 }
@@ -619,6 +619,43 @@ fn value_kind(value: &Value) -> &'static str {
 mod tests {
     use super::*;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn python_arrays_preserve_rank_and_share_live_numeric_allocations() {
+        let wide = (1_u64 << 53) + 1;
+        for shape in [Vec::new(), vec![1]] {
+            let tensor =
+                Tensor::new_integer(IntegerStorage::U64(vec![wide]), shape.clone()).unwrap();
+            let address = NumericOwner(tensor.host_buffer().clone()).address();
+            let PythonValue::Array(array) = value_to_python(Value::Tensor(tensor)).unwrap() else {
+                panic!("expected Python array");
+            };
+            assert_eq!(array.shape, shape);
+            assert_eq!(array.dtype, PythonDType::Uint64);
+            assert!(array.read_only && array.column_major);
+            assert_eq!(array.owner.address(), address);
+            assert_eq!(array.owner.copy_bytes(), wide.to_ne_bytes());
+
+            let tensor = ComplexTensor::new(vec![(7.0, -3.0)], shape.clone()).unwrap();
+            let ComplexStorage::F64(buffer) = tensor.complex_storage() else {
+                panic!("expected double complex storage");
+            };
+            let address = ComplexF64Owner(buffer.clone()).address();
+            let PythonValue::Array(array) = value_to_python(Value::ComplexTensor(tensor)).unwrap()
+            else {
+                panic!("expected Python complex array");
+            };
+            assert_eq!(array.shape, shape);
+            assert_eq!(array.dtype, PythonDType::Complex128);
+            assert!(array.read_only && array.column_major);
+            assert_eq!(array.owner.address(), address);
+            assert_eq!(
+                array.owner.copy_bytes(),
+                [7.0_f64.to_ne_bytes(), (-3.0_f64).to_ne_bytes()].concat(),
+            );
+        }
+    }
+
     #[test]
     fn python_conversion_rejects_nested_transient_sequences_before_recursion() {
         let nested = Value::Cell(
@@ -741,7 +778,7 @@ mod tests {
             panic!("expected datetime object");
         };
         let tensor = crate::builtins::datetime::serial_tensor_for_object(&object).unwrap();
-        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(tensor.shape(), &[2, 1]);
         assert!(
             crate::builtins::datetime::naive_from_datenum(tensor.materialize_f64()[0])
                 .unwrap()

@@ -244,7 +244,7 @@ fn ensure_supported_resident_image_class(value: &Value) -> BuiltinResult<()> {
 
 fn is_colormap_argument(value: &Value) -> bool {
     match value {
-        Value::Tensor(tensor) => tensor.shape.len() == 2 && tensor.shape.get(1) == Some(&3),
+        Value::Tensor(tensor) => tensor.shape().len() == 2 && tensor.shape().get(1) == Some(&3),
         Value::GpuTensor(handle) => handle.shape().len() == 2 && handle.shape().get(1) == Some(&3),
         _ => false,
     }

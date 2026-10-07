@@ -481,11 +481,15 @@ fn real_rows_from_sparse(sparse: &SparseTensor) -> BuiltinResult<RealRows> {
 fn complex_matrix_input(value: &Value, fn_name: &str) -> BuiltinResult<ComplexRows> {
     match value {
         Value::Complex(re, im) => ComplexRows::new(1, 1, nonzero_complex_rows(1, 1, &[(*re, *im)])),
-        Value::ComplexTensor(tensor) => ComplexRows::new(
-            tensor.rows,
-            tensor.cols,
-            nonzero_complex_rows(tensor.rows, tensor.cols, &tensor.materialize_f64()),
-        ),
+        Value::ComplexTensor(tensor) => {
+            let rows = tensor.rows();
+            let cols = tensor.cols();
+            ComplexRows::new(
+                rows,
+                cols,
+                nonzero_complex_rows(rows, cols, &tensor.materialize_f64()),
+            )
+        }
         Value::Num(value) => ComplexRows::new(1, 1, nonzero_complex_rows(1, 1, &[(*value, 0.0)])),
         Value::Bool(value) => {
             let scalar = if *value { 1.0 } else { 0.0 };
@@ -1183,7 +1187,7 @@ mod tests {
     async fn numeric_matrix_rows_return_sparse_cosines() {
         let m = tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2);
         let out = dense_sparse(cosine_similarity_builtin(vec![m]).await.expect("cosine"));
-        assert_eq!(out.shape, vec![2, 2]);
+        assert_eq!(out.shape(), &[2, 2]);
         assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
     }
 
@@ -1205,7 +1209,7 @@ mod tests {
                     .await
                     .expect("extended numeric cosine"),
             );
-            assert_eq!(out.shape, vec![2, 2]);
+            assert_eq!(out.shape(), &[2, 2]);
             assert_eq!(out.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
         }
     }
@@ -1220,7 +1224,7 @@ mod tests {
                 .expect("cosine"),
         );
         let inv = 1.0 / 2.0_f64.sqrt();
-        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.shape(), &[2, 1]);
         let values = out.materialize_f64();
         assert!((values[0] - inv).abs() < 1e-12);
         assert!((values[1] - inv).abs() < 1e-12);
@@ -1234,7 +1238,7 @@ mod tests {
             vec!["alpha", "unique"],
         ]);
         let out = dense_sparse(cosine_similarity_builtin(vec![docs]).await.expect("cosine"));
-        assert_eq!(out.shape, vec![3, 3]);
+        assert_eq!(out.shape(), &[3, 3]);
         let values = out.materialize_f64();
         assert!((values[0] - 1.0).abs() < 1e-12);
         assert!(values[1] > 0.0 && values[1] < 1.0);
@@ -1262,7 +1266,7 @@ mod tests {
                 .await
                 .expect("cosine"),
         );
-        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.shape(), &[2, 1]);
         assert_eq!(out.materialize_f64(), vec![1.0, 0.0]);
     }
 
@@ -1315,10 +1319,54 @@ mod tests {
         let Value::ComplexTensor(out) = out else {
             panic!("expected complex tensor");
         };
-        assert_eq!(out.shape, vec![1, 1]);
+        assert_eq!(out.shape(), &[1, 1]);
         let inv = 1.0 / 2.0_f64.sqrt();
         assert!((out.materialize_f64()[0].0 - inv).abs() < 1e-12);
         assert!((out.materialize_f64()[0].1 + inv).abs() < 1e-12);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn cosine_similarity_preserves_real_and_complex_rank_projections() {
+        let real_scalar = Value::Tensor(Tensor::new(vec![2.0], Vec::new()).unwrap());
+        let real_output = dense_sparse(
+            futures::executor::block_on(cosine_similarity_builtin(vec![real_scalar]))
+                .expect("rank-zero real cosine similarity"),
+        );
+        assert_eq!(real_output.shape(), &[1, 1]);
+        assert_eq!(real_output.materialize_f64(), vec![1.0]);
+
+        let real_vector = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap());
+        let real_output = dense_sparse(
+            futures::executor::block_on(cosine_similarity_builtin(vec![real_vector]))
+                .expect("rank-one real cosine similarity"),
+        );
+        assert_eq!(real_output.shape(), &[2, 2]);
+
+        let complex_scalar =
+            Value::ComplexTensor(ComplexTensor::new(vec![(2.0, 0.0)], Vec::new()).unwrap());
+        let Value::ComplexTensor(complex_output) =
+            futures::executor::block_on(cosine_similarity_builtin(vec![complex_scalar]))
+                .expect("rank-zero complex cosine similarity")
+        else {
+            panic!("expected complex output");
+        };
+        assert_eq!(complex_output.shape(), &[0, 0]);
+        assert!(complex_output.materialize_f64().is_empty());
+
+        let complex_vector = Value::ComplexTensor(
+            ComplexTensor::new(vec![(1.0, 0.0), (0.0, 1.0)], vec![2]).unwrap(),
+        );
+        let Value::ComplexTensor(complex_output) =
+            futures::executor::block_on(cosine_similarity_builtin(vec![complex_vector]))
+                .expect("rank-one complex cosine similarity")
+        else {
+            panic!("expected complex output");
+        };
+        assert_eq!(complex_output.shape(), &[1, 1]);
+        let value = complex_output.materialize_f64()[0];
+        assert!((value.0 - 1.0).abs() < 1.0e-12);
+        assert!(value.1.abs() < 1.0e-12);
     }
 
     #[tokio::test]

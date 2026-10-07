@@ -561,7 +561,7 @@ async fn extract_numeric_data(value: Value) -> BuiltinResult<NumericData> {
 }
 
 fn tensor_to_numeric_data(tensor: Tensor) -> BuiltinResult<NumericData> {
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(num2str_error_with_message(
             "num2str: input must be scalar, vector, or 2-D matrix",
             &NUM2STR_ERROR_INVALID_INPUT,
@@ -587,14 +587,14 @@ fn tensor_to_numeric_data(tensor: Tensor) -> BuiltinResult<NumericData> {
 }
 
 fn complex_tensor_to_data(tensor: ComplexTensor) -> BuiltinResult<NumericData> {
-    if tensor.shape.len() > 2 {
+    if tensor.shape().len() > 2 {
         return Err(num2str_error_with_message(
             "num2str: complex input must be scalar, vector, or 2-D matrix",
             &NUM2STR_ERROR_INVALID_INPUT,
         ));
     }
-    let rows = tensor.rows;
-    let cols = tensor.cols;
+    let rows = tensor.rows();
+    let cols = tensor.cols();
     if let Some(storage) = tensor.integer_storage() {
         return Ok(NumericData::IntegerComplex {
             storage: storage.clone(),
@@ -1421,6 +1421,55 @@ pub(crate) mod tests {
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn num2str_preserves_real_and_complex_rank_projections() {
+        let Value::CharArray(real_scalar) = num2str_builtin(
+            Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap()),
+            Vec::new(),
+        )
+        .expect("rank-zero real num2str") else {
+            panic!("expected char array");
+        };
+        assert_eq!((real_scalar.rows, real_scalar.cols), (1, 1));
+        assert_eq!(real_scalar.data, vec!['7']);
+
+        let Value::CharArray(real_vector) = num2str_builtin(
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap()),
+            Vec::new(),
+        )
+        .expect("rank-one real num2str") else {
+            panic!("expected char array");
+        };
+        assert_eq!((real_vector.rows, real_vector.cols), (2, 1));
+        assert_eq!(real_vector.data, vec!['1', '2']);
+
+        let Value::CharArray(complex_scalar) = num2str_builtin(
+            Value::ComplexTensor(ComplexTensor::new(vec![(7.0, 1.0)], Vec::new()).unwrap()),
+            Vec::new(),
+        )
+        .expect("rank-zero complex num2str") else {
+            panic!("expected char array");
+        };
+        assert_eq!((complex_scalar.rows, complex_scalar.cols), (0, 0));
+        assert!(complex_scalar.data.is_empty());
+
+        let Value::CharArray(complex_vector) = num2str_builtin(
+            Value::ComplexTensor(
+                ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![2]).unwrap(),
+            ),
+            Vec::new(),
+        )
+        .expect("rank-one complex num2str") else {
+            panic!("expected char array");
+        };
+        assert_eq!(complex_vector.rows, 1);
+        assert_eq!(
+            complex_vector.data.iter().collect::<String>(),
+            "1 + 2i  3 + 4i"
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn num2str_complex_integer_tensor_reads_exact_storage_without_mirror() {
         let storage = IntegerComplexStorage::new(
@@ -1510,7 +1559,7 @@ pub(crate) mod tests {
             let tensor = Tensor::new(vec![10.5, 20.5], vec![1, 2]).expect("tensor");
             let view = runmat_accelerate_api::HostTensorView {
                 data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let out = num2str_builtin(Value::GpuTensor(handle), vec![Value::String("%.1f".into())])
@@ -1592,7 +1641,7 @@ pub(crate) mod tests {
             let data = tensor.materialize_f64();
             let view = runmat_accelerate_api::HostTensorView {
                 data: &data,
-                shape: &tensor.shape,
+                shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
             let error = error_message(

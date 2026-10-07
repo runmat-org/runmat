@@ -40,7 +40,7 @@ fn uint8_grayscale_default_bins_count_exact_intensities() {
     let Value::Tensor(counts) = call(Value::Tensor(image), vec![], None) else {
         panic!("expected counts tensor");
     };
-    assert_eq!(counts.shape, vec![256, 1]);
+    assert_eq!(counts.shape(), &[256, 1]);
     assert_eq!(counts.materialize_f64()[0], 1.0);
     assert_eq!(counts.materialize_f64()[1], 2.0);
     assert_eq!(counts.materialize_f64()[255], 1.0);
@@ -53,7 +53,7 @@ fn exact_uint8_storage_uses_integer_image_range() {
     let Value::Tensor(counts) = call(Value::Tensor(image), vec![], None) else {
         panic!("expected counts tensor");
     };
-    assert_eq!(counts.shape, vec![256, 1]);
+    assert_eq!(counts.shape(), &[256, 1]);
     assert_eq!(counts.materialize_f64()[0], 1.0);
     assert_eq!(counts.materialize_f64()[1], 2.0);
     assert_eq!(counts.materialize_f64()[2], 3.0);
@@ -68,8 +68,8 @@ fn two_outputs_return_counts_and_bin_locations_as_columns() {
     };
     let counts = Tensor::try_from(&outputs[0]).unwrap();
     let locations = Tensor::try_from(&outputs[1]).unwrap();
-    assert_eq!(counts.shape, vec![3, 1]);
-    assert_eq!(locations.shape, vec![3, 1]);
+    assert_eq!(counts.shape(), &[3, 1]);
+    assert_eq!(locations.shape(), &[3, 1]);
     assert_eq!(counts.materialize_f64(), vec![1.0, 1.0, 2.0]);
     assert_eq!(locations.materialize_f64(), vec![0.0, 0.5, 1.0]);
 }
@@ -80,7 +80,7 @@ fn logical_image_uses_two_bins() {
     let Value::Tensor(counts) = call(Value::LogicalArray(logical), vec![], None) else {
         panic!("expected counts");
     };
-    assert_eq!(counts.shape, vec![2, 1]);
+    assert_eq!(counts.shape(), &[2, 1]);
     assert_eq!(counts.materialize_f64(), vec![3.0, 3.0]);
 }
 
@@ -100,6 +100,29 @@ fn indexed_image_counts_colormap_indices() {
     let locations = Tensor::try_from(&outputs[1]).unwrap();
     assert_eq!(counts.materialize_f64(), vec![1.0, 2.0, 1.0]);
     assert_eq!(locations.materialize_f64(), vec![1.0, 2.0, 3.0]);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn colormap_argument_distinguishes_rank_zero_bin_count_from_rank_one_map() {
+    let rank_zero_bins = Value::Tensor(Tensor::new(vec![3.0], Vec::new()).unwrap());
+    let Value::Tensor(counts) = call(Value::Num(1.0), vec![rank_zero_bins], None) else {
+        panic!("expected grayscale counts");
+    };
+    assert_eq!(counts.shape(), &[3, 1]);
+    assert_eq!(counts.materialize_f64(), vec![0.0, 0.0, 1.0]);
+
+    let rank_one_map = Value::Tensor(Tensor::new(vec![0.0; 3], vec![3]).unwrap());
+    let error = block_on(imhist_builtin(None, Value::Num(1.0), vec![rank_one_map]))
+        .expect_err("rank-one map is not an Nx3 colormap");
+    assert!(error.message().contains("Nx3"));
+
+    let rank_two_map = Value::Tensor(Tensor::new(vec![0.0; 3], vec![1, 3]).unwrap());
+    let Value::Tensor(counts) = call(Value::Num(1.0), vec![rank_two_map], None) else {
+        panic!("expected indexed counts");
+    };
+    assert_eq!(counts.shape(), &[1, 1]);
+    assert_eq!(counts.materialize_f64(), vec![1.0]);
 }
 
 #[test]
@@ -290,7 +313,7 @@ fn accepts_n_dimensional_grayscale_input_including_three_plane_shape() {
     else {
         panic!("expected counts tensor");
     };
-    assert_eq!(counts.shape, vec![DEFAULT_GRAYSCALE_BINS, 1]);
+    assert_eq!(counts.shape(), &[DEFAULT_GRAYSCALE_BINS, 1]);
     assert_eq!(counts.materialize_f64().iter().sum::<f64>(), 12.0);
     assert_eq!(counts.materialize_f64()[0], 12.0);
 }
@@ -474,7 +497,7 @@ fn resident_statement_form_returns_host_counts_without_plotting_or_publication()
         let Value::Tensor(counts) = result else {
             panic!("gpuArray statement form must return host counts in ans");
         };
-        assert_eq!(counts.shape, vec![DEFAULT_GRAYSCALE_BINS, 1]);
+        assert_eq!(counts.shape(), &[DEFAULT_GRAYSCALE_BINS, 1]);
         let gathered_source = test_support::gather(Value::GpuTensor(source))
             .expect("source remains resident and readable");
         assert_eq!(gathered_source.materialize_f64(), input.materialize_f64());

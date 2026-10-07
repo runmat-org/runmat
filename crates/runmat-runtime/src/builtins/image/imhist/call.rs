@@ -90,7 +90,7 @@ pub(super) fn is_typed_integer_scalar(value: &Value) -> bool {
 fn parse_colormap_bins(value: &Value) -> BuiltinResult<usize> {
     let tensor = Tensor::try_from(value)
         .map_err(|err| invalid(format!("colormap must be an Nx3 numeric array: {err}")))?;
-    if tensor.shape.len() != 2 || tensor.cols != 3 || tensor.rows == 0 {
+    if tensor.shape().len() != 2 || tensor.cols() != 3 || tensor.rows() == 0 {
         return Err(invalid("colormap must be a non-empty Nx3 numeric array"));
     }
     if tensor.numeric_dtype() != runmat_value::NumericDType::F64 {
@@ -103,8 +103,8 @@ fn parse_colormap_bins(value: &Value) -> BuiltinResult<usize> {
     if !values.iter().all(|value| (0.0..=1.0).contains(value)) {
         return Err(invalid("colormap values must be in the range [0, 1]"));
     }
-    validate_bin_count(tensor.rows)?;
-    Ok(tensor.rows)
+    validate_bin_count(tensor.rows())?;
+    Ok(tensor.rows())
 }
 
 pub(super) fn validate_bin_count(bins: usize) -> BuiltinResult<()> {

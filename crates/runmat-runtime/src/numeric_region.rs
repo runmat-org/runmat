@@ -185,17 +185,17 @@ fn analyze_inputs<'a>(inputs: &[&'a Value]) -> Option<(Vec<NumericInput<'a>>, Op
             Value::Tensor(tensor) => {
                 let values = tensor.as_f64_slice()?;
                 if tensor.len() == 1 {
-                    output_shape.get_or_insert_with(|| tensor.shape.clone());
+                    output_shape.get_or_insert_with(|| tensor.shape().to_vec());
                     input_views.push(NumericInput::Scalar(values[0]));
                 } else {
                     if tensor_shape
                         .as_ref()
-                        .is_some_and(|shape| shape != &tensor.shape)
+                        .is_some_and(|shape| shape != tensor.shape())
                     {
                         return None;
                     }
-                    tensor_shape = Some(tensor.shape.clone());
-                    output_shape = Some(tensor.shape.clone());
+                    tensor_shape = Some(tensor.shape().to_vec());
+                    output_shape = Some(tensor.shape().to_vec());
                     input_views.push(NumericInput::Dense(values));
                 }
             }
@@ -320,7 +320,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn preserves_scalar_array_shape() {
         let program = NumericRegionProgram {
             nodes: vec![
@@ -334,20 +335,29 @@ mod tests {
             ],
             outputs: vec![2],
         };
-        let input = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
-        let result = execute_values(
-            &program,
-            &[Value::Tensor(input)],
-            &runmat_execution::cancellation::CancellationSource::new().token(),
-        )
-        .unwrap();
-        let NumericRegionExecution::Completed(outputs) = result else {
-            panic!("eligible numeric region did not execute")
-        };
-        let Value::Tensor(output) = &outputs[0] else {
-            panic!("scalar arrays must remain arrays")
-        };
-        assert_eq!(output.shape, vec![1, 1]);
-        assert_eq!(output.materialize_f64(), vec![3.0]);
+        for shape in [Vec::new(), vec![1], vec![1, 1]] {
+            let input = Value::Tensor(Tensor::new(vec![2.0], shape.clone()).unwrap());
+            assert_eq!(
+                workload(&[&input]),
+                Some(NumericRegionWorkload {
+                    elements: 1,
+                    output_bytes_per_value: 8,
+                }),
+            );
+            let result = execute_values(
+                &program,
+                &[input],
+                &runmat_execution::cancellation::CancellationSource::new().token(),
+            )
+            .unwrap();
+            let NumericRegionExecution::Completed(outputs) = result else {
+                panic!("eligible numeric region did not execute")
+            };
+            let Value::Tensor(output) = &outputs[0] else {
+                panic!("scalar arrays must remain arrays")
+            };
+            assert_eq!(output.shape(), shape);
+            assert_eq!(output.materialize_f64(), vec![3.0]);
+        }
     }
 }

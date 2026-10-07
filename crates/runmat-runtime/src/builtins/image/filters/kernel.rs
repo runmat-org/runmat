@@ -72,16 +72,16 @@ pub fn build_imfilter_plan(
     options: &ImfilterOptions,
     builtin: &str,
 ) -> ImfilterKernelResult<ImfilterPlan> {
-    if kernel.is_empty() || kernel.shape.contains(&0) {
+    if kernel.is_empty() || kernel.shape().contains(&0) {
         return Err(ImfilterKernelError::new(
             builtin,
             format!("{builtin}: filter must be non-empty along every dimension"),
         ));
     }
 
-    let final_shape = filter_output_shape(image_shape, &kernel.shape, options.shape, builtin)?;
+    let final_shape = filter_output_shape(image_shape, kernel.shape(), options.shape, builtin)?;
     let image_shape_norm = normalize_shape(image_shape);
-    let kernel_shape_norm = normalize_shape(&kernel.shape);
+    let kernel_shape_norm = normalize_shape(kernel.shape());
     let rank = image_shape_norm.len().max(kernel_shape_norm.len());
     let image_ext = extend_shape(&image_shape_norm, rank);
     let kernel_ext = extend_shape(&kernel_shape_norm, rank);
@@ -163,7 +163,7 @@ pub fn apply_imfilter_tensor(
     options: &ImfilterOptions,
     builtin: &str,
 ) -> ImfilterKernelResult<Tensor> {
-    let plan = build_imfilter_plan(&image.shape, kernel, options, builtin)?;
+    let plan = build_imfilter_plan(image.shape(), kernel, options, builtin)?;
     let image_values = tensor::tensor_values_f64_cow(image);
     let data = plan.evaluate(&image_values, options);
     Tensor::new(data, plan.final_shape.clone())
@@ -190,7 +190,7 @@ pub fn apply_imfilter_native(
             ))
         }
     };
-    let plan = build_imfilter_plan(&image.shape, kernel, options, builtin)?;
+    let plan = build_imfilter_plan(image.shape(), kernel, options, builtin)?;
     let values = tensor::tensor_values_f64_cow(image);
     let data = plan.evaluate_with_accumulation(
         &values,

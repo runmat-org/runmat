@@ -30,7 +30,7 @@ impl GrayscaleInput {
     }
 
     pub(super) fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
-        let shape = tensor.shape.clone();
+        let shape = tensor.shape().to_vec();
         let storage = tensor
             .into_numeric_storage()
             .map_err(|err| internal(format!("grayscale tensor storage: {err}")))?;
