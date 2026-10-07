@@ -2206,19 +2206,21 @@ fn mfilename_reads_current_source_context() {
         fallback = mfilename("not-a-mode");
     "#;
     let bytecode = compile_source(source).expect("compile source");
-    let source_text = source.to_string();
-    let _catalog_guard = runmat_runtime::source_context::replace_source_catalog(vec![(
-        runmat_hir::SourceId(0),
-        "/tmp/runmat_vm_mfilename_probe.m".to_string(),
-        source_text,
-    )])
-    .expect("source catalog admission");
-    let vars = interpret(&bytecode).expect("execute bytecode");
-    assert!(
-        vars.iter().any(|v| {
-            matches!(v, runmat_value::Value::String(s) if s == "runmat_vm_mfilename_probe")
-        }),
-        "expected source stem; vars={vars:?}"
+    let vars = test_helpers::interpret_with_program_source(
+        &bytecode,
+        "/tmp/runmat_vm_mfilename_probe.m",
+        source,
+    )
+    .expect("execute bytecode with selected program source");
+    let stem_count = vars
+        .iter()
+        .filter(|value| {
+            matches!(value, runmat_value::Value::String(s) if s == "runmat_vm_mfilename_probe")
+        })
+        .count();
+    assert_eq!(
+        stem_count, 2,
+        "expected name and fallback stem; vars={vars:?}"
     );
     assert!(
         vars.iter().any(|v| {

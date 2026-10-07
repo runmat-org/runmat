@@ -1,9 +1,13 @@
-//! Value-only exact callable fixtures. Tests install their own typed invoker
-//! in the same runtime library copy and session that dispatches the call.
+//! Exact callable fixtures. Tests install their own typed invoker in the same
+//! runtime library copy and session that dispatches the call.
 
 use crate::context::RuntimeContext;
 use runmat_value::{BoundFunctionBinding, FunctionDefinitionOwner, LocalExport, Value};
 use std::sync::Arc;
+
+#[path = "test_support/named.rs"]
+mod named;
+pub use named::*;
 
 pub fn exact_fixture_runtime() -> RuntimeContext {
     let runtime = RuntimeContext::new(std::rc::Rc::new(

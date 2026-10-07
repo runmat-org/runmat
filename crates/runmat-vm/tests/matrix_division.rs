@@ -166,7 +166,7 @@ fn matrix_and_elementwise_object_overloads_dispatch_separately() {
     let vars = execute_program(
         "__register_test_classes(); \
          o = new_object('OverIdx'); \
-         o = call_method(o, 'subsasgn', '.', 'k', 5); \
+         o = call_method(o, 'subsasgn', struct('type', '.', 'subs', 'k'), 5); \
          a = o / 2; \
          b = o \\ 2; \
          c = o ./ 2; \

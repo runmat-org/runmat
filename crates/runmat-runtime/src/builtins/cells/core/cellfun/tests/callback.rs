@@ -40,10 +40,13 @@ fn bound_callback_uses_semantic_identity() {
 
 #[test]
 fn name_callback_resolves_to_semantic_function() {
-    let _resolver =
-        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
-            (name == "project_callback").then_some(418)
-        })));
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _fixtures = crate::user_functions::test_support::install_exact_named_forwarders(
+        &runtime,
+        &[("project_callback", 418)],
+    )
+    .unwrap();
+    let entry = runtime.enter();
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, arguments, _| {
             assert_eq!(function, 418);
@@ -54,10 +57,11 @@ fn name_callback_resolves_to_semantic_function() {
             Box::pin(async move { crate::sequence::single_value_sequence(Value::Num(result)) })
         },
     )));
-    let result = call(
+    drop(entry);
+    let result = futures::executor::block_on(runtime.scope(super::cellfun_builtin(
         Value::String("project_callback".into()),
         vec![cell(vec![Value::Num(3.0)], &[1, 1])],
-    )
+    )))
     .unwrap();
     assert_eq!(tensor_values(result), vec![6.0]);
 }

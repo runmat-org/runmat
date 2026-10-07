@@ -1454,7 +1454,7 @@ fn object_range_end_assignment_accepts_rich_end_expression_payload() {
     assert!(bytecode
         .instructions
         .iter()
-        .any(|instr| matches!(instr, Instr::StoreSlice(2, ..))));
+        .any(|instr| matches!(instr, Instr::StoreSlice(1, ..))));
     let vars = execute_source(input);
     assert!(
         vars.iter().any(|v| {

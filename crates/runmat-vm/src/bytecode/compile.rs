@@ -7084,46 +7084,99 @@ y = x^[1 2; 3 4];\n",
 
     #[test]
     fn compile_external_semantic_function_handle_keeps_identity() {
+        let helper_ast =
+            runmat_parser::parse("function y = remote_inc(x); y = x + 1; end; helper_marker = 0;")
+                .expect("parse helper definition");
+        let helper_hir = lower(&helper_ast, &LoweringContext::empty()).expect("lower helper HIR");
+        let helper_mir = lower_assembly(&helper_hir.assembly).expect("lower helper MIR");
+        let helper_entrypoint = helper_hir.assembly.entrypoints[0].id;
+        let helper_bytecode = compile(&helper_hir.assembly, &helper_mir, helper_entrypoint)
+            .expect("compile helper definition");
+        let helper_function = helper_bytecode
+            .function_registry
+            .resolve_name("remote_inc")
+            .expect("compiled helper identity");
+        let helper_body = helper_bytecode
+            .function_registry
+            .get_current(helper_function)
+            .expect("compiled helper body")
+            .clone();
+        let helper_owner = Arc::clone(&helper_body.definition_owner);
+
         let ast = runmat_parser::parse("h = @remote_inc; y = feval(h, 2);").expect("parse");
         let mut bound_functions = HashMap::new();
-        bound_functions.insert("remote_inc".to_string(), FunctionId(9001));
+        bound_functions.insert("remote_inc".to_string(), helper_function);
         let context = LoweringContext::empty().with_bound_functions(&bound_functions);
         let hir = lower(&ast, &context).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
 
-        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let mut bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
         assert!(bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            Instr::CreateExternalBoundFunctionHandle(FunctionId(9001), name, _)
-                if name == "remote_inc"
+            Instr::CreateExternalBoundFunctionHandle(function, name, _)
+                if *function == helper_function && name == "remote_inc"
         )));
+        bytecode
+            .function_registry
+            .insert_replacing_name(helper_body);
 
-        let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
-            Some(Arc::new(|name| {
-                if name == "remote_inc" {
-                    Some(9001)
-                } else {
-                    None
-                }
-            })),
-        );
-        let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
-            Some(Arc::new(|function, args, requested_outputs| {
-                assert_eq!(function, 9001);
-                assert_eq!(args, &[Value::Num(2.0)]);
-                assert_eq!(requested_outputs, 1);
-                Box::pin(async move {
-                    runmat_value::ValueSequence::single(Value::Num(3.0))
-                        .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
-                })
-            })),
-        );
-
-        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let vars = block_on(runtime.scope(crate::interpret(&bytecode))).expect("interpret");
         assert!(vars
             .iter()
             .any(|value| matches!(value, Value::Num(n) if (*n - 3.0).abs() < 1e-12)));
+        let binding = vars
+            .iter()
+            .find_map(|value| match value {
+                Value::BoundFunctionHandle {
+                    name,
+                    function,
+                    authority,
+                    ..
+                } if name == "remote_inc" && *function == helper_function.0 => {
+                    Some(runmat_value::BoundFunctionBinding {
+                        function: *function,
+                        authority: authority.clone(),
+                    })
+                }
+                _ => None,
+            })
+            .expect("retained external bound handle");
+        assert!(helper_owner.has_handles());
+
+        let foreign = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let wrong = block_on(
+            runmat_runtime::user_functions::try_call_bound_function_in_context(
+                &foreign,
+                binding.clone(),
+                &[Value::Num(2.0)],
+                1,
+            ),
+        )
+        .expect("typed bound route")
+        .expect_err("another live runtime cannot invoke the helper");
+        assert_eq!(wrong.identifier(), Some("RunMat:UnavailableBoundFunction"));
+
+        drop(runtime);
+        let ended = block_on(
+            runmat_runtime::user_functions::try_call_bound_function_in_context(
+                &foreign,
+                binding.clone(),
+                &[Value::Num(2.0)],
+                1,
+            ),
+        )
+        .expect("typed bound route")
+        .expect_err("an ended runtime cannot invoke the helper");
+        assert_eq!(ended.identifier(), Some("RunMat:UnavailableBoundFunction"));
+        drop(vars);
+        drop(binding);
+        assert!(!helper_owner.has_handles());
     }
 
     #[test]

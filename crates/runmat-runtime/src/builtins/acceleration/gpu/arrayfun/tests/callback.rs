@@ -53,12 +53,15 @@ fn arrayfun_semantic_function_handle_uses_semantic_invoker() {
 
 #[test]
 fn arrayfun_name_only_callback_uses_semantic_resolver() {
-    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _resolver_guard =
-        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
-            (name == "resolved_arrayfun_target").then_some(80)
-        })));
-    let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    runtime.set_runmat_extensions_enabled(true);
+    let _fixtures = crate::user_functions::test_support::install_exact_named_forwarders(
+        &runtime,
+        &[("resolved_arrayfun_target", 80)],
+    )
+    .unwrap();
+    let entry = runtime.enter();
+    let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, args, requested_outputs| {
             assert_eq!(function, 80);
             assert_eq!(requested_outputs, 1);
@@ -71,12 +74,14 @@ fn arrayfun_name_only_callback_uses_semantic_resolver() {
             )
         },
     )));
+    drop(entry);
     let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
 
-    let result = call(
+    let result = block_on(runtime.scope(arrayfun_builtin(
+        Some(runtime.clone()),
         Value::String("resolved_arrayfun_target".to_string()),
         vec![Value::Tensor(tensor)],
-    )
+    )))
     .expect("resolved name-only arrayfun");
     match result {
         Value::Tensor(out) => {
@@ -96,11 +101,14 @@ fn arrayfun_qualified_text_callback_classifies_as_external_name() {
 
 #[test]
 fn arrayfun_external_handle_uses_semantic_resolver() {
-    let _resolver_guard =
-        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
-            (name == "pkg.callback").then_some(87)
-        })));
-    let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _fixtures = crate::user_functions::test_support::install_exact_named_forwarders(
+        &runtime,
+        &[("pkg.callback", 87)],
+    )
+    .unwrap();
+    let entry = runtime.enter();
+    let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, args, requested_outputs| {
             assert_eq!(function, 87);
             assert_eq!(requested_outputs, 1);
@@ -113,12 +121,14 @@ fn arrayfun_external_handle_uses_semantic_resolver() {
             )
         },
     )));
+    drop(entry);
     let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
 
-    let result = call(
+    let result = block_on(runtime.scope(arrayfun_builtin(
+        Some(runtime.clone()),
         Value::ExternalFunctionHandle("pkg.callback".to_string()),
         vec![Value::Tensor(tensor)],
-    )
+    )))
     .expect("resolved external-handle arrayfun");
     match result {
         Value::Tensor(out) => {

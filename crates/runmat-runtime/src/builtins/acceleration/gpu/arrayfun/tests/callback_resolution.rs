@@ -2,11 +2,14 @@ use super::*;
 
 #[test]
 fn arrayfun_single_segment_external_handle_uses_runtime_name_resolution() {
-    let _resolver_guard =
-        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
-            (name == "callback").then_some(887)
-        })));
-    let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _fixtures = crate::user_functions::test_support::install_exact_named_forwarders(
+        &runtime,
+        &[("callback", 887)],
+    )
+    .unwrap();
+    let entry = runtime.enter();
+    let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, args, requested_outputs| {
             assert_eq!(function, 887);
             assert_eq!(requested_outputs, 1);
@@ -19,12 +22,14 @@ fn arrayfun_single_segment_external_handle_uses_runtime_name_resolution() {
             )
         },
     )));
+    drop(entry);
     let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
 
-    let result = call(
+    let result = block_on(runtime.scope(arrayfun_builtin(
+        Some(runtime.clone()),
         Value::ExternalFunctionHandle("callback".to_string()),
         vec![Value::Tensor(tensor)],
-    )
+    )))
     .expect("single-segment external-handle arrayfun should resolve via runtime-name policy");
     match result {
         Value::Tensor(out) => {
@@ -37,11 +42,14 @@ fn arrayfun_single_segment_external_handle_uses_runtime_name_resolution() {
 
 #[test]
 fn arrayfun_external_handle_prefers_semantic_handle_binding_when_resolved() {
-    let _resolver_guard =
-        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
-            (name == "pkg.callback").then_some(87)
-        })));
-    let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _fixtures = crate::user_functions::test_support::install_exact_named_forwarders(
+        &runtime,
+        &[("pkg.callback", 87)],
+    )
+    .unwrap();
+    let entry = runtime.enter();
+    let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, arguments, _| {
             assert_eq!(function, 87);
             assert_eq!(arguments, &[Value::Num(4.0)]);
@@ -50,19 +58,23 @@ fn arrayfun_external_handle_prefers_semantic_handle_binding_when_resolved() {
     )));
     let callable = Callable::from_function(Value::ExternalFunctionHandle("pkg.callback".into()))
         .expect("external handle should parse");
+    drop(entry);
     assert_eq!(
-        block_on(callable.call(None, &[Value::Num(4.0)])).unwrap(),
+        block_on(runtime.scope(callable.call(Some(&runtime), &[Value::Num(4.0)]))).unwrap(),
         Value::Num(8.0)
     );
 }
 
 #[test]
 fn arrayfun_name_only_closure_prefers_semantic_handle_binding_when_resolved() {
-    let _resolver_guard =
-        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
-            (name == "pkg.callback").then_some(187)
-        })));
-    let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _fixtures = crate::user_functions::test_support::install_exact_named_forwarders(
+        &runtime,
+        &[("pkg.callback", 187)],
+    )
+    .unwrap();
+    let entry = runtime.enter();
+    let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, arguments, _| {
             assert_eq!(function, 187);
             assert_eq!(arguments, &[Value::Num(5.0), Value::Num(4.0)]);
@@ -77,19 +89,23 @@ fn arrayfun_name_only_closure_prefers_semantic_handle_binding_when_resolved() {
         captures: vec![Value::Num(5.0)],
     }))
     .expect("closure callback should parse");
+    drop(entry);
     assert_eq!(
-        block_on(callable.call(None, &[Value::Num(4.0)])).unwrap(),
+        block_on(runtime.scope(callable.call(Some(&runtime), &[Value::Num(4.0)]))).unwrap(),
         Value::Num(9.0)
     );
 }
 
 #[test]
 fn arrayfun_name_only_closure_call_uses_semantic_resolver_when_unbound() {
-    let _resolver_guard =
-        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
-            (name == "pkg.callback").then_some(287)
-        })));
-    let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+    let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+    let _fixtures = crate::user_functions::test_support::install_exact_named_forwarders(
+        &runtime,
+        &[("pkg.callback", 287)],
+    )
+    .unwrap();
+    let entry = runtime.enter();
+    let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, args, requested_outputs| {
             assert_eq!(function, 287);
             assert_eq!(requested_outputs, 1);
@@ -105,7 +121,9 @@ fn arrayfun_name_only_closure_call_uses_semantic_resolver_when_unbound() {
         captures: vec![Value::Num(5.0)],
     }))
     .expect("closure callback should parse");
-    let value = block_on(callable.call(None, &[Value::Num(4.0)])).expect("closure call");
+    drop(entry);
+    let value = block_on(runtime.scope(callable.call(Some(&runtime), &[Value::Num(4.0)])))
+        .expect("closure call");
     assert_eq!(value, Value::Num(9.0));
 }
 
