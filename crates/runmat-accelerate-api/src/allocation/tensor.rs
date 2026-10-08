@@ -1,7 +1,7 @@
 //! Owning tensor views. Neither diagnostic identities nor serde mint ownership.
+use super::shared::{Shared, WeakShared};
 use super::*;
 use crate::{GpuHandleProvenance, GpuTensorDescriptor};
-use std::sync::{Arc, Weak};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TensorViewIdentity {
@@ -39,14 +39,14 @@ struct OwnedTensorView {
 /// ```
 #[derive(Clone)]
 pub struct GpuTensorHandle {
-    inner: Arc<OwnedTensorView>,
+    inner: Shared<OwnedTensorView>,
 }
 
 /// Non-owning cache reference to an existing admitted view. No new view or
 /// physical lease is minted on upgrade; unavailable owners still reject use.
 #[derive(Clone)]
 pub struct WeakGpuTensorHandle {
-    inner: Weak<OwnedTensorView>,
+    inner: WeakShared<OwnedTensorView>,
 }
 impl WeakGpuTensorHandle {
     pub fn acquire(&self) -> Result<GpuTensorHandle, AllocationAcquisitionError> {
@@ -62,7 +62,7 @@ impl WeakGpuTensorHandle {
 impl GpuTensorHandle {
     pub fn downgrade(&self) -> WeakGpuTensorHandle {
         WeakGpuTensorHandle {
-            inner: Arc::downgrade(&self.inner),
+            inner: Shared::downgrade(&self.inner),
         }
     }
     /// Only an owner-admitted lease can construct an operational handle. There
@@ -82,7 +82,7 @@ impl GpuTensorHandle {
                 .map_err(AllocationAcquisitionError::InvalidView)?,
         };
         Ok(Self {
-            inner: Arc::new(OwnedTensorView {
+            inner: Shared::new(OwnedTensorView {
                 cleanup: crate::residency::ViewCleanup::new(identity),
                 allocation,
                 identity,
@@ -144,7 +144,7 @@ impl GpuTensorHandle {
         }
     }
     pub fn release(self) -> Result<AllocationReleaseOutcome, GpuHandleReleaseError> {
-        match Arc::try_unwrap(self.inner) {
+        match Shared::try_unwrap(self.inner) {
             Err(view) => {
                 drop(view);
                 Ok(AllocationReleaseOutcome::ReferenceReleased)

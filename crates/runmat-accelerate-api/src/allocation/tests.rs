@@ -8,9 +8,13 @@ use owner::{Entry, TestOwner};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+#[cfg(all(target_arch = "wasm32", not(feature = "wgpu")))]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
 const ID: AllocationIdentity = AllocationIdentity::new(17, 41, 2);
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn clones_retain_captured_owner_and_retire_exactly_once() {
     let owner = TestOwner::new(ID, AllocationRetirementOutcome::Retired);
     let owner_weak = Arc::downgrade(&owner);

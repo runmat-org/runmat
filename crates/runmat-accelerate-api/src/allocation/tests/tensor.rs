@@ -8,7 +8,8 @@ fn tensor(owner: &Arc<TestOwner>) -> GpuTensorHandle {
     .unwrap()
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn clones_share_view_and_new_views_share_one_physical_retirement() {
     let owner = TestOwner::new(ID, AllocationRetirementOutcome::Retired);
     let original = tensor(&owner);
@@ -55,7 +56,8 @@ fn clones_share_view_and_new_views_share_one_physical_retirement() {
     );
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn wire_is_nonowning_and_acquisition_rejects_foreign_stale_or_forged_facts() {
     let owner = TestOwner::new(ID, AllocationRetirementOutcome::Retired);
     let original = tensor(&owner);

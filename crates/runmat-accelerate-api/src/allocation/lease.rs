@@ -1,3 +1,4 @@
+use super::shared::{Shared, WeakShared};
 use super::{
     catch_allocation_cleanup_unwind, AllocationIdentity, AllocationOwner,
     AllocationRegistrationError, AllocationReleaseError, AllocationReleaseOutcome,
@@ -5,7 +6,7 @@ use super::{
 };
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::{Arc, OnceLock};
 
 struct LeaseInner {
     identity: AllocationIdentity,
@@ -44,14 +45,14 @@ impl Drop for LeaseInner {
     }
 }
 
-/// One owning reference to a registered allocation. Clone copies only an Arc.
+/// One owning reference to a registered allocation. Clone retains the shared lease.
 /// Shape/storage views belong to the eventual tensor carrier, not this lease.
 /// Retirement callback unwinds are contained on unwind-enabled targets. This
 /// does not make an arbitrary owner's own destructor nonpanicking: the owner
 /// must satisfy its documented teardown contract. Panic-abort cannot be caught.
 #[derive(Clone)]
 pub struct AllocationLease {
-    inner: Arc<LeaseInner>,
+    inner: Shared<LeaseInner>,
 }
 
 impl AllocationLease {
@@ -63,7 +64,7 @@ impl AllocationLease {
         owner: Arc<dyn AllocationOwner>,
     ) -> Result<Self, AllocationRegistrationError> {
         let lease = Self {
-            inner: Arc::new(LeaseInner {
+            inner: Shared::new(LeaseInner {
                 identity,
                 owner,
                 armed: AtomicBool::new(false),
@@ -113,10 +114,10 @@ impl AllocationLease {
             .map_err(|_| GpuViewError::IdentityExhausted)
     }
 
-    /// Atomic ownership extraction, never a racy strong_count/free sequence.
-    /// Losing to a concurrent weak upgrade releases only this reference.
+    /// Extract unique ownership without a separate strong_count/free sequence.
+    /// On native targets, losing to a concurrent weak upgrade releases only this reference.
     pub fn release(self) -> Result<AllocationReleaseOutcome, AllocationReleaseError> {
-        match Arc::try_unwrap(self.inner) {
+        match Shared::try_unwrap(self.inner) {
             Err(reference) => {
                 drop(reference);
                 Ok(AllocationReleaseOutcome::ReferenceReleased)
@@ -135,13 +136,13 @@ impl AllocationLease {
 
     pub fn downgrade(&self) -> WeakAllocationLease {
         WeakAllocationLease {
-            inner: Arc::downgrade(&self.inner),
+            inner: Shared::downgrade(&self.inner),
         }
     }
 
     /// Descriptors with equal numbers do not prove common lifetime authority.
     pub fn shares_allocation_with(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.inner, &other.inner)
+        Shared::ptr_eq(&self.inner, &other.inner)
     }
 }
 
@@ -159,7 +160,7 @@ impl fmt::Debug for AllocationLease {
 /// validate its live state and wire descriptor before exposing an acquired view.
 #[derive(Clone)]
 pub struct WeakAllocationLease {
-    inner: Weak<LeaseInner>,
+    inner: WeakShared<LeaseInner>,
 }
 
 impl WeakAllocationLease {

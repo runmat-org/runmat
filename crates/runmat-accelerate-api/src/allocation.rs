@@ -9,6 +9,7 @@ mod descriptor;
 mod lease;
 mod owner;
 mod release;
+mod shared;
 mod tensor;
 
 pub use cleanup::{catch_allocation_cleanup_unwind, AllocationCleanupPanicked};

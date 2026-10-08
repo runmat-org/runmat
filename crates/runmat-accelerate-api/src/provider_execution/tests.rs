@@ -14,7 +14,8 @@ impl fmt::Display for RetainedOwner {
 }
 impl Error for RetainedOwner {}
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn nested_error_retains_actual_owner_until_final_error_drop() {
     let owner = Owner::new(());
     let weak = Owner::downgrade(&owner);
@@ -32,7 +33,8 @@ fn nested_error_retains_actual_owner_until_final_error_drop() {
     assert!(weak.upgrade().is_none());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn completion_exposes_original_cause_and_never_authorizes_post_effect_replay() {
     let owner = Owner::new(());
     let weak = Owner::downgrade(&owner);
@@ -53,7 +55,8 @@ fn completion_exposes_original_cause_and_never_authorizes_post_effect_replay() {
     assert!(weak.upgrade().is_none());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn unsupported_marker_survives_wrapping_but_ordinary_failure_is_not_fallback() {
     assert!(
         ProviderExecutionError::from(crate::unsupported_provider_operation(
@@ -77,17 +80,20 @@ fn unsupported_marker_survives_wrapping_but_ordinary_failure_is_not_fallback() {
     assert!(staged.source().unwrap().source().is_some());
     assert!(!ProviderExecutionError::from_source(staged).is_unsupported());
 
-    let wrapped = anyhow::Error::new(
-        ProviderExecutionError::from(crate::unsupported_provider_operation(
-            "post-effect source retained through anyhow",
-        ))
-        .after_effect(),
-    )
-    .context("outer operation failed");
-    assert!(!crate::is_unsupported_provider_operation(&wrapped));
-    assert!(wrapped
-        .chain()
-        .any(|source| source.is::<crate::UnsupportedProviderOperation>()));
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let wrapped = anyhow::Error::new(
+            ProviderExecutionError::from(crate::unsupported_provider_operation(
+                "post-effect source retained through anyhow",
+            ))
+            .after_effect(),
+        )
+        .context("outer operation failed");
+        assert!(!crate::is_unsupported_provider_operation(&wrapped));
+        assert!(wrapped
+            .chain()
+            .any(|source| source.is::<crate::UnsupportedProviderOperation>()));
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
