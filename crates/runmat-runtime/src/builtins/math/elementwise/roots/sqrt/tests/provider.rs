@@ -102,7 +102,7 @@ fn sqrt_wgpu_matches_cpu_elementwise() {
     let gathered = test_support::gather(gpu_value).expect("gather");
     match cpu {
         Value::Tensor(ct) => {
-            assert_eq!(gathered.shape.as_slice(), ct.shape());
+            assert_eq!(gathered.shape(), ct.shape());
             for (gpu, cpu) in gathered
                 .materialize_f64()
                 .iter()

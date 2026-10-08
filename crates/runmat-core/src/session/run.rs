@@ -100,8 +100,6 @@ impl RunMatSession {
                 #[cfg(not(target_arch = "wasm32"))]
                 let mex_runtime = std::rc::Rc::clone(&mex_runtime);
                 Box::pin(async move {
-                    #[cfg(target_arch = "wasm32")]
-                    let _ = &runtime;
                     if !matches!(
                         request,
                         runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions
@@ -119,7 +117,23 @@ impl RunMatSession {
                         }
                     }
                     #[cfg(not(target_arch = "wasm32"))]
-                    mex_runtime.clear_gracefully(&request, runtime).await?;
+                    mex_runtime
+                        .clear_gracefully(&request, runtime.clone())
+                        .await?;
+                    // A successful typed function clear invalidates its
+                    // selected session's persistent bindings. Do this after
+                    // fallible module retirement so a failed clear cannot
+                    // erase live function state.
+                    let authority = runtime.session_variable_authority();
+                    match &request {
+                        runmat_runtime::user_functions::DynamicFunctionClearRequest::All => {
+                            authority.clear_all_persistents()?;
+                        }
+                        runmat_runtime::user_functions::DynamicFunctionClearRequest::Named(name) => {
+                            authority.clear_persistent_function(name)?;
+                        }
+                        runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions => {}
+                    }
                     Ok(())
                 })
             });

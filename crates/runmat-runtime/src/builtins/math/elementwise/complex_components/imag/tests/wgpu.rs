@@ -23,7 +23,7 @@ fn imag_wgpu_matches_cpu_zero() {
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).unwrap(),
         other => panic!("unexpected cpu value {other:?}"),
     };
-    assert_eq!(gathered.shape.as_slice(), cpu_tensor.shape());
+    assert_eq!(gathered.shape(), cpu_tensor.shape());
     assert_eq!(
         gathered.materialize_f64().len(),
         cpu_tensor.materialize_f64().len()

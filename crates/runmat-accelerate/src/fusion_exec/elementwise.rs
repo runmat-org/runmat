@@ -2,6 +2,14 @@
 use super::*;
 use runmat_accelerate_api::{ProviderElementType, ProviderExecutionResult as ExecutionResult};
 
+#[path = "elementwise/effects.rs"]
+mod effects;
+use effects::ElementwiseEffects;
+
+#[cfg(test)]
+#[path = "elementwise/effect_tests.rs"]
+mod effect_tests;
+
 async fn execute_elementwise_outputs(
     request: &FusionExecutionRequest<'_>,
     output_ids: &[ValueId],
@@ -206,6 +214,8 @@ async fn execute_elementwise_outputs(
     };
     let recorder = selection.recorder();
     runmat_accelerate_api::observation::observe_provider_future(recorder, async move {
+        let mut effects = ElementwiseEffects::default();
+        let result: ExecutionResult<_> = async {
         let observer = selection.observer;
         let mut timer = FusionStageTimer::new("elementwise", request.plan.index, len);
         let scalar_shape = normalize_scalar_shape(&vec![1; output_shape.len()]);
@@ -244,11 +254,14 @@ async fn execute_elementwise_outputs(
                         drop(metadata);
                         observer.queue(started);
                         let materialized = match materialized {
-                            Ok(handle) => handle,
+                            Ok(handle) => {
+                                effects.succeeded();
+                                handle
+                            }
                             Err(error)
                                 if runmat_accelerate_api::is_unsupported_provider_operation(
                                     &error,
-                                ) =>
+                                ) && effects.can_replay_unsupported() =>
                             {
                                 return Ok(FusionExecutionOutcome::SharedRuntime(
                                     FusionCpuObservation::new(None),
@@ -276,8 +289,10 @@ async fn execute_elementwise_outputs(
                             ProviderPrecision::F32 => provider.unary_single(&contiguous).await,
                         };
                         drop(metadata);
+                        let converted = converted?;
+                        effects.succeeded();
                         allocations.admit(
-                            converted?,
+                            converted,
                             provider,
                             handle.shape(),
                             provider.precision(),
@@ -296,6 +311,7 @@ async fn execute_elementwise_outputs(
                     let data = t.materialize_f64();
                     let started = Instant::now();
                     let handle = allocations.upload(provider, &data, t.shape())?;
+                    effects.succeeded();
                     observer.upload(
                         started,
                         physical_upload_bytes(provider.precision(), data.len()),
@@ -316,6 +332,7 @@ async fn execute_elementwise_outputs(
                     let data = temp_scalars.last().unwrap();
                     let started = Instant::now();
                     let handle = allocations.upload(provider, data, &scalar_shape)?;
+                    effects.succeeded();
                     observer.upload(
                         started,
                         physical_upload_bytes(provider.precision(), data.len()),
@@ -347,6 +364,7 @@ async fn execute_elementwise_outputs(
             let output = provider.fused_elementwise(&shader, &handles, &output_shape, len, physical_output_class);
             drop(metadata);
             let output = output?;
+            effects.succeeded();
             let output =
                 allocations.admit(output, provider, &output_shape, provider.precision())?;
             observer.queue(started);
@@ -369,6 +387,7 @@ async fn execute_elementwise_outputs(
             observer.queue(started);
             match multi_result {
                 Ok(out_handles) => {
+                    effects.succeeded();
                     let out_handles = allocations.admit_batch(
                         out_handles,
                         provider,
@@ -402,6 +421,7 @@ async fn execute_elementwise_outputs(
                         );
                         drop(metadata);
                         let output = output?;
+                        effects.succeeded();
                         let output = allocations.admit(
                             output,
                             provider,
@@ -434,7 +454,9 @@ async fn execute_elementwise_outputs(
                     );
                 let converted = provider.unary_single(&raw).await;
                 drop(metadata);
-                allocations.admit(converted?, provider, &output_shape, ProviderPrecision::F32)?
+                let converted = converted?;
+                effects.succeeded();
+                allocations.admit(converted, provider, &output_shape, ProviderPrecision::F32)?
             } else {
                 raw
             };
@@ -450,6 +472,9 @@ async fn execute_elementwise_outputs(
 
         selection.submitted();
         Ok(FusionExecutionOutcome::Executed(outputs))
+        }
+        .await;
+        result.map_err(|error| effects.classify(error))
     })
     .await
 }

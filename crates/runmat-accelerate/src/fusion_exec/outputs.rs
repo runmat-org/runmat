@@ -149,9 +149,9 @@ pub(super) fn reject_outputs(
         .filter_map(|handle| handle.release().err())
         .collect();
     if cleanup.is_empty() {
-        anyhow!(message).into()
+        ProviderExecutionError::from(anyhow!(message)).after_effect()
     } else {
-        ProviderExecutionError::from_source(RejectedOutputs { message, cleanup })
+        ProviderExecutionError::from_source(RejectedOutputs { message, cleanup }).after_effect()
     }
 }
 #[derive(Debug)]

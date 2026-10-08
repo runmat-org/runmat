@@ -78,6 +78,10 @@ pub fn encode_interpreter_program_v2(
             .validate_fusion_stage_projection()
             .map_err(|message| invalid(InterpreterPayloadForm::ProgramV2, message))?;
     }
+    #[cfg(feature = "native-accel")]
+    registry
+        .validate_fusion_scaffolds_for_artifact()
+        .map_err(|message| invalid(InterpreterPayloadForm::ProgramV2, message))?;
     encode_payload(
         InterpreterPayloadForm::ProgramV2,
         PROGRAM_V2_PREAMBLE,
@@ -126,5 +130,9 @@ pub fn decode_interpreter_program_v2(
             .validate_fusion_stage_projection()
             .map_err(|message| invalid(InterpreterPayloadForm::ProgramV2, message))?;
     }
+    #[cfg(feature = "native-accel")]
+    registry
+        .validate_fusion_scaffolds_for_artifact()
+        .map_err(|message| invalid(InterpreterPayloadForm::ProgramV2, message))?;
     Ok(registry)
 }

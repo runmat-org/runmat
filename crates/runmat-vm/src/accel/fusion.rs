@@ -127,6 +127,10 @@ pub fn fusion_span_has_vm_barrier(instructions: &[Instr], span: &InstrSpan) -> b
     fusion_span_live_result_count(instructions, span) != Some(1)
 }
 
+#[path = "fusion/final_only_stores.rs"]
+mod final_only_stores;
+pub use final_only_stores::final_only_span_requires_ordinary_stores;
+
 pub struct StackSliceGuard<'a> {
     stack: *mut Vec<Value>,
     slice: Option<Vec<Value>>,
@@ -440,6 +444,8 @@ pub fn gather_fusion_inputs<'a>(
     })
 }
 
+/// Direct writeback utility retained for allocation-lifetime tests. VM
+/// publication uses the ordinary StoreVar/StoreLocal owner in the runner.
 pub fn write_elementwise_materialized_stores(
     materialized_stores: Vec<(FusionStoreMaterialization, Value)>,
     vars: &mut Vec<Value>,
@@ -481,25 +487,97 @@ fn fusion_execution_error(error: runmat_accelerate_api::ProviderExecutionError) 
     runmat_runtime::runtime_error::with_provider_execution_source(fallback, error)
 }
 
+/// Only an explicit unsupported, pre-effect provider result permits replay.
+/// Hard failures and failures after a provider or workspace effect retain
+/// their original error and must follow normal exception handling.
+#[derive(Debug)]
+pub enum FusionAttemptError {
+    Deopt(RuntimeError),
+    Terminal(RuntimeError),
+}
+
+pub struct FusionVmResult {
+    pub final_value: Value,
+    pub ordered_stores: Vec<(FusionStoreMaterialization, Value)>,
+}
+
+fn without_intermediate_stores(
+    outcome: FusionExecutionOutcome<Value>,
+) -> FusionExecutionOutcome<FusionVmResult> {
+    match outcome {
+        FusionExecutionOutcome::Executed(final_value) => {
+            FusionExecutionOutcome::Executed(FusionVmResult {
+                final_value,
+                ordered_stores: Vec::new(),
+            })
+        }
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            FusionExecutionOutcome::SharedRuntime(observation)
+        }
+    }
+}
+
+fn classify_provider_error(
+    error: runmat_accelerate_api::ProviderExecutionError,
+) -> FusionAttemptError {
+    let retryable = error.is_unsupported();
+    let error = fusion_execution_error(error);
+    if retryable {
+        FusionAttemptError::Deopt(error)
+    } else {
+        FusionAttemptError::Terminal(error)
+    }
+}
+
+fn finish_provider_execution(
+    outcome: runmat_accelerate_api::ProviderExecutionResult<FusionExecutionOutcome<Value>>,
+    stack_guard: StackSliceGuard<'_>,
+) -> Result<FusionExecutionOutcome<Value>, FusionAttemptError> {
+    match outcome {
+        Ok(FusionExecutionOutcome::Executed(result)) => {
+            stack_guard.commit();
+            Ok(FusionExecutionOutcome::Executed(result))
+        }
+        Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
+            Ok(FusionExecutionOutcome::SharedRuntime(observation))
+        }
+        Err(error) => {
+            let classified = classify_provider_error(error);
+            if matches!(&classified, FusionAttemptError::Terminal(_)) {
+                stack_guard.commit();
+            }
+            Err(classified)
+        }
+    }
+}
+
 #[cfg(test)]
 mod error_tests;
 
 pub async fn execute_fusion_elementwise(
     request: FusionExecutionRequest<'_>,
     stack_guard: StackSliceGuard<'_>,
-    vars: &mut Vec<Value>,
-    context: &mut ExecutionContext,
-) -> Result<FusionExecutionOutcome<Value>, RuntimeError> {
+) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
     match execute_elementwise_placed(request).await {
         Ok(FusionExecutionOutcome::Executed(result)) => {
-            write_elementwise_materialized_stores(result.materialized_stores, vars, context)?;
             stack_guard.commit();
-            Ok(FusionExecutionOutcome::Executed(result.final_value))
+            Ok(FusionExecutionOutcome::Executed(FusionVmResult {
+                final_value: result.final_value,
+                ordered_stores: result.materialized_stores,
+            }))
         }
         Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
             Ok(FusionExecutionOutcome::SharedRuntime(observation))
         }
-        Err(err) => Err(fusion_execution_error(err)),
+        Err(err) => {
+            let classified = classify_provider_error(err);
+            if matches!(&classified, FusionAttemptError::Terminal(_)) {
+                // Ordinary failing arithmetic consumes its operands before
+                // entering the catch handler. Deopt alone needs them back.
+                stack_guard.commit();
+            }
+            Err(classified)
+        }
     }
 }
 
@@ -508,70 +586,33 @@ pub async fn execute_fusion_special_kind(
     plan_inputs: &[runmat_accelerate::graph::ValueId],
     request: FusionExecutionRequest<'_>,
     stack_guard: StackSliceGuard<'_>,
-) -> Result<FusionExecutionOutcome<Value>, RuntimeError> {
+) -> Result<FusionExecutionOutcome<Value>, FusionAttemptError> {
     match kind {
-        FusionKind::CenteredGram => match execute_centered_gram_placed(request).await {
-            Ok(FusionExecutionOutcome::Executed(result)) => {
-                stack_guard.commit();
-                Ok(FusionExecutionOutcome::Executed(result))
-            }
-            Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
-                Ok(FusionExecutionOutcome::SharedRuntime(observation))
-            }
-            Err(err) => Err(fusion_execution_error(err)),
-        },
-        FusionKind::PowerStepNormalize => {
-            match execute_power_step_normalize_placed(request).await {
-                Ok(FusionExecutionOutcome::Executed(result)) => {
-                    stack_guard.commit();
-                    Ok(FusionExecutionOutcome::Executed(result))
-                }
-                Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
-                    Ok(FusionExecutionOutcome::SharedRuntime(observation))
-                }
-                Err(err) => Err(fusion_execution_error(err)),
-            }
+        FusionKind::CenteredGram => {
+            finish_provider_execution(execute_centered_gram_placed(request).await, stack_guard)
         }
+        FusionKind::PowerStepNormalize => finish_provider_execution(
+            execute_power_step_normalize_placed(request).await,
+            stack_guard,
+        ),
         FusionKind::ExplainedVariance => {
             log::debug!("explained variance plan inputs {:?}", plan_inputs);
-            match execute_explained_variance_placed(request).await {
-                Ok(FusionExecutionOutcome::Executed(result)) => {
-                    stack_guard.commit();
-                    Ok(FusionExecutionOutcome::Executed(result))
-                }
-                Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
-                    Ok(FusionExecutionOutcome::SharedRuntime(observation))
-                }
-                Err(err) => {
-                    log::debug!("explained variance fusion fallback: {}", err);
-                    Err(fusion_execution_error(err))
-                }
+            let outcome = execute_explained_variance_placed(request).await;
+            if let Err(error) = &outcome {
+                log::debug!("explained variance fusion execution: {}", error);
             }
+            finish_provider_execution(outcome, stack_guard)
         }
-        FusionKind::MatmulEpilogue => match execute_matmul_epilogue_placed(request).await {
-            Ok(FusionExecutionOutcome::Executed(result)) => {
-                stack_guard.commit();
-                Ok(FusionExecutionOutcome::Executed(result))
-            }
-            Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
-                Ok(FusionExecutionOutcome::SharedRuntime(observation))
-            }
-            Err(err) => Err(fusion_execution_error(err)),
-        },
-        FusionKind::ImageNormalize => match execute_image_normalize_placed(request).await {
-            Ok(FusionExecutionOutcome::Executed(result)) => {
-                stack_guard.commit();
-                Ok(FusionExecutionOutcome::Executed(result))
-            }
-            Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
-                Ok(FusionExecutionOutcome::SharedRuntime(observation))
-            }
-            Err(err) => Err(fusion_execution_error(err)),
-        },
-        _ => Err(mex(
+        FusionKind::MatmulEpilogue => {
+            finish_provider_execution(execute_matmul_epilogue_placed(request).await, stack_guard)
+        }
+        FusionKind::ImageNormalize => {
+            finish_provider_execution(execute_image_normalize_placed(request).await, stack_guard)
+        }
+        _ => Err(FusionAttemptError::Terminal(mex(
             "FusionUnsupportedKind",
             "fusion: unsupported fusion kind",
-        )),
+        ))),
     }
 }
 
@@ -583,51 +624,56 @@ pub fn execute_fusion_reduction(
     plan: &runmat_accelerate::FusionGroupPlan,
     request: FusionExecutionRequest<'_>,
     stack_guard: StackSliceGuard<'_>,
-) -> Result<FusionExecutionOutcome<Value>, RuntimeError> {
-    let geom = resolve_reduction_geometry(plan, &request)?;
+) -> Result<FusionExecutionOutcome<Value>, FusionAttemptError> {
+    let geom = match resolve_reduction_geometry(plan, &request) {
+        Ok(geom) => geom,
+        Err(error) => {
+            return Err(FusionAttemptError::Terminal(error));
+        }
+    };
     // Specialize only this invocation. The generator must use the same axis as
     // geometry; never overwrite a cached dimension value used by another op.
-    let resolved_plan = reduction_geometry::bind_axis(plan, &geom)?;
+    let resolved_plan = match reduction_geometry::bind_axis(plan, &geom) {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            return Err(FusionAttemptError::Terminal(error));
+        }
+    };
     let request = FusionExecutionRequest {
         plan: &resolved_plan,
         ..request
     };
-    match execute_reduction_with_shape_placed(
-        request,
-        geom.reduce_len,
-        geom.num_slices,
-        &geom.output_shape,
-        256u32,
-    ) {
-        Ok(FusionExecutionOutcome::Executed(result)) => {
-            stack_guard.commit();
-            Ok(FusionExecutionOutcome::Executed(result))
-        }
-        Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
-            Ok(FusionExecutionOutcome::SharedRuntime(observation))
-        }
-        Err(err) => Err(fusion_execution_error(err)),
-    }
+    finish_provider_execution(
+        execute_reduction_with_shape_placed(
+            request,
+            geom.reduce_len,
+            geom.num_slices,
+            &geom.output_shape,
+            256u32,
+        ),
+        stack_guard,
+    )
 }
 
 pub async fn try_execute_fusion_group(
     plan: &runmat_accelerate::FusionGroupPlan,
     graph: &runmat_accelerate::AccelGraph,
     stack: &mut Vec<Value>,
-    vars: &mut Vec<Value>,
+    vars: &mut [Value],
     context: &mut ExecutionContext,
     placement: Option<PlacementCorrelationId>,
-) -> Result<FusionExecutionOutcome<Value>, RuntimeError> {
+) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
     let (stack_guard, request, _consumed_inputs) =
-        gather_fusion_inputs(plan, graph, stack, vars, context, placement)?;
+        gather_fusion_inputs(plan, graph, stack, vars, context, placement)
+            .map_err(FusionAttemptError::Terminal)?;
     if plan.group.kind.is_elementwise()
         && !request.inputs.is_empty()
         && request.inputs.iter().all(is_scalarish_runtime_value)
     {
-        return Err(mex(
+        return Err(FusionAttemptError::Deopt(mex(
             "FusionScalarBypass",
             "fusion: bypass scalar-only elementwise group",
-        ));
+        )));
     }
     log::debug!(
         "dispatch fusion kind {:?}, supported {}",
@@ -635,12 +681,13 @@ pub async fn try_execute_fusion_group(
         plan.kernel.supported
     );
     if plan.group.kind.is_elementwise() {
-        execute_fusion_elementwise(request, stack_guard, vars, context).await
+        execute_fusion_elementwise(request, stack_guard).await
     } else if plan.group.kind.is_reduction() {
-        execute_fusion_reduction(plan, request, stack_guard)
+        execute_fusion_reduction(plan, request, stack_guard).map(without_intermediate_stores)
     } else {
         execute_fusion_special_kind(plan.group.kind.clone(), &plan.inputs, request, stack_guard)
             .await
+            .map(without_intermediate_stores)
     }
 }
 

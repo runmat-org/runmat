@@ -47,7 +47,7 @@ fn times_wgpu_complex_single_equal_shape_and_broadcast_stay_resident() {
             Value::ComplexTensor(output) => output,
             other => panic!("expected complex output, got {other:?}"),
         };
-        assert_eq!(output.shape, shape);
+        assert_eq!(output.shape(), shape);
         assert_eq!(output.materialize_f64(), expected);
     }
 }
@@ -64,11 +64,11 @@ fn times_wgpu_matches_cpu_elementwise() {
     let cpu = times_host(Value::Tensor(lhs.clone()), Value::Tensor(rhs.clone())).unwrap();
     let view_l = HostTensorView {
         data: &lhs.materialize_f64(),
-        shape: &lhs.shape,
+        shape: lhs.shape(),
     };
     let view_r = HostTensorView {
         data: &rhs.materialize_f64(),
-        shape: &rhs.shape,
+        shape: rhs.shape(),
     };
     let ha = provider.upload(&view_l).unwrap();
     let hb = provider.upload(&view_r).unwrap();

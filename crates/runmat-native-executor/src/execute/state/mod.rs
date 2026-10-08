@@ -82,7 +82,10 @@ pub(super) struct HostState {
     current_block: Option<NativeBlockId>,
     global_bindings: runmat_runtime::workspace::bindings::FrameGlobalBindings,
     global_seen_revision: BTreeMap<usize, runmat_runtime::workspace::session::GlobalRevision>,
-    persistent_bindings: BTreeMap<usize, String>,
+    persistent_seen_revision:
+        BTreeMap<usize, runmat_runtime::workspace::session::PersistentRevision>,
+    persistent_bindings:
+        BTreeMap<usize, runmat_runtime::workspace::session::PersistentBindingContinuation>,
     active_for_loops: BTreeMap<NativeBlockId, ActiveForLoop>,
     loop_backedges: BTreeMap<runmat_types::ProgramPointId, u64>,
     osr_point: Option<runmat_types::ProgramPointId>,

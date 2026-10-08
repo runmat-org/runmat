@@ -172,7 +172,7 @@ fn wgpu_matches_host() {
         .unwrap();
     let result = block_on(super::super::provider::execute(input)).unwrap();
     let actual = test_support::gather(result).unwrap();
-    assert_eq!(actual.shape, expected.shape);
+    assert_eq!(actual.shape(), expected.shape());
     for (actual, expected) in actual
         .materialize_f64()
         .iter()

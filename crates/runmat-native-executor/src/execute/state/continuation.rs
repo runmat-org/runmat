@@ -273,7 +273,8 @@ impl HostState {
                 requested_outputs: self.requested_outputs,
                 missing_input_locals: self.missing_input_locals.clone(),
                 global_bindings: self.global_bindings.snapshot().into_iter().collect(),
-                persistent_bindings: self.persistent_bindings.clone(),
+                // Filled once after canonical local refresh below.
+                persistent_bindings: Default::default(),
             },
             |value| {
                 let Some(reference) = self.values.get(&value).copied() else {
@@ -289,11 +290,11 @@ impl HostState {
                 }
             },
         )?;
-        // A nested invocation can change a global after this frame's last SSA
-        // definition. Override only its materialized local, leaving any other
+        // A nested invocation can change a global or persistent value after
+        // this frame's last SSA definition. Override only its materialized local, leaving any other
         // local or already-evaluated operand sharing that SSA value untouched.
         for local in &mut materialized.locals {
-            if let Some(reference) = self.declared_global_reference(local.local.0 as usize)? {
+            if let Some(reference) = self.declared_session_reference(local.local.0 as usize)? {
                 local.value = if reference.is_null() {
                     None
                 } else {
@@ -301,6 +302,10 @@ impl HostState {
                 };
             }
         }
+        // Refreshing a declared local also observes function invalidation.
+        // Capture that same binding state alongside the refreshed locals;
+        // evaluated operands above remain their original SSA snapshots.
+        materialized.persistent_bindings = self.persistent_bindings.clone();
         self.pending_deoptimization = Some(materialized.clone());
         Ok(materialized)
     }

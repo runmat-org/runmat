@@ -9,6 +9,8 @@ pub mod errors;
 #[cfg(feature = "native-accel")]
 mod fusion_observation;
 pub(crate) mod parallel_placement;
+pub(crate) mod persistent;
+pub use persistent::{PersistentAliases, PersistentBinding};
 pub mod runner;
 pub mod stack;
 pub mod state;

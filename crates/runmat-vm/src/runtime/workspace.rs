@@ -7,6 +7,7 @@ use std::rc::{Rc, Weak};
 
 mod activation;
 mod admission;
+mod declaration;
 mod frame;
 use activation::active_frame;
 pub(crate) use activation::WorkspaceFrameActivation;
@@ -15,6 +16,7 @@ pub use admission::{
     workspace_admission, workspace_admission_with_global_bindings, PendingWorkspaceAdmission,
     WorkspaceExecutionCompletion,
 };
+pub(crate) use declaration::declare_workspace_persistent_slot;
 use frame::{has_exact_pending_service_frame, take_service_frame, PendingServiceFrame};
 pub(crate) use frame::{
     reconcile_workspace_frame, release_pending_workspace_service_frame,

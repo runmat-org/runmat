@@ -203,7 +203,7 @@ fn provider_unsupported_host_fallback_is_one_completed_conditional_route() {
     let Value::Tensor(output) = output else {
         panic!("unsupported hook must publish the host double tensor")
     };
-    assert_eq!(output.shape, vec![2, 2]);
+    assert_eq!(output.shape(), [2, 2]);
     assert_eq!(output.materialize_f64(), vec![0.25; 4]);
     let samples = session
         .profile_snapshot()

@@ -58,7 +58,7 @@ fn minus_wgpu_complex_single_broadcast_stays_resident_in_both_operand_orders() {
             Value::ComplexTensor(output) => output,
             other => panic!("expected complex output, got {other:?}"),
         };
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), vec![2, 2]);
         assert_eq!(output.materialize_f64(), expected);
     }
 }
@@ -77,7 +77,7 @@ fn minus_wgpu_matches_cpu_elementwise() {
     let gathered = test_support::gather(gpu).expect("gather");
     match cpu {
         Value::Tensor(ct) => {
-            assert_eq!(gathered.shape, ct.shape);
+            assert_eq!(gathered.shape(), ct.shape());
             for (a, b) in gathered
                 .as_f64_slice()
                 .expect("gathered double")

@@ -4,6 +4,14 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
+#[path = "session/persistent.rs"]
+mod persistent;
+pub use persistent::{
+    persistent_named_value, persistent_revision, persistent_slot_value, store_persistent_named,
+    store_persistent_slot, update_persistent_slot, PersistentBindingContinuation,
+    PersistentInvalidationRevision, PersistentRevision,
+};
+
 /// Exact, non-owning capability for one Runtime session's variable store.
 /// Executor services retain it across suspension instead of re-resolving an
 /// ambient RuntimeContext which may belong to another invocation.
@@ -11,6 +19,14 @@ use std::rc::{Rc, Weak};
 pub struct SessionVariableAuthority {
     state: Weak<crate::context::RuntimeContextState>,
 }
+
+impl PartialEq for SessionVariableAuthority {
+    fn eq(&self, other: &Self) -> bool {
+        Weak::ptr_eq(&self.state, &other.state)
+    }
+}
+
+impl Eq for SessionVariableAuthority {}
 
 impl SessionVariableAuthority {
     pub(crate) fn new(state: &Rc<crate::context::RuntimeContextState>) -> Self {
@@ -124,6 +140,8 @@ pub struct SessionVariableState {
     globals: HashMap<String, Value>,
     global_slots: HashMap<usize, Value>,
     global_revision: GlobalRevision,
+    persistent_revision: PersistentRevision,
+    persistent_invalidation_leases: HashMap<String, Weak<()>>,
     persistent_slots: HashMap<(String, usize), Value>,
     persistent_names: HashMap<(String, String), Value>,
 }
@@ -264,53 +282,14 @@ pub fn global_slot_value(index: usize) -> Option<Value> {
     with_state(|state| state.global_slots.get(&index).cloned())
 }
 
-pub fn persistent_slot_value(function: &str, index: usize) -> Option<Value> {
-    with_state(|state| {
-        state
-            .persistent_slots
-            .get(&(function.to_string(), index))
-            .cloned()
-    })
-}
-
-pub fn persistent_named_value(function: &str, name: &str) -> Option<Value> {
-    with_state(|state| {
-        state
-            .persistent_names
-            .get(&(function.to_string(), name.to_string()))
-            .cloned()
-    })
-}
-
-pub fn update_persistent_slot(function: &str, index: usize, value: &Value) {
-    with_state_mut(|state| {
-        let key = (function.to_string(), index);
-        if state.persistent_slots.contains_key(&key) {
-            state.persistent_slots.insert(key, value.clone());
-        }
-    });
-}
-
-pub fn store_persistent_slot(function: &str, index: usize, value: Value) {
-    with_state_mut(|state| {
-        state
-            .persistent_slots
-            .insert((function.to_string(), index), value);
-    });
-}
-
-pub fn store_persistent_named(function: &str, name: &str, value: Value) {
-    with_state_mut(|state| {
-        state
-            .persistent_names
-            .insert((function.to_string(), name.to_string()), value);
-    });
-}
-
 #[doc(hidden)]
 pub fn reset_legacy_state_for_tests() {
     LEGACY_SESSION_VARIABLES.with(|state| *state.borrow_mut() = SessionVariableState::default());
 }
+
+#[cfg(test)]
+#[path = "session/persistent_revision_tests.rs"]
+mod persistent_revision_tests;
 
 #[cfg(test)]
 mod tests {

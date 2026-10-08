@@ -1220,7 +1220,7 @@ pub(crate) mod tests {
         let Value::GpuTensor(handle) = &gpu_value else {
             panic!("gpuArray must retain a resident handle")
         };
-        assert_eq!(handle.shape(), tensor.shape);
+        assert_eq!(handle.shape(), tensor.shape());
         assert_eq!(
             handle.physical().element_type(),
             runmat_accelerate_api::NumericElementType::F64

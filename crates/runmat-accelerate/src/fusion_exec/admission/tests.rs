@@ -8,6 +8,18 @@ use runmat_runtime::{
 };
 use std::{collections::HashMap, rc::Rc};
 
+#[test]
+fn reduction_provider_hook_failure_cannot_replay_typed_unsupported() {
+    let typed = runmat_accelerate_api::unsupported_provider_operation(
+        "injected unsupported fused reduction",
+    );
+    assert!(runmat_accelerate_api::ProviderExecutionError::from(
+        runmat_accelerate_api::unsupported_provider_operation("pre-effect unsupported")
+    )
+    .is_unsupported());
+    assert!(!after_reduction_provider_effect(typed).is_unsupported());
+}
+
 struct RejectingProvider;
 
 impl runmat_accelerate_api::AccelProvider for RejectingProvider {

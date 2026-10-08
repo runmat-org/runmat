@@ -1,4 +1,4 @@
-use super::fusion_execution_error;
+use super::{classify_provider_error, fusion_execution_error, FusionAttemptError};
 use runmat_accelerate_api::ProviderExecutionError;
 use runmat_runtime::runtime_error::{build_runtime_error, GpuGatherRetry};
 use std::error::Error;
@@ -48,6 +48,34 @@ fn fusion_publication_preserves_language_error_and_local_owner() {
     assert!(weak.upgrade().is_some());
     drop(result);
     assert!(weak.upgrade().is_none());
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn fusion_replays_only_typed_unsupported_before_effect() {
+    let unsupported = || {
+        ProviderExecutionError::from(runmat_accelerate_api::unsupported_provider_operation(
+            "no fused kernel",
+        ))
+    };
+    assert!(matches!(
+        classify_provider_error(unsupported()),
+        FusionAttemptError::Deopt(_)
+    ));
+    assert!(matches!(
+        classify_provider_error(unsupported().after_effect()),
+        FusionAttemptError::Terminal(_)
+    ));
+    let hard = build_runtime_error("provider cancelled")
+        .with_identifier("RunMat:ExecutionCancelled")
+        .build();
+    match classify_provider_error(ProviderExecutionError::from_source(hard)) {
+        FusionAttemptError::Terminal(error) => {
+            assert_eq!(error.identifier(), Some("RunMat:ExecutionCancelled"));
+            assert_eq!(error.message(), "provider cancelled");
+        }
+        FusionAttemptError::Deopt(_) => panic!("hard provider errors must not replay"),
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

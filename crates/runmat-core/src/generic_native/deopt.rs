@@ -177,6 +177,10 @@ async fn resume_interpreter(
             "bytecode resume PC exceeds this host",
         )
     })?;
+    let persistent_authority = runtime.session_variable_authority();
+    for continuation in frame.persistent_bindings.values() {
+        continuation.validate_selected(&persistent_authority, &function_name)?;
+    }
     let mut vars = vec![None; var_count];
     for local in frame.locals {
         let slot = layout
@@ -194,23 +198,29 @@ async fn resume_interpreter(
     // remain available to the generic-native continuation. The VM resumes at
     // the compiler-verified bytecode boundary before that operation, where its
     // own operand stack is empty, so it reconstructs those operands normally.
-    let aliases = |bindings: std::collections::BTreeMap<usize, String>| {
-        bindings
-            .into_iter()
-            .map(|(local, name)| {
-                layout
-                    .mir_local_slots
-                    .get(&runmat_mir::MirLocalId(local))
-                    .map(|slot| (slot.0, name))
-                    .ok_or_else(|| {
-                        super::error::stage(
-                            "NativeDeoptimization",
-                            "native storage alias has no canonical VM slot",
-                        )
-                    })
-            })
-            .collect::<Result<std::collections::HashMap<_, _>, _>>()
-    };
+    let persistent_aliases = frame
+        .persistent_bindings
+        .into_iter()
+        .map(|(local, continuation)| {
+            let slot = layout
+                .mir_local_slots
+                .get(&runmat_mir::MirLocalId(local))
+                .ok_or_else(|| {
+                    super::error::stage(
+                        "NativeDeoptimization",
+                        "native persistent alias has no canonical VM slot",
+                    )
+                })?;
+            Ok((
+                slot.0,
+                runmat_vm::PersistentBinding::from_native_continuation(
+                    continuation,
+                    &persistent_authority,
+                    &function_name,
+                )?,
+            ))
+        })
+        .collect::<Result<std::collections::HashMap<_, _>, runmat_runtime::RuntimeError>>()?;
     let global_aliases = frame
         .global_bindings
         .into_iter()
@@ -251,7 +261,7 @@ async fn resume_interpreter(
         requested_outputs: frame.requested_outputs,
         missing_input_slots,
         global_aliases,
-        persistent_aliases: aliases(frame.persistent_bindings)?,
+        persistent_aliases,
         side_effect_epoch: frame.site.side_effect_epoch,
     };
     let runmat_vm::InterpreterOutcome::Completed(completion) =
@@ -361,6 +371,11 @@ mod tests {
             ..DeoptimizationPolicy::default()
         }
         .inject(FaultInjection::Safepoint(safepoint));
+        let runtime = unit
+            .bind_runtime_sources(
+                session.execution_runtime_context(unit.revision().program_revision.clone()),
+            )
+            .expect("bind selected deoptimization source");
         let execution = block_on(super::invoke_with_policy(
             &unit,
             super::DeoptimizationInvocation {
@@ -369,7 +384,7 @@ mod tests {
                 captures: Vec::new(),
                 arguments: vec![Value::Num(81.0)],
                 requested_outputs: 2,
-                runtime: session.runtime_context().clone(),
+                runtime,
                 policy,
                 osr: None,
                 workspace: None,
@@ -377,5 +392,95 @@ mod tests {
         ))
         .expect("native execution should resume in the interpreter");
         assert_eq!(execution.outputs, vec![Value::Num(9.0), Value::Num(2.0)]);
+    }
+
+    #[test]
+    fn function_clear_before_native_deopt_does_not_resurrect_persistent() {
+        runmat_gc::gc_test_context(|| {
+            let mut session = RunMatSession::with_options(false, false).expect("session init");
+            session.configure_runtime_context();
+            let unit = block_on(session.compile_executable_unit(
+                ExecutableSource::new(
+                    "persistent-deopt-clear@1",
+                    "persistentDeopt.m",
+                    "function y = persistentDeopt()\npersistent p\np = 7;\nclear('persistentDeopt');\ny = sqrt(9);\nend\n",
+                ),
+                None,
+            ))
+            .expect("compile persistent deopt fixture");
+            let compiled = super::super::compile::compile(&unit, Some("persistentDeopt"))
+                .expect("compile generic-native persistent function");
+            let safepoint = compiled
+                .safepoints
+                .get(&compiled.entrypoint)
+                .and_then(|points| points.last())
+                .copied()
+                .expect("sqrt call after clear has a native safepoint");
+            let runtime = unit
+                .bind_runtime_sources(
+                    session.execution_runtime_context(unit.revision().program_revision.clone()),
+                )
+                .expect("bind selected persistent deoptimization source");
+            let mut invocation = compiled
+                .executor
+                .begin_request(runmat_native_executor::NativeInvocationRequest {
+                    function: compiled.entrypoint,
+                    captures: Vec::new(),
+                    arguments: Vec::new(),
+                    requested_outputs: 1,
+                    runtime: runtime.clone(),
+                    deoptimization: DeoptimizationPolicy {
+                        target: ResumeTarget::Interpreter,
+                        ..Default::default()
+                    }
+                    .inject(FaultInjection::Safepoint(safepoint)),
+                    osr_target: None,
+                    workspace: None,
+                })
+                .expect("begin native persistent-clear invocation");
+            let result = block_on(async {
+                loop {
+                    match invocation.advance().expect("advance native clear fixture") {
+                        super::NativeInvocationStep::Completed(_) => {
+                            panic!("post-clear safepoint must physically deoptimize")
+                        }
+                        super::NativeInvocationStep::Suspended {
+                            continuation,
+                            generation,
+                        } => invocation
+                            .resume_suspension(continuation, generation)
+                            .await
+                            .expect("resume native clear fixture suspension"),
+                        super::NativeInvocationStep::Deoptimized { target, frame, .. } => {
+                            assert_eq!(
+                                target,
+                                runmat_runtime::native::NativeResumeKind::INTERPRETER
+                            );
+                            assert_eq!(
+                                runtime
+                                    .session_variable_authority()
+                                    .persistent_named_value("persistentDeopt", "p")
+                                    .expect("read canonical persistent after native clear"),
+                                None,
+                                "clear must execute before physical deoptimization"
+                            );
+                            break super::resume_interpreter(&unit, frame, 1, runtime.clone())
+                                .await
+                                .expect("resume cleared persistent frame in interpreter");
+                        }
+                    }
+                }
+            });
+            assert_eq!(result.outputs, vec![Value::Num(3.0)]);
+            assert_eq!(
+                session
+                    .runtime_context()
+                    .session_variable_authority()
+                    .persistent_named_value("persistentDeopt", "p")
+                    .unwrap(),
+                None,
+                "old native alias must not republish after selected function clear"
+            );
+        });
     }
 }

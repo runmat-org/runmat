@@ -27,6 +27,14 @@ use super::{
 mod definition_dependencies;
 #[path = "program/function_remap.rs"]
 pub(crate) mod function_remap;
+#[cfg(feature = "native-accel")]
+#[path = "program/function_fusion.rs"]
+mod function_fusion;
+#[cfg(feature = "native-accel")]
+pub use function_fusion::FunctionFusionScaffold;
+#[cfg(feature = "native-accel")]
+#[path = "program/vm_fusion_plan.rs"]
+mod vm_fusion_plan;
 pub use function_remap::{
     rebind_session_source, remap_session_entrypoint, remap_session_function, SessionCallableBinding,
 };
@@ -109,6 +117,9 @@ pub struct FunctionBytecode {
     #[cfg(feature = "native-accel")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fusion_stage_projection: Option<std::sync::Arc<crate::bytecode::FusionStageProjection>>,
+    #[cfg(feature = "native-accel")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fusion_scaffold: Option<FunctionFusionScaffold>,
     pub instructions: Vec<Instr>,
     /// Innermost lexical catch at each instruction, derived from MIR.
     pub catch_scopes: Vec<Option<runmat_mir::CatchScopeId>>,
@@ -166,6 +177,8 @@ impl Default for FunctionBytecode {
             capabilities: Default::default(),
             #[cfg(feature = "native-accel")]
             fusion_stage_projection: None,
+            #[cfg(feature = "native-accel")]
+            fusion_scaffold: None,
             instructions: Vec::new(),
             catch_scopes: Vec::new(),
             instr_spans: Vec::new(),
@@ -218,6 +231,14 @@ impl FunctionBytecode {
         #[cfg(feature = "native-accel")]
         {
             bytecode.fusion_metadata.stage_projection = self.fusion_stage_projection.clone();
+            if let Some(scaffold) = registry.admitted_fusion_scaffold(self) {
+                bytecode.fusion_metadata.mir_fusion_signal_count = scaffold.signal_count;
+                bytecode.fusion_metadata.mir_fusion_candidate_group_count =
+                    scaffold.candidates.len();
+                bytecode.fusion_metadata.mir_fusion_candidate_groups = scaffold.candidates.clone();
+                bytecode.fusion_metadata.instruction_window_count = scaffold.windows.len();
+                bytecode.fusion_metadata.instruction_windows = scaffold.windows.clone();
+            }
         }
         bytecode.source_id = self.source_id;
         bytecode.active_function = Some(self.function);
@@ -267,6 +288,12 @@ impl FunctionBytecode {
         let prior_stage_valid = self.fusion_stage_projection.is_some()
             && self.validate_fusion_stage_projection().is_ok();
         self.function = function;
+        #[cfg(feature = "native-accel")]
+        if let Some(scaffold) = &mut self.fusion_scaffold {
+            for candidate in &mut scaffold.candidates {
+                candidate.function = function;
+            }
+        }
         self.resume_points = std::mem::take(&mut self.resume_points)
             .into_iter()
             .map(|(mut point, pc)| {
@@ -378,6 +405,9 @@ pub struct FunctionRegistryData {
     retired: HashMap<FunctionId, Vec<FunctionBytecode>>,
     #[serde(skip)]
     execution_stacks: OnceLock<HashMap<FunctionId, runmat_types::ExecutionStackRequirement>>,
+    #[cfg(feature = "native-accel")]
+    #[serde(skip)]
+    admitted_fusion_scaffolds: OnceLock<HashMap<usize, std::sync::Arc<FunctionFusionScaffold>>>,
 }
 
 impl std::ops::Deref for FunctionRegistry {
@@ -393,6 +423,8 @@ impl std::ops::DerefMut for FunctionRegistry {
         self.static_overlay = None;
         let data = std::sync::Arc::make_mut(&mut self.data);
         data.execution_stacks.take();
+        #[cfg(feature = "native-accel")]
+        data.admitted_fusion_scaffolds.take();
         data
     }
 }
@@ -481,6 +513,8 @@ impl FunctionRegistry {
                 source_functions,
                 retired: HashMap::new(),
                 execution_stacks: OnceLock::new(),
+                #[cfg(feature = "native-accel")]
+                admitted_fusion_scaffolds: OnceLock::new(),
             }),
             static_overlay: None,
         }
@@ -1746,6 +1780,8 @@ mod function_registry_tests {
             capabilities: Default::default(),
             #[cfg(feature = "native-accel")]
             fusion_stage_projection: None,
+            #[cfg(feature = "native-accel")]
+            fusion_scaffold: None,
             instructions: vec![Instr::Return],
             catch_scopes: vec![None],
             instr_spans: Vec::new(),

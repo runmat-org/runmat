@@ -65,6 +65,8 @@ pub fn semantic_definition_fingerprint(
         capabilities,
         #[cfg(feature = "native-accel")]
         fusion_stage_projection,
+        #[cfg(feature = "native-accel")]
+        fusion_scaffold,
         instructions,
         catch_scopes,
         instr_spans,
@@ -115,6 +117,12 @@ pub fn semantic_definition_fingerprint(
     append!(&fusion_stage_projection
         .as_ref()
         .map(|projection| projection.portable_definition_identity()));
+    // Legacy definitions without a scaffold retain their prior fingerprint.
+    // New function-local authority is sealed together with its owner IDs.
+    #[cfg(feature = "native-accel")]
+    if let Some(scaffold) = fusion_scaffold {
+        append!(scaffold);
+    }
     append!(instructions);
     append!(catch_scopes);
     append!(instr_spans);

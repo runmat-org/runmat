@@ -90,7 +90,7 @@ fn realsqrt_wgpu_matches_cpu_for_nonnegative_values() {
         runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
         runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
     };
-    assert_eq!(gathered.shape.as_slice(), tensor.shape());
+    assert_eq!(gathered.shape(), tensor.shape());
     for (actual, expected) in gathered.materialize_f64().iter().zip(expected) {
         assert!((actual - expected).abs() < tolerance);
     }

@@ -22,7 +22,7 @@ fn conj_wgpu_matches_cpu_for_real() {
     let gathered = test_support::gather(gpu).expect("gather");
     match (cpu, gathered) {
         (Value::Tensor(ct), gt) => {
-            assert_eq!(ct.shape(), gt.shape.as_slice());
+            assert_eq!(ct.shape(), gt.shape());
             assert_eq!(ct.materialize_f64(), gt.materialize_f64());
         }
         _ => panic!("unexpected shapes"),

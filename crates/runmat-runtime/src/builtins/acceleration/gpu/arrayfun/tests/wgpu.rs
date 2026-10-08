@@ -28,7 +28,7 @@ fn arrayfun_wgpu_sin_matches_cpu() {
     };
     let gathered = test_support::gather(Value::GpuTensor(out_handle.clone())).unwrap();
     let expected: Vec<f64> = values(&tensor).into_iter().map(f64::sin).collect();
-    assert_eq!(gathered.shape, tensor.shape);
+    assert_eq!(gathered.shape(), tensor.shape());
     let tol = match provider.precision() {
         runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
         runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
@@ -80,7 +80,7 @@ fn arrayfun_wgpu_plus_matches_cpu() {
         .zip(values(&b).iter())
         .map(|(x, y)| x + y)
         .collect();
-    assert_eq!(gathered.shape, a.shape);
+    assert_eq!(gathered.shape(), a.shape());
     let tol = match provider.precision() {
         runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
         runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
@@ -163,7 +163,7 @@ fn arrayfun_wgpu_fallback_preserves_every_integer_class() {
         panic!("expected resident output");
     };
     let gathered = test_support::gather(Value::GpuTensor(output.clone())).expect("gather");
-    assert_eq!(gathered.shape, vec![2, 3]);
+    assert_eq!(gathered.shape(), vec![2, 3]);
     assert_eq!(
         gathered.integer_storage(),
         Some(&IntegerStorage::U64(vec![

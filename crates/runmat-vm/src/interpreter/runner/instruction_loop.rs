@@ -8,6 +8,12 @@ use super::*;
 use std::future::Future;
 use std::pin::Pin;
 
+#[path = "instruction_loop/fusion_publish.rs"]
+mod fusion_publish;
+use fusion_publish::{after_global_store, after_local_fallback_store, after_local_store};
+#[cfg(feature = "native-accel")]
+use fusion_publish::{publish_fusion_stores, FusionPublicationFrame};
+
 pub(super) type InstructionLoopResult = Result<(), RuntimeError>;
 
 pub(super) struct InstructionLoopContext<'a> {
@@ -23,7 +29,7 @@ pub(super) struct InstructionLoopContext<'a> {
     pub(super) last_exception: &'a mut Option<runmat_value::MException>,
     pub(super) imports: &'a mut Vec<(Vec<String>, bool)>,
     pub(super) global_aliases: &'a runmat_runtime::workspace::bindings::FrameGlobalBindings,
-    pub(super) persistent_aliases: &'a mut HashMap<usize, String>,
+    pub(super) persistent_aliases: &'a mut crate::interpreter::PersistentAliases,
     pub(super) missing_input_slots: &'a mut HashSet<usize>,
     pub(super) current_function_name: &'a str,
     pub(super) invocation_arity: RuntimeInvocationArity,
@@ -58,26 +64,69 @@ type FusionExecutionFuture<'a> = Pin<
     Box<
         dyn Future<
                 Output = Result<
-                    runmat_accelerate::fusion_exec::FusionExecutionOutcome<Value>,
-                    RuntimeError,
+                    runmat_accelerate::fusion_exec::FusionExecutionOutcome<
+                        accel_fusion::FusionVmResult,
+                    >,
+                    accel_fusion::FusionAttemptError,
                 >,
             > + 'a,
     >,
 >;
 
 #[cfg(feature = "native-accel")]
+struct FusionExecutionFrame<'a> {
+    stack: &'a mut Vec<Value>,
+    vars: &'a mut Vec<Value>,
+    context: &'a mut crate::bytecode::program::ExecutionContext,
+    persistent_aliases: &'a crate::interpreter::PersistentAliases,
+    current_function_name: &'a str,
+}
+
+#[cfg(feature = "native-accel")]
 #[inline(never)]
 fn boxed_fusion_execution<'a>(
     plan: &'a runmat_accelerate::FusionGroupPlan,
     graph: &'a runmat_accelerate::AccelGraph,
-    stack: &'a mut Vec<Value>,
-    vars: &'a mut Vec<Value>,
-    context: &'a mut crate::bytecode::program::ExecutionContext,
+    frame: FusionExecutionFrame<'a>,
     placement: Option<runmat_accelerate::placement::PlacementCorrelationId>,
 ) -> FusionExecutionFuture<'a> {
-    Box::pin(accel_fusion::try_execute_fusion_group(
-        plan, graph, stack, vars, context, placement,
-    ))
+    #[cfg(test)]
+    fusion_store_tests::record_fusion_execution_entry();
+    Box::pin(async move {
+        let FusionExecutionFrame {
+            stack,
+            vars,
+            context,
+            persistent_aliases,
+            current_function_name,
+        } = frame;
+        // Refresh only frame-owned variable inputs before graph capture. Stack
+        // operands remain the values evaluated at their original instructions.
+        let authority = context.runtime.session_variable_authority();
+        let mut refreshed = HashSet::new();
+        for value_id in &plan.inputs {
+            if let Some(info) = graph.value(*value_id) {
+                if let runmat_accelerate::graph::ValueOrigin::Variable { kind, index } =
+                    &info.origin
+                {
+                    if (*kind == runmat_accelerate::VarKind::Global
+                        || context.call_stack.last().is_none())
+                        && refreshed.insert(*index)
+                    {
+                        crate::interpreter::persistent::refresh(
+                            persistent_aliases,
+                            vars,
+                            &authority,
+                            current_function_name,
+                            *index,
+                        )
+                        .map_err(accel_fusion::FusionAttemptError::Terminal)?;
+                    }
+                }
+            }
+        }
+        accel_fusion::try_execute_fusion_group(plan, graph, stack, vars, context, placement).await
+    })
 }
 
 async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult {
@@ -124,10 +173,34 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
         #[cfg(feature = "native-accel")]
         set_current_pc(*pc);
         interp_engine::check_cancelled()?;
+        let active_catch = bytecode
+            .catch_scopes
+            .get(*pc)
+            .copied()
+            .flatten()
+            .and_then(|scope| catch_exceptions.get(&scope).cloned());
         #[cfg(feature = "native-accel")]
         if let (Some(plan), Some(graph)) = (active_group_plan_clone(), fusion_accel_graph.as_ref())
         {
             if plan.group.span.start == *pc && !fusion_observations.contains_start(*pc) {
+                let span = plan.group.span.clone();
+                let crosses_catch_scope = !bytecode.catch_scopes.is_empty()
+                    && bytecode
+                        .catch_scopes
+                        .get(span.start..=span.end)
+                        .is_none_or(|scopes| {
+                            scopes
+                                .first()
+                                .is_some_and(|first| scopes.iter().any(|scope| scope != first))
+                        });
+                let has_barrier = !plan.kernel.supported
+                    || crosses_catch_scope
+                    || accel_fusion::fusion_span_has_vm_barrier(&bytecode.instructions, &span)
+                    || accel_fusion::final_only_span_requires_ordinary_stores(
+                        &plan.group.kind,
+                        &bytecode.instructions,
+                        &span,
+                    );
                 #[cfg(feature = "native-accel")]
                 {
                     interp_engine::note_fusion_gate(
@@ -135,19 +208,13 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                         &plan,
                         bytecode,
                         *pc,
-                        accel_fusion::fusion_span_has_vm_barrier(
-                            &bytecode.instructions,
-                            &plan.group.span,
-                        ),
+                        has_barrier,
                         accel_fusion::fusion_span_live_result_count(
                             &bytecode.instructions,
                             &plan.group.span,
                         ),
                     );
                 }
-                let span = plan.group.span.clone();
-                let has_barrier =
-                    accel_fusion::fusion_span_has_vm_barrier(&bytecode.instructions, &span);
                 let _fusion_span = info_span!(
                     "fusion.execute",
                     span_start = plan.group.span.start,
@@ -176,16 +243,26 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                 if !has_barrier {
                     let _consumed_fusion = crate::runtime::gc::ManagedRoots::new(&*stack)
                         .map_err(RuntimeError::new)?;
-                    match boxed_fusion_execution(
+                    let fusion_future = boxed_fusion_execution(
                         &plan,
                         graph,
-                        &mut *stack,
-                        &mut *vars,
-                        &mut *context,
+                        FusionExecutionFrame {
+                            stack: &mut *stack,
+                            vars: &mut *vars,
+                            context: &mut *context,
+                            persistent_aliases: &*persistent_aliases,
+                            current_function_name,
+                        },
                         Some(trace.correlation()),
-                    )
-                    .await
-                    {
+                    );
+                    let fusion_result = if let Some(exception) = active_catch.clone() {
+                        catch_runtime
+                            .scope_active_catch_unboxed_shared(Some(exception), fusion_future)
+                            .await
+                    } else {
+                        fusion_future.await
+                    };
+                    match fusion_result {
                         Ok(runmat_accelerate::fusion_exec::FusionExecutionOutcome::Executed(
                             result,
                         )) => {
@@ -193,7 +270,36 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                                 PlacementVariant::ProviderFusion,
                                 Some(duration_ns_saturating(fusion_started.elapsed())),
                             );
-                            stack.push(result);
+                            if let Err(err) = publish_fusion_stores(
+                                result.ordered_stores,
+                                FusionPublicationFrame {
+                                    vars: &mut *vars,
+                                    context: &mut *context,
+                                    var_names: &bytecode.var_names,
+                                    completion_assigned_slots,
+                                    global_aliases,
+                                    persistent_aliases,
+                                    current_function_name,
+                                    missing_input_slots,
+                                },
+                            ) {
+                                fusion_observations.abort();
+                                sequence_register.clear(&mut *stack);
+                                match interp_dispatch::redirect_exception_to_catch(
+                                    err,
+                                    &mut *try_stack,
+                                    &mut *vars,
+                                    &mut *last_exception,
+                                    &mut *pc,
+                                    refresh_workspace_state,
+                                ) {
+                                    interp_dispatch::ExceptionHandling::Caught => continue,
+                                    interp_dispatch::ExceptionHandling::Uncaught(err) => {
+                                        return Err(*err)
+                                    }
+                                }
+                            }
+                            stack.push(result.final_value);
                             let executed_pc = *pc;
                             *pc = plan.group.span.end + 1;
                             fusion_observations.instruction_exit(executed_pc, *pc);
@@ -211,7 +317,24 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                             // CPU region that could otherwise complete this turn.
                             interp_engine::check_cancelled()?;
                         }
-                        Err(err) => {
+                        Err(accel_fusion::FusionAttemptError::Terminal(err)) => {
+                            fusion_observations.abort();
+                            sequence_register.clear(&mut *stack);
+                            match interp_dispatch::redirect_exception_to_catch(
+                                err,
+                                &mut *try_stack,
+                                &mut *vars,
+                                &mut *last_exception,
+                                &mut *pc,
+                                refresh_workspace_state,
+                            ) {
+                                interp_dispatch::ExceptionHandling::Caught => continue,
+                                interp_dispatch::ExceptionHandling::Uncaught(err) => {
+                                    return Err(*err)
+                                }
+                            }
+                        }
+                        Err(accel_fusion::FusionAttemptError::Deopt(err)) => {
                             trace.event(
                                 PlacementEventKind::Fallback,
                                 Some(PlacementVariant::SharedRuntime),
@@ -255,39 +378,32 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
         };
         let mut store_var_before_overwrite = |_current: &Value, _incoming: &Value| {};
         let mut store_var_after_store = |stored_index: usize, stored_value: &Value| {
-            if let Some(assigned_slots) = completion_assigned_slots.as_mut() {
-                assigned_slots.insert(stored_index);
-            }
             if let Some(ref aliases) = store_var_global_aliases {
-                runtime_globals::update_global_store(stored_index, stored_value, aliases);
+                after_global_store(
+                    completion_assigned_slots,
+                    aliases,
+                    stored_index,
+                    stored_value,
+                );
+            } else if let Some(assigned_slots) = completion_assigned_slots.as_mut() {
+                assigned_slots.insert(stored_index);
             }
         };
         let mut store_local_before_local_overwrite = |_current: &Value, _incoming: &Value| {};
         let mut store_local_before_var_overwrite = |_current: &Value, _incoming: &Value| {};
         let mut store_local_after_store = |stored_offset: usize, stored_value: &Value| {
             if let Some(ref aliases) = store_local_global_aliases {
-                runtime_globals::update_global_store(stored_offset, stored_value, aliases);
+                after_local_store(aliases, stored_offset, stored_value);
             }
         };
         let mut store_local_after_fallback_store =
-            |func_name: &str, stored_offset: usize, stored_value: &Value| {
+            |_func_name: &str, stored_offset: usize, stored_value: &Value| {
                 if let Some(ref aliases) = store_local_global_aliases {
-                    runtime_globals::update_global_store(stored_offset, stored_value, aliases);
+                    after_local_fallback_store(aliases, stored_offset, stored_value);
                 }
-                runtime_globals::update_persistent_local_store(
-                    func_name,
-                    stored_offset,
-                    stored_value,
-                );
             };
         #[cfg(feature = "native-accel")]
         let executed_pc = *pc;
-        let active_catch = bytecode
-            .catch_scopes
-            .get(*pc)
-            .copied()
-            .flatten()
-            .and_then(|scope| catch_exceptions.get(&scope).cloned());
         let dispatch_future = interp_dispatch::dispatch_instruction(
             interp_dispatch::DispatchMeta {
                 instr: &bytecode.instructions[*pc],
@@ -602,3 +718,11 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
     }
     Ok::<(), RuntimeError>(())
 }
+
+#[cfg(all(test, feature = "native-accel"))]
+#[path = "instruction_loop/fusion_store_tests.rs"]
+mod fusion_store_tests;
+
+#[cfg(all(test, feature = "native-accel"))]
+#[path = "instruction_loop/persistent_fusion_tests.rs"]
+mod persistent_fusion_tests;

@@ -111,6 +111,22 @@ pub fn store_var<BeforeOverwrite, AfterStore>(
     vars: &mut Vec<Value>,
     index: usize,
     var_names: &HashMap<usize, String>,
+    before_overwrite: BeforeOverwrite,
+    after_store: AfterStore,
+) -> Result<(), RuntimeError>
+where
+    BeforeOverwrite: FnMut(&Value, &Value),
+    AfterStore: FnMut(usize, &Value),
+{
+    let value = pop_value(stack)?;
+    store_var_value(value, vars, index, var_names, before_overwrite, after_store)
+}
+
+pub fn store_var_value<BeforeOverwrite, AfterStore>(
+    value: Value,
+    vars: &mut Vec<Value>,
+    index: usize,
+    var_names: &HashMap<usize, String>,
     mut before_overwrite: BeforeOverwrite,
     mut after_store: AfterStore,
 ) -> Result<(), RuntimeError>
@@ -118,7 +134,6 @@ where
     BeforeOverwrite: FnMut(&Value, &Value),
     AfterStore: FnMut(usize, &Value),
 {
-    let value = pop_value(stack)?;
     if index < vars.len() {
         before_overwrite(&vars[index], &value);
     }
@@ -140,10 +155,10 @@ pub fn store_local<BeforeLocalOverwrite, BeforeVarOverwrite, AfterLocalStore, Af
     context: &mut ExecutionContext,
     vars: &mut Vec<Value>,
     offset: usize,
-    mut before_local_overwrite: BeforeLocalOverwrite,
-    mut before_var_overwrite: BeforeVarOverwrite,
-    mut after_local_store: AfterLocalStore,
-    mut after_fallback_store: AfterFallbackStore,
+    before_local_overwrite: BeforeLocalOverwrite,
+    before_var_overwrite: BeforeVarOverwrite,
+    after_local_store: AfterLocalStore,
+    after_fallback_store: AfterFallbackStore,
 ) -> Result<(), RuntimeError>
 where
     BeforeLocalOverwrite: FnMut(&Value, &Value),
@@ -152,26 +167,75 @@ where
     AfterFallbackStore: FnMut(&str, usize, &Value),
 {
     let value = pop_value(stack)?;
+    store_local_value(
+        value,
+        context,
+        vars,
+        offset,
+        StoreLocalHooks {
+            before_local_overwrite,
+            before_var_overwrite,
+            after_local_store,
+            after_fallback_store,
+        },
+    )
+}
+
+pub struct StoreLocalHooks<
+    BeforeLocalOverwrite,
+    BeforeVarOverwrite,
+    AfterLocalStore,
+    AfterFallbackStore,
+> {
+    pub before_local_overwrite: BeforeLocalOverwrite,
+    pub before_var_overwrite: BeforeVarOverwrite,
+    pub after_local_store: AfterLocalStore,
+    pub after_fallback_store: AfterFallbackStore,
+}
+
+pub fn store_local_value<
+    BeforeLocalOverwrite,
+    BeforeVarOverwrite,
+    AfterLocalStore,
+    AfterFallbackStore,
+>(
+    value: Value,
+    context: &mut ExecutionContext,
+    vars: &mut Vec<Value>,
+    offset: usize,
+    mut hooks: StoreLocalHooks<
+        BeforeLocalOverwrite,
+        BeforeVarOverwrite,
+        AfterLocalStore,
+        AfterFallbackStore,
+    >,
+) -> Result<(), RuntimeError>
+where
+    BeforeLocalOverwrite: FnMut(&Value, &Value),
+    BeforeVarOverwrite: FnMut(&Value, &Value),
+    AfterLocalStore: FnMut(usize, &Value),
+    AfterFallbackStore: FnMut(&str, usize, &Value),
+{
     if let Some(current_frame) = context.call_stack.last() {
         let local_index = current_frame.locals_start + offset;
         while context.locals.len() <= local_index {
             context.locals.push(Value::Num(0.0));
         }
-        before_local_overwrite(&context.locals[local_index], &value);
+        (hooks.before_local_overwrite)(&context.locals[local_index], &value);
         context.locals[local_index] = value;
-        after_local_store(local_index, &context.locals[local_index]);
+        (hooks.after_local_store)(local_index, &context.locals[local_index]);
     } else {
         if offset >= vars.len() {
             vars.resize(offset + 1, Value::Num(0.0));
         }
-        before_var_overwrite(&vars[offset], &value);
+        (hooks.before_var_overwrite)(&vars[offset], &value);
         vars[offset] = value;
         let func_name = context
             .call_stack
             .last()
             .map(|f| f.function_name.as_str())
             .unwrap_or("<main>");
-        after_fallback_store(func_name, offset, &vars[offset]);
+        (hooks.after_fallback_store)(func_name, offset, &vars[offset]);
     }
     Ok(())
 }

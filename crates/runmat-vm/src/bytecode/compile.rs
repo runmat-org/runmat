@@ -16,6 +16,9 @@ use std::collections::{HashMap, HashSet};
 #[cfg(all(test, feature = "native-accel"))]
 #[path = "compile/fusion_admission_tests.rs"]
 mod fusion_admission_tests;
+#[cfg(feature = "native-accel")]
+#[path = "compile/function_fusion.rs"]
+mod function_fusion;
 
 #[cfg(test)]
 #[path = "compile/statement_outputs_tests.rs"]
@@ -608,7 +611,7 @@ fn instruction_within_semantic_candidate_span(
 }
 
 #[cfg(feature = "native-accel")]
-fn derive_semantic_fusion_instruction_windows(
+pub(crate) fn derive_semantic_fusion_instruction_windows(
     instructions: &[Instr],
     instr_spans: &[runmat_hir::Span],
     candidate_groups: &[crate::bytecode::FusionCandidateGroup],
@@ -702,7 +705,9 @@ fn derive_semantic_fusion_instruction_windows(
 }
 
 #[cfg(feature = "native-accel")]
-fn instr_fusion_signal_kind(instr: &Instr) -> Option<crate::bytecode::FusionInstructionKind> {
+pub(crate) fn instr_fusion_signal_kind(
+    instr: &Instr,
+) -> Option<crate::bytecode::FusionInstructionKind> {
     match instr {
         // Operand shapes are not available in the instruction stream. The
         // runtime graph refines scalar multiplication back to elementwise.
@@ -895,6 +900,15 @@ fn compile_semantic_functions(
                 })
             })
             .map(std::sync::Arc::new);
+        #[cfg(feature = "native-accel")]
+        let fusion_scaffold = fusion_stage_projection.as_ref().and_then(|_| {
+            function_fusion::derive_function_scaffold(
+                mir,
+                function.id,
+                &compiler.instructions,
+                &compiler.instr_spans,
+            )
+        });
         functions.insert(
             function.id,
             FunctionBytecode {
@@ -936,6 +950,8 @@ fn compile_semantic_functions(
                     })?,
                 #[cfg(feature = "native-accel")]
                 fusion_stage_projection,
+                #[cfg(feature = "native-accel")]
+                fusion_scaffold,
                 instructions: compiler.instructions,
                 catch_scopes: compiler.catch_scopes,
                 instr_spans: compiler.instr_spans,

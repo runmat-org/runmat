@@ -31,7 +31,7 @@ fn plus_wgpu_complex_rank_beyond_shader_abi_uses_legal_host_fallback() {
     let mut expected_shape = vec![1; 129];
     expected_shape[0] = 2;
     expected_shape[1] = 2;
-    assert_eq!(result.shape, expected_shape);
+    assert_eq!(result.shape(), expected_shape);
     assert_eq!(
         result.materialize_f64(),
         vec![(11.0, 2.0), (13.0, 4.0), (21.0, 2.0), (23.0, 4.0)]
@@ -91,7 +91,7 @@ fn plus_wgpu_complex_gpu_stays_resident() {
     .expect("gather complex gpu");
     match gathered {
         Value::ComplexTensor(ct) => {
-            assert_eq!(ct.shape, vec![2, 1]);
+            assert_eq!(ct.shape(), vec![2, 1]);
             assert_eq!(ct.materialize_f64(), vec![(4.0, 0.5), (5.0, 4.0)]);
         }
         other => panic!("expected complex tensor, got {other:?}"),
@@ -151,7 +151,7 @@ fn plus_wgpu_complex_scalar_implicit_expansion_stays_resident() {
     .expect("gather complex result");
     match gathered {
         Value::ComplexTensor(ct) => {
-            assert_eq!(ct.shape, vec![3, 1]);
+            assert_eq!(ct.shape(), vec![3, 1]);
             assert_eq!(
                 ct.materialize_f64(),
                 vec![(12.0, -3.0), (22.0, -3.0), (32.0, -3.0)]
@@ -194,7 +194,7 @@ fn plus_wgpu_complex_gpu_host_complex_scalar_falls_back() {
     .expect("plus host complex scalar");
     match result {
         Value::ComplexTensor(ct) => {
-            assert_eq!(ct.shape, vec![2, 1]);
+            assert_eq!(ct.shape(), vec![2, 1]);
             assert_eq!(ct.materialize_f64(), vec![(11.0, -0.5), (8.0, 3.0)]);
         }
         other => panic!("expected host complex fallback, got {other:?}"),

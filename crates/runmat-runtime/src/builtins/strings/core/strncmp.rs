@@ -547,7 +547,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![3.0], vec![1, 1]).unwrap();
         let view = HostTensorView {
             data: &tensor.materialize_f64(),
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload prefix length to GPU");
         let result = strncmp_builtin(

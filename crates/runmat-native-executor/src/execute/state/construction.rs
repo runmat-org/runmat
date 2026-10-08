@@ -244,6 +244,7 @@ impl HostState {
             current_block: None,
             global_bindings,
             global_seen_revision: BTreeMap::new(),
+            persistent_seen_revision: BTreeMap::new(),
             persistent_bindings: BTreeMap::new(),
             active_exception_handlers: Vec::new(),
             catch_exceptions: BTreeMap::new(),

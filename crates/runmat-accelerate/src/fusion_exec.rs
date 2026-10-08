@@ -650,6 +650,12 @@ pub fn execute_reduction_with_shape(
     }
 }
 
+/// A failing provider hook may already have made an effect. Its Unsupported
+/// cause cannot authorize replay of the skipped bytecode.
+fn after_reduction_provider_effect(error: anyhow::Error) -> ProviderExecutionError {
+    ProviderExecutionError::from(error).after_effect()
+}
+
 pub fn execute_reduction_with_shape_placed(
     request: FusionExecutionRequest<'_>,
     reduce_len: usize,
@@ -726,7 +732,9 @@ pub fn execute_reduction_with_shape_placed(
                     shape: t.shape(),
                 };
                 let started = Instant::now();
-                let handle = provider.upload(&view)?;
+                let handle = provider
+                    .upload(&view)
+                    .map_err(after_reduction_provider_effect)?;
                 observer.upload(started, host_f64_bytes(data.len()));
                 prepared.push(PreparedInput { handle });
             }
@@ -748,7 +756,9 @@ pub fn execute_reduction_with_shape_placed(
                     shape: &scalar_shape,
                 };
                 let started = Instant::now();
-                let handle = provider.upload(&view)?;
+                let handle = provider
+                    .upload(&view)
+                    .map_err(after_reduction_provider_effect)?;
                 observer.upload(started, host_f64_bytes(data.len()));
                 prepared.push(PreparedInput { handle });
             }
@@ -806,15 +816,17 @@ pub fn execute_reduction_with_shape_placed(
         .reduction_flavor
         .unwrap_or(ReductionFlavor::Sum);
     let started = Instant::now();
-    let mut output = provider.fused_reduction(
-        &shader,
-        &handles,
-        output_shape,
-        reduce_len,
-        num_slices,
-        wg,
-        flavor,
-    )?;
+    let mut output = provider
+        .fused_reduction(
+            &shader,
+            &handles,
+            output_shape,
+            reduce_len,
+            num_slices,
+            wg,
+            flavor,
+        )
+        .map_err(after_reduction_provider_effect)?;
     observer.queue(started);
     observer.kernel_unmeasured();
     timer.mark("dispatch");

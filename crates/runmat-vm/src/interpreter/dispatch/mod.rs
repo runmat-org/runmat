@@ -15,6 +15,7 @@ mod stack;
 
 use crate::bytecode::Instr;
 use crate::interpreter::debug;
+use crate::interpreter::persistent::{self, PersistentAlias};
 use crate::runtime::workspace::{
     refresh_workspace_slot, refresh_workspace_state, workspace_slot_assigned, workspace_slot_name,
 };
@@ -70,7 +71,7 @@ pub struct DispatchState<'a> {
     pub last_exception: &'a mut Option<runmat_value::MException>,
     pub imports: &'a mut Vec<(Vec<String>, bool)>,
     pub global_aliases: &'a runmat_runtime::workspace::bindings::FrameGlobalBindings,
-    pub persistent_aliases: &'a mut HashMap<usize, String>,
+    pub persistent_aliases: &'a mut crate::interpreter::persistent::PersistentAliases,
     pub missing_input_slots: &'a mut HashSet<usize>,
     pub pc: &'a mut usize,
 }
@@ -769,6 +770,15 @@ fn dispatch_immediate(
             )))
         }
         Instr::LoadLocal(offset) => {
+            if context.call_stack.last().is_none() {
+                persistent::refresh(
+                    persistent_aliases,
+                    vars,
+                    &context.runtime.session_variable_authority(),
+                    current_function_name,
+                    *offset,
+                )?;
+            }
             load_local(stack, context, vars, *offset)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
@@ -784,6 +794,13 @@ fn dispatch_immediate(
                 vars[*index] = global_value;
                 refresh_workspace_slot(*index, &vars[*index]);
             }
+            persistent::refresh(
+                persistent_aliases,
+                vars,
+                &context.runtime.session_variable_authority(),
+                current_function_name,
+                *index,
+            )?;
             if missing_input_slots.contains(index) {
                 return Err(crate::interpreter::errors::mex(
                     "NotEnoughInputs",
@@ -829,6 +846,13 @@ fn dispatch_immediate(
                 vars[*index] = global_value;
                 refresh_workspace_slot(*index, &vars[*index]);
             }
+            persistent::refresh(
+                persistent_aliases,
+                vars,
+                &context.runtime.session_variable_authority(),
+                current_function_name,
+                *index,
+            )?;
             if missing_input_slots.contains(index) {
                 return Err(crate::interpreter::errors::mex(
                     "NotEnoughInputs",
@@ -889,6 +913,13 @@ fn dispatch_immediate(
                 store_var_after_store,
             )?;
             missing_input_slots.remove(index);
+            persistent::publish_store(
+                persistent_aliases,
+                vars,
+                &context.runtime.session_variable_authority(),
+                current_function_name,
+                *index,
+            )?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -906,6 +937,13 @@ fn dispatch_immediate(
                     },
                 )?;
                 missing_input_slots.remove(offset);
+                persistent::publish_store(
+                    persistent_aliases,
+                    vars,
+                    &context.runtime.session_variable_authority(),
+                    current_function_name,
+                    *offset,
+                )?;
             } else {
                 store_local(
                     stack,
@@ -999,23 +1037,47 @@ fn dispatch_immediate(
             )))
         }
         Instr::DeclarePersistent(indices) => {
-            crate::runtime::globals::declare_persistent(
-                current_function_name,
-                indices.clone(),
-                vars,
-            );
+            let authority = context.runtime.session_variable_authority();
+            for &slot in indices {
+                persistent::declare(
+                    persistent_aliases,
+                    vars,
+                    &authority,
+                    current_function_name,
+                    slot,
+                    PersistentAlias::LegacySlot,
+                )?;
+                crate::runtime::workspace::declare_workspace_persistent_slot(
+                    context.runtime.local_identity(),
+                    slot,
+                    &vars[slot],
+                );
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
         Instr::DeclarePersistentNamed(indices, names) => {
-            crate::runtime::globals::declare_persistent_named(
-                current_function_name,
-                indices.clone(),
-                names.clone(),
-                vars,
-                persistent_aliases,
-            );
+            let authority = context.runtime.session_variable_authority();
+            for (position, &slot) in indices.iter().enumerate() {
+                let name = names
+                    .get(position)
+                    .cloned()
+                    .unwrap_or_else(|| format!("var_{slot}"));
+                persistent::declare(
+                    persistent_aliases,
+                    vars,
+                    &authority,
+                    current_function_name,
+                    slot,
+                    PersistentAlias::Named(name),
+                )?;
+                crate::runtime::workspace::declare_workspace_persistent_slot(
+                    context.runtime.local_identity(),
+                    slot,
+                    &vars[slot],
+                );
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

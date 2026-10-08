@@ -3,6 +3,9 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
+#[path = "fusion_gpu/persistent.rs"]
+mod persistent;
+
 use anyhow::{anyhow, bail, Context};
 use futures::executor::block_on;
 use once_cell::sync::OnceCell;

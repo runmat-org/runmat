@@ -25,18 +25,40 @@ impl HostState {
             .get(slot)
             .copied()
             .ok_or_else(|| NativeExecutorError::Host("native local is out of bounds".into()))?;
-        let Some(name) = self.global_bindings.name_for_slot(slot) else {
-            return Ok(reference);
-        };
-        let authority = self.runtime.session_variable_authority();
-        let revision = authority.global_revision()?;
-        if self.global_seen_revision.get(&slot) == Some(&revision) {
+        let global_name = self.global_bindings.name_for_slot(slot);
+        if global_name.is_none() && !self.persistent_bindings.contains_key(&slot) {
             return Ok(reference);
         }
-        // A nested invocation can update this alias without touching this frame's
-        // local slot. The session global, not the last SSA/local snapshot, owns it.
-        let value = authority.global_value(&name)?;
-        self.replace_local_from_global(slot, value, revision)
+        let authority = self.runtime.session_variable_authority();
+        if let Some(name) = global_name {
+            let revision = authority.global_revision()?;
+            if self.global_seen_revision.get(&slot) == Some(&revision) {
+                return Ok(reference);
+            }
+            // The session global, not an old SSA/local snapshot, owns this alias.
+            let value = authority.global_value(&name)?;
+            return self.replace_local_from_global(slot, value, revision);
+        }
+        if let Some(binding) = self.persistent_bindings.get(&slot) {
+            let revision = authority.persistent_revision()?;
+            if self.persistent_seen_revision.get(&slot) == Some(&revision) {
+                return Ok(reference);
+            }
+            let name = binding.name.clone();
+            let previous_invalidation = binding.invalidation.clone();
+            let invalidation = authority.persistent_invalidation_revision(&self.function.name)?;
+            let value = authority.persistent_named_value(&self.function.name, &name)?;
+            let absent = value.is_none();
+            let refreshed = self.replace_local_from_canonical(slot, value)?;
+            if let Some(binding) = self.persistent_bindings.get_mut(&slot) {
+                binding.invalidated =
+                    absent && (binding.invalidated || previous_invalidation != invalidation);
+                binding.invalidation = invalidation;
+            }
+            self.persistent_seen_revision.insert(slot, revision);
+            return Ok(refreshed);
+        }
+        Ok(reference)
     }
 
     fn replace_local_from_global(
@@ -45,6 +67,16 @@ impl HostState {
         value: Option<Value>,
         revision: runmat_runtime::workspace::session::GlobalRevision,
     ) -> NativeExecutorResult<NativeValueRef> {
+        let refreshed = self.replace_local_from_canonical(slot, value)?;
+        self.global_seen_revision.insert(slot, revision);
+        Ok(refreshed)
+    }
+
+    fn replace_local_from_canonical(
+        &mut self,
+        slot: usize,
+        value: Option<Value>,
+    ) -> NativeExecutorResult<NativeValueRef> {
         let value = value.unwrap_or_else(empty_workspace_value);
         let refreshed = self.arena.insert(value);
         if let Some(workspace) = &self.workspace {
@@ -52,19 +84,17 @@ impl HostState {
         }
         self.locals[slot] = refreshed;
         self.record_local_initialization(slot, refreshed);
-        self.global_seen_revision.insert(slot, revision);
         Ok(refreshed)
     }
 
-    pub(in crate::execute) fn declared_global_reference(
+    pub(in crate::execute) fn declared_session_reference(
         &mut self,
         slot: usize,
     ) -> NativeExecutorResult<Option<NativeValueRef>> {
-        self.global_bindings
-            .name_for_slot(slot)
-            .is_some()
-            .then(|| self.local_reference(slot))
-            .transpose()
+        (self.global_bindings.name_for_slot(slot).is_some()
+            || self.persistent_bindings.contains_key(&slot))
+        .then(|| self.local_reference(slot))
+        .transpose()
     }
 
     pub(in crate::execute) fn assignment_root(
@@ -104,9 +134,29 @@ impl HostState {
         self.locals[slot] = value;
         if value.is_null() {
             self.global_seen_revision.remove(&slot);
+            self.persistent_seen_revision.remove(&slot);
         }
         self.record_local_initialization(slot, value);
         self.synchronize_session_binding(slot, value)
+    }
+
+    /// A block parameter transfers an already-evaluated SSA snapshot, not a
+    /// new assignment to a declared global or persistent. A nested call may
+    /// have changed canonical session storage since that snapshot was made.
+    pub(in crate::execute) fn bind_edge_local(
+        &mut self,
+        slot: usize,
+        value: NativeValueRef,
+        inherited_snapshot: bool,
+    ) -> NativeExecutorResult<NativeValueRef> {
+        if inherited_snapshot
+            && (self.global_bindings.name_for_slot(slot).is_some()
+                || self.persistent_bindings.contains_key(&slot))
+        {
+            return self.local_reference(slot);
+        }
+        self.set_local(slot, value)?;
+        Ok(value)
     }
 
     pub fn reconcile_external_workspace(&mut self) -> NativeExecutorResult<()> {
@@ -133,6 +183,7 @@ impl HostState {
             })?;
             *local = reference;
             self.global_seen_revision.remove(&slot);
+            self.persistent_seen_revision.remove(&slot);
             self.record_local_initialization(slot, reference);
         }
         if let Some(workspace) = &self.workspace {
@@ -182,10 +233,21 @@ impl HostState {
                 "native local cannot be both global and persistent".into(),
             ));
         }
-        self.persistent_bindings.insert(slot, name.clone());
-        let value =
-            runmat_runtime::workspace::session::persistent_named_value(&self.function.name, &name)
-                .unwrap_or_else(empty_workspace_value);
+        let authority = self.runtime.session_variable_authority();
+        let invalidation = authority.persistent_invalidation_revision(&self.function.name)?;
+        self.persistent_bindings.insert(
+            slot,
+            runmat_runtime::workspace::session::PersistentBindingContinuation {
+                name: name.clone(),
+                function: self.function.name.clone(),
+                owner: authority.clone(),
+                invalidation,
+                invalidated: false,
+            },
+        );
+        let value = authority
+            .persistent_named_value(&self.function.name, &name)?
+            .unwrap_or_else(empty_workspace_value);
         let reference = self.arena.insert(value);
         self.set_local(slot, reference)
     }
@@ -205,12 +267,16 @@ impl HostState {
             self.global_seen_revision
                 .insert(slot, authority.global_revision()?);
         }
-        if let Some(name) = self.persistent_bindings.get(&slot) {
-            runmat_runtime::workspace::session::store_persistent_named(
-                &self.function.name,
-                name,
-                value,
-            );
+        if let Some(binding) = self.persistent_bindings.get(&slot) {
+            let authority = self.runtime.session_variable_authority();
+            authority.store_persistent_named(&self.function.name, &binding.name, value)?;
+            self.persistent_seen_revision
+                .insert(slot, authority.persistent_revision()?);
+            let invalidation = authority.persistent_invalidation_revision(&self.function.name)?;
+            if let Some(binding) = self.persistent_bindings.get_mut(&slot) {
+                binding.invalidation = invalidation;
+                binding.invalidated = false;
+            }
         }
         Ok(())
     }

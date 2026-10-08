@@ -4,7 +4,7 @@ use log::debug;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::graph::AccelGraph;
 #[cfg(feature = "native-accel")]
-use runmat_accelerate::{prepare_fusion_plan, FusionPlanRef};
+use runmat_accelerate::FusionPlanRef;
 use runmat_runtime::context::RuntimeInvocationArity;
 use runmat_runtime::workspace::bindings::FrameGlobalBindings;
 use runmat_value::Value;
@@ -54,7 +54,7 @@ pub struct InterpreterResumeState {
     pub requested_outputs: usize,
     pub missing_input_slots: HashSet<usize>,
     pub global_aliases: HashMap<usize, runmat_runtime::workspace::bindings::FrameGlobalBinding>,
-    pub persistent_aliases: HashMap<usize, String>,
+    pub persistent_aliases: crate::interpreter::persistent::PersistentAliases,
     pub side_effect_epoch: u64,
 }
 
@@ -78,7 +78,7 @@ pub struct InterpreterState {
     pub last_exception: Option<runmat_value::MException>,
     pub imports: Vec<(Vec<String>, bool)>,
     pub global_aliases: FrameGlobalBindings,
-    pub persistent_aliases: HashMap<usize, String>,
+    pub persistent_aliases: crate::interpreter::persistent::PersistentAliases,
     pub missing_input_slots: HashSet<usize>,
     pub current_function_name: String,
     pub initial_assigned_var_count: usize,
@@ -129,23 +129,7 @@ impl InterpreterState {
             );
         }
         #[cfg(feature = "native-accel")]
-        let (fusion_plan, fusion_accel_graph) = {
-            // Runtime planning/execution owns accel-graph realization from the active
-            // bytecode instruction stream whenever semantic fusion scaffolds exist.
-            let runtime_groups = bytecode.runtime_fusion_groups();
-            let runtime_graph = bytecode.runtime_accel_graph_for_fusion(&runtime_groups);
-            let runtime_groups = if let Some(graph) = runtime_graph.as_ref() {
-                bytecode.runtime_fusion_groups_for_graph(graph)
-            } else {
-                runtime_groups
-            };
-            let fusion_plan = prepare_fusion_plan(
-                runtime_graph.as_ref(),
-                &runtime_groups,
-                bytecode.fusion_metadata.mir_fusion_candidate_group_count,
-            );
-            (fusion_plan, runtime_graph)
-        };
+        let (fusion_plan, fusion_accel_graph) = bytecode.prepare_vm_fusion_plan();
         Self {
             stack: Vec::new(),
             context: ExecutionContext {

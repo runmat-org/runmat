@@ -454,6 +454,13 @@ pub async fn interpret_resume_in_context(
     current_function_name: Option<&str>,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> VmResult<InterpreterOutcome> {
+    // Resume authority is checked before installing workspace services or
+    // reconstructing any local. A foreign continuation is not a clear.
+    let selected_authority = runtime.session_variable_authority();
+    let selected_function = current_function_name.unwrap_or("<main>");
+    for binding in resume.persistent_aliases.values() {
+        binding.validate_selected(&selected_authority, selected_function)?;
+    }
     let runtime = runtime.with_invocation_arity(RuntimeInvocationArity::function(
         resume.supplied_inputs,
         resume.requested_outputs,
@@ -971,6 +978,12 @@ async fn run_interpreter_inner(
     #[cfg(feature = "native-accel")]
     fusion_observations.abort();
     interpreter_timing.flush_host_span("loop_complete", None);
+    crate::interpreter::persistent::finish_success(
+        &persistent_aliases,
+        &mut vars,
+        &context.runtime.session_variable_authority(),
+        &current_function_name,
+    )?;
     crate::runtime::workspace::reconcile_workspace_vars(&mut vars);
     sync_initial_vars(initial_vars, &vars);
     Ok(InterpreterOutcome::Completed(
@@ -1272,7 +1285,6 @@ async fn interpret_function_with_counts_in_context_inner(
             Err(attach_call_frames(name, source_id, error))
         }
     }?;
-    runtime_globals::persist_declared_for_bytecode(bytecode, name, &vars);
     Ok(res)
 }
 
@@ -1283,6 +1295,10 @@ mod native_metadata_tests;
 #[cfg(test)]
 #[path = "runner/process_dispatch_tests.rs"]
 mod process_dispatch_tests;
+
+#[cfg(test)]
+#[path = "runner/persistent_resume_tests.rs"]
+mod persistent_resume_tests;
 
 #[cfg(test)]
 mod tests {

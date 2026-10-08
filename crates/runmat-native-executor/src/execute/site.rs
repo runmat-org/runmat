@@ -630,7 +630,7 @@ fn return_local_value(
     terminator: &NativeTerminator,
     local: runmat_native_codegen::NativeLocalId,
 ) -> NativeExecutorResult<runmat_value::Value> {
-    if let Some(reference) = state.declared_global_reference(local.0 as usize)? {
+    if let Some(reference) = state.declared_session_reference(local.0 as usize)? {
         return state.arena.get(reference).cloned();
     }
     let value = terminator
@@ -645,7 +645,7 @@ fn return_local_value(
     state.arena.get(value_for(state, value)?).cloned()
 }
 
-fn take_edge(
+pub(in crate::execute) fn take_edge(
     state: &mut HostState,
     edge: &NativeEdge,
     index: u32,
@@ -684,11 +684,15 @@ fn take_edge(
                 NativeExecutorError::Host("native await edge has no completed value".into())
             })?,
         };
-        transferred.push((parameter.clone(), value));
+        transferred.push((
+            parameter.clone(),
+            value,
+            matches!(argument, NativeEdgeArgument::Value(_)),
+        ));
     }
-    for (parameter, value) in transferred {
-        state.values.insert(parameter.value, value);
-        state.set_local(parameter.local.0 as usize, value)?;
+    for (parameter, value, inherited_snapshot) in transferred {
+        let bound = state.bind_edge_local(parameter.local.0 as usize, value, inherited_snapshot)?;
+        state.values.insert(parameter.value, bound);
     }
     state.take_control_edge(edge.target);
     Ok(NativeSiteOutcome::edge(index))

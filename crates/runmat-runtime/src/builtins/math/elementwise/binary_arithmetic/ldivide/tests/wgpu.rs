@@ -18,11 +18,11 @@ fn ldivide_wgpu_matches_cpu_elementwise() {
     .unwrap();
     let view_l = HostTensorView {
         data: &lhs.materialize_f64(),
-        shape: &lhs.shape,
+        shape: lhs.shape(),
     };
     let view_r = HostTensorView {
         data: &rhs.materialize_f64(),
-        shape: &rhs.shape,
+        shape: rhs.shape(),
     };
     let ha = provider.upload(&view_l).unwrap();
     let hb = provider.upload(&view_r).unwrap();

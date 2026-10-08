@@ -5,6 +5,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+#[path = "native_workspace_reconciliation/persistent_return.rs"]
+mod persistent_return;
+#[path = "native_workspace_reconciliation/public_self_clear.rs"]
+mod public_self_clear;
+
 fn execute_workspace_outcome(
     session: &mut RunMatSession,
     source: &str,

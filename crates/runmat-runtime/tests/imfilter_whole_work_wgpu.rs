@@ -443,7 +443,7 @@ fn automatic_integer_two_readbacks_obey_finite_host_quota_before_effects() {
     let Value::Tensor(output) = result else {
         panic!("automatic integer result stays host-side")
     };
-    assert_eq!(output.shape, vec![2, 2]);
+    assert_eq!(output.shape(), [2, 2]);
     assert_eq!(
         output.integer_storage(),
         Some(&IntegerStorage::U8(vec![1, 2, 3, 4]))

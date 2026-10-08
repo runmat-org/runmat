@@ -490,11 +490,7 @@ impl RunMatSession {
     ) -> std::result::Result<runmat_value::ValueSequence, RunError> {
         let _admission = self.admit_execution(control.cancellation());
         self.ensure_user_path_hydrated().await?;
-        self.configure_runtime_context();
-        let runtime = self
-            .runtime_context
-            .clone()
-            .with_program_revision(Some(unit.revision().program_revision.clone()));
+        let runtime = self.execution_runtime_context(unit.revision().program_revision.clone());
         let runtime = unit
             .bind_runtime_sources(runtime)
             .map_err(|error| runtime_error("RunMat:ExecutableSourceIdentity", error))?;

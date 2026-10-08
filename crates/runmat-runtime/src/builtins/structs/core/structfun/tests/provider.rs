@@ -38,7 +38,7 @@ fn gathers_field_values_from_an_actual_wgpu_provider() {
     let handle = provider
         .upload(&HostTensorView {
             data: &materialized,
-            shape: &tensor.shape,
+            shape: tensor.shape(),
         })
         .unwrap();
     let precision = runmat_accelerate_api::handle_precision(&handle).expect("floating upload");
@@ -56,7 +56,7 @@ fn gathers_field_values_from_an_actual_wgpu_provider() {
         }
         runmat_accelerate_api::ProviderPrecision::F64 => (0.25f64.sin(), 1e-12),
     };
-    assert_eq!(output.shape, vec![1, 1]);
+    assert_eq!(output.shape(), vec![1, 1]);
     let values = output.materialize_f64();
     assert!(values[0] > 0.0);
     assert!((values[0] - expected).abs() <= tolerance);

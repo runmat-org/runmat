@@ -25,7 +25,7 @@ fn double_wgpu_matches_cpu() {
     let gathered = test_support::gather(gpu_value.clone()).expect("gather");
     match cpu_value {
         Value::Tensor(ref ct) => {
-            assert_eq!(gathered.shape.as_slice(), ct.shape());
+            assert_eq!(gathered.shape(), ct.shape());
             assert_eq!(gathered.materialize_f64(), ct.materialize_f64());
         }
         Value::Num(n) => {

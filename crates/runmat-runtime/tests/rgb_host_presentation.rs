@@ -772,7 +772,10 @@ fn actual_wgpu_gray_host_sink_completes_nonempty_empty_and_lazy_readbacks() {
         .expect("required actual WGPU gray readback") else {
             panic!("{name} must publish host tensor")
         };
-        assert_eq!(output.shape, vec![source.shape()[0], source.shape()[1], 3]);
+        assert_eq!(
+            output.shape(),
+            vec![source.shape()[0], source.shape()[1], 3]
+        );
         assert_eq!(output.numeric_dtype(), dtype);
         let actual = output.materialize_f64();
         let expected = [

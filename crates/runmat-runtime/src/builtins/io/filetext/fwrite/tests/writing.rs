@@ -387,7 +387,7 @@ fn fwrite_wgpu_tensor_roundtrip() {
     let expected = tensor.materialize_f64().clone();
     let view = HostTensorView {
         data: &tensor.materialize_f64(),
-        shape: &tensor.shape,
+        shape: tensor.shape(),
     };
     let handle = provider.upload(&view).expect("upload to gpu");
     let args = vec![Value::from("double")];

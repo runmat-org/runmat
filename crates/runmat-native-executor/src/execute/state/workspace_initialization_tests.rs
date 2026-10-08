@@ -6,6 +6,8 @@ use std::{rc::Rc, sync::Arc};
 
 #[path = "workspace_initialization_tests/sync_completion.rs"]
 mod sync_completion;
+#[path = "workspace_initialization_tests/edge_global.rs"]
+mod edge_global;
 
 #[test]
 fn first_global_declaration_replaces_a_stale_local_with_canonical_empty() {

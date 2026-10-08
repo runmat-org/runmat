@@ -15,3 +15,6 @@ mod tests;
 #[cfg(test)]
 #[path = "artifact/float_tests.rs"]
 mod float_tests;
+#[cfg(all(test, feature = "native-accel"))]
+#[path = "artifact/function_fusion_tests.rs"]
+mod function_fusion_tests;

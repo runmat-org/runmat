@@ -1,9 +1,6 @@
-use crate::bytecode::instr::Instr;
-use crate::bytecode::program::Bytecode;
 use crate::runtime::workspace::refresh_workspace_slot;
 use runmat_runtime::workspace::bindings::{FrameGlobalBinding, FrameGlobalBindings};
 use runmat_value::Value;
-use std::collections::HashMap;
 
 pub fn workspace_global_names() -> Vec<String> {
     runmat_runtime::workspace::session::global_names()
@@ -44,14 +41,6 @@ pub fn update_global_store(
         }
         None => {}
     }
-}
-
-pub fn update_persistent_local_store(func_name: &str, stored_offset: usize, stored_value: &Value) {
-    runmat_runtime::workspace::session::update_persistent_slot(
-        func_name,
-        stored_offset,
-        stored_value,
-    );
 }
 
 pub fn declare_global(
@@ -99,82 +88,6 @@ pub fn declare_global_named(
         global_aliases.declare_named(i, name);
     }
     Ok(())
-}
-
-pub fn declare_persistent(func_name: &str, indices: Vec<usize>, vars: &mut Vec<Value>) {
-    for i in indices {
-        let val_opt = runmat_runtime::workspace::session::persistent_slot_value(func_name, i);
-        if let Some(v) = val_opt {
-            if i >= vars.len() {
-                vars.resize(i + 1, Value::Num(0.0));
-            }
-            vars[i] = v;
-            refresh_workspace_slot(i, &vars[i]);
-        }
-    }
-}
-
-pub fn declare_persistent_named(
-    func_name: &str,
-    indices: Vec<usize>,
-    names: Vec<String>,
-    vars: &mut Vec<Value>,
-    persistent_aliases: &mut HashMap<usize, String>,
-) {
-    for (pos, i) in indices.into_iter().enumerate() {
-        let name = names
-            .get(pos)
-            .cloned()
-            .unwrap_or_else(|| format!("var_{i}"));
-        let val_opt = runmat_runtime::workspace::session::persistent_named_value(func_name, &name)
-            .or_else(|| runmat_runtime::workspace::session::persistent_slot_value(func_name, i));
-        if let Some(v) = val_opt {
-            if i >= vars.len() {
-                vars.resize(i + 1, Value::Num(0.0));
-            }
-            vars[i] = v;
-            refresh_workspace_slot(i, &vars[i]);
-        }
-        persistent_aliases.insert(i, name);
-    }
-}
-
-pub fn persist_declared_for_bytecode(bytecode: &Bytecode, func_name: &str, vars: &[Value]) {
-    for instr in &bytecode.instructions {
-        match instr {
-            Instr::DeclarePersistent(indices) => {
-                for &i in indices {
-                    if i < vars.len() {
-                        runmat_runtime::workspace::session::store_persistent_slot(
-                            func_name,
-                            i,
-                            vars[i].clone(),
-                        );
-                    }
-                }
-            }
-            Instr::DeclarePersistentNamed(indices, names) => {
-                for (pos, &i) in indices.iter().enumerate() {
-                    if i < vars.len() {
-                        let name = names
-                            .get(pos)
-                            .cloned()
-                            .unwrap_or_else(|| format!("var_{i}"));
-                        let val = vars[i].clone();
-                        runmat_runtime::workspace::session::store_persistent_slot(
-                            func_name,
-                            i,
-                            val.clone(),
-                        );
-                        runmat_runtime::workspace::session::store_persistent_named(
-                            func_name, &name, val,
-                        );
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
 }
 
 pub(crate) fn reset_thread_state_for_tests() {
