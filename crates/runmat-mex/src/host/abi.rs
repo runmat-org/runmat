@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::rc::Rc;
-use std::sync::{Arc, Mutex, MutexGuard};
+#[cfg(not(target_family = "wasm"))]
+use std::sync::Arc;
+use std::sync::{Mutex, MutexGuard};
 
 #[cfg(not(target_family = "wasm"))]
 use super::ConcurrentMexBoundaryHostServices;
@@ -11,7 +13,7 @@ use super::{
 };
 use crate::mxarray::{MxArrayData, MxSparse, MxSparseValues};
 use crate::{
-    value_to_mx_for_interface_in_context, MexAsyncResult, MexHostServices, MxApi, MxApiMode,
+    value_to_mx_for_interface_in_context, MexAsyncResultHandle, MexHostServices, MxApi, MxApiMode,
     MxArray, MxBoundaryInterface, MxClassId,
 };
 
@@ -42,7 +44,7 @@ pub(crate) struct MexCallStateInner {
     local_service_guard: Option<LocalBoundaryServiceGuard>,
     global_arrays: BTreeSet<usize>,
     interface: MxBoundaryInterface,
-    pub(crate) async_requests: BTreeMap<u64, Arc<dyn MexAsyncResult>>,
+    pub(crate) async_requests: BTreeMap<u64, MexAsyncResultHandle>,
     pub(crate) async_property_targets: BTreeMap<u64, usize>,
     pub(crate) next_async_request: u64,
     pub(crate) engine_contexts: BTreeMap<u64, BoundaryServiceSlot>,

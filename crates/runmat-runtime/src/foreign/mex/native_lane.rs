@@ -8,9 +8,9 @@ use std::time::{Duration, Instant};
 use futures::channel::{mpsc as async_mpsc, oneshot};
 use futures::{FutureExt, StreamExt};
 use runmat_mex::{
-    MexAsyncHostServices, MexAsyncOperation, MexAsyncResult, MexBoundaryHostServices,
-    MexDiagnostic, MexEngineCompletion, MexLoadError, MexModule, MexNativeInvocation, MxApiMode,
-    MxArray, MxBoundaryInterface,
+    MexAsyncHostServices, MexAsyncOperation, MexAsyncResult, MexAsyncResultHandle,
+    MexBoundaryHostServices, MexDiagnostic, MexEngineCompletion, MexLoadError, MexModule,
+    MexNativeInvocation, MxApiMode, MxArray, MxBoundaryInterface,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -829,10 +829,7 @@ impl MexBoundaryHostServices for NativeBoundaryProxy {
 }
 
 impl MexAsyncHostServices for NativeBoundaryProxy {
-    fn submit(
-        &self,
-        operation: MexAsyncOperation,
-    ) -> Result<Arc<dyn MexAsyncResult>, MexDiagnostic> {
+    fn submit(&self, operation: MexAsyncOperation) -> Result<MexAsyncResultHandle, MexDiagnostic> {
         self.origin
             .callbacks
             .unbounded_send(BoundaryEnvelope::AsyncStarted {

@@ -4,6 +4,7 @@ fn native_async_objects_and_explicit_concurrent_services_remain_send_sync() {
     fn require_send_sync<T: Send + Sync + ?Sized>() {}
     require_send_sync::<dyn super::MexAsyncResult>();
     require_send_sync::<dyn super::MexAsyncHostServices>();
+    require_send_sync::<super::MexAsyncResultHandle>();
     require_send_sync::<dyn crate::ConcurrentMexBoundaryHostServices>();
     require_send_sync::<crate::MexCallState>();
 }
@@ -53,8 +54,8 @@ mod local {
         fn submit(
             &self,
             _operation: MexAsyncOperation,
-        ) -> Result<Arc<dyn MexAsyncResult>, MexDiagnostic> {
-            Ok(Arc::new(LocalResult {
+        ) -> Result<MexAsyncResultHandle, MexDiagnostic> {
+            Ok(new_async_result(LocalResult {
                 _owner: ResultOwner(self.drops.clone()),
                 completion: MexEngineCompletion::from_result(Ok(vec![self
                     .payload

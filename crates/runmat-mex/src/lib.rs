@@ -37,9 +37,9 @@ pub use conversion::{value_from_mx, value_to_mx, MxConversionError, MxValueConte
 pub(crate) use conversion::{value_from_mx_in_context, value_to_mx_for_interface_in_context};
 pub use host::{
     ConcurrentMexBoundaryHostServices, DirectMexBoundaryHostServices, MexAsyncHostServices,
-    MexAsyncOperation, MexAsyncResult, MexBoundaryHostServices, MexCallState, MexCancellationScope,
-    MexDiagnostic, MexEngineCompletion, MexHostApiV1, MexHostServices, UnavailableMexHostServices,
-    MEX_HOST_ABI_VERSION,
+    MexAsyncOperation, MexAsyncResult, MexAsyncResultHandle, MexBoundaryHostServices, MexCallState,
+    MexCancellationScope, MexDiagnostic, MexEngineCompletion, MexHostApiV1, MexHostServices,
+    UnavailableMexHostServices, MEX_HOST_ABI_VERSION,
 };
 pub use libmx::MxApi;
 #[cfg(not(target_family = "wasm"))]

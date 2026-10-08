@@ -2,12 +2,14 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(not(target_family = "wasm"))]
 use std::sync::Arc;
 use std::time::Duration;
 
+use super::async_request::new_async_result;
 use crate::{
-    MexAsyncHostServices, MexAsyncOperation, MexAsyncResult, MexBoundaryHostServices,
-    MexDiagnostic, MexEngineCompletion, MxArray,
+    MexAsyncHostServices, MexAsyncOperation, MexAsyncResult,
+    MexAsyncResultHandle, MexBoundaryHostServices, MexDiagnostic, MexEngineCompletion, MxArray,
 };
 
 pub trait ConcurrentMexBoundaryHostServices:
@@ -142,10 +144,7 @@ impl MexBoundaryHostServices for BoundaryServiceSlot {
 }
 
 impl MexAsyncHostServices for BoundaryServiceSlot {
-    fn submit(
-        &self,
-        operation: MexAsyncOperation,
-    ) -> Result<Arc<dyn MexAsyncResult>, MexDiagnostic> {
+    fn submit(&self, operation: MexAsyncOperation) -> Result<MexAsyncResultHandle, MexDiagnostic> {
         match self {
             #[cfg(not(target_family = "wasm"))]
             Self::Concurrent(services) => services.submit(operation),
@@ -156,7 +155,7 @@ impl MexAsyncHostServices for BoundaryServiceSlot {
                         runmat_execution::cancellation::CancellationSource::new().token(),
                     ))
                 })?;
-                Ok(Arc::new(CompletedAsyncResult(completion)))
+                Ok(new_async_result(CompletedAsyncResult(completion)))
             }
             Self::Unavailable => Err(MexDiagnostic {
                 identifier: Some("RunMat:MEX:AsyncHostUnavailable".into()),

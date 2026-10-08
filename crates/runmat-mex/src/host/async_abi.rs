@@ -1,8 +1,9 @@
 use std::ffi::{c_char, c_void, CStr};
-use std::sync::Arc;
 use std::time::Duration;
 
-use super::{MexAsyncHostServices, MexAsyncOperation, MexAsyncResult, MexCallState, MexDiagnostic};
+use super::{
+    MexAsyncHostServices, MexAsyncOperation, MexAsyncResultHandle, MexCallState, MexDiagnostic,
+};
 use crate::MxArray;
 
 unsafe fn host<'a>(host: *mut c_void) -> Option<&'a MexCallState> {
@@ -22,7 +23,7 @@ fn text(pointer: *const c_char) -> Option<String> {
     )
 }
 
-fn register(host: &MexCallState, request: Arc<dyn MexAsyncResult>) -> Result<u64, MexDiagnostic> {
+fn register(host: &MexCallState, request: MexAsyncResultHandle) -> Result<u64, MexDiagnostic> {
     let mut state = host.lock().map_err(|()| poisoned())?;
     let start = state.next_async_request.max(1);
     let mut id = start;
@@ -112,7 +113,7 @@ fn clone_array(host: &MexCallState, value: *const MxArray) -> Result<MxArray, Me
         .map_err(|error| invalid(error.to_string()))
 }
 
-fn request(host: &MexCallState, id: u64) -> Result<Arc<dyn MexAsyncResult>, MexDiagnostic> {
+fn request(host: &MexCallState, id: u64) -> Result<MexAsyncResultHandle, MexDiagnostic> {
     host.lock()
         .map_err(|()| poisoned())?
         .async_requests
@@ -504,6 +505,8 @@ fn invalid(name: impl Into<String>) -> MexDiagnostic {
 
 #[cfg(test)]
 mod tests {
+    use super::super::async_request::new_async_result;
+    use super::super::MexAsyncResult;
     use super::*;
     use crate::{MexEngineCompletion, MxApiMode};
 
@@ -548,14 +551,16 @@ mod tests {
     }
 
     fn insert(state: &MexCallState, completion: MexEngineCompletion<Vec<MxArray>>) -> u64 {
-        register(state, Arc::new(CompletedRequest(completion))).expect("register completed request")
+        register(state, new_async_result(CompletedRequest(completion)))
+            .expect("register completed request")
     }
 
     #[cfg_attr(not(target_family = "wasm"), test)]
     #[cfg_attr(target_family = "wasm", wasm_bindgen_test::wasm_bindgen_test)]
     fn pending_requests_retain_module_lifecycle_until_completion_or_release() {
         let state = MexCallState::new(MxApiMode::InterleavedComplex);
-        let request = register(&state, Arc::new(PendingRequest)).expect("register pending request");
+        let request =
+            register(&state, new_async_result(PendingRequest)).expect("register pending request");
         assert!(state.has_pending_async_requests().unwrap());
 
         // SAFETY: the request belongs to `state` and is released exactly once.

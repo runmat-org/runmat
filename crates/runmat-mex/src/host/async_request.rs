@@ -1,3 +1,6 @@
+#[cfg(target_family = "wasm")]
+use std::rc::Rc;
+#[cfg(not(target_family = "wasm"))]
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -61,11 +64,26 @@ pub trait MexAsyncResult: MexAsyncThreadBound {
     fn result(&self) -> MexEngineCompletion<Vec<MxArray>>;
 }
 
+/// A native result can cross threads; a browser result stays on its originating
+/// WASM worker with the `MxArray` allocations it retains.
+#[cfg(not(target_family = "wasm"))]
+pub type MexAsyncResultHandle = Arc<dyn MexAsyncResult>;
+#[cfg(target_family = "wasm")]
+pub type MexAsyncResultHandle = Rc<dyn MexAsyncResult>;
+
+pub(super) fn new_async_result<T: MexAsyncResult + 'static>(result: T) -> MexAsyncResultHandle {
+    #[cfg(not(target_family = "wasm"))]
+    {
+        Arc::new(result)
+    }
+    #[cfg(target_family = "wasm")]
+    {
+        Rc::new(result)
+    }
+}
+
 pub trait MexAsyncHostServices: MexAsyncThreadBound {
-    fn submit(
-        &self,
-        operation: MexAsyncOperation,
-    ) -> Result<Arc<dyn MexAsyncResult>, MexDiagnostic>;
+    fn submit(&self, operation: MexAsyncOperation) -> Result<MexAsyncResultHandle, MexDiagnostic>;
 }
 
 #[cfg(test)]

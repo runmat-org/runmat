@@ -14,7 +14,9 @@ mod services;
 pub use abi::{MexCallState, MexDiagnostic, MexHostApiV1, MEX_HOST_ABI_VERSION};
 #[doc(hidden)]
 pub use async_request::MexAsyncThreadBound;
-pub use async_request::{MexAsyncHostServices, MexAsyncOperation, MexAsyncResult};
+pub use async_request::{
+    MexAsyncHostServices, MexAsyncOperation, MexAsyncResult, MexAsyncResultHandle,
+};
 pub use boundary::{DirectMexBoundaryHostServices, MexBoundaryHostServices};
 pub use service_slot::ConcurrentMexBoundaryHostServices;
 pub(crate) use service_slot::{BoundaryServiceSlot, LocalBoundaryServiceGuard};
