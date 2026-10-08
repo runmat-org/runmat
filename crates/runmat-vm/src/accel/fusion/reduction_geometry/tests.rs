@@ -51,6 +51,32 @@ fn geometry(plan: &FusionGroupPlan, inputs: Vec<Value>) -> Result<ReductionGeome
 }
 
 #[test]
+fn unsupported_complex_geometry_deopts_before_effects_and_restores_stack() {
+    let plan = plan();
+    let operand = Value::ComplexTensor(
+        runmat_value::ComplexTensor::new(vec![(1.0, 2.0), (2.0, 1.0)], vec![1, 2]).unwrap(),
+    );
+    let original = vec![Value::Num(17.0), operand.clone()];
+    let mut stack = original.clone();
+    let guard = super::super::StackSliceGuard::new(&mut stack, 1);
+    let result = super::super::execute_fusion_reduction(
+        &plan,
+        FusionExecutionRequest {
+            plan: &plan,
+            inputs: vec![operand],
+            placement: None,
+            runtime: None,
+        },
+        guard,
+    );
+    assert!(matches!(
+        result,
+        Err(super::super::FusionAttemptError::Deopt(_))
+    ));
+    assert_eq!(stack, original);
+}
+
+#[test]
 fn actual_shape_overrides_cached_shape_and_binds_default_row_axis_without_mutation() {
     let plan = plan();
     let geom = geometry(&plan, vec![input(&[1, 3])]).unwrap();

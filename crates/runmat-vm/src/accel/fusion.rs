@@ -628,7 +628,10 @@ pub fn execute_fusion_reduction(
     let geom = match resolve_reduction_geometry(plan, &request) {
         Ok(geom) => geom,
         Err(error) => {
-            return Err(FusionAttemptError::Terminal(error));
+            // Geometry admission runs before provider work. Unsupported or
+            // unresolved fused geometry must leave the original runtime call
+            // responsible for its value, options, and owning diagnostics.
+            return Err(FusionAttemptError::Deopt(error));
         }
     };
     // Specialize only this invocation. The generator must use the same axis as
