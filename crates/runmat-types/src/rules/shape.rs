@@ -7,6 +7,11 @@ fn aligned_dims(shape: &ShapeFact, rank: usize) -> Option<Vec<DimensionFact>> {
         ShapeFact::Ranked { rank } => vec![DimensionFact::Unknown; *rank],
         ShapeFact::Shaped { dims } => dims.clone(),
     };
+    // A one-dimensional value is a row when implicit expansion reaches a
+    // matrix (or higher rank), matching concrete broadcast and Runtime.
+    if rank >= 2 && dims.len() == 1 {
+        dims.insert(0, DimensionFact::Known(1));
+    }
     dims.resize(rank, DimensionFact::Known(1));
     Some(dims)
 }
@@ -367,4 +372,72 @@ pub fn infer_range(
         range_shape_with_step(start, step, end),
         crate::StorageFact::Dense,
     ))
+}
+
+#[cfg(test)]
+mod broadcast_tests {
+    use super::*;
+
+    fn shaped(dims: &[usize]) -> ShapeFact {
+        ShapeFact::Shaped {
+            dims: dims.iter().copied().map(DimensionFact::Known).collect(),
+        }
+    }
+
+    #[test]
+    fn vector_uses_row_shorthand_only_when_broadcast_rank_reaches_two() {
+        assert_eq!(
+            broadcast_shape(&shaped(&[4]), &shaped(&[4])).unwrap(),
+            shaped(&[4])
+        );
+        assert_eq!(
+            broadcast_shape(&shaped(&[4]), &ShapeFact::Scalar).unwrap(),
+            shaped(&[1, 4])
+        );
+        assert_eq!(
+            broadcast_shape(&ShapeFact::Scalar, &shaped(&[4])).unwrap(),
+            shaped(&[1, 4])
+        );
+        assert_eq!(
+            broadcast_shape(&shaped(&[4]), &shaped(&[2, 4])).unwrap(),
+            shaped(&[2, 4])
+        );
+        assert_eq!(
+            broadcast_shape(&shaped(&[2, 4]), &shaped(&[4])).unwrap(),
+            shaped(&[2, 4])
+        );
+        assert_eq!(
+            broadcast_shape(&shaped(&[4]), &shaped(&[4, 1])).unwrap(),
+            shaped(&[4, 4])
+        );
+        assert_eq!(
+            broadcast_shape(&shaped(&[4, 1]), &shaped(&[4])).unwrap(),
+            shaped(&[4, 4])
+        );
+        assert_eq!(
+            broadcast_shape(&shaped(&[4, 1]), &ShapeFact::Scalar).unwrap(),
+            shaped(&[4, 1])
+        );
+        assert!(broadcast_shape(&shaped(&[4]), &shaped(&[2, 5])).is_err());
+    }
+
+    #[test]
+    fn vector_row_shorthand_preserves_higher_rank_and_empty_axes() {
+        assert_eq!(
+            broadcast_shape(&shaped(&[4]), &shaped(&[2, 1, 3])).unwrap(),
+            shaped(&[2, 4, 3])
+        );
+        assert_eq!(
+            broadcast_shape(&shaped(&[0]), &ShapeFact::Scalar).unwrap(),
+            shaped(&[1, 0])
+        );
+        assert_eq!(
+            broadcast_shape(&shaped(&[0]), &shaped(&[2, 0])).unwrap(),
+            shaped(&[2, 0])
+        );
+        assert_eq!(
+            broadcast_shape(&ShapeFact::Ranked { rank: 1 }, &shaped(&[2, 4])).unwrap(),
+            shaped(&[2, 4])
+        );
+    }
 }
