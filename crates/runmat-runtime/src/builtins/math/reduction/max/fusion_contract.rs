@@ -1,3 +1,4 @@
+use super::reduction::geometry::resolve_reduction_dims;
 use super::*;
 use crate::builtins::common::spec::{
     checked_reduction_elements, FusionReductionContext, FusionReductionContract,

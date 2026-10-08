@@ -186,6 +186,28 @@ mod tests {
     }
 
     #[test]
+    fn max_dispatch_identity_has_exactly_one_canonical_default_binding() {
+        let entry = &runmat_builtins::MAX_CATALOG_ENTRY;
+        assert_eq!(entry.identity.name, "max");
+        assert_eq!(
+            entry.bindings,
+            runmat_builtins::REQUIRED_DEFAULT_BINDING.as_slice()
+        );
+        let bindings = runtime_builtin_bindings_by_name(entry.identity.name);
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(
+            bindings[0].identity,
+            entry.binding_identity(&entry.bindings[0])
+        );
+        assert!(runmat_builtins::builtin_function_by_name(entry.identity.name).is_none());
+
+        let observed =
+            crate::dispatcher::call_builtin(entry.identity.name, &[runmat_value::Value::Num(5.0)])
+                .expect("dispatch canonical max");
+        assert_eq!(observed, runmat_value::Value::Num(5.0));
+    }
+
+    #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn warm_binding_lookup_borrows_without_inventory_traversal() {
         let first = with_runtime_builtin_bindings_by_name("sin", |entries| {

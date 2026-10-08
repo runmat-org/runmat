@@ -6,6 +6,7 @@ mod median_inference;
 mod median_options;
 mod min_options;
 mod min_inference;
+mod max_inference;
 mod missing_policy;
 mod numeric_inference;
 mod sum_inference;
@@ -15,16 +16,20 @@ pub(super) use dispersion_inference::{
     admitted_std_controls, admitted_var_controls, inferred_dispersion_shape,
 };
 pub use dispersion_options::{DispersionControl, DispersionNormalization};
+pub(super) use max_inference::{
+    admitted_max_pairwise_options, admitted_max_reduction_controls, inferred_empty_max_shape,
+    inferred_max_shape,
+};
 pub(super) use mean_inference::{admitted_mean_controls, inferred_mean_shape};
 pub use mean_options::{MeanControl, MeanOutputClass};
 pub(super) use median_inference::{admitted_median_controls, inferred_median_shape};
 pub use median_options::MedianControl;
 pub(super) use min_inference::{
     admitted_min_pairwise_options, admitted_min_reduction_controls, inferred_min_shape,
-    is_empty_placeholder,
 };
 pub use min_options::{MinComparisonMethod, MinControl};
 pub use missing_policy::ReductionNaN;
+pub(super) use numeric_inference::is_empty_placeholder;
 pub(super) use numeric_inference::LiteralReductionOutput;
 pub(super) use sum_inference::{admitted_sum_controls, inferred_sum_shape};
 pub use sum_options::{SumControl, SumOutputClass};

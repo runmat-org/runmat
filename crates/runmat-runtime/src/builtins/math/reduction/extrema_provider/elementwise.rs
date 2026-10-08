@@ -16,6 +16,13 @@ impl ExtremaKind {
         let Some(provider) = self.pair_owner(left, right)? else {
             return Ok(None);
         };
+        // The real provider hook cannot select complex values by the host
+        // magnitude/phase order, even if it returns a plausible descriptor.
+        if left.physical().storage() == GpuTensorStorage::ComplexInterleaved
+            || right.physical().storage() == GpuTensorStorage::ComplexInterleaved
+        {
+            return Ok(None);
+        }
         let Some((shape, repeats_left, repeats_right)) =
             broadcast_repeats(left.shape(), right.shape())
                 .map_err(|error| self.contract_error(error))?

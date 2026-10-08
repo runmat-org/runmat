@@ -3,7 +3,7 @@
 //! `None` means a typed capability rejection, never a provider execution error.
 use crate::builtins::common::gpu_helpers;
 use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_value::{Tensor, Value};
 
 mod demand;
@@ -109,6 +109,11 @@ impl ExtremaKind {
         demand: ExtremaDemand,
     ) -> BuiltinResult<Option<ExtremaResult>> {
         let provider = self.owner(input)?;
+        // The dimensional provider hooks implement real extrema only. Complex
+        // magnitude/phase selection belongs to the owning host comparator.
+        if input.physical().storage() == GpuTensorStorage::ComplexInterleaved {
+            return Ok(None);
+        }
         let result = match self {
             Self::Min => provider.reduce_min_dim(input, dimension).await,
             Self::Max => provider.reduce_max_dim(input, dimension).await,

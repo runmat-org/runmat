@@ -17,6 +17,12 @@ pub(super) enum EmptyAxesPolicy {
     Reject,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum AxisSelectionPolicy {
+    ReplaceEmptyDefault,
+    Once,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LiteralReductionOutput {
     Default,
@@ -37,6 +43,21 @@ pub(crate) struct KnownControls {
     pub(crate) output: Option<LiteralReductionOutput>,
 }
 
+impl KnownControls {
+    pub(crate) fn selects_all(&self) -> bool {
+        matches!(self.axes, KnownAxes::All)
+    }
+}
+
+pub(crate) fn is_empty_placeholder(literal: &LiteralValue) -> bool {
+    match literal {
+        LiteralValue::Empty => true,
+        LiteralValue::Vector(values) => values.is_empty(),
+        LiteralValue::String(text) | LiteralValue::Character(text) => text.is_empty(),
+        _ => false,
+    }
+}
+
 pub(super) fn admitted_literal_controls(
     argument_count: usize,
     context: &ResolveContext,
@@ -44,6 +65,26 @@ pub(super) fn admitted_literal_controls(
     decode_normalization: Option<fn(&LiteralValue) -> NormalizationLiteral>,
     option_start: usize,
     empty_axes: EmptyAxesPolicy,
+) -> Option<KnownControls> {
+    admitted_literal_controls_with_axis_policy(
+        argument_count,
+        context,
+        decode_control,
+        decode_normalization,
+        option_start,
+        empty_axes,
+        AxisSelectionPolicy::ReplaceEmptyDefault,
+    )
+}
+
+pub(super) fn admitted_literal_controls_with_axis_policy(
+    argument_count: usize,
+    context: &ResolveContext,
+    decode_control: fn(&LiteralValue) -> Option<LiteralReductionControl>,
+    decode_normalization: Option<fn(&LiteralValue) -> NormalizationLiteral>,
+    option_start: usize,
+    empty_axes: EmptyAxesPolicy,
+    axis_selection: AxisSelectionPolicy,
 ) -> Option<KnownControls> {
     let mut axes = KnownAxes::Default;
     let mut axes_set = false;
@@ -55,7 +96,10 @@ pub(super) fn admitted_literal_controls(
         if let Some(control) = decode_control(literal) {
             match control {
                 LiteralReductionControl::All => {
-                    if axes_set && !matches!(axes, KnownAxes::Default) {
+                    if axes_set
+                        && (matches!(axis_selection, AxisSelectionPolicy::Once)
+                            || !matches!(axes, KnownAxes::Default))
+                    {
                         return None;
                     }
                     axes = KnownAxes::All;
@@ -86,7 +130,10 @@ pub(super) fn admitted_literal_controls(
             }
         }
         let selection = axes_literal(literal, empty_axes)?;
-        if axes_set && !matches!(axes, KnownAxes::Default) {
+        if axes_set
+            && (matches!(axis_selection, AxisSelectionPolicy::Once)
+                || !matches!(axes, KnownAxes::Default))
+        {
             return None;
         }
         axes = selection;

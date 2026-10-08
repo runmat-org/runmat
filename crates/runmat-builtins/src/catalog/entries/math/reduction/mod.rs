@@ -12,10 +12,12 @@ mod median;
 mod std;
 mod var;
 mod min;
+mod max;
 
 pub use self::all::*;
 pub use self::any::*;
 pub use self::bounds::*;
+pub use self::max::*;
 pub use self::mean::*;
 pub use self::median::*;
 pub use self::min::*;
@@ -36,4 +38,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(std::ENTRIES.iter().copied());
     values.extend(var::ENTRIES.iter().copied());
     values.extend(min::ENTRIES.iter().copied());
+    values.extend(max::ENTRIES.iter().copied());
 }

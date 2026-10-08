@@ -1,8 +1,8 @@
 use runmat_accelerate_api::{
     test_support::{RetirementProbe, TestAllocation, TestAllocationOwner},
-    AccelDownloadFuture, AccelNumericDownloadFuture, AccelProvider, GpuTensorHandle,
-    GpuTensorStorage, HostNumericDataOwned, HostNumericDataView, HostNumericTensorOwned,
-    HostTensorView, ThreadProviderGuard,
+    AccelDownloadFuture, AccelNumericDownloadFuture, AccelProvider, AccelProviderFuture,
+    GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned, HostNumericDataView,
+    HostNumericTensorOwned, HostTensorView, ReduceDimResult, ThreadProviderGuard,
 };
 use runmat_value::{ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
 use std::sync::Mutex;
@@ -16,12 +16,21 @@ struct NativeProvider {
 
 impl NativeProvider {
     fn allocate(&self, data: HostNumericDataOwned, storage: GpuTensorStorage) -> TestAllocation {
+        self.allocate_with_shape(data, storage, vec![1, 1, 1])
+    }
+
+    fn allocate_with_shape(
+        &self,
+        data: HostNumericDataOwned,
+        storage: GpuTensorStorage,
+        shape: Vec<usize>,
+    ) -> TestAllocation {
         let allocation = self
             .owner
             .allocate_numeric(HostNumericTensorOwned {
                 data,
                 storage,
-                shape: vec![1, 1, 1],
+                shape,
             })
             .unwrap();
         self.records
@@ -71,6 +80,233 @@ impl AccelProvider for NativeProvider {
                 storage: input.physical().storage(),
             })
         })
+    }
+    fn reduce_max_dim<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: usize,
+    ) -> AccelProviderFuture<'a, ReduceDimResult> {
+        panic!("complex max must select host comparison before the real extrema hook")
+    }
+    fn reduce_min_dim<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        _: usize,
+    ) -> AccelProviderFuture<'a, ReduceDimResult> {
+        if input.physical().storage() == GpuTensorStorage::ComplexInterleaved {
+            panic!("complex min must select host comparison before the real extrema hook");
+        }
+        Box::pin(async {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "real min reduction fixture failure",
+            )
+            .into())
+        })
+    }
+    fn elem_max<'a>(
+        &'a self,
+        left: &'a GpuTensorHandle,
+        right: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        if left.physical().storage() == GpuTensorStorage::ComplexInterleaved
+            || right.physical().storage() == GpuTensorStorage::ComplexInterleaved
+        {
+            panic!("complex max must select host comparison before the real extrema hook");
+        }
+        Box::pin(async {
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "resident real max is not implemented by this fixture",
+            ))
+        })
+    }
+    fn elem_min<'a>(
+        &'a self,
+        left: &'a GpuTensorHandle,
+        right: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        if left.physical().storage() == GpuTensorStorage::ComplexInterleaved
+            || right.physical().storage() == GpuTensorStorage::ComplexInterleaved
+        {
+            panic!("complex min must select host comparison before the real extrema hook");
+        }
+        Box::pin(async {
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "resident real min is not implemented by this fixture",
+            ))
+        })
+    }
+}
+
+#[test]
+fn complex_resident_min_gathers_before_real_extrema_hook_and_keeps_its_lease() {
+    let provider = Box::leak(Box::new(NativeProvider {
+        owner: TestAllocationOwner::new(),
+        records: Mutex::new(Vec::new()),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let allocation = provider.allocate(
+        HostNumericDataOwned::F64(vec![3.0, 4.0]),
+        GpuTensorStorage::ComplexInterleaved,
+    );
+    let observed = futures::executor::block_on(crate::call_builtin_async(
+        "min",
+        &[Value::GpuTensor(allocation.handle.clone())],
+    ))
+    .expect("complex min host materialization");
+    assert_eq!(observed, Value::Complex(3.0, 4.0));
+    allocation
+        .handle
+        .allocation_lease()
+        .validate_live()
+        .unwrap();
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop(allocation.handle);
+    assert_eq!(allocation.probe.retirements(), 1);
+}
+
+#[test]
+fn nonscalar_complex_pairwise_min_never_uses_real_elementwise_hook() {
+    let provider = Box::leak(Box::new(NativeProvider {
+        owner: TestAllocationOwner::new(),
+        records: Mutex::new(Vec::new()),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let left = provider.allocate_with_shape(
+        HostNumericDataOwned::F64(vec![1.0, 2.0, 3.0, 0.0]),
+        GpuTensorStorage::ComplexInterleaved,
+        vec![2, 1],
+    );
+    let right = provider.allocate_with_shape(
+        HostNumericDataOwned::F64(vec![0.0, 5.0, 2.0, 1.0]),
+        GpuTensorStorage::ComplexInterleaved,
+        vec![2, 1],
+    );
+    let observed = futures::executor::block_on(crate::call_builtin_async(
+        "min",
+        &[
+            Value::GpuTensor(left.handle.clone()),
+            Value::GpuTensor(right.handle.clone()),
+        ],
+    ))
+    .expect("complex min host selector");
+    assert_eq!(
+        observed,
+        Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 2.0), (2.0, 1.0)], vec![2, 1]).unwrap())
+    );
+    for allocation in [left, right] {
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
+    }
+}
+
+#[test]
+fn real_min_provider_error_retains_canonical_min_identity_and_source() {
+    let provider = Box::leak(Box::new(NativeProvider {
+        owner: TestAllocationOwner::new(),
+        records: Mutex::new(Vec::new()),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let input = provider.allocate_with_shape(
+        HostNumericDataOwned::F64(vec![2.0, 1.0]),
+        GpuTensorStorage::Real,
+        vec![2, 1],
+    );
+    let error = futures::executor::block_on(crate::call_builtin_async(
+        "min",
+        &[Value::GpuTensor(input.handle.clone())],
+    ))
+    .expect_err("real min provider failure is not a capability fallback");
+    assert_eq!(
+        error.identifier(),
+        runmat_builtins::MIN_ERROR_INTERNAL.identifier
+    );
+    let mut source = std::error::Error::source(&error);
+    let mut retained = None;
+    while let Some(error) = source {
+        if let Some(error) = error.downcast_ref::<std::io::Error>() {
+            retained = Some(error.kind());
+        }
+        source = error.source();
+    }
+    assert_eq!(retained, Some(std::io::ErrorKind::BrokenPipe));
+    assert_eq!(input.probe.retirements(), 0);
+    input.handle.allocation_lease().validate_live().unwrap();
+    drop(input.handle);
+    assert_eq!(input.probe.retirements(), 1);
+}
+
+#[test]
+fn complex_resident_max_gathers_before_real_extrema_hook_and_keeps_its_lease() {
+    let provider = Box::leak(Box::new(NativeProvider {
+        owner: TestAllocationOwner::new(),
+        records: Mutex::new(Vec::new()),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let allocation = provider.allocate(
+        HostNumericDataOwned::F64(vec![3.0, 4.0]),
+        GpuTensorStorage::ComplexInterleaved,
+    );
+    let observed = futures::executor::block_on(crate::call_builtin_async(
+        "max",
+        &[Value::GpuTensor(allocation.handle.clone())],
+    ))
+    .expect("complex max host materialization");
+    assert_eq!(observed, Value::Complex(3.0, 4.0));
+    allocation
+        .handle
+        .allocation_lease()
+        .validate_live()
+        .unwrap();
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop(allocation.handle);
+    assert_eq!(allocation.probe.retirements(), 1);
+}
+
+#[test]
+fn nonscalar_complex_pairwise_max_never_uses_real_elementwise_hook() {
+    let provider = Box::leak(Box::new(NativeProvider {
+        owner: TestAllocationOwner::new(),
+        records: Mutex::new(Vec::new()),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let left = provider.allocate_with_shape(
+        HostNumericDataOwned::F64(vec![1.0, 2.0, 3.0, 0.0]),
+        GpuTensorStorage::ComplexInterleaved,
+        vec![2, 1],
+    );
+    let right = provider.allocate_with_shape(
+        HostNumericDataOwned::F64(vec![0.0, 5.0, 2.0, 1.0]),
+        GpuTensorStorage::ComplexInterleaved,
+        vec![2, 1],
+    );
+    let observed = futures::executor::block_on(crate::call_builtin_async(
+        "max",
+        &[
+            Value::GpuTensor(left.handle.clone()),
+            Value::GpuTensor(right.handle.clone()),
+        ],
+    ))
+    .expect("complex host selector");
+    assert_eq!(
+        observed,
+        Value::ComplexTensor(ComplexTensor::new(vec![(0.0, 5.0), (3.0, 0.0)], vec![2, 1]).unwrap())
+    );
+    for allocation in [left, right] {
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 }
 

@@ -57,12 +57,3 @@ fn min_literal_control(literal: &LiteralValue) -> Option<LiteralReductionControl
         MinControl::ComparisonMethod => LiteralReductionControl::RequiresRuntimeValue,
     })
 }
-
-pub(crate) fn is_empty_placeholder(literal: &LiteralValue) -> bool {
-    match literal {
-        LiteralValue::Empty => true,
-        LiteralValue::Vector(values) => values.is_empty(),
-        LiteralValue::String(text) | LiteralValue::Character(text) => text.is_empty(),
-        _ => false,
-    }
-}

@@ -42,6 +42,9 @@ mod native_arity;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_deal.rs"]
 mod native_deal;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_max.rs"]
+mod native_max;
 
 use futures::executor::block_on;
 use std::path::{Path, PathBuf};
