@@ -1,8 +1,8 @@
 use runmat_async::{
-    runtime_error, RuntimeError, RuntimeErrorSourceBound, SharedRuntimeErrorSource,
+    runtime_error, RuntimeError, RuntimeErrorOwner, RuntimeErrorSourceBound,
+    SharedRuntimeErrorSource,
 };
 use std::error::Error;
-use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
 type Owner = std::sync::Arc<()>;
@@ -59,7 +59,7 @@ fn forwarding_bound_retains_nested_exact_source_and_local_owner_until_final_drop
 fn shared_rethrow_retains_the_original_and_its_downcastable_cause() {
     let owner = Owner::new(());
     let weak = Owner::downgrade(&owner);
-    let original = Arc::new(
+    let original = RuntimeErrorOwner::new(
         runtime_error("source failure")
             .with_identifier("RunMat:Test:Original")
             .with_call_stack(vec!["origin".into()])
@@ -69,7 +69,7 @@ fn shared_rethrow_retains_the_original_and_its_downcastable_cause() {
             .with_source(RetainedCause(owner))
             .build(),
     );
-    let caught = Arc::clone(&original);
+    let caught = RuntimeErrorOwner::clone(&original);
     let reraised = RuntimeError::from_shared_original(caught);
     assert_eq!(reraised.identifier(), Some("RunMat:Test:Original"));
     assert_eq!(reraised.context.call_stack, ["origin"]);

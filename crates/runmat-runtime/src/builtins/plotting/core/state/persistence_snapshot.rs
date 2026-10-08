@@ -1,14 +1,13 @@
 //! Checked immutable snapshots of the shared plot registry.
 
-use super::{registry, FigureHandle, GraphicsSceneLease};
+use super::{registry, shared_figure::FigureOwner, FigureHandle, GraphicsSceneLease};
 use runmat_plot::plots::Figure;
 use std::collections::HashMap;
-use std::sync::Arc;
 use thiserror::Error;
 
-fn figure_arc_allocation_upper_bound(payload_bytes: usize) -> Option<usize> {
-    // `Arc` retains two atomic counters before its payload. Include worst-case
-    // alignment padding without relying on the private `ArcInner` layout.
+fn figure_owner_allocation_upper_bound(payload_bytes: usize) -> Option<usize> {
+    // Both platform owners retain two counters before the payload. Include
+    // worst-case alignment padding without relying on their private layouts.
     let header_and_padding = (2 * std::mem::size_of::<usize>())
         .checked_add(std::mem::align_of::<Figure>().saturating_sub(1))?;
     header_and_padding
@@ -28,7 +27,7 @@ pub struct FigureSnapshotEntry {
     /// Exact runtime-only scene authority captured under the same registry
     /// guard as `figure`; `revision` remains only a presentation cache hint.
     pub scene_lease: GraphicsSceneLease,
-    pub figure: Arc<Figure>,
+    pub figure: FigureOwner,
 }
 
 #[derive(Clone, Debug)]
@@ -83,7 +82,7 @@ pub fn capture_figure_persistence_snapshot(
             .get(handle)
             .ok_or_else(|| FigurePersistenceSnapshotError::MissingFigure(handle.as_u32()))?;
         if let std::collections::hash_map::Entry::Vacant(entry) = selected.entry(*handle) {
-            let figure_bytes = figure_arc_allocation_upper_bound(
+            let figure_bytes = figure_owner_allocation_upper_bound(
                 state
                     .figure
                     .retained_snapshot_bytes()
@@ -103,7 +102,7 @@ pub fn capture_figure_persistence_snapshot(
         }
     }
 
-    let mut snapshots = HashMap::<FigureHandle, Arc<Figure>>::with_capacity(selected.len());
+    let mut snapshots = HashMap::<FigureHandle, FigureOwner>::with_capacity(selected.len());
     for handle in selected.keys() {
         let state = registry
             .figures
@@ -137,6 +136,7 @@ mod tests {
     };
     use runmat_plot::plots::surface::ColorMap;
     use runmat_plot::plots::LinePlot;
+    use std::sync::Arc;
 
     #[test]
     fn snapshot_is_revisioned_immutable_and_charged_once_per_figure() {
@@ -145,13 +145,13 @@ mod tests {
         let mut figure = Figure::new();
         figure.set_name("before");
         let handle = import_figure(figure);
-        let expected_bytes = figure_arc_allocation_upper_bound(
+        let expected_bytes = figure_owner_allocation_upper_bound(
             clone_figure(handle)
                 .expect("figure")
                 .retained_snapshot_bytes()
                 .expect("bounded figure"),
         )
-        .expect("bounded Arc allocation");
+        .expect("bounded shared allocation");
 
         let expected_bytes = expected_bytes + 2 * std::mem::size_of::<FigureSnapshotEntry>();
         let snapshot = capture_figure_persistence_snapshot(&[handle, handle], 2, expected_bytes)
@@ -159,7 +159,7 @@ mod tests {
         assert_eq!(snapshot.scope, FigureSnapshotScope::SharedGlobalRegistry);
         assert_eq!(snapshot.entries.len(), 2);
         assert_eq!(snapshot.retained_bytes, expected_bytes);
-        assert!(Arc::ptr_eq(
+        assert!(FigureOwner::ptr_eq(
             &snapshot.entries[0].figure,
             &snapshot.entries[1].figure
         ));
@@ -201,13 +201,13 @@ mod tests {
         figure.set_name("x".repeat(4096));
         let handle = import_figure(figure);
         let required = std::mem::size_of::<FigureSnapshotEntry>()
-            + figure_arc_allocation_upper_bound(
+            + figure_owner_allocation_upper_bound(
                 clone_figure(handle)
                     .expect("figure")
                     .retained_snapshot_bytes()
                     .expect("bounded figure"),
             )
-            .expect("bounded Arc allocation");
+            .expect("bounded shared allocation");
 
         let error = capture_figure_persistence_snapshot(&[handle], 1, required - 1)
             .expect_err("one byte below exact retained charge must reject");
@@ -282,7 +282,7 @@ mod tests {
         let handle = import_figure(figure);
         let entry_bytes = std::mem::size_of::<FigureSnapshotEntry>();
         let baseline_budget = entry_bytes
-            + figure_arc_allocation_upper_bound(baseline).expect("bounded baseline Arc");
+            + figure_owner_allocation_upper_bound(baseline).expect("bounded baseline allocation");
         assert!(matches!(
             capture_figure_persistence_snapshot(&[handle], 1, baseline_budget),
             Err(FigurePersistenceSnapshotError::BudgetExceeded { .. })

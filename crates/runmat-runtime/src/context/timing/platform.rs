@@ -126,7 +126,8 @@ fn process_cpu_seconds() -> Option<f64> {
 
 #[cfg(target_arch = "wasm32")]
 async fn browser_sleep(duration: Duration) -> Result<(), crate::RuntimeError> {
-    let mut remaining = duration.as_millis() + u128::from(duration.subsec_nanos() % 1_000_000 != 0);
+    let mut remaining =
+        duration.as_millis() + u128::from(!duration.subsec_nanos().is_multiple_of(1_000_000));
     loop {
         let chunk = remaining.min(i32::MAX as u128) as i32;
         browser_sleep_chunk(chunk).await?;

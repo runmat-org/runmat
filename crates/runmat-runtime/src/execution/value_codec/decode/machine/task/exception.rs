@@ -1,9 +1,9 @@
 use super::super::*;
 use super::text::TextCopy;
+use runmat_async::RuntimeErrorOwner;
 use runmat_execution::value::{
     ExceptionFailureOrigin, ExceptionGpuGatherRetry, ExceptionRuntimeMetadata, ExceptionValue,
 };
-use std::sync::Arc;
 
 enum Stage {
     Identifier,
@@ -191,7 +191,12 @@ impl<'a> ExceptionTask<'a> {
                     runmat_async::RuntimeFailureOrigin::LanguageEvaluation
                 }
             };
-            MException::from_runtime_error(identifier, message, stack, Arc::new(error))
+            MException::from_runtime_error(
+                identifier,
+                message,
+                stack,
+                RuntimeErrorOwner::new(error),
+            )
         } else {
             let mut exception = MException::new(identifier, message);
             exception.stack = stack;

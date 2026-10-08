@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::context::SessionSourceEvaluation;
+use runmat_async::RuntimeErrorOwner;
 use runmat_value::StructValue;
 use std::sync::Arc;
 
@@ -53,7 +54,7 @@ pub(super) async fn run_callback(
 pub(super) async fn run_error_callback(
     runtime: &RuntimeContext,
     handle: &HandleRef,
-    error: Arc<RuntimeError>,
+    error: RuntimeErrorOwner,
 ) -> BuiltinResult<()> {
     run_callback_with_error(runtime, handle, TimerCallback::Error, Some(error)).await
 }
@@ -62,7 +63,7 @@ async fn run_callback_with_error(
     runtime: &RuntimeContext,
     handle: &HandleRef,
     slot: TimerCallback,
-    error: Option<Arc<RuntimeError>>,
+    error: Option<RuntimeErrorOwner>,
 ) -> BuiltinResult<()> {
     let callback = property(handle, slot.property().name())?;
     if callback_is_empty(&callback) {
@@ -121,7 +122,7 @@ fn callback_base_args(
     runtime: &RuntimeContext,
     handle: &HandleRef,
     callback: TimerCallback,
-    error: Option<&Arc<RuntimeError>>,
+    error: Option<&RuntimeErrorOwner>,
 ) -> Vec<Value> {
     vec![
         Value::HandleObject(handle.clone()),
@@ -132,7 +133,7 @@ fn callback_base_args(
 fn timer_event(
     runtime: &RuntimeContext,
     callback: TimerCallback,
-    error: Option<&Arc<RuntimeError>>,
+    error: Option<&RuntimeErrorOwner>,
 ) -> Value {
     let mut data = StructValue::new();
     data.insert(

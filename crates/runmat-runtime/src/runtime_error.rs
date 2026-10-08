@@ -1,6 +1,7 @@
 pub use runmat_async::{
     runtime_error as build_runtime_error, CallFrame, ErrorContext, GpuGatherRetry, RuntimeError,
-    RuntimeErrorBuilder, RuntimeErrorSourceBound, RuntimeFailureOrigin, SharedRuntimeErrorSource,
+    RuntimeErrorBuilder, RuntimeErrorOwner, RuntimeErrorSourceBound, RuntimeFailureOrigin,
+    SharedRuntimeErrorSource,
 };
 
 #[cfg(test)]
@@ -49,9 +50,7 @@ pub fn semantic_error(identifier: &str, message: impl Into<String>) -> RuntimeEr
 ///
 /// Executors own control transfer and frame/source decoration; Runtime owns
 /// the stable conversion from its semantic error contract to `MException`.
-pub fn exception_from_error(
-    error: impl Into<std::sync::Arc<RuntimeError>>,
-) -> runmat_value::MException {
+pub fn exception_from_error(error: impl Into<RuntimeErrorOwner>) -> runmat_value::MException {
     let original = error.into();
     let error = original.as_ref();
     let (identifier, message) = if let Some(identifier) = error.identifier() {

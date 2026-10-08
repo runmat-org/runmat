@@ -88,7 +88,7 @@ fn rethrow_with_external_original_keeps_its_charge_only_on_the_original_owner() 
     }
 
     let drops = Arc::new(AtomicUsize::new(0));
-    let original = Arc::new(
+    let original = RuntimeErrorOwner::new(
         runtime_error("original full diagnostic")
             .with_identifier("RunMat:Original")
             .with_builtin("readmatrix")
@@ -133,7 +133,7 @@ fn rethrow_with_unique_original_moves_its_charge_without_a_metadata_copy() {
     }
 
     let drops = Arc::new(AtomicUsize::new(0));
-    let original = Arc::new(
+    let original = RuntimeErrorOwner::new(
         runtime_error("unique full diagnostic")
             .with_identifier("RunMat:Unique")
             .with_retained_diagnostic_allocation(RetainedDiagnosticAllocation::Owned(Box::new(

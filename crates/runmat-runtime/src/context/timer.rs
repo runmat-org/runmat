@@ -7,24 +7,23 @@ use super::{RuntimeContext, RuntimeLocalTaskLease};
 use crate::builtins::timing::timer::property::{
     TimerBusyMode, TimerExecutionMode, TimerVisibility,
 };
-use crate::RuntimeError;
+use runmat_async::RuntimeErrorOwner;
 use runmat_gc::ExplicitRoot;
 use runmat_value::HandleRef;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 
 /// A generation's failure survives replacement of the timer's current record
 /// while a waiter still holds this receipt; otherwise it drops with the run.
 #[derive(Clone, Default)]
-pub(crate) struct TimerFailureReceipt(Rc<RefCell<Option<Arc<RuntimeError>>>>);
+pub(crate) struct TimerFailureReceipt(Rc<RefCell<Option<RuntimeErrorOwner>>>);
 
 impl TimerFailureReceipt {
-    pub(crate) fn record(&self, error: Arc<RuntimeError>) {
+    pub(crate) fn record(&self, error: RuntimeErrorOwner) {
         *self.0.borrow_mut() = Some(error);
     }
 
-    pub(crate) fn take(&self) -> Option<Arc<RuntimeError>> {
+    pub(crate) fn take(&self) -> Option<RuntimeErrorOwner> {
         self.0.borrow_mut().take()
     }
 }

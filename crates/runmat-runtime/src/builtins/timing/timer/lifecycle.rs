@@ -3,8 +3,8 @@
 use super::*;
 use crate::context::RuntimeLocalTaskOutcome;
 use crate::context::{TimerAdmissionError, TimerFailureReceipt, TimerPhase};
+use runmat_async::RuntimeErrorOwner;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Duration;
 
 mod schedule;
@@ -235,7 +235,7 @@ async fn run_timer_task(
     failure: TimerFailureReceipt,
 ) {
     let outcome = run_timer_callbacks(&runtime, &handle, generation, config).await;
-    let terminal_error = outcome.err().map(Arc::new);
+    let terminal_error = outcome.err().map(RuntimeErrorOwner::new);
     if let Some(error) = &terminal_error {
         failure.record(error.clone());
         if still_running(&runtime, &handle, generation) {

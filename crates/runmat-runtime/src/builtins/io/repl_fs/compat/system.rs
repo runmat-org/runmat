@@ -79,12 +79,12 @@ pub(super) async fn run(
             .with_builtin("system")
             .build());
         }
-        return Err(
+        Err(
             build_runtime_error("system: process execution is unavailable in WebAssembly")
                 .with_identifier("RunMat:system:UnsupportedOnWasm")
                 .with_builtin("system")
                 .build(),
-        );
+        )
     }
 
     #[cfg(not(target_arch = "wasm32"))]

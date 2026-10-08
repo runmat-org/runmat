@@ -1,11 +1,11 @@
-use std::sync::Arc;
+use runmat_async::RuntimeErrorOwner;
 
 #[derive(Debug, Clone)]
 pub struct MException {
     pub identifier: String,
     pub message: String,
     pub stack: Vec<String>,
-    original: Option<Arc<runmat_async::RuntimeError>>,
+    original: Option<RuntimeErrorOwner>,
 }
 
 /// Language fields and the optional exact caught error, moved together.
@@ -13,7 +13,7 @@ pub struct MExceptionParts {
     pub identifier: String,
     pub message: String,
     pub stack: Vec<String>,
-    pub original: Option<Arc<runmat_async::RuntimeError>>,
+    pub original: Option<RuntimeErrorOwner>,
 }
 
 impl MException {
@@ -32,7 +32,7 @@ impl MException {
         identifier: String,
         message: String,
         stack: Vec<String>,
-        original: Arc<runmat_async::RuntimeError>,
+        original: RuntimeErrorOwner,
     ) -> Self {
         Self {
             identifier,
@@ -42,7 +42,7 @@ impl MException {
         }
     }
 
-    pub fn original(&self) -> Option<&Arc<runmat_async::RuntimeError>> {
+    pub fn original(&self) -> Option<&RuntimeErrorOwner> {
         self.original.as_ref()
     }
 

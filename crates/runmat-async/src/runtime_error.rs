@@ -1,4 +1,6 @@
 use std::error::Error as StdError;
+#[cfg(target_arch = "wasm32")]
+use std::rc::Rc;
 use std::sync::Arc;
 
 use miette::SourceSpan;
@@ -15,6 +17,12 @@ pub use source_bound::RuntimeErrorSourceBound;
 pub type RuntimeErrorSource = dyn StdError + Send + Sync + 'static;
 #[cfg(target_arch = "wasm32")]
 pub type RuntimeErrorSource = dyn StdError + 'static;
+
+/// Exact caught-error ownership follows the executor's sharing boundary.
+#[cfg(not(target_arch = "wasm32"))]
+pub type RuntimeErrorOwner = Arc<RuntimeError>;
+#[cfg(target_arch = "wasm32")]
+pub type RuntimeErrorOwner = Rc<RuntimeError>;
 
 /// An allocation owner that survives with a diagnostic. This is ownership,
 /// not a certificate for the publicly mutable message, context, or later
@@ -105,7 +113,7 @@ pub struct RuntimeError {
 /// `RuntimeError` and its downcastable provider or host cause.
 #[derive(Debug)]
 pub struct SharedRuntimeErrorSource {
-    original: Arc<RuntimeError>,
+    original: RuntimeErrorOwner,
 }
 
 impl SharedRuntimeErrorSource {
@@ -152,8 +160,8 @@ impl RuntimeError {
     /// Recover the original caught error when it has one owner; otherwise
     /// retain that exact original as an owning source while copying only its
     /// language-visible metadata into the new outward error.
-    pub fn from_shared_original(original: Arc<Self>) -> Self {
-        match Arc::try_unwrap(original) {
+    pub fn from_shared_original(original: RuntimeErrorOwner) -> Self {
+        match RuntimeErrorOwner::try_unwrap(original) {
             Ok(error) => error,
             Err(original) => Self {
                 message: original.message.clone(),
