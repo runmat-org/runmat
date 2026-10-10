@@ -3,7 +3,6 @@ use crate::core::scene::{DrawIndirectArgsRaw, GpuVertexBuffer};
 use crate::gpu::axis::{axis_storage_buffer, AxisData};
 use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 pub struct ContourFillGpuInputs<'a> {
@@ -79,42 +78,46 @@ pub fn pack_contour_fill_vertices(
     let x_buffer = axis_storage_buffer(emission, "contourf-x-axis", &inputs.x_axis, inputs.scalar)?;
     let y_buffer = axis_storage_buffer(emission, "contourf-y-axis", &inputs.y_axis, inputs.scalar)?;
 
-    let color_buffer = Arc::new(
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let color_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+        &wgpu::util::BufferInitDescriptor {
             label: Some("contourf-color-table"),
             contents: bytemuck::cast_slice(inputs.color_table),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        }),
-    );
+        },
+    ));
 
-    let level_buffer = Arc::new(
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let level_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+        &wgpu::util::BufferInitDescriptor {
             label: Some("contourf-level-values"),
             contents: bytemuck::cast_slice(inputs.level_values),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        }),
-    );
+        },
+    ));
 
     let output_size = vertex_count as u64 * std::mem::size_of::<Vertex>() as u64;
-    let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("contourf-gpu-vertices"),
-        size: output_size,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("contourf-gpu-vertices"),
+            size: output_size,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
 
-    let indirect_args = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("contourf-gpu-indirect-args"),
-        size: std::mem::size_of::<DrawIndirectArgsRaw>() as u64,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::INDIRECT
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let indirect_args = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("contourf-gpu-indirect-args"),
+            size: std::mem::size_of::<DrawIndirectArgsRaw>() as u64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::INDIRECT
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
     let init = DrawIndirectArgsRaw {
         vertex_count: 0,
         instance_count: 1,

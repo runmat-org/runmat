@@ -32,8 +32,7 @@ impl ImfilterShader {
 #[cfg(test)]
 mod recipe_tests {
     use super::ImfilterShader;
-    #[cfg(not(target_arch = "wasm32"))]
-    use wgpu::naga;
+    use crate::backend::wgpu::shaders::validation_tests::{validate_generated, RequiredCaps};
 
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -44,18 +43,18 @@ mod recipe_tests {
             ImfilterShader::Double,
         ] {
             let template = recipe.source();
+            let required = match recipe {
+                ImfilterShader::Single => RequiredCaps::None,
+                ImfilterShader::SingleDouble | ImfilterShader::Double => RequiredCaps::Float64,
+            };
             for workgroup in [1, 64, 128] {
-                let source =
-                    crate::backend::wgpu::pipelines::substitute_tokens(&template, workgroup, 8);
-                let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|error| {
-                    panic!("{recipe:?}: {}", error.emit_to_string(&source))
-                });
-                naga::valid::Validator::new(
-                    naga::valid::ValidationFlags::all(),
-                    naga::valid::Capabilities::all(),
-                )
-                .validate(&module)
-                .unwrap_or_else(|error| panic!("{recipe:?}: {error:?}"));
+                validate_generated(
+                    &format!("imfilter-{recipe:?}-wg{workgroup}"),
+                    &template,
+                    workgroup,
+                    8,
+                    required,
+                );
             }
         }
     }

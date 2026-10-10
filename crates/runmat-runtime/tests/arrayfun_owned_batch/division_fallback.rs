@@ -27,7 +27,10 @@ impl AccelProvider for Provider {
     fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         panic!("typed upload required")
     }
-    fn upload_numeric_raw(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        _: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::SeqCst);
         self.returned
             .lock()

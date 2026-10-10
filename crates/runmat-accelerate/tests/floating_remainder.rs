@@ -113,9 +113,7 @@ async fn wgpu_floating_remainder_executes_encoded_extremes_and_broadcasts() {
             .await
             .unwrap_err(),
     ] {
-        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-            &error
-        ));
+        assert!(error.is_unsupported());
     }
     retirement::release_all([mismatched]);
     let (large, divisor, exact, maximum, tiny, tiny_divisor, tiny_exact) = if single {

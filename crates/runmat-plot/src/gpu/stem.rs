@@ -4,7 +4,6 @@ use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
 use crate::plots::line::LineStyle;
 use glam::Vec4;
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 #[derive(Clone, Debug)]
@@ -70,15 +69,17 @@ pub fn pack_vertices_from_xy(
         });
     let baseline_count = if params.baseline_visible { 2 } else { 0 };
     let vertex_count = baseline_count as u64 + inputs.len as u64 * 2;
-    let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("stem-gpu-vertices"),
-        size: vertex_count * std::mem::size_of::<Vertex>() as u64,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("stem-gpu-vertices"),
+            size: vertex_count * std::mem::size_of::<Vertex>() as u64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
     let uniforms = StemUniforms {
         color: params.color.to_array(),
         baseline_color: params.baseline_color.to_array(),

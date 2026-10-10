@@ -52,8 +52,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::wgpu::shaders::validation_tests::{validate_generated, RequiredCaps};
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn shader_has_three_broadcast_operands_and_no_arithmetic_blending() {
         for precision in [NumericPrecision::F32, NumericPrecision::F64] {
             let source = shader(precision);
@@ -61,18 +63,11 @@ mod tests {
             assert!(source.contains("Out.data[index] = Then.data[i1]"));
             assert!(source.contains("Out.data[index] = Else.data[i2]"));
             assert!(!source.contains("Mask.data[i0] *"));
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                let source = crate::backend::wgpu::pipelines::substitute_tokens(&source, 64, 8);
-                let module = wgpu::naga::front::wgsl::parse_str(&source)
-                    .unwrap_or_else(|error| panic!("{}", error.emit_to_string(&source)));
-                wgpu::naga::valid::Validator::new(
-                    wgpu::naga::valid::ValidationFlags::all(),
-                    wgpu::naga::valid::Capabilities::all(),
-                )
-                .validate(&module)
-                .unwrap();
-            }
+            let required = match precision {
+                NumericPrecision::F32 => RequiredCaps::None,
+                NumericPrecision::F64 => RequiredCaps::Float64,
+            };
+            validate_generated(&format!("select-{precision:?}"), &source, 64, 8, required);
         }
     }
 }

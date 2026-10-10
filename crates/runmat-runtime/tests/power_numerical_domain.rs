@@ -1,6 +1,9 @@
 use futures::executor::block_on;
 use runmat_value::{Tensor, Value};
 
+#[path = "support/retained_provider.rs"]
+mod retained_provider;
+
 fn power(base: Value, exponent: Value) -> Value {
     block_on(runmat_runtime::call_builtin_async_with_outputs(
         "power",
@@ -107,9 +110,7 @@ fn actual_resident_dispatch_preserves_complex_promotion_in_both_compatibility_mo
     use runmat_accelerate_api::{
         AccelProvider, GpuTensorStorage, HostTensorView, ThreadProviderGuard,
     };
-    use std::sync::OnceLock;
-    static PROVIDER: OnceLock<InProcessProvider> = OnceLock::new();
-    let provider = PROVIDER.get_or_init(InProcessProvider::new);
+    let provider = retained_provider::retained_test_provider!(PROVIDER: InProcessProvider = InProcessProvider::new());
     let _provider = ThreadProviderGuard::set(Some(provider));
     for extensions in [false, true] {
         let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(extensions);

@@ -41,7 +41,7 @@ pub(super) async fn sum_gpu_with_omitnan(
                 Ok(output) => Some(provider_output::admit_input_double(
                     provider, &handle, output,
                 )?),
-                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+                Err(error) if error.is_unsupported() => {
                     return sum_gpu_fallback(&handle, parsed).await;
                 }
                 Err(error) => return Err(sum_provider_error(error)),
@@ -63,14 +63,15 @@ pub(super) async fn sum_gpu_with_omitnan(
                 }
             }
         }
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
-            if let Some(widened) = widened {
-                provider_output::retire_widened_input(widened)?;
-            }
+        Err(error) if error.is_unsupported() && widened.is_none() => {
             return sum_gpu_fallback(&handle, parsed).await;
         }
         Err(error) => {
-            let error = sum_provider_error(error);
+            let error = sum_provider_error(if widened.is_some() {
+                error.after_effect()
+            } else {
+                error
+            });
             return Err(if let Some(widened) = widened {
                 provider_output::fail_stage(widened, error)
             } else {
@@ -97,14 +98,10 @@ pub(super) async fn sum_gpu_with_omitnan(
                     parsed.output,
                 )?;
             }
-            Err(error) if error.is_unsupported() => {
-                provider_output::retire_before_fallback(current)?;
-                return sum_gpu_fallback(&handle, parsed).await;
-            }
             Err(error) => {
                 return Err(provider_output::fail_stage(
                     current,
-                    sum_provider_error(error),
+                    sum_provider_error(error.after_effect()),
                 ))
             }
         }

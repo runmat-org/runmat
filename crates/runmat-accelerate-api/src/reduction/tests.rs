@@ -11,6 +11,83 @@ use runmat_types::{
     FusionReductionTies, ReductionNaN,
 };
 
+struct NoReductionProvider;
+impl crate::AccelProvider for NoReductionProvider {
+    fn device_info(&self) -> String {
+        "no reduction provider".into()
+    }
+    fn upload(&self, _: &crate::HostTensorView) -> anyhow::Result<crate::GpuTensorHandle> {
+        panic!("default typed reduction must not upload")
+    }
+    fn download<'a>(&'a self, _: &'a crate::GpuTensorHandle) -> crate::AccelDownloadFuture<'a> {
+        panic!("default typed reduction must not download")
+    }
+}
+
+#[test]
+fn default_typed_reduction_declines_before_effects_and_keeps_input() {
+    use crate::AccelProvider;
+    let owner = TestAllocationOwner::new();
+    let input = owner
+        .allocate_zeroed(vec![4, 2], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    let recipe = recipe(descriptor());
+    let inputs = [input.handle.clone()];
+    let selected = ReductionSelection::new(&recipe, ReductionStrategy::SinglePass).unwrap();
+    let submitted = ReductionSubmission::new(selected, &inputs, owner.device_id()).unwrap();
+    let error = NoReductionProvider
+        .submit_reduction_recipe(&submitted)
+        .unwrap_err();
+    assert!(error.is_unsupported());
+    assert!(!error.is_after_effect());
+    input.handle.allocation_lease().validate_live().unwrap();
+    assert_eq!(input.probe.retirements(), 0);
+    drop(submitted);
+    drop(inputs);
+    drop(input.handle);
+    assert_eq!(input.probe.retirements(), 1);
+}
+
+#[test]
+fn default_physical_selection_is_pre_effect_unsupported() {
+    use crate::AccelProvider;
+    let provider = NoReductionProvider;
+    let config = provider.reduction_recipe_config(4, 2).unwrap_err();
+    assert!(config.is_unsupported());
+    assert!(!config.is_after_effect());
+    let recipe = recipe(descriptor());
+    let candidates = provider.reduction_recipe_candidates(&recipe).unwrap_err();
+    assert!(candidates.is_unsupported());
+    assert!(!candidates.is_after_effect());
+}
+
+#[test]
+fn projected_workload_retains_exact_selection_identity_and_representations() {
+    let recipe = recipe(descriptor());
+    let first = ReductionSelection::new(&recipe, ReductionStrategy::SinglePass).unwrap();
+    let second = ReductionSelection::new(&recipe, ReductionStrategy::TwoPass).unwrap();
+    let first_work = crate::ProviderTypedReductionWorkload::from_selection(&first);
+    let second_work = crate::ProviderTypedReductionWorkload::from_selection(&second);
+    assert_eq!(first_work.recipe_identity, recipe.identity());
+    assert_eq!(second_work.recipe_identity, recipe.identity());
+    assert_ne!(
+        first_work.selection_identity,
+        second_work.selection_identity
+    );
+    assert_eq!(first_work.work.partial_requested_bytes, 0);
+    assert_eq!(second_work.work.partial_requested_bytes, 64);
+    assert_eq!(first_work.inputs[0].shape, vec![4, 2]);
+    assert_eq!(
+        first_work.inputs[0].element_type,
+        crate::ProviderElementType::F32
+    );
+    assert_eq!(second_work.output.shape, vec![1, 2]);
+    assert_eq!(
+        second_work.output.element_type,
+        crate::ProviderElementType::F64
+    );
+}
+
 fn descriptor() -> ReductionRecipeDescriptor {
     let dispatch = |logical_groups| ReductionDispatch {
         workgroups: [logical_groups, 1, 1],

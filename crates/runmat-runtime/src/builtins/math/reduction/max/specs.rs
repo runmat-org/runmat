@@ -29,8 +29,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 use super::fusion_contract;
+use super::fusion_pairwise;
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::max", epilogue = crate::builtins::common::spec::FusionEpilogueOperation::Maximum, reduction = fusion_contract::DECLARATION)]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::max", semantics = fusion_pairwise::SEMANTICS, epilogue = crate::builtins::common::spec::FusionEpilogueOperation::Maximum, reduction = fusion_contract::DECLARATION)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "max",
     shape: ShapeRequirements::BroadcastCompatible,

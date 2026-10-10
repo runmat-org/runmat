@@ -1,5 +1,21 @@
 use crate::RuntimeError;
+use runmat_builtins::BuiltinBindingIdentity;
 use runmat_value::Value;
+
+/// A completed prepared body is not yet a completed builtin call. Only the
+/// dispatcher may deliver this one-shot observation after compatibility and
+/// workspace reconciliation. Dropping it abandons feedback.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PreparedCallStatus {
+    Succeeded,
+    CompletedFailure,
+}
+
+pub trait PreparedCallCompletion {
+    fn binding(&self) -> BuiltinBindingIdentity;
+    fn status(&self) -> PreparedCallStatus;
+    fn publish(self: Box<Self>, outer_started: runmat_time::Instant, elapsed_ns: u64);
+}
 
 /// Backend-owned feedback and temporary ownership. Implementations must retain
 /// borrowed input protection and adopt returned aliases before releasing temps.

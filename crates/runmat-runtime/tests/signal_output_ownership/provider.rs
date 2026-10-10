@@ -182,7 +182,10 @@ impl AccelProvider for Provider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         panic!("native download required")
     }
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let upload = self.uploads.fetch_add(1, Ordering::SeqCst);
         if matches!(self.upload, Upload::SecondFailure) && upload == 1 {
             return Err(std::io::Error::new(
@@ -194,9 +197,9 @@ impl AccelProvider for Provider {
         let stage = self.step()?;
         match self.upload {
             Upload::Unsupported => {
-                return Err(unsupported_provider_operation(
-                    "fixture typed upload unavailable",
-                ))
+                return Err(
+                    unsupported_provider_operation("fixture typed upload unavailable").into(),
+                )
             }
             Upload::Failure => {
                 return Err(std::io::Error::new(

@@ -1,8 +1,7 @@
 use super::*;
 use runmat_accelerate_api::{
     test_support::{RetirementProbe, TestAllocationOwner},
-    AccelDownloadFuture, AccelProviderFuture, HostTensorView, NumericElementType,
-    ThreadProviderGuard,
+    AccelDownloadFuture, HostTensorView, NumericElementType, ThreadProviderGuard,
 };
 use std::{
     future::Future,
@@ -31,7 +30,7 @@ impl AccelProvider for Provider {
     fn reduce_min<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             if self.alias {
                 return Ok(input.with_view(input.view().clone().with_shape(vec![1, 1]))?);
@@ -47,7 +46,8 @@ impl AccelProvider for Provider {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn pending_probe_owns_reduction_and_rejects_distinct_view_input_alias() {
     for alias in [false, true] {
         let provider = Box::leak(Box::new(Provider {

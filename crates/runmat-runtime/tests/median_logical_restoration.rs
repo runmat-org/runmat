@@ -109,7 +109,7 @@ fn logical_weighted_median_uses_true_native_producer_and_retains_operational_err
                             .downcast_ref::<NumericUploadError>()
                             .unwrap();
                         assert!(
-                            matches!(source, NumericUploadError::Provider(cause) if is_unsupported_provider_operation(cause))
+                            matches!(source, NumericUploadError::Provider(cause) if cause.is_unsupported())
                         );
                     }
                     Mode::Failure | Mode::Alias => fixture::assert_upload_failure(

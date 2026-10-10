@@ -2,8 +2,8 @@ use crate::builtins::common::test_support;
 use runmat_accelerate::simple_provider::InProcessProvider;
 use runmat_accelerate_api::{
     allocation::WeakAllocationLease, AccelDownloadFuture, AccelIntegerDownloadFuture,
-    AccelNumericDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorHandle,
-    HostIntegerTensorView, HostNumericTensorView, HostTensorView, ProviderPrecision,
+    AccelNumericDownloadFuture, AccelProvider, GpuTensorHandle, HostIntegerTensorView,
+    HostNumericTensorView, HostTensorView, ProviderExecutionFuture, ProviderPrecision,
     ThreadProviderGuard,
 };
 use std::sync::{
@@ -46,11 +46,10 @@ impl ConversionHookProvider {
         &'a self,
         input: &'a GpuTensorHandle,
         single: bool,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             self.hook_calls.fetch_add(1, Ordering::SeqCst);
             match self.behavior {
-                HookBehavior::Success if single => self.inner.unary_single(input).await,
                 HookBehavior::Success => self.inner.unary_double(input).await,
                 HookBehavior::PendingTemplateDownload => {
                     // A valid same-class hook may return an input alias. This
@@ -69,7 +68,7 @@ impl ConversionHookProvider {
                         shape: source.shape,
                         storage: source.storage,
                     };
-                    let output = self.inner.upload_numeric_raw(&host.as_view())?;
+                    let output = self.inner.upload_numeric_host(&host.as_view())?;
                     assert!(!output.shares_allocation_with(input));
                     *self.created_output.lock().unwrap() =
                         Some(output.allocation_lease().downgrade());
@@ -78,9 +77,12 @@ impl ConversionHookProvider {
                 HookBehavior::Unsupported => {
                     Err(runmat_accelerate_api::unsupported_provider_operation(
                         "conversion hook unavailable",
-                    ))
+                    )
+                    .into())
                 }
-                HookBehavior::Failure => anyhow::bail!("injected conversion kernel failure"),
+                HookBehavior::Failure => {
+                    Err(anyhow::anyhow!("injected conversion kernel failure").into())
+                }
                 HookBehavior::PendingDirectHook => futures::future::pending().await,
                 HookBehavior::Malformed => {
                     let output = self.inner.upload(&HostTensorView {
@@ -133,7 +135,10 @@ impl AccelProvider for ConversionHookProvider {
         self.inner.upload(host)
     }
 
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.inner.upload_numeric_raw(host)
     }
 
@@ -166,15 +171,22 @@ impl AccelProvider for ConversionHookProvider {
     fn unary_double<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
         self.invoke(input, false)
     }
 
     fn unary_single<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        self.invoke(input, true)
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            if matches!(self.behavior, HookBehavior::Success) {
+                self.hook_calls.fetch_add(1, Ordering::SeqCst);
+                self.inner.unary_single(input).await
+            } else {
+                self.invoke(input, true).await
+            }
+        })
     }
 }
 

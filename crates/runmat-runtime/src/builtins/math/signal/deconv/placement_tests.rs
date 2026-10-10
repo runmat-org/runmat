@@ -70,10 +70,16 @@ impl AccelProvider for ControlledUploadProvider {
     ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
         self.inner.download_numeric(handle)
     }
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let index = self.uploads.fetch_add(1, Ordering::SeqCst);
         if self.fail_second && index == 1 {
-            anyhow::bail!("second result upload failed after first result publication")
+            return Err(anyhow::anyhow!(
+                "second result upload failed after first result publication"
+            )
+            .into());
         }
         let output = self.inner.upload_numeric_raw(host)?;
         if index == 0 {

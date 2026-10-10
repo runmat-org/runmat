@@ -75,9 +75,10 @@ fn nan_transforms_keep_empty_shapes_and_reject_nonfloating_or_foreign_inputs() {
             storage: GpuTensorStorage::Real,
         })
         .unwrap();
-    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-        &provider.map_nan_to_zero(&integer).unwrap_err()
-    ));
+    assert!(provider
+        .map_nan_to_zero(&integer)
+        .unwrap_err()
+        .is_unsupported());
     assert!(runmat_accelerate_api::is_unsupported_provider_operation(
         &provider.not_nan_mask(&integer).unwrap_err()
     ));

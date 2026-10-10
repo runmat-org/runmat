@@ -3,6 +3,7 @@ use super::*;
 use runmat_accelerate_api::GpuTensorHandle;
 
 pub(super) async fn reduction_max_gpu(
+    runtime: Option<&crate::context::RuntimeContext>,
     handle: GpuTensorHandle,
     args: &ReductionArgs,
     demand: super::extrema_provider::ExtremaDemand,
@@ -48,6 +49,6 @@ pub(super) async fn reduction_max_gpu(
         handle.device_id()
     );
     super::extrema_provider::ExtremaKind::Max
-        .reduce_dim(&handle, zero_based, demand)
+        .reduce_dim(runtime, &handle, zero_based, demand)
         .await
 }

@@ -13,22 +13,25 @@ mod arithmetic;
 mod bounded_transfer;
 mod complex_components;
 pub(crate) mod convolution;
-mod iir;
+pub(crate) mod extrema;
+pub(crate) mod fusion_reduction;
 pub(crate) mod floating_conversion;
 #[cfg(feature = "wgpu")]
 pub(crate) mod fspecial;
-pub(crate) mod imfilter;
 pub(crate) mod fusion_elementwise;
+mod iir;
+mod image_stages;
+pub(crate) mod imfilter;
 mod integer_conversion;
-mod logical;
-pub(crate) mod resident_select;
-pub(crate) mod sum;
-pub(crate) mod matmul;
 pub(crate) mod logarithm_roots;
+mod logical;
+pub(crate) mod matmul;
 pub(crate) mod power;
 pub(crate) mod real_unary;
-pub(crate) mod rounding;
 pub(crate) mod remainder;
+pub(crate) mod resident_select;
+pub(crate) mod rounding;
+pub(crate) mod sum;
 pub(crate) mod trigonometry;
 
 const IN_PROCESS_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
@@ -249,6 +252,7 @@ pub(crate) fn in_process_capability_snapshot(
     logical::append(&mut snapshot);
     resident_select::append(&mut snapshot);
     sum::append(&mut snapshot);
+    extrema::append(&mut snapshot, false);
     convolution::append(&mut snapshot, false);
     imfilter::append(&mut snapshot, false);
     integer_conversion::append(&mut snapshot);
@@ -268,13 +272,56 @@ pub(crate) fn wgpu_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
     max_buffer_bytes: u64,
 ) -> ProviderCapabilitySnapshot {
-    let mut snapshot = dense_capability_snapshot(provider, 17, WGPU_OPERATIONS);
+    let mut snapshot = dense_capability_snapshot(provider, 18, WGPU_OPERATIONS);
+    // A selected F64 reduction emits IEEE word helpers. Keep the provider's
+    // advertised operation and revision aligned with its enabled device
+    // features; ordinary F64 arithmetic and integer reductions stay present.
+    if provider.precision() == ProviderPrecision::F64
+        && !provider.supports_shader_requirements(
+            runmat_accelerate_api::ProviderShaderRequirements::F64IeeeWords,
+        )
+    {
+        snapshot.operations.retain(|operation| {
+            [
+                FusionKind::Reduction,
+                FusionKind::MatmulEpilogue,
+                FusionKind::PowerStepNormalize,
+            ]
+            .iter()
+            .all(|kind| {
+                operation.identity != ProviderOperationIdentity::new(fusion_operation_token(kind))
+            })
+        });
+        snapshot.revision = 19;
+    }
     // WebGPU's adapter limit is a maximum for one buffer. It does not
     // establish a total device-memory capacity.
     snapshot.max_allocation_bytes = Some(max_buffer_bytes);
     logical::append(&mut snapshot);
     resident_select::append(&mut snapshot);
     sum::append(&mut snapshot);
+    if provider.precision() == ProviderPrecision::F64
+        && !provider.supports_shader_requirements(
+            runmat_accelerate_api::ProviderShaderRequirements::F64IeeeWords,
+        )
+    {
+        snapshot.operations.retain(|operation| {
+            [
+                runmat_types::SumInvocation::Sum,
+                runmat_types::SumInvocation::NanSum,
+            ]
+            .into_iter()
+            .all(|invocation| {
+                operation.identity
+                    != ProviderOperationIdentity::new(
+                        runmat_builtins::sum_invocation_entry(invocation)
+                            .identity
+                            .name,
+                    )
+            })
+        });
+    }
+    extrema::append(&mut snapshot, true);
     convolution::append(&mut snapshot, true);
     fspecial::append(&mut snapshot, true);
     imfilter::append(&mut snapshot, true);
@@ -294,10 +341,16 @@ pub(crate) fn in_process_feasibility(
     provider: &(impl AccelProvider + ?Sized),
     query: &ProviderFeasibilityQuery,
 ) -> ProviderFeasibility {
+    if let Some(result) = image_stages::validate(query) {
+        return result;
+    }
     if let Some(result) = iir::validate(provider, false, query) {
         return result;
     }
     if let Some(result) = sum::validate(provider, false, query) {
+        return result;
+    }
+    if let Some(result) = extrema::validate(provider, false, query) {
         return result;
     }
     if let Some(result) = convolution::validate(provider, false, query) {
@@ -313,6 +366,9 @@ pub(crate) fn in_process_feasibility(
         return result;
     }
     if let Some(result) = fusion_elementwise::validate(provider, false, query) {
+        return result;
+    }
+    if let Some(result) = fusion_reduction::validate(false, query) {
         return result;
     }
     if let Some(result) = rounding::validate(provider, rounding::HookProfile::InProcess, query) {
@@ -347,6 +403,7 @@ pub(crate) fn in_process_feasibility(
     if let Some(result) = power::feasibility(
         power::HookProfile::InProcess,
         provider.precision(),
+        provider,
         &snapshot,
         query,
     ) {
@@ -375,10 +432,16 @@ pub(crate) fn wgpu_feasibility(
     query: &ProviderFeasibilityQuery,
     max_buffer_bytes: u64,
 ) -> ProviderFeasibility {
+    if let Some(result) = image_stages::validate(query) {
+        return result;
+    }
     if let Some(result) = iir::validate(provider, true, query) {
         return result;
     }
     if let Some(result) = sum::validate(provider, true, query) {
+        return result;
+    }
+    if let Some(result) = extrema::validate(provider, true, query) {
         return result;
     }
     if let Some(result) = convolution::validate(provider, true, query) {
@@ -397,6 +460,9 @@ pub(crate) fn wgpu_feasibility(
         return result;
     }
     if let Some(result) = fusion_elementwise::validate(provider, true, query) {
+        return result;
+    }
+    if let Some(result) = fusion_reduction::validate(true, query) {
         return result;
     }
     if let Some(result) = rounding::validate(provider, rounding::HookProfile::Wgpu, query) {
@@ -431,6 +497,7 @@ pub(crate) fn wgpu_feasibility(
     if let Some(result) = power::feasibility(
         power::HookProfile::Wgpu,
         provider.precision(),
+        provider,
         &snapshot,
         query,
     ) {
@@ -659,6 +726,10 @@ fn dense_feasibility_with_bytes(
         ),
     })
 }
+
+#[cfg(all(test, feature = "wgpu"))]
+#[path = "provider_contract/ieee_capability_tests.rs"]
+mod ieee_capability_tests;
 
 #[cfg(test)]
 mod tests {

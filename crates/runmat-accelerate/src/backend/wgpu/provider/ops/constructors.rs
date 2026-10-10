@@ -1,10 +1,15 @@
 use super::*;
 
-const FILL_MAX_DISPATCH_WORKGROUPS: u64 = 65_535;
+const FILL_MAX_DISPATCH_WORKGROUPS: u64 =
+    crate::backend::wgpu_geometry::MAX_DISPATCH_WORKGROUPS as u64;
 
 #[cfg(test)]
 #[path = "constructors/typed_tests.rs"]
 mod typed_tests;
+
+#[cfg(test)]
+#[path = "constructors/validation_tests.rs"]
+mod validation_tests;
 
 fn constructor_elements(shape: &[usize]) -> Option<usize> {
     if shape.contains(&0) {
@@ -134,25 +139,38 @@ impl WgpuProvider {
         self.register_existing_buffer(out_buffer, normalized, total_len)
     }
     pub(crate) fn fill_exec(&self, shape: &[usize], value: f64) -> Result<GpuTensorHandle> {
-        self.fill_produced_exec(shape, value, false)
+        self.fill_produced_exec(shape, value, false, None, None, None)
+    }
+
+    pub(super) fn fill_std_selected_exec(
+        &self,
+        shape: &[usize],
+        value: f64,
+        validated: &super::validated_fusion::ValidatedFusionPipeline,
+        effect: &std::cell::Cell<bool>,
+        after_allocation: Option<&super::reduction::phase_context::AllocationFault<'_>>,
+    ) -> Result<GpuTensorHandle> {
+        self.fill_produced_exec(
+            shape,
+            value,
+            false,
+            Some(validated),
+            Some(effect),
+            after_allocation,
+        )
     }
 
     pub(crate) fn fill_buffer_demand(&self, elements: u64) -> Option<u64> {
-        let output = elements.max(1).checked_mul(self.element_size as u64)?;
-        if elements == 0 {
-            return Some(output);
-        }
-        let capacity =
-            FILL_MAX_DISPATCH_WORKGROUPS.checked_mul(u64::from(self.workgroup_config.scalar))?;
-        let params_size = match self.precision {
-            NumericPrecision::F64 => {
-                std::mem::size_of::<crate::backend::wgpu::params::FillParamsF64>() as u64
-            }
-            NumericPrecision::F32 => {
-                std::mem::size_of::<crate::backend::wgpu::params::FillParamsF32>() as u64
-            }
+        let precision = match self.precision {
+            NumericPrecision::F32 => ProviderPrecision::F32,
+            NumericPrecision::F64 => ProviderPrecision::F64,
         };
-        output.checked_add(elements.div_ceil(capacity).checked_mul(params_size)?)
+        crate::backend::wgpu_geometry::fill_physical_work(
+            elements,
+            self.workgroup_config.scalar,
+            precision,
+        )?
+        .total_bytes()
     }
 
     pub(crate) fn logical_fill_exec(
@@ -160,7 +178,7 @@ impl WgpuProvider {
         shape: &[usize],
         value: bool,
     ) -> Result<GpuTensorHandle> {
-        self.fill_produced_exec(shape, if value { 1.0 } else { 0.0 }, true)
+        self.fill_produced_exec(shape, if value { 1.0 } else { 0.0 }, true, None, None, None)
     }
 
     fn fill_produced_exec(
@@ -168,6 +186,9 @@ impl WgpuProvider {
         shape: &[usize],
         value: f64,
         logical: bool,
+        validated: Option<&super::validated_fusion::ValidatedFusionPipeline>,
+        effect: Option<&std::cell::Cell<bool>>,
+        after_allocation: Option<&super::reduction::phase_context::AllocationFault<'_>>,
     ) -> Result<GpuTensorHandle> {
         let total_len = constructor_elements(shape)
             .ok_or_else(|| anyhow!("fill: tensor size exceeds GPU limits"))?;
@@ -175,6 +196,12 @@ impl WgpuProvider {
         let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
             let out_buffer =
                 self.create_storage_buffer_checked(emission, total_len, "runmat-fill-out")?;
+            if let Some(effect) = effect {
+                effect.set(true);
+            }
+            if let Some(after_allocation) = after_allocation {
+                after_allocation(&out_buffer)?;
+            }
             if total_len == 0 {
                 return Ok(out_buffer);
             }
@@ -183,7 +210,19 @@ impl WgpuProvider {
                 "fill: tensor length exceeds GPU dispatch limits"
             );
 
-            let pipeline = self.pipelines.fill.get(emission)?;
+            let legacy = if validated.is_none() {
+                Some(self.pipelines.fill.get(emission)?)
+            } else {
+                None
+            };
+            let layout = validated
+                .map(|selected| selected.layout.as_ref())
+                .or_else(|| legacy.as_ref().map(|bundle| &bundle.layout))
+                .expect("selected or legacy fill layout");
+            let pipeline = validated
+                .map(|selected| selected.pipeline.as_ref())
+                .or_else(|| legacy.as_ref().map(|bundle| &bundle.pipeline))
+                .expect("selected or legacy fill pipeline");
             // chunked dispatch below will build per-chunk params buffers
 
             // Dispatch in chunks to satisfy per-dimension group limits (<= 65535)
@@ -222,7 +261,7 @@ impl WgpuProvider {
                     .device()
                     .create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("runmat-fill-bind"),
-                        layout: &pipeline.layout,
+                        layout,
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
@@ -246,7 +285,7 @@ impl WgpuProvider {
                 crate::backend::wgpu::dispatch::creation::run(
                     emission,
                     pending,
-                    &pipeline.pipeline,
+                    pipeline,
                     &bind_group,
                     workgroups,
                     "runmat-fill-encoder",

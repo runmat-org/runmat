@@ -492,7 +492,7 @@ mod tests {
         fn upload_numeric_raw(
             &self,
             host: &runmat_accelerate_api::HostNumericTensorView<'_>,
-        ) -> anyhow::Result<GpuTensorHandle> {
+        ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
             self.inner.upload_numeric_raw(host)
         }
         fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {

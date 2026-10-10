@@ -1,13 +1,14 @@
 use super::*;
 
 pub(super) async fn reduction_max(
+    runtime: Option<&crate::context::RuntimeContext>,
     value: Value,
     args: ReductionArgs,
     demand: super::extrema_provider::ExtremaDemand,
 ) -> BuiltinResult<super::extrema_provider::ExtremaResult> {
     match value {
         Value::GpuTensor(handle) => {
-            if let Some(eval) = reduction_max_gpu(handle.clone(), &args, demand).await? {
+            if let Some(eval) = reduction_max_gpu(runtime, handle.clone(), &args, demand).await? {
                 return Ok(eval);
             }
             // Fall back to host if GPU path is unavailable.

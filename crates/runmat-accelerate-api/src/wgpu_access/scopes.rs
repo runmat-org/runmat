@@ -19,7 +19,6 @@ impl<'a, D: ScopeDriver> ActiveScopes<'a, D> {
         };
         scopes.push_one(wgpu::ErrorFilter::Validation);
         scopes.push_one(wgpu::ErrorFilter::OutOfMemory);
-        #[cfg(target_arch = "wasm32")]
         scopes.push_one(wgpu::ErrorFilter::Internal);
         scopes
     }

@@ -2,8 +2,7 @@ use super::*;
 use futures::{executor::block_on, task::noop_waker, FutureExt};
 use runmat_accelerate::simple_provider::InProcessProvider;
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProviderFuture, HostTensorView, ProviderPrecision,
-    ThreadProviderGuard,
+    AccelDownloadFuture, HostTensorView, ProviderPrecision, ThreadProviderGuard,
 };
 use std::sync::Mutex;
 use std::task::{Context, Poll};
@@ -49,7 +48,7 @@ impl AccelProvider for Provider {
     fn reduce_min<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         let mode = self.mode.lock().unwrap().clone();
         Box::pin(async move {
             match mode {
@@ -74,7 +73,7 @@ impl AccelProvider for Provider {
     fn reduce_max<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         let mode = self.mode.lock().unwrap().clone();
         Box::pin(async move {
             match mode {
@@ -84,7 +83,7 @@ impl AccelProvider for Provider {
                         .is_err());
                     futures::future::pending().await
                 }
-                Mode::ErrorMax => anyhow::bail!("injected max failure"),
+                Mode::ErrorMax => Err(anyhow::anyhow!("injected max failure").into()),
                 Mode::RejectLogicalView => {
                     assert!(!runmat_accelerate_api::handle_is_logical(input));
                     assert!(runmat_accelerate_api::handle_transpose_info(input).is_none());

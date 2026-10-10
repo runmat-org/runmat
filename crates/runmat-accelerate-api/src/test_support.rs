@@ -4,8 +4,13 @@ use crate::allocation::*;
 use crate::*;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-    Arc, Mutex,
+    Mutex,
 };
+
+#[cfg(not(target_arch = "wasm32"))]
+type FixtureOwnerRef = std::sync::Arc<FixtureOwner>;
+#[cfg(target_arch = "wasm32")]
+type FixtureOwnerRef = std::rc::Rc<FixtureOwner>;
 
 static NEXT: AtomicU64 = AtomicU64::new(1);
 mod payload;
@@ -100,7 +105,7 @@ pub struct TestAllocation {
 }
 #[derive(Clone)]
 pub struct RetirementProbe {
-    owner: Arc<FixtureOwner>,
+    owner: FixtureOwnerRef,
 }
 impl RetirementProbe {
     /// Make this fixture allocation unavailable, as when its device is lost.
@@ -246,7 +251,7 @@ pub(crate) fn owned(
     element: NumericElementType,
     storage: GpuTensorStorage,
     logical: bool,
-) -> (GpuTensorHandle, Arc<FixtureOwner>) {
+) -> (GpuTensorHandle, FixtureOwnerRef) {
     let bytes = crate::native_buffer_byte_length(&shape, element, storage).unwrap();
     let host = HostNumericTensorOwned {
         data: payload::zeroed(element, bytes / element.element_size()),
@@ -260,7 +265,7 @@ fn owned_data(
     device: u32,
     host: HostNumericTensorOwned,
     logical: bool,
-) -> anyhow::Result<(GpuTensorHandle, Arc<FixtureOwner>)> {
+) -> anyhow::Result<(GpuTensorHandle, FixtureOwnerRef)> {
     host.validate()?;
     let element = host.data.element_type();
     let bytes = crate::native_buffer_byte_length(&host.shape, element, host.storage)?;
@@ -269,7 +274,7 @@ fn owned_data(
     } else {
         host.shape.iter().product::<usize>()
     };
-    let owner = Arc::new(FixtureOwner {
+    let owner = FixtureOwnerRef::new(FixtureOwner {
         identity: AllocationIdentity::new(device, NEXT.fetch_add(1, Ordering::SeqCst), 1),
         physical: GpuPhysicalDescriptor::new(
             element,

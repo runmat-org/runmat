@@ -6,7 +6,7 @@
 
 use anyhow::{anyhow, Result};
 use runmat_execution::Digest;
-use runmat_value::{IntValue, NumericScalar, Value};
+use runmat_value::{IntValue, NumericDType, NumericScalar, Value};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -54,10 +54,12 @@ enum ConstantPayload<'a> {
     },
     Tensor {
         shape: &'a [usize],
+        dtype: NumericDType,
         data: Vec<ScalarBits>,
     },
     ComplexTensor {
         shape: &'a [usize],
+        dtype: NumericDType,
         data: Vec<(ScalarBits, ScalarBits)>,
     },
     SparseReal {
@@ -66,11 +68,12 @@ enum ConstantPayload<'a> {
         col_ptrs: &'a [usize],
         row_indices: &'a [usize],
         logical: bool,
+        dtype: Option<NumericDType>,
         data: Vec<ScalarBits>,
     },
 }
 
-pub(super) fn exact_constant_digest(value: &Value) -> Result<Digest> {
+pub(crate) fn exact_constant_digest(value: &Value) -> Result<Digest> {
     let payload = match value {
         Value::Num(value) => ConstantPayload::Num(value.to_bits()),
         Value::Int(value) => ConstantPayload::Int(value),
@@ -93,6 +96,7 @@ pub(super) fn exact_constant_digest(value: &Value) -> Result<Digest> {
         },
         Value::Tensor(tensor) => ConstantPayload::Tensor {
             shape: tensor.shape(),
+            dtype: tensor.numeric_dtype(),
             data: (0..tensor.len())
                 .map(|index| {
                     tensor
@@ -104,6 +108,7 @@ pub(super) fn exact_constant_digest(value: &Value) -> Result<Digest> {
         },
         Value::ComplexTensor(tensor) => ConstantPayload::ComplexTensor {
             shape: tensor.shape(),
+            dtype: tensor.numeric_dtype(),
             data: (0..tensor.len())
                 .map(|index| {
                     tensor
@@ -119,6 +124,7 @@ pub(super) fn exact_constant_digest(value: &Value) -> Result<Digest> {
             col_ptrs: &tensor.col_ptrs,
             row_indices: &tensor.row_indices,
             logical: tensor.is_logical(),
+            dtype: tensor.numeric_dtype(),
             data: (0..tensor.nnz())
                 .map(|index| {
                     tensor
@@ -136,7 +142,7 @@ pub(super) fn exact_constant_digest(value: &Value) -> Result<Digest> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_value::{ComplexTensor, IntegerStorage, Tensor};
+    use runmat_value::{ComplexTensor, IntegerStorage, SparseTensor, Tensor};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
@@ -158,6 +164,52 @@ mod tests {
         assert_ne!(
             exact_constant_digest(&complex).unwrap(),
             exact_constant_digest(&matrix).unwrap()
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn empty_numeric_payload_identity_retains_storage_class() {
+        let shape = vec![0, 1];
+        let double = Value::Tensor(Tensor::new(Vec::new(), shape.clone()).unwrap());
+        let single = Value::Tensor(Tensor::from_f32(Vec::new(), shape.clone()).unwrap());
+        let integer = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(Vec::new()), shape.clone()).unwrap(),
+        );
+        assert_ne!(
+            exact_constant_digest(&double).unwrap(),
+            exact_constant_digest(&single).unwrap()
+        );
+        assert_ne!(
+            exact_constant_digest(&single).unwrap(),
+            exact_constant_digest(&integer).unwrap()
+        );
+
+        let complex_double =
+            Value::ComplexTensor(ComplexTensor::new(Vec::new(), shape.clone()).unwrap());
+        let complex_single =
+            Value::ComplexTensor(ComplexTensor::from_f32(Vec::new(), shape).unwrap());
+        assert_ne!(
+            exact_constant_digest(&complex_double).unwrap(),
+            exact_constant_digest(&complex_single).unwrap()
+        );
+
+        let sparse_double = Value::SparseTensor(
+            SparseTensor::new(0, 1, vec![0, 0], Vec::<usize>::new(), Vec::new()).unwrap(),
+        );
+        let sparse_single = Value::SparseTensor(
+            SparseTensor::new_f32(0, 1, vec![0, 0], Vec::<usize>::new(), Vec::new()).unwrap(),
+        );
+        let sparse_logical = Value::SparseTensor(
+            SparseTensor::new_logical(0, 1, vec![0, 0], Vec::<usize>::new()).unwrap(),
+        );
+        assert_ne!(
+            exact_constant_digest(&sparse_double).unwrap(),
+            exact_constant_digest(&sparse_single).unwrap()
+        );
+        assert_ne!(
+            exact_constant_digest(&sparse_single).unwrap(),
+            exact_constant_digest(&sparse_logical).unwrap()
         );
     }
 }

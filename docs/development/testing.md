@@ -65,6 +65,16 @@ cargo test -p runmat-runtime-integration-tests --test bench_residency_smoke
 
 Use the in-process provider for semantic tests that should not depend on a physical GPU. Use WGPU tests when validating backend initialization, residency, shader dispatch, or device behavior.
 
+Production WGSL generators also have GPU-free Rust tests. These parse the emitted source with the Naga version paired with WGPU, validate its declared capabilities, and check that removing a required capability rejects the shader:
+
+```bash
+cargo test -p runmat-accelerate --lib --no-default-features --features wgpu validation_tests
+cargo test -p runmat-accelerate --lib --no-default-features --features wgpu atan2_selected_tests
+cargo test -p runmat-accelerate --lib --no-default-features --features wgpu selected_native_power_reduction_uses_the_ordinary_helper_for_edge_controls
+```
+
+Add generator cases beside their owning shader or provider module, using the shared validation helper rather than copying shader source into a test. Cover precision, operation, operand layout and specialization variants that alter emitted code. Parsing and validation do not establish device support, numerical accuracy, residency or performance; those require separate execution tests on the relevant backend and precision.
+
 ## WASM Tests
 
 WASM CI builds the runtime for `wasm32-unknown-unknown`, then runs the headless browser script:

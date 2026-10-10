@@ -38,7 +38,7 @@ impl AccelProvider for Provider {
     fn upload_numeric_raw(
         &self,
         host: &HostNumericTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.inner.upload_numeric_raw(host)
     }
     fn upload_logical_raw(
@@ -208,7 +208,10 @@ fn find_logical_output_preserves_native_owner_and_rejects_operational_or_alias_u
                             panic!("provider failure")
                         };
                         assert_eq!(
-                            cause.downcast_ref::<std::io::Error>().unwrap().kind(),
+                            std::error::Error::source(cause)
+                                .and_then(|source| source.downcast_ref::<std::io::Error>())
+                                .unwrap()
+                                .kind(),
                             std::io::ErrorKind::BrokenPipe
                         );
                     }

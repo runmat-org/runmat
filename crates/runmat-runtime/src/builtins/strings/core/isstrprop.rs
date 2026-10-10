@@ -45,6 +45,19 @@ pub(crate) async fn isstrprop_builtin(
             "isstrprop",
         )?;
     }
+    let prop = gather_if_needed_async(&prop)
+        .await
+        .map_err(|err| map_control_flow_with_builtin(err, "isstrprop"))?;
+    let prop = scalar_text(&prop, "isstrprop")?.to_ascii_lowercase();
+    let category = CharacterPropertyCategory::parse(&prop).ok_or_else(|| {
+        compat_error(
+            "isstrprop",
+            format!("isstrprop: unknown character category '{prop}'"),
+        )
+    })?;
+    let force_cell_output = parse_force_cell_output(&rest)?;
+    // Category and option values are host-only. Reject known invalid controls
+    // before a selected resident input incurs provider work.
     let text = match &text {
         Value::GpuTensor(handle) => {
             let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
@@ -61,17 +74,6 @@ pub(crate) async fn isstrprop_builtin(
         }
         _ => text,
     };
-    let prop = gather_if_needed_async(&prop)
-        .await
-        .map_err(|err| map_control_flow_with_builtin(err, "isstrprop"))?;
-    let prop = scalar_text(&prop, "isstrprop")?.to_ascii_lowercase();
-    let category = CharacterPropertyCategory::parse(&prop).ok_or_else(|| {
-        compat_error(
-            "isstrprop",
-            format!("isstrprop: unknown character category '{prop}'"),
-        )
-    })?;
-    let force_cell_output = parse_force_cell_output(&rest)?;
     let result =
         classify_text_or_numeric_value(text, "isstrprop", |ch| char_matches_prop(ch, category))?;
     if force_cell_output && !matches!(result, Value::Cell(_)) {
@@ -80,3 +82,11 @@ pub(crate) async fn isstrprop_builtin(
         Ok(result)
     }
 }
+
+#[cfg(test)]
+#[path = "isstrprop/pre_effect_tests.rs"]
+mod pre_effect_tests;
+
+#[cfg(test)]
+#[path = "isstrprop/flag_carrier_tests.rs"]
+mod flag_carrier_tests;

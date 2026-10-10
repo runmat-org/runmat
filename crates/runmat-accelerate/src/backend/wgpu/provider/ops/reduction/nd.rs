@@ -4,28 +4,84 @@ use super::*;
 mod geometry;
 use geometry::NdReductionGeometry;
 
+#[path = "nd/selected_mean.rs"]
+mod selected_mean;
+
+#[path = "nd/rank_n_dim.rs"]
+mod rank_n_dim;
+
+#[path = "nd/ordered_real_mean.rs"]
+mod ordered_real_mean;
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "nd/lazy_tests.rs"]
 mod lazy_tests;
 
 impl WgpuProvider {
+    pub(in crate::backend::wgpu::provider::backend) fn validate_nd_moment_pair(
+        &self,
+        source: &GpuTensorHandle,
+        dims: &[usize],
+        mean: &GpuTensorHandle,
+        ex2: &GpuTensorHandle,
+    ) -> Result<()> {
+        let source_entry = self.real_floating_entry(source)?;
+        let mean_entry = self.real_floating_entry(mean)?;
+        let ex2_entry = self.real_floating_entry(ex2)?;
+        let geometry = NdReductionGeometry::new(&source_entry.shape, dims, "N-D moments pair")?;
+        ensure!(
+            source_entry.storage == GpuTensorStorage::Real
+                && mean_entry.storage == GpuTensorStorage::Real
+                && ex2_entry.storage == GpuTensorStorage::Real
+                && !runmat_accelerate_api::handle_is_logical(mean)
+                && !runmat_accelerate_api::handle_is_logical(ex2)
+                && mean_entry.element_type == source_entry.element_type
+                && ex2_entry.element_type == source_entry.element_type
+                && mean_entry.shape == geometry.out_shape
+                && ex2_entry.shape == geometry.out_shape
+                && !mean.shares_allocation_with(source)
+                && !ex2.shares_allocation_with(source)
+                && !mean.shares_allocation_with(ex2),
+            "N-D moments pair violates selected source, class, shape, or allocation ownership"
+        );
+        Ok(())
+    }
+
     pub(crate) async fn reduce_nd_mean_exec(
         &self,
         a: &GpuTensorHandle,
         dims_zero_based: &[usize],
     ) -> Result<GpuTensorHandle> {
         // Cache hits must not bypass the original input's owner/live/precision admission.
-        self.get_entry(a)?;
+        let source_entry = self.real_floating_entry(a)?;
+        if source_entry.storage != GpuTensorStorage::Real {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "N-D mean requires real physical storage",
+            ));
+        }
+        if source_entry.precision != self.precision
+            && runmat_accelerate_api::handle_is_transposed(a)
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "alternate-precision N-D mean requires a canonical source view",
+            ));
+        }
         if self.reduction_reuse.is_poisoned() {
             // The original uncached ND kernel remains authoritative when only
             // optional reuse bookkeeping is unavailable; make the loss visible.
             log::error!("WGPU reduction reuse cache poisoned; executing uncached ND mean");
         } else {
             // If input is a known square of a base tensor, reuse or compute ex2 via moments.
-            let base = self.cached_square_source(a)?;
+            let base = if source_entry.precision == self.precision {
+                self.cached_square_source(a)?
+            } else {
+                // No alternate-precision square provenance is certified yet;
+                // reduce the actual selected input rather than its source.
+                None
+            };
             if let Some(base) = base {
                 if let Ok(base_handle) = base.acquire() {
-                    self.get_entry(&base_handle)?;
+                    self.real_floating_entry(&base_handle)?;
                     if let Some((_, ex2)) =
                         self.cached_moment_pair(&base_handle, dims_zero_based)?
                     {
@@ -49,7 +105,7 @@ impl WgpuProvider {
             self.remember_moments(a, dims_zero_based, &moments.mean, &moments.ex2)?;
             return Ok(moments.mean);
         }
-        let entry = self.get_entry(a)?;
+        let entry = self.real_floating_entry(a)?;
         let NdReductionGeometry {
             rank,
             reduce,
@@ -63,15 +119,24 @@ impl WgpuProvider {
             out_shape,
         } = NdReductionGeometry::new(&entry.shape, dims_zero_based, "reduce_mean_nd")?;
 
+        if entry.precision != self.precision
+            && self.prepare_cold_mean_nd_exec(a, &reduce)?.is_none()
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "alternate-precision N-D mean has no qualified physical route",
+            ));
+        }
+
         // Geometry above is logical. The stride-based kernel (and sequenced fallback)
         // needs canonical storage, not the backing order of a lazy transpose.
         // Keep this owner local; cache identity remains the caller's original view.
         let materialized = self.materialize_nd_reduction_input(a)?;
         let a = materialized.as_ref().unwrap_or(a);
-        let entry = self.get_entry(a)?;
+        let entry = self.real_floating_entry(a)?;
+        let pipeline = self.real_nd_pipeline(entry.precision, false)?;
 
         // Heuristic fallback: for very large row extents, prefer sequenced dim-reductions.
-        if rows >= self.two_pass_threshold() {
+        if rows >= self.two_pass_threshold() && entry.precision == self.precision {
             let mut current = a.clone();
             let mut owned = false;
             for &d in &reduce {
@@ -86,19 +151,28 @@ impl WgpuProvider {
         }
 
         let (out_buffer, out_shape) = self.with_emission(|emission, pending| -> Result<_> {
-            let mut out_buffer =
-                self.create_storage_buffer(emission, cols, "runmat-reduce-nd-mean-out")?;
+            let mut out_buffer = self.create_storage_buffer_checked_with_element_size(
+                emission,
+                cols,
+                "runmat-reduce-nd-mean-out",
+                crate::backend::wgpu::residency::BufferUsageClass::Generic,
+                entry.element_type.element_size(),
+            )?;
             // Prevent aliasing: output must not be the same as input buffer
             if std::ptr::eq(out_buffer.as_ref(), entry.buffer.as_ref()) {
-                let size_bytes = (cols * self.element_size) as u64;
-                out_buffer = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("runmat-reduce-nd-mean-out-unique"),
-                    size: size_bytes,
-                    usage: wgpu::BufferUsages::STORAGE
-                        | wgpu::BufferUsages::COPY_SRC
-                        | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                }));
+                let size_bytes = u64::try_from(cols)?
+                    .checked_mul(entry.element_type.element_size() as u64)
+                    .ok_or_else(|| anyhow!("N-D mean output byte extent overflow"))?;
+                out_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
+                    emission.device().create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("runmat-reduce-nd-mean-out-unique"),
+                        size: size_bytes,
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_SRC
+                            | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    }),
+                );
             }
             let out_shape = out_shape.clone();
 
@@ -141,7 +215,7 @@ impl WgpuProvider {
                             .device()
                             .create_bind_group(&wgpu::BindGroupDescriptor {
                                 label: Some("runmat-reduce-nd-mean-bind-f64"),
-                                layout: &self.pipelines.reduce_nd_mean.get(emission)?.layout,
+                                layout: &pipeline.get(emission)?.layout,
                                 entries: &[
                                     wgpu::BindGroupEntry {
                                         binding: 0,
@@ -171,7 +245,7 @@ impl WgpuProvider {
                     crate::backend::wgpu::dispatch::elementwise::run(
                         emission,
                         pending,
-                        &self.pipelines.reduce_nd_mean.get(emission)?.pipeline,
+                        &pipeline.get(emission)?.pipeline,
                         &bind_group,
                         groups_x,
                     )?;
@@ -214,7 +288,7 @@ impl WgpuProvider {
                             .device()
                             .create_bind_group(&wgpu::BindGroupDescriptor {
                                 label: Some("runmat-reduce-nd-mean-bind-f32"),
-                                layout: &self.pipelines.reduce_nd_mean.get(emission)?.layout,
+                                layout: &pipeline.get(emission)?.layout,
                                 entries: &[
                                     wgpu::BindGroupEntry {
                                         binding: 0,
@@ -244,7 +318,7 @@ impl WgpuProvider {
                     crate::backend::wgpu::dispatch::elementwise::run(
                         emission,
                         pending,
-                        &self.pipelines.reduce_nd_mean.get(emission)?.pipeline,
+                        &pipeline.get(emission)?.pipeline,
                         &bind_group,
                         groups_x,
                     )?;
@@ -253,7 +327,7 @@ impl WgpuProvider {
 
             Ok((out_buffer, out_shape))
         })??;
-        self.register_existing_buffer(out_buffer, out_shape, cols)
+        self.register_real_floating_output(out_buffer, out_shape, cols, entry.precision)
     }
 
     pub(crate) fn reduce_moments_nd_exec(
@@ -261,7 +335,17 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         dims_zero_based: &[usize],
     ) -> Result<runmat_accelerate_api::ProviderMoments2> {
-        let entry = self.get_entry(a)?;
+        let entry = self.real_floating_entry(a)?;
+        if entry.storage != GpuTensorStorage::Real {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "N-D moments requires real physical storage",
+            ));
+        }
+        if entry.precision != self.precision && runmat_accelerate_api::handle_is_transposed(a) {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "alternate-precision N-D moments requires a canonical source view",
+            ));
+        }
         let NdReductionGeometry {
             rank,
             reduce,
@@ -275,19 +359,38 @@ impl WgpuProvider {
             out_shape,
         } = NdReductionGeometry::new(&entry.shape, dims_zero_based, "reduce_moments_nd")?;
 
+        if entry.precision != self.precision
+            && self.prepare_cold_mean_nd_exec(a, &reduce)?.is_none()
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "alternate-precision N-D moments has no qualified physical route",
+            ));
+        }
+
         // Mean's normal cache-miss path and direct moments/variance consumers
         // share this boundary. Validate geometry before issuing the storage move.
         let materialized = self.materialize_nd_reduction_input(a)?;
         let a = materialized.as_ref().unwrap_or(a);
-        let entry = self.get_entry(a)?;
+        let entry = self.real_floating_entry(a)?;
+        let pipeline = self.real_nd_pipeline(entry.precision, true)?;
 
         let (mean_out, ex2_out, out_shape) =
             self.with_emission(|emission, pending| -> Result<_> {
                 // Allocate outputs
-                let mean_out =
-                    self.create_storage_buffer(emission, cols, "runmat-reduce-nd-moments-mean")?;
-                let ex2_out =
-                    self.create_storage_buffer(emission, cols, "runmat-reduce-nd-moments-ex2")?;
+                let mean_out = self.create_storage_buffer_checked_with_element_size(
+                    emission,
+                    cols,
+                    "runmat-reduce-nd-moments-mean",
+                    crate::backend::wgpu::residency::BufferUsageClass::Generic,
+                    entry.element_type.element_size(),
+                )?;
+                let ex2_out = self.create_storage_buffer_checked_with_element_size(
+                    emission,
+                    cols,
+                    "runmat-reduce-nd-moments-ex2",
+                    crate::backend::wgpu::residency::BufferUsageClass::Generic,
+                    entry.element_type.element_size(),
+                )?;
                 let out_shape = out_shape.clone();
 
                 match entry.precision {
@@ -335,7 +438,7 @@ impl WgpuProvider {
                                 .device()
                                 .create_bind_group(&wgpu::BindGroupDescriptor {
                                     label: Some("runmat-reduce-nd-moments-bind-f64"),
-                                    layout: &self.pipelines.reduce_nd_moments.get(emission)?.layout,
+                                    layout: &pipeline.get(emission)?.layout,
                                     entries: &[
                                         wgpu::BindGroupEntry {
                                             binding: 0,
@@ -360,7 +463,7 @@ impl WgpuProvider {
                         crate::backend::wgpu::dispatch::elementwise::run(
                             emission,
                             pending,
-                            &self.pipelines.reduce_nd_moments.get(emission)?.pipeline,
+                            &pipeline.get(emission)?.pipeline,
                             &bind_group,
                             groups_x,
                         )?;
@@ -409,7 +512,7 @@ impl WgpuProvider {
                                 .device()
                                 .create_bind_group(&wgpu::BindGroupDescriptor {
                                     label: Some("runmat-reduce-nd-moments-bind-f32"),
-                                    layout: &self.pipelines.reduce_nd_moments.get(emission)?.layout,
+                                    layout: &pipeline.get(emission)?.layout,
                                     entries: &[
                                         wgpu::BindGroupEntry {
                                             binding: 0,
@@ -433,7 +536,7 @@ impl WgpuProvider {
                         crate::backend::wgpu::dispatch::elementwise::run(
                             emission,
                             pending,
-                            &self.pipelines.reduce_nd_moments.get(emission)?.pipeline,
+                            &pipeline.get(emission)?.pipeline,
                             &bind_group,
                             groups_x,
                         )?;
@@ -442,8 +545,11 @@ impl WgpuProvider {
 
                 Ok((mean_out, ex2_out, out_shape))
             })??;
-        let mean_handle = self.register_existing_buffer(mean_out, out_shape.clone(), cols)?;
-        let ex2_handle = self.register_existing_buffer(ex2_out, out_shape, cols)?;
+        let mean_handle =
+            self.register_real_floating_output(mean_out, out_shape.clone(), cols, entry.precision)?;
+        let ex2_handle =
+            self.register_real_floating_output(ex2_out, out_shape, cols, entry.precision)?;
+        self.validate_nd_moment_pair(a, dims_zero_based, &mean_handle, &ex2_handle)?;
         Ok(runmat_accelerate_api::ProviderMoments2 {
             mean: mean_handle,
             ex2: ex2_handle,

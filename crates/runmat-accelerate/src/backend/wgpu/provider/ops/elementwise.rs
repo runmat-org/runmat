@@ -25,210 +25,242 @@ use crate::backend::wgpu::shaders::logical::{
 };
 use crate::backend::wgpu::types::NumericPrecision;
 
-#[path = "elementwise_indexed.rs"]
-mod indexed;
-#[path = "elementwise/complex_broadcast.rs"]
-mod complex_broadcast;
 #[path = "elementwise/broadcast_plan.rs"]
 mod broadcast_plan;
+#[path = "elementwise/complex_broadcast.rs"]
+mod complex_broadcast;
+#[path = "elementwise/fusion_recipe.rs"]
+mod fusion_recipe;
+#[path = "elementwise_indexed.rs"]
+mod indexed;
+#[path = "elementwise/numeric_output.rs"]
+mod numeric_output;
+#[path = "elementwise/scoped_generic.rs"]
+mod scoped_generic;
+pub(super) use scoped_generic::check_kernel_limits;
+#[path = "elementwise/validated_request.rs"]
+mod validated_request;
+pub(super) use fusion_recipe::{FrozenFusionRecipe, FusionUniformAbi};
+pub(in crate::backend::wgpu::provider::backend) use validated_request::{MultiFrame, SingleFrame};
+#[cfg(test)]
+#[path = "elementwise/binary_max_tests.rs"]
+mod binary_max_tests;
+#[path = "elementwise/real_binary_recipe.rs"]
+mod real_binary_recipe;
+#[cfg(test)]
+#[path = "elementwise/real_floating_tests.rs"]
+mod real_floating_tests;
+#[path = "elementwise/real_recipe.rs"]
+mod real_recipe;
+#[cfg(test)]
+#[path = "elementwise/required_geometry_tests.rs"]
+mod required_geometry_tests;
+#[path = "elementwise/scalar_control.rs"]
+mod scalar_control;
+#[cfg(test)]
+#[path = "elementwise/scalar_max_tests.rs"]
+mod scalar_max_tests;
 use indexed::{
     validate_indexed_layout, FusionMultiRequest, IndexedFusionObserved, MultiFusionLayout,
 };
 pub(super) use indexed::{IndexedFusionMultiRequest, IndexedFusionOperand};
+use real_binary_recipe::{RealBinaryObserved, RealBinarySubmission};
+use real_recipe::RealObserved;
+use std::cell::{Cell, RefCell};
 
 /// Internal shader ABI: input words can differ from the native output words.
 /// The owning shader must declare both precisions explicitly.
+#[derive(Clone, Copy)]
 pub(super) struct FusedElementwiseRepresentation {
     pub(super) input_precision: NumericPrecision,
+    pub(super) output_precision: NumericPrecision,
     pub(super) output_storage: GpuTensorStorage,
     pub(super) logical_output: bool,
 }
 
+/// Requested output geometry and shader ABI for one fused execution.
+/// Allocation callbacks and resource observation remain separate effects.
+#[derive(Clone, Copy)]
+pub(super) struct FusedElementwiseWork<'a> {
+    pub(super) output_shape: &'a [usize],
+    pub(super) len: usize,
+    pub(super) representation: FusedElementwiseRepresentation,
+    /// None is the explicitly unprepared arbitrary-shader compatibility path.
+    pub(super) uniform_abi: Option<FusionUniformAbi>,
+}
+
+enum SingleFusionEvidence<'a> {
+    Legacy {
+        observed: Option<&'a RefCell<RealObserved>>,
+        prepared: Option<&'a FrozenFusionRecipe>,
+    },
+    Validated {
+        frame: &'a SingleFrame,
+        pipeline: &'a super::validated_fusion::ValidatedFusionPipeline,
+    },
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct IntegerComparisonParams {
+    len: u32,
+    op: u32,
+    offset: u32,
+    total: u32,
+    integer_type: u32,
+    rank: u32,
+    _pad0: u32,
+    _pad1: u32,
+    out_shape:
+        [crate::backend::wgpu::params::AlignedU32; crate::backend::wgpu::params::BCAST_MAX_RANK],
+    a_shape:
+        [crate::backend::wgpu::params::AlignedU32; crate::backend::wgpu::params::BCAST_MAX_RANK],
+    b_shape:
+        [crate::backend::wgpu::params::AlignedU32; crate::backend::wgpu::params::BCAST_MAX_RANK],
+    a_strides:
+        [crate::backend::wgpu::params::AlignedU32; crate::backend::wgpu::params::BCAST_MAX_RANK],
+    b_strides:
+        [crate::backend::wgpu::params::AlignedU32; crate::backend::wgpu::params::BCAST_MAX_RANK],
+}
+
 impl WgpuProvider {
-    fn integer_comparison_exec(
+    async fn integer_comparison_exec(
         &self,
         operation: u32,
         operation_name: &str,
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
-    ) -> Result<GpuTensorHandle> {
-        let entry_a = self.get_entry_raw(a)?;
-        let entry_b = self.get_entry_raw(b)?;
-        let integer_type = entry_a
-            .integer_type()
-            .ok_or_else(|| anyhow!("{operation_name}: expected native integer gpuArray input"))?;
-        ensure!(
-            entry_b.integer_type() == Some(integer_type),
-            "{operation_name}: integer operands must have the same class"
-        );
-        ensure!(
-            entry_a.storage == runmat_accelerate_api::GpuTensorStorage::Real
-                && entry_b.storage == runmat_accelerate_api::GpuTensorStorage::Real,
-            "{operation_name}: complex integer gpuArray comparison is not supported"
-        );
-        let broadcast = super::integer::integer_broadcast_plan(
-            operation_name,
-            &entry_a.shape,
-            entry_a.len,
-            &entry_b.shape,
-            entry_b.len,
-        )?;
-        let len = broadcast.len;
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        use runmat_accelerate_api::ProviderExecutionError;
+        let frame = scoped_generic::IntegerComparisonFrame::plan(self, operation_name, a, b)?;
+        let len = frame.broadcast.len;
         if len == 0 {
-            let out = self.with_emission(|emission, _| {
-                self.create_storage_buffer(emission, 0, "runmat-integer-compare-empty")
-            })??;
-            let handle = self.register_logical_buffer(
-                out,
-                broadcast.output_shape,
-                0,
-                BufferUsageClass::Generic,
-            )?;
+            let allocated = Cell::new(false);
+            let out = self
+                .with_emission(|emission, _| {
+                    let out =
+                        self.create_storage_buffer(emission, 0, "runmat-integer-compare-empty")?;
+                    allocated.set(true);
+                    Ok::<_, anyhow::Error>(out)
+                })?
+                .map_err(|error| {
+                    let typed = ProviderExecutionError::from(error);
+                    if allocated.get() {
+                        typed.after_effect()
+                    } else {
+                        typed
+                    }
+                })?;
+            let handle = self
+                .register_logical_buffer(
+                    out,
+                    frame.broadcast.output_shape,
+                    0,
+                    BufferUsageClass::Generic,
+                )
+                .map_err(|error| ProviderExecutionError::from(error).after_effect())?;
             return Ok(handle);
         }
-        if len > u32::MAX as usize {
-            return Err(gpu_dispatch_length_limit_error(operation_name, len));
-        }
-
-        #[repr(C)]
-        #[derive(Clone, Copy, Pod, Zeroable)]
-        struct Params {
-            len: u32,
-            op: u32,
-            offset: u32,
-            total: u32,
-            integer_type: u32,
-            rank: u32,
-            _pad0: u32,
-            _pad1: u32,
-            out_shape: [crate::backend::wgpu::params::AlignedU32;
-                crate::backend::wgpu::params::BCAST_MAX_RANK],
-            a_shape: [crate::backend::wgpu::params::AlignedU32;
-                crate::backend::wgpu::params::BCAST_MAX_RANK],
-            b_shape: [crate::backend::wgpu::params::AlignedU32;
-                crate::backend::wgpu::params::BCAST_MAX_RANK],
-            a_strides: [crate::backend::wgpu::params::AlignedU32;
-                crate::backend::wgpu::params::BCAST_MAX_RANK],
-            b_strides: [crate::backend::wgpu::params::AlignedU32;
-                crate::backend::wgpu::params::BCAST_MAX_RANK],
-        }
-
-        let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
-            let scalar_type = match self.precision {
-                NumericPrecision::F64 => "f64",
-                NumericPrecision::F32 => "f32",
-            };
-            let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
-            let shader = crate::backend::wgpu::shaders::integer::comparison_shader(
-                scalar_type,
-                workgroup_size,
-            );
-            let bind_group_layout =
-                emission
-                    .device()
-                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        label: Some("runmat-integer-compare-bgl"),
-                        entries: &[
-                            crate::backend::wgpu::bindings::storage_read_entry(0),
-                            crate::backend::wgpu::bindings::storage_read_entry(1),
-                            crate::backend::wgpu::bindings::storage_read_write_entry(2),
-                            crate::backend::wgpu::bindings::uniform_entry(3),
-                        ],
-                    });
-            let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-                emission,
-                "runmat-integer-compare-pl",
-                &bind_group_layout,
-            );
-            let module = crate::backend::wgpu::pipelines::create_shader_module(
-                emission,
-                "runmat-integer-compare-module",
-                &shader,
-            );
-            let key = self.compute_pipeline_hash_bytes(
-                shader.as_bytes(),
-                "runmat-integer-compare-bgl",
-                Some(workgroup_size),
-            );
-            let pipeline = self.get_or_create_pipeline(
-                emission,
-                key,
-                &pipeline_layout,
-                &module,
-                "runmat-integer-compare",
-                Some(shader.as_bytes()),
-                Some("runmat-integer-compare-bgl"),
-                Some(workgroup_size),
-            )?;
-            let out_buffer =
-                self.create_storage_buffer_checked(emission, len, "runmat-integer-compare-out")?;
-            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-                * workgroup_size as usize;
-            let mut offset = 0usize;
-            while offset < len {
-                let chunk_len = (len - offset).min(chunk_capacity);
-                let params = Params {
-                    len: chunk_len as u32,
-                    op: operation,
-                    offset: offset as u32,
-                    total: len as u32,
-                    integer_type: super::integer::integer_type_code(integer_type),
-                    rank: broadcast.rank,
-                    _pad0: 0,
-                    _pad1: 0,
-                    out_shape: broadcast.out_shape,
-                    a_shape: broadcast.a_shape,
-                    b_shape: broadcast.b_shape,
-                    a_strides: broadcast.a_strides,
-                    b_strides: broadcast.b_strides,
-                };
-                let params_buffer =
-                    self.uniform_buffer(emission, &params, "runmat-integer-compare-params")?;
-                let bind_group = emission
-                    .device()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-integer-compare-bg"),
-                        layout: &bind_group_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: entry_a.buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: entry_b.buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: out_buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: params_buffer.as_entire_binding(),
-                            },
-                        ],
-                    });
-                let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_len as u32,
-                    workgroup_size,
-                );
-                crate::backend::wgpu::dispatch::elementwise::run(
+        let validated = self
+            .prepare_validated_integer_comparison_pipeline(&frame.recipe)
+            .await?;
+        validated
+            .require_integer_comparison(&frame.recipe)
+            .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
+        frame
+            .require_live_inputs(self, a, b)
+            .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
+        let entry_a = &frame.lhs;
+        let entry_b = &frame.rhs;
+        let broadcast = &frame.broadcast;
+        let integer_type = frame.integer_type;
+        let allocated = Cell::new(false);
+        let out_buffer = self
+            .with_emission(|emission, pending| -> Result<_> {
+                frame.require_live_inputs(self, a, b)?;
+                let bind_group_layout = validated.layout.as_ref();
+                let pipeline = validated.pipeline.as_ref();
+                let out_buffer = self.create_storage_buffer_checked(
                     emission,
-                    pending,
-                    &pipeline,
-                    &bind_group,
-                    groups,
+                    len,
+                    "runmat-integer-compare-out",
                 )?;
-                offset += chunk_len;
-            }
-            Ok(out_buffer)
-        })??;
-        let handle = self.register_logical_buffer(
-            out_buffer,
-            broadcast.output_shape,
-            len,
-            BufferUsageClass::Generic,
-        )?;
+                allocated.set(true);
+                let mut offset = 0usize;
+                while offset < len {
+                    let chunk_len = (len - offset).min(frame.chunk_capacity);
+                    let params = IntegerComparisonParams {
+                        len: chunk_len as u32,
+                        op: operation,
+                        offset: offset as u32,
+                        total: len as u32,
+                        integer_type: super::integer::integer_type_code(integer_type),
+                        rank: broadcast.rank,
+                        _pad0: 0,
+                        _pad1: 0,
+                        out_shape: broadcast.out_shape,
+                        a_shape: broadcast.a_shape,
+                        b_shape: broadcast.b_shape,
+                        a_strides: broadcast.a_strides,
+                        b_strides: broadcast.b_strides,
+                    };
+                    let params_buffer =
+                        self.uniform_buffer(emission, &params, "runmat-integer-compare-params")?;
+                    let bind_group =
+                        emission
+                            .device()
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("runmat-integer-compare-bg"),
+                                layout: bind_group_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: entry_a.buffer.as_ref().as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: entry_b.buffer.as_ref().as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: out_buffer.as_ref().as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 3,
+                                        resource: params_buffer.as_entire_binding(),
+                                    },
+                                ],
+                            });
+                    let groups = frame.launch.dispatch_groups(chunk_len).ok_or_else(|| {
+                        anyhow!("integer comparison: selected launch exceeds enabled limits")
+                    })?;
+                    crate::backend::wgpu::dispatch::elementwise::run(
+                        emission,
+                        pending,
+                        pipeline,
+                        &bind_group,
+                        groups,
+                    )?;
+                    offset += chunk_len;
+                }
+                Ok(out_buffer)
+            })?
+            .map_err(|error| {
+                let typed = ProviderExecutionError::from(error);
+                if allocated.get() {
+                    typed.after_effect()
+                } else {
+                    typed.with_unproven_effects()
+                }
+            })?;
+        let handle = self
+            .register_logical_buffer(
+                out_buffer,
+                broadcast.output_shape.clone(),
+                len,
+                BufferUsageClass::Generic,
+            )
+            .map_err(|error| ProviderExecutionError::from(error).after_effect())?;
         Ok(handle)
     }
 
@@ -491,6 +523,11 @@ impl WgpuProvider {
         } else {
             entry.len / 2
         };
+        if len != 0
+            && crate::backend::wgpu::shaders::elementwise::complex_unary_requires_ieee_words(op)
+        {
+            self.require_ieee_words(entry.precision)?;
+        }
         let shader = complex_unary_shader(op, self.precision);
         let output_storage = if output_complex {
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
@@ -514,131 +551,150 @@ impl WgpuProvider {
         Ok(out)
     }
 
-    pub(crate) fn round_digits_exec(
+    pub(crate) async fn round_digits_exec(
         &self,
         a: &GpuTensorHandle,
         digits: i32,
         significant: bool,
-    ) -> Result<GpuTensorHandle> {
-        let entry = self.get_entry(a)?;
-        let len = entry.len;
-        let input_is_complex = runmat_accelerate_api::handle_storage(a)
-            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
-        let (out_buffer, start) = self.with_emission(|emission, pending| -> Result<_> {
-            let out_buffer =
-                self.create_storage_buffer_checked(emission, len, "runmat-round-digits-out")?;
-            if len == 0 {
-                return Ok((out_buffer, None));
-            }
-            if len > (u32::MAX as usize) {
-                return Err(gpu_dispatch_length_limit_error("round_digits", len));
-            }
-
-            let shader = round_digits_shader(self.precision, significant);
-            let module = crate::backend::wgpu::pipelines::create_shader_module(
-                emission,
-                "runmat-round-digits-shader",
-                &shader,
-            );
-            let layout = &self.pipelines.unary.get(emission)?.layout;
-            let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-                emission,
-                "runmat-round-digits-pipeline-layout",
-                layout,
-            );
-            let layout_tag = if significant {
-                "runmat-round-significant"
-            } else {
-                "runmat-round-decimals"
-            };
-            let shader_hash = self.compute_pipeline_hash_bytes(
-                shader.as_bytes(),
-                layout_tag,
-                Some(crate::backend::wgpu::config::effective_workgroup_size()),
-            );
-            let pipeline = self.get_or_create_pipeline(
-                emission,
-                shader_hash,
-                &pipeline_layout,
-                &module,
-                "runmat-round-digits-pipeline",
-                Some(shader.as_bytes()),
-                Some(layout_tag),
-                Some(crate::backend::wgpu::config::effective_workgroup_size()),
-            )?;
-
-            let params_buffer =
-                Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("runmat-round-digits-params"),
-                    size: std::mem::size_of::<crate::backend::wgpu::params::RoundDigitsParams>()
-                        as u64,
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                }));
-            let bind_group = emission
-                .device()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-round-digits-bind"),
-                    layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: params_buffer.as_ref().as_entire_binding(),
-                        },
-                    ],
-                });
-
-            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-            let mut offset = 0usize;
-            let start = Instant::now();
-            while offset < len {
-                let chunk_len = (len - offset).min(chunk_capacity);
-                let params = crate::backend::wgpu::params::RoundDigitsParams {
-                    len: chunk_len as u32,
-                    offset: offset as u32,
-                    total: len as u32,
-                    digits,
-                };
-                emission
-                    .queue()
-                    .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
-                let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_len as u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
-                crate::backend::wgpu::dispatch::elementwise::run(
-                    emission,
-                    pending,
-                    &pipeline,
-                    &bind_group,
-                    groups,
-                )?;
-                offset += chunk_len;
-            }
-
-            Ok((out_buffer, Some(start)))
-        })??;
-        let storage = if input_is_complex {
-            GpuTensorStorage::ComplexInterleaved
-        } else {
-            GpuTensorStorage::Real
-        };
-        let out =
-            self.register_existing_buffer_with_storage(out_buffer, entry.shape, len, storage)?;
-        if let Some(start) = start {
-            self.telemetry
-                .record_fused_elementwise_duration(start.elapsed());
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        use runmat_accelerate_api::ProviderExecutionError;
+        let frame = scoped_generic::RoundDigitsFrame::plan(self, a, digits, significant)?;
+        let len = frame.scalar_len;
+        if len != 0 {
+            let validated = self
+                .prepare_validated_round_digits_pipeline(&frame.recipe, significant)
+                .await?;
+            validated
+                .require_round_digits(&frame.recipe, frame.significant)
+                .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
+            frame
+                .require_live_input(self, a)
+                .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
+            return self.round_digits_prepared_exec(a, digits, frame, validated);
         }
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer_checked(emission, 0, "runmat-round-digits-empty")
+        })??;
+        let out = self
+            .register_numeric_buffer(
+                out_buffer,
+                super::backend_types::NumericBufferRegistration {
+                    shape: frame.input.shape,
+                    len: frame.input.len,
+                    physical_element_type: frame.input.element_type,
+                    storage: frame.storage,
+                    allocated_bytes: frame.allocated_bytes,
+                    usage: BufferUsageClass::Generic,
+                },
+            )
+            .map_err(|error| ProviderExecutionError::from(error).after_effect())?;
         self.inherit_elementwise_layout(out, a)
+            .map_err(|error| ProviderExecutionError::from(error).after_effect())
+    }
+
+    fn round_digits_prepared_exec(
+        &self,
+        a: &GpuTensorHandle,
+        digits: i32,
+        frame: scoped_generic::RoundDigitsFrame,
+        validated: Arc<super::validated_fusion::ValidatedFusionPipeline>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        use runmat_accelerate_api::ProviderExecutionError;
+        let len = frame.scalar_len;
+        let allocated = Cell::new(false);
+        let (out_buffer, start) = self
+            .with_emission(|emission, pending| -> Result<_> {
+                frame.require_live_input(self, a)?;
+                let out_buffer =
+                    self.create_storage_buffer_checked(emission, len, "runmat-round-digits-out")?;
+                allocated.set(true);
+                let layout = validated.layout.as_ref();
+                let pipeline = validated.pipeline.as_ref();
+
+                let params_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
+                    emission.device().create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("runmat-round-digits-params"),
+                        size: std::mem::size_of::<crate::backend::wgpu::params::RoundDigitsParams>()
+                            as u64,
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    }),
+                );
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-round-digits-bind"),
+                        layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: frame.input.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params_buffer.as_ref().as_entire_binding(),
+                            },
+                        ],
+                    });
+
+                let mut offset = 0usize;
+                let start = Instant::now();
+                while offset < len {
+                    let chunk_len = (len - offset).min(frame.chunk_capacity);
+                    let params = crate::backend::wgpu::params::RoundDigitsParams {
+                        len: chunk_len as u32,
+                        offset: offset as u32,
+                        total: len as u32,
+                        digits,
+                    };
+                    emission
+                        .queue()
+                        .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+                    let groups = frame
+                        .launch
+                        .dispatch_groups(chunk_len)
+                        .ok_or_else(|| anyhow!("round_digits launch exceeds enabled limits"))?;
+                    crate::backend::wgpu::dispatch::elementwise::run(
+                        emission,
+                        pending,
+                        pipeline,
+                        &bind_group,
+                        groups,
+                    )?;
+                    offset += chunk_len;
+                }
+
+                Ok((out_buffer, start))
+            })?
+            .map_err(|error| {
+                let typed = ProviderExecutionError::from(error);
+                if allocated.get() {
+                    typed.after_effect()
+                } else {
+                    typed.with_unproven_effects()
+                }
+            })?;
+        let out = self
+            .register_numeric_buffer(
+                out_buffer,
+                super::backend_types::NumericBufferRegistration {
+                    shape: frame.input.shape,
+                    len: frame.input.len,
+                    physical_element_type: frame.input.element_type,
+                    storage: frame.storage,
+                    allocated_bytes: frame.allocated_bytes,
+                    usage: BufferUsageClass::Generic,
+                },
+            )
+            .map_err(|error| ProviderExecutionError::from(error).after_effect())?;
+        self.telemetry
+            .record_fused_elementwise_duration(start.elapsed());
+        self.inherit_elementwise_layout(out, a)
+            .map_err(|error| ProviderExecutionError::from(error).after_effect())
     }
 
     pub(crate) fn pow2_scale_exec(
@@ -650,6 +706,11 @@ impl WgpuProvider {
             mantissa.shape() == exponent.shape(),
             "pow2_scale requires matching shapes"
         );
+        // This internal synchronous product is floating-only. Check the
+        // mantissa before creating the floating Pow2 temporary so a native
+        // integer view cannot reach a cold binary pipeline after that effect.
+        let _ = self.get_entry(mantissa)?;
+        let _ = self.get_entry(exponent)?;
         let pow = self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Pow2, exponent)?;
         let result = self.binary_op_exec(
             crate::backend::wgpu::types::BinaryOpCode::Mul,
@@ -660,27 +721,35 @@ impl WgpuProvider {
         result
     }
 
-    pub(crate) fn elem_eq_exec(
+    pub(crate) async fn elem_eq_exec(
         &self,
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         if self.get_entry_raw(a)?.integer_type().is_some()
             || self.get_entry_raw(b)?.integer_type().is_some()
         {
-            return self.integer_comparison_exec(0, "elem_eq", a, b);
+            return self.integer_comparison_exec(0, "elem_eq", a, b).await;
         }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
-            return Err(anyhow!("elem_eq: shape mismatch between inputs"));
+            return Err(anyhow!("elem_eq: shape mismatch between inputs").into());
         }
         let len = entry_a.len;
         let handle = if len == 0 {
-            let out = self.with_emission(|emission, _| {
-                self.create_storage_buffer(emission, 0, "runmat-elem-eq-empty")
-            })??;
-            self.register_logical_buffer(out, entry_a.shape, 0, BufferUsageClass::Generic)?
+            let out = self
+                .with_emission(|emission, _| {
+                    self.create_storage_buffer(emission, 0, "runmat-elem-eq-empty")
+                })?
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error)
+                        .with_unproven_effects()
+                })?;
+            self.register_logical_buffer(out, entry_a.shape, 0, BufferUsageClass::Generic)
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error).after_effect()
+                })?
         } else {
             let shader = match self.precision {
                 NumericPrecision::F64 => ELEM_EQ_SHADER_F64,
@@ -691,32 +760,43 @@ impl WgpuProvider {
                 &[a.clone(), b.clone()],
                 &entry_a.shape,
                 len,
-            )?
+            )
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })?
         };
         Ok(handle)
     }
 
-    pub(crate) fn elem_ne_exec(
+    pub(crate) async fn elem_ne_exec(
         &self,
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         if self.get_entry_raw(a)?.integer_type().is_some()
             || self.get_entry_raw(b)?.integer_type().is_some()
         {
-            return self.integer_comparison_exec(1, "elem_ne", a, b);
+            return self.integer_comparison_exec(1, "elem_ne", a, b).await;
         }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
-            return Err(anyhow!("elem_ne: shape mismatch between inputs"));
+            return Err(anyhow!("elem_ne: shape mismatch between inputs").into());
         }
         let len = entry_a.len;
         let handle = if len == 0 {
-            let out = self.with_emission(|emission, _| {
-                self.create_storage_buffer(emission, 0, "runmat-elem-ne-empty")
-            })??;
-            self.register_logical_buffer(out, entry_a.shape, 0, BufferUsageClass::Generic)?
+            let out = self
+                .with_emission(|emission, _| {
+                    self.create_storage_buffer(emission, 0, "runmat-elem-ne-empty")
+                })?
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error)
+                        .with_unproven_effects()
+                })?;
+            self.register_logical_buffer(out, entry_a.shape, 0, BufferUsageClass::Generic)
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error).after_effect()
+                })?
         } else {
             let shader = match self.precision {
                 NumericPrecision::F64 => ELEM_NE_SHADER_F64,
@@ -727,31 +807,42 @@ impl WgpuProvider {
                 &[a.clone(), b.clone()],
                 &entry_a.shape,
                 len,
-            )?
+            )
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })?
         };
         Ok(handle)
     }
-    pub(crate) fn elem_lt_exec(
+    pub(crate) async fn elem_lt_exec(
         &self,
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         if self.get_entry_raw(a)?.integer_type().is_some()
             || self.get_entry_raw(b)?.integer_type().is_some()
         {
-            return self.integer_comparison_exec(2, "elem_lt", a, b);
+            return self.integer_comparison_exec(2, "elem_lt", a, b).await;
         }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
-            return Err(anyhow!("elem_lt: shape mismatch between inputs"));
+            return Err(anyhow!("elem_lt: shape mismatch between inputs").into());
         }
         let len = entry_a.len;
         let handle = if len == 0 {
-            let out = self.with_emission(|emission, _| {
-                self.create_storage_buffer(emission, 0, "runmat-elem-lt-empty")
-            })??;
-            self.register_logical_buffer(out, entry_a.shape, 0, BufferUsageClass::Generic)?
+            let out = self
+                .with_emission(|emission, _| {
+                    self.create_storage_buffer(emission, 0, "runmat-elem-lt-empty")
+                })?
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error)
+                        .with_unproven_effects()
+                })?;
+            self.register_logical_buffer(out, entry_a.shape, 0, BufferUsageClass::Generic)
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error).after_effect()
+                })?
         } else {
             let shader = match self.precision {
                 NumericPrecision::F64 => ELEM_LT_SHADER_F64,
@@ -762,32 +853,43 @@ impl WgpuProvider {
                 &[a.clone(), b.clone()],
                 &entry_a.shape,
                 len,
-            )?
+            )
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })?
         };
         Ok(handle)
     }
 
-    pub(crate) fn elem_le_exec(
+    pub(crate) async fn elem_le_exec(
         &self,
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         if self.get_entry_raw(a)?.integer_type().is_some()
             || self.get_entry_raw(b)?.integer_type().is_some()
         {
-            return self.integer_comparison_exec(3, "elem_le", a, b);
+            return self.integer_comparison_exec(3, "elem_le", a, b).await;
         }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
-            return Err(anyhow!("elem_le: shape mismatch between inputs"));
+            return Err(anyhow!("elem_le: shape mismatch between inputs").into());
         }
         let len = entry_a.len;
         let handle = if len == 0 {
-            let out = self.with_emission(|emission, _| {
-                self.create_storage_buffer(emission, 0, "runmat-elem-le-empty")
-            })??;
-            self.register_logical_buffer(out, entry_a.shape, 0, BufferUsageClass::Generic)?
+            let out = self
+                .with_emission(|emission, _| {
+                    self.create_storage_buffer(emission, 0, "runmat-elem-le-empty")
+                })?
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error)
+                        .with_unproven_effects()
+                })?;
+            self.register_logical_buffer(out, entry_a.shape, 0, BufferUsageClass::Generic)
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error).after_effect()
+                })?
         } else {
             let shader = match self.precision {
                 NumericPrecision::F64 => ELEM_LE_SHADER_F64,
@@ -798,32 +900,43 @@ impl WgpuProvider {
                 &[a.clone(), b.clone()],
                 &entry_a.shape,
                 len,
-            )?
+            )
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })?
         };
         Ok(handle)
     }
 
-    pub(crate) fn elem_gt_exec(
+    pub(crate) async fn elem_gt_exec(
         &self,
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         if self.get_entry_raw(a)?.integer_type().is_some()
             || self.get_entry_raw(b)?.integer_type().is_some()
         {
-            return self.integer_comparison_exec(4, "elem_gt", a, b);
+            return self.integer_comparison_exec(4, "elem_gt", a, b).await;
         }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
-            return Err(anyhow!("elem_gt: shape mismatch between inputs"));
+            return Err(anyhow!("elem_gt: shape mismatch between inputs").into());
         }
         let len = entry_a.len;
         let handle = if len == 0 {
-            let out = self.with_emission(|emission, _| {
-                self.create_storage_buffer(emission, 0, "runmat-elem-gt-empty")
-            })??;
-            self.register_logical_buffer(out, entry_a.shape, 0, BufferUsageClass::Generic)?
+            let out = self
+                .with_emission(|emission, _| {
+                    self.create_storage_buffer(emission, 0, "runmat-elem-gt-empty")
+                })?
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error)
+                        .with_unproven_effects()
+                })?;
+            self.register_logical_buffer(out, entry_a.shape, 0, BufferUsageClass::Generic)
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error).after_effect()
+                })?
         } else {
             let shader = match self.precision {
                 NumericPrecision::F64 => ELEM_GT_SHADER_F64,
@@ -834,32 +947,43 @@ impl WgpuProvider {
                 &[a.clone(), b.clone()],
                 &entry_a.shape,
                 len,
-            )?
+            )
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })?
         };
         Ok(handle)
     }
 
-    pub(crate) fn elem_ge_exec(
+    pub(crate) async fn elem_ge_exec(
         &self,
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         if self.get_entry_raw(a)?.integer_type().is_some()
             || self.get_entry_raw(b)?.integer_type().is_some()
         {
-            return self.integer_comparison_exec(5, "elem_ge", a, b);
+            return self.integer_comparison_exec(5, "elem_ge", a, b).await;
         }
         let entry_a = self.get_entry(a)?;
         let entry_b = self.get_entry(b)?;
         if entry_a.shape != entry_b.shape {
-            return Err(anyhow!("elem_ge: shape mismatch between inputs"));
+            return Err(anyhow!("elem_ge: shape mismatch between inputs").into());
         }
         let len = entry_a.len;
         let handle = if len == 0 {
-            let out = self.with_emission(|emission, _| {
-                self.create_storage_buffer(emission, 0, "runmat-elem-ge-empty")
-            })??;
-            self.register_logical_buffer(out, entry_a.shape, 0, BufferUsageClass::Generic)?
+            let out = self
+                .with_emission(|emission, _| {
+                    self.create_storage_buffer(emission, 0, "runmat-elem-ge-empty")
+                })?
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error)
+                        .with_unproven_effects()
+                })?;
+            self.register_logical_buffer(out, entry_a.shape, 0, BufferUsageClass::Generic)
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error).after_effect()
+                })?
         } else {
             let shader = match self.precision {
                 NumericPrecision::F64 => ELEM_GE_SHADER_F64,
@@ -870,7 +994,10 @@ impl WgpuProvider {
                 &[a.clone(), b.clone()],
                 &entry_a.shape,
                 len,
-            )?
+            )
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })?
         };
         Ok(handle)
     }
@@ -1107,54 +1234,157 @@ impl WgpuProvider {
         op: crate::backend::wgpu::types::UnaryOpCode,
         a: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        self.unary_op_exec_recorded(op, a, None)
+    }
+
+    pub(super) fn unary_std_selected_exec(
+        &self,
+        op: crate::backend::wgpu::types::UnaryOpCode,
+        a: &GpuTensorHandle,
+        validated: &super::validated_fusion::ValidatedFusionPipeline,
+        effect: &std::cell::Cell<bool>,
+    ) -> Result<GpuTensorHandle> {
         if std::env::var("RUNMAT_DISABLE_UNARY").is_ok() {
             return Err(anyhow!("unary ops disabled via RUNMAT_DISABLE_UNARY"));
         }
-        let entry_a = self.get_entry(a)?;
+        ensure!(
+            matches!(
+                op,
+                crate::backend::wgpu::types::UnaryOpCode::Abs
+                    | crate::backend::wgpu::types::UnaryOpCode::Sqrt
+            ),
+            "std selected unary operation is not admitted"
+        );
+        let entry = self.get_entry(a)?;
+        let shader = real_unary_shader(op, entry.precision);
+        let frame = self.plan_ordinary_single_fusion(
+            &shader,
+            std::slice::from_ref(a),
+            &entry.shape,
+            entry.len,
+            match entry.precision {
+                NumericPrecision::F32 => runmat_accelerate_api::ProviderElementType::F32,
+                NumericPrecision::F64 => runmat_accelerate_api::ProviderElementType::F64,
+            },
+        )?;
+        self.fused_elementwise_typed_exec_recorded(
+            &shader,
+            std::slice::from_ref(a),
+            FusedElementwiseWork {
+                output_shape: &entry.shape,
+                len: entry.len,
+                representation: FusedElementwiseRepresentation {
+                    input_precision: entry.precision,
+                    output_precision: entry.precision,
+                    output_storage: GpuTensorStorage::Real,
+                    logical_output: false,
+                },
+                uniform_abi: None,
+            },
+            |_| {
+                effect.set(true);
+                Ok(())
+            },
+            SingleFusionEvidence::Validated {
+                frame: &frame,
+                pipeline: validated,
+            },
+        )
+    }
+
+    fn unary_op_exec_recorded(
+        &self,
+        op: crate::backend::wgpu::types::UnaryOpCode,
+        a: &GpuTensorHandle,
+        observed: Option<&RefCell<RealObserved>>,
+    ) -> Result<GpuTensorHandle> {
+        if std::env::var("RUNMAT_DISABLE_UNARY").is_ok() {
+            return Err(anyhow!("unary ops disabled via RUNMAT_DISABLE_UNARY"));
+        }
+        let entry_a = self.real_floating_entry(a)?;
         ensure!(
             self.effective_storage_for_entry(a, &entry_a)
                 != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
             "real unary operation does not support complex-interleaved buffers"
         );
         let len = entry_a.len;
-        let shader = real_unary_shader(op, self.precision);
-        self.fused_elementwise_with_telemetry_exec(
+        if len != 0
+            && crate::backend::wgpu::shaders::elementwise::real_unary_requires_ieee_words(op)
+        {
+            self.require_ieee_words(entry_a.precision)?;
+        }
+        let shader = real_unary_shader(op, entry_a.precision);
+        let start = Instant::now();
+        let result = self.fused_elementwise_typed_exec_recorded(
             &shader,
             std::slice::from_ref(a),
-            &entry_a.shape,
-            len,
-        )
+            FusedElementwiseWork {
+                output_shape: &entry_a.shape,
+                len,
+                uniform_abi: Some(FusionUniformAbi::Simple),
+                representation: FusedElementwiseRepresentation {
+                    input_precision: entry_a.precision,
+                    output_precision: entry_a.precision,
+                    output_storage: GpuTensorStorage::Real,
+                    logical_output: false,
+                },
+            },
+            |_| Ok(()),
+            SingleFusionEvidence::Legacy {
+                observed,
+                prepared: None,
+            },
+        );
+        if result.is_ok() {
+            self.telemetry
+                .record_fused_elementwise_duration(start.elapsed());
+        }
+        result
     }
     /// Exact upper bound on the explicitly allocated output and per-chunk
     /// scalar uniforms. The buffer pool may reuse storage, which only lowers
     /// new allocation demand; pending submissions can retain every chunk.
     pub(crate) fn scalar_op_buffer_demand(&self, len: u64) -> Option<u64> {
-        let element_size = self.element_size as u64;
+        self.scalar_op_buffer_demand_for_precision(len, self.precision)
+    }
+
+    fn scalar_op_buffer_demand_for_precision(
+        &self,
+        len: u64,
+        precision: NumericPrecision,
+    ) -> Option<u64> {
+        let element_size = match precision {
+            NumericPrecision::F32 => 4,
+            NumericPrecision::F64 => 8,
+        };
         let output = len.max(1).checked_mul(element_size)?;
         if len == 0 {
             return Some(output);
         }
-        let capacity = u64::from(crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS)
-            .checked_mul(u64::from(crate::backend::wgpu::config::WORKGROUP_SIZE))?;
-        let size = match self.precision {
-            NumericPrecision::F64 => {
-                std::mem::size_of::<crate::backend::wgpu::params::ScalarParamsF64>() as u64
-            }
-            NumericPrecision::F32 => {
-                std::mem::size_of::<crate::backend::wgpu::params::ScalarParamsF32>() as u64
-            }
-        };
-        let uniform = size.max(1).div_ceil(256).checked_mul(256)?;
+        let launch = self.real_scalar_pipeline(precision).ok()?.scalar_launch()?;
+        let capacity = launch.chunk_capacity()?;
+        let uniform = launch.uniform_requested_bytes();
         output.checked_add(len.div_ceil(capacity).checked_mul(uniform)?)
     }
 
     pub(crate) fn binary_same_shape_buffer_demand(&self, len: u64) -> Option<u64> {
-        let output = len.max(1).checked_mul(self.element_size as u64)?;
+        self.binary_same_shape_buffer_demand_for_precision(len, self.precision)
+    }
+
+    fn binary_same_shape_buffer_demand_for_precision(
+        &self,
+        len: u64,
+        precision: NumericPrecision,
+    ) -> Option<u64> {
+        let element_bytes = match precision {
+            NumericPrecision::F32 => 4,
+            NumericPrecision::F64 => 8,
+        };
+        let output = len.max(1).checked_mul(element_bytes)?;
         if len == 0 {
             return Some(output);
         }
-        let capacity = u64::from(crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS)
-            .checked_mul(u64::from(crate::backend::wgpu::config::WORKGROUP_SIZE))?;
+        let capacity = u64::try_from(self.binary_linear_launch().ok()?.chunk_capacity()?).ok()?;
         let uniform = (std::mem::size_of::<crate::backend::wgpu::params::LenOpParams>() as u64)
             .max(1)
             .div_ceil(256)
@@ -1163,7 +1393,19 @@ impl WgpuProvider {
     }
 
     pub(crate) fn binary_broadcast_buffer_demand(&self, len: u64) -> Option<u64> {
-        broadcast_plan::BroadcastRoute::requested_buffer_bound(len, self.element_size as u64)
+        self.binary_broadcast_buffer_demand_for_precision(len, self.precision)
+    }
+
+    fn binary_broadcast_buffer_demand_for_precision(
+        &self,
+        len: u64,
+        precision: NumericPrecision,
+    ) -> Option<u64> {
+        let element_bytes = match precision {
+            NumericPrecision::F32 => 4,
+            NumericPrecision::F64 => 8,
+        };
+        broadcast_plan::BroadcastRoute::requested_buffer_bound(len, element_bytes)
     }
 
     pub(crate) fn scalar_op_exec(
@@ -1172,7 +1414,29 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         scalar: f64,
     ) -> Result<GpuTensorHandle> {
-        let entry_a = self.get_entry(a)?;
+        self.scalar_op_exec_recorded(op, a, scalar, None)
+    }
+
+    fn scalar_op_exec_recorded(
+        &self,
+        op: crate::backend::wgpu::types::ScalarOpCode,
+        a: &GpuTensorHandle,
+        scalar: f64,
+        observed: Option<&RefCell<RealObserved>>,
+    ) -> Result<GpuTensorHandle> {
+        let entry_a = if runmat_accelerate_api::handle_storage(a)
+            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        {
+            self.get_entry(a)?
+        } else {
+            self.real_floating_entry(a)?
+        };
+        let selected_precision = entry_a.precision;
+        let scalar_precision = match selected_precision {
+            NumericPrecision::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+            NumericPrecision::F64 => runmat_accelerate_api::ProviderPrecision::F64,
+        };
+        scalar_control::admit(op, scalar_precision, scalar)?;
         if runmat_accelerate_api::handle_storage(a)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         {
@@ -1220,24 +1484,42 @@ impl WgpuProvider {
             return result;
         }
         let len = entry_a.len;
+        let pipeline = self.real_scalar_pipeline_for_operation(op, selected_precision)?;
+        let launch = pipeline
+            .scalar_launch()
+            .ok_or_else(|| anyhow!("scalar pipeline has no frozen launch recipe"))?;
+        let chunk_capacity = usize::try_from(
+            launch
+                .chunk_capacity()
+                .ok_or_else(|| anyhow!("scalar launch capacity overflow"))?,
+        )?;
+        self.validate_real_floating_output_extent(len, selected_precision)?;
+        self.scalar_op_buffer_demand_for_precision(u64::try_from(len)?, selected_precision)
+            .ok_or_else(|| anyhow!("selected real scalar resource extent overflow"))?;
         let (out_buffer, start) = self.with_emission(|emission, pending| -> Result<_> {
-            let out_buffer =
-                self.create_storage_buffer_checked(emission, len, "runmat-scalar-out")?;
+            let out_buffer = self.create_storage_buffer_checked_with_element_size(
+                emission,
+                len,
+                "runmat-scalar-out",
+                BufferUsageClass::Generic,
+                entry_a.element_type.element_size(),
+            )?;
+            if let Some(observed) = observed {
+                observed.borrow_mut().output(&out_buffer);
+            }
             if len == 0 {
                 return Ok((out_buffer, None));
             }
             if len > (u32::MAX as usize) {
                 return Err(gpu_dispatch_length_limit_error("scalar_op", len));
             }
-            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
             let mut offset = 0usize;
             let start = Instant::now();
             while offset < len {
                 let remaining = len - offset;
                 let chunk_len = remaining.min(chunk_capacity);
-                let params_buffer = match self.provider_precision_exec() {
-                    runmat_accelerate_api::ProviderPrecision::F64 => {
+                let params_buffer = match selected_precision {
+                    NumericPrecision::F64 => {
                         let params = crate::backend::wgpu::params::ScalarParamsF64 {
                             len: chunk_len as u32,
                             op: op as u32,
@@ -1262,7 +1544,7 @@ impl WgpuProvider {
                             .write_buffer(buf.as_ref(), 0, bytes_of(&params));
                         buf
                     }
-                    _ => {
+                    NumericPrecision::F32 => {
                         let params = crate::backend::wgpu::params::ScalarParamsF32 {
                             len: chunk_len as u32,
                             op: op as u32,
@@ -1286,11 +1568,14 @@ impl WgpuProvider {
                         buf
                     }
                 };
+                if let Some(observed) = observed {
+                    observed.borrow_mut().uniform(&params_buffer)?;
+                }
                 let bind_group = emission
                     .device()
                     .create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("runmat-scalar-bind"),
-                        layout: &self.pipelines.scalar.get(emission)?.layout,
+                        layout: &pipeline.get(emission)?.layout,
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
@@ -1308,25 +1593,69 @@ impl WgpuProvider {
                     });
                 let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
                     chunk_len as u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                    launch.workgroup(),
                 );
                 crate::backend::wgpu::dispatch::elementwise::run(
                     emission,
                     pending,
-                    &self.pipelines.scalar.get(emission)?.pipeline,
+                    &pipeline.get(emission)?.pipeline,
                     &bind_group,
                     groups,
                 )?;
+                if let Some(observed) = observed {
+                    observed.borrow_mut().submitted(groups > 0)?;
+                }
                 offset += chunk_len;
             }
             Ok((out_buffer, Some(start)))
         })??;
-        let handle = self.register_existing_buffer(out_buffer, entry_a.shape, len)?;
+        let handle =
+            self.register_real_floating_output(out_buffer, entry_a.shape, len, selected_precision)?;
         if let Some(start) = start {
             self.telemetry
                 .record_fused_elementwise_duration(start.elapsed());
         }
         self.inherit_elementwise_layout(handle, a)
+    }
+
+    pub(crate) async fn binary_op_public_exec(
+        &self,
+        op: crate::backend::wgpu::types::BinaryOpCode,
+        operation_name: &str,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        use crate::backend::wgpu::types::BinaryOpCode;
+        use runmat_accelerate_api::ProviderExecutionError;
+        if std::env::var("RUNMAT_DISABLE_BINARY").is_ok() {
+            return Err(ProviderExecutionError::from(anyhow!(
+                "binary ops disabled via RUNMAT_DISABLE_BINARY"
+            )));
+        }
+        let integer = self.get_entry_raw(a)?.integer_type().is_some()
+            || self.get_entry_raw(b)?.integer_type().is_some();
+        if integer {
+            return match op {
+                BinaryOpCode::Min | BinaryOpCode::Max => {
+                    self.integer_minmax_exec(op, operation_name, a, b).await
+                }
+                BinaryOpCode::Add | BinaryOpCode::Sub | BinaryOpCode::Mul
+                | BinaryOpCode::Div | BinaryOpCode::Pow => {
+                    self.integer_arithmetic_exec(op, operation_name, a, b).await
+                }
+                _ => Err(ProviderExecutionError::from(anyhow!(
+                    "native integer gpuArray arithmetic requires a dedicated integer provider kernel"
+                ))),
+            };
+        }
+        // `get_entry` is the existing precision/class admission owner. Its
+        // Unsupported result is certified before the synchronous emitter can
+        // allocate, so retain it for Runtime's legitimate host fallback.
+        let _ = (self.get_entry(a)?, self.get_entry(b)?);
+        // This inherited synchronous floating route can allocate or submit;
+        // its unphased errors are never certified pre-effect replay causes.
+        self.binary_op_exec(op, a, b)
+            .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())
     }
 
     pub(crate) fn binary_op_exec(
@@ -1335,67 +1664,156 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        self.binary_op_exec_recorded(op, a, b, None, None, None)
+    }
+
+    pub(super) fn binary_std_selected_exec(
+        &self,
+        op: crate::backend::wgpu::types::BinaryOpCode,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+        validated: &super::validated_fusion::ValidatedFusionPipeline,
+        effect: &std::cell::Cell<bool>,
+    ) -> Result<GpuTensorHandle> {
+        ensure!(
+            matches!(
+                op,
+                crate::backend::wgpu::types::BinaryOpCode::Add
+                    | crate::backend::wgpu::types::BinaryOpCode::Sub
+                    | crate::backend::wgpu::types::BinaryOpCode::Mul
+                    | crate::backend::wgpu::types::BinaryOpCode::Div
+            ),
+            "std selected binary operation is not admitted"
+        );
+        let left = self.get_entry(a)?;
+        let right = self.get_entry(b)?;
+        ensure!(
+            left.shape == right.shape
+                && left.precision == self.precision
+                && right.precision == self.precision
+                && left.storage == GpuTensorStorage::Real
+                && right.storage == GpuTensorStorage::Real
+                && left.integer_type().is_none()
+                && right.integer_type().is_none(),
+            "std selected binary operands are not same-shape native real floating tensors"
+        );
+        self.binary_op_exec_recorded(op, a, b, None, Some(validated), Some(effect))
+    }
+
+    pub(super) fn preflight_std_binary_input(&self, input: &GpuTensorHandle) -> Result<()> {
+        let entry = self.get_entry(input)?;
+        let selected = self.real_binary_pipeline(
+            entry.precision,
+            false,
+            crate::backend::wgpu::types::BinaryOpCode::Mul,
+        )?;
+        selected.preflight()?;
+        self.validate_real_floating_output_extent(entry.len, entry.precision)?;
+        self.binary_linear_launch()?
+            .chunk_capacity()
+            .ok_or_else(|| anyhow!("std binary selected launch capacity overflows"))?;
+        self.binary_same_shape_buffer_demand(u64::try_from(entry.len)?)
+            .ok_or_else(|| anyhow!("std binary physical demand overflows"))?;
+        Ok(())
+    }
+
+    fn binary_op_exec_recorded(
+        &self,
+        op: crate::backend::wgpu::types::BinaryOpCode,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+        observed: Option<&RefCell<RealBinaryObserved>>,
+        validated: Option<&super::validated_fusion::ValidatedFusionPipeline>,
+        effect: Option<&std::cell::Cell<bool>>,
+    ) -> Result<GpuTensorHandle> {
         if std::env::var("RUNMAT_DISABLE_BINARY").is_ok() {
             return Err(anyhow!("binary ops disabled via RUNMAT_DISABLE_BINARY"));
         }
-        if self.get_entry_raw(a)?.integer_type().is_some()
-            || self.get_entry_raw(b)?.integer_type().is_some()
-        {
-            return match op {
-                crate::backend::wgpu::types::BinaryOpCode::Add => {
-                    self.integer_arithmetic_exec(0, "elem_add", a, b)
-                }
-                crate::backend::wgpu::types::BinaryOpCode::Sub => {
-                    self.integer_arithmetic_exec(1, "elem_sub", a, b)
-                }
-                crate::backend::wgpu::types::BinaryOpCode::Mul => {
-                    self.integer_arithmetic_exec(2, "elem_mul", a, b)
-                }
-                crate::backend::wgpu::types::BinaryOpCode::Div => {
-                    self.integer_arithmetic_exec(3, "elem_div", a, b)
-                }
-                crate::backend::wgpu::types::BinaryOpCode::Pow => {
-                    self.integer_arithmetic_exec(4, "elem_pow", a, b)
-                }
-                crate::backend::wgpu::types::BinaryOpCode::Min => {
-                    self.integer_minmax_exec(true, "elem_min", a, b)
-                }
-                crate::backend::wgpu::types::BinaryOpCode::Max => {
-                    self.integer_minmax_exec(false, "elem_max", a, b)
-                }
-                _ => Err(anyhow!(
-                    "native integer gpuArray arithmetic requires a dedicated integer provider kernel"
-                )),
-            };
-        }
-        let entry_a = self.get_entry(a)?;
-        let entry_b = self.get_entry(b)?;
-        let storage_a = self.effective_storage_for_entry(a, &entry_a);
-        let storage_b = self.effective_storage_for_entry(b, &entry_b);
+        // The ordinary public integer hooks prepare asynchronously before effects.
+        // Internal synchronous users of this routine admit floating storage via
+        // get_entry; they cannot create an unvalidated cold integer pipeline.
+        let _ = (self.get_entry(a)?, self.get_entry(b)?);
+        let raw_a = self.get_entry_raw(a)?;
+        let raw_b = self.get_entry_raw(b)?;
+        let storage_a = self.effective_storage_for_entry(a, &raw_a);
+        let storage_b = self.effective_storage_for_entry(b, &raw_b);
         if storage_a == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
             || storage_b == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         {
+            let entry_a = self.get_entry(a)?;
+            let entry_b = self.get_entry(b)?;
             if entry_a.shape != entry_b.shape {
                 return self.complex_binary_broadcast_exec(op, a, b, &entry_a, &entry_b);
             }
             return self.complex_binary_op_exec(op, a, b, &entry_a, &entry_b);
         }
+        let entry_a = self.real_floating_entry(a)?;
+        let entry_b = self.real_floating_entry(b)?;
+        ensure!(
+            entry_a.precision == entry_b.precision,
+            "real binary operands require the same physical precision"
+        );
+        if validated.is_some() {
+            ensure!(
+                entry_a.precision == self.precision && entry_a.shape == entry_b.shape,
+                "std selected binary frame changed physical precision or shape"
+            );
+        }
+        let selected_precision = entry_a.precision;
         if entry_a.shape != entry_b.shape {
             // Attempt general N-D broadcasted binary op
-            return self.binary_op_broadcast_exec(op, a, b);
+            return self.binary_op_broadcast_exec_recorded(op, a, b, observed);
         }
         let len = entry_a.len;
+        let selected_max = if op == crate::backend::wgpu::types::BinaryOpCode::Max {
+            let pipeline = self.real_binary_pipeline(selected_precision, false, op)?;
+            pipeline.preflight()?;
+            Some(pipeline)
+        } else {
+            None
+        };
         if len == 0 {
             let out_buffer = self.with_emission(|emission, _| {
-                self.create_storage_buffer(emission, 0, "runmat-binary-out")
+                self.create_storage_buffer_checked_with_element_size(
+                    emission,
+                    0,
+                    "runmat-binary-out",
+                    BufferUsageClass::Generic,
+                    entry_a.element_type.element_size(),
+                )
             })??;
-            return self.register_existing_buffer(out_buffer, entry_a.shape, entry_a.len);
+            if let Some(effect) = effect {
+                effect.set(true);
+            }
+            if let Some(observed) = observed {
+                observed.borrow_mut().output(&out_buffer);
+            }
+            return self.register_real_floating_output(
+                out_buffer,
+                entry_a.shape,
+                entry_a.len,
+                selected_precision,
+            );
         }
         if len > (u32::MAX as usize) {
             return Err(gpu_dispatch_length_limit_error("binary_op", len));
         }
+        let pipeline = match selected_max {
+            Some(pipeline) => pipeline,
+            None => {
+                let pipeline = self.real_binary_pipeline(selected_precision, false, op)?;
+                pipeline.preflight()?;
+                pipeline
+            }
+        };
+        self.validate_real_floating_output_extent(len, selected_precision)?;
+        self.binary_same_shape_buffer_demand_for_precision(u64::try_from(len)?, selected_precision)
+            .ok_or_else(|| anyhow!("selected real binary resource extent overflow"))?;
         let start = Instant::now();
         self.with_emission(|emission, pending| -> Result<()> {
+            if let Some(observed) = observed {
+                observed.borrow_mut().begin_effect();
+            }
             let mut enc =
                 emission
                     .device()
@@ -1406,9 +1824,20 @@ impl WgpuProvider {
                 label: Some("runmat-binary-noop-pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pipelines.binary.get(emission)?.pipeline);
+            pass.set_pipeline(match validated {
+                Some(selected) => selected.pipeline.as_ref(),
+                None => &pipeline.get(emission)?.pipeline,
+            });
             drop(pass);
             self.submit(emission, pending, enc)?;
+            if let Some(effect) = effect {
+                effect.set(true);
+            }
+            if let Some(observed) = observed {
+                observed
+                    .borrow_mut()
+                    .submitted(RealBinarySubmission::PreOutput)?;
+            }
             Ok(())
         })??;
         self.access.poll(wgpu::Maintain::Poll);
@@ -1421,11 +1850,29 @@ impl WgpuProvider {
                             label: Some("runmat-binary-flush-gap"),
                         });
                 self.submit(emission, pending, enc)?;
+                if let Some(observed) = observed {
+                    observed
+                        .borrow_mut()
+                        .submitted(RealBinarySubmission::PreOutput)?;
+                }
             }
-            let out_buffer =
-                self.create_storage_buffer_checked(emission, len, "runmat-binary-out")?;
-            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+            let out_buffer = self.create_storage_buffer_checked_with_element_size(
+                emission,
+                len,
+                "runmat-binary-out",
+                BufferUsageClass::Generic,
+                entry_a.element_type.element_size(),
+            )?;
+            if let Some(effect) = effect {
+                effect.set(true);
+            }
+            if let Some(observed) = observed {
+                observed.borrow_mut().output(&out_buffer);
+            }
+            let chunk_capacity = self
+                .binary_linear_launch()?
+                .chunk_capacity()
+                .ok_or_else(|| anyhow!("selected real binary dispatch capacity overflow"))?;
             let mut offset = 0usize;
             while offset < len {
                 let remaining = len - offset;
@@ -1442,6 +1889,9 @@ impl WgpuProvider {
                     std::mem::size_of::<crate::backend::wgpu::params::LenOpParams>() as u64,
                     "runmat-binary-params",
                 )?;
+                if let Some(observed) = observed {
+                    observed.borrow_mut().uniform(&params_buffer)?;
+                }
                 emission
                     .queue()
                     .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
@@ -1449,7 +1899,10 @@ impl WgpuProvider {
                     .device()
                     .create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("runmat-binary-bind"),
-                        layout: &self.pipelines.binary.get(emission)?.layout,
+                        layout: match validated {
+                            Some(selected) => selected.layout.as_ref(),
+                            None => &pipeline.get(emission)?.layout,
+                        },
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
@@ -1476,15 +1929,24 @@ impl WgpuProvider {
                 crate::backend::wgpu::dispatch::elementwise::run(
                     emission,
                     pending,
-                    &self.pipelines.binary.get(emission)?.pipeline,
+                    match validated {
+                        Some(selected) => selected.pipeline.as_ref(),
+                        None => &pipeline.get(emission)?.pipeline,
+                    },
                     &bind_group,
                     groups,
                 )?;
+                if let Some(observed) = observed {
+                    observed
+                        .borrow_mut()
+                        .submitted(RealBinarySubmission::Dispatch)?;
+                }
                 offset += chunk_len;
             }
             Ok(out_buffer)
         })??;
-        let handle = self.register_existing_buffer(out_buffer, entry_a.shape, len)?;
+        let handle =
+            self.register_real_floating_output(out_buffer, entry_a.shape, len, selected_precision)?;
         self.telemetry
             .record_fused_elementwise_duration(start.elapsed());
         self.inherit_elementwise_layout(handle, a)
@@ -1652,30 +2114,58 @@ impl WgpuProvider {
         Ok(handle)
     }
 
-    fn binary_op_broadcast_exec(
+    fn binary_op_broadcast_exec_recorded(
         &self,
         op: crate::backend::wgpu::types::BinaryOpCode,
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
+        observed: Option<&RefCell<RealBinaryObserved>>,
     ) -> Result<GpuTensorHandle> {
         use crate::backend::wgpu::params::{AlignedU32, BinaryBroadcastParams, BCAST_MAX_RANK};
-        let entry_a = self.get_entry(a)?;
-        let entry_b = self.get_entry(b)?;
+        let entry_a = self.real_floating_entry(a)?;
+        let entry_b = self.real_floating_entry(b)?;
+        ensure!(
+            entry_a.precision == entry_b.precision,
+            "real broadcast operands require the same physical precision"
+        );
+        let selected_precision = entry_a.precision;
+        let pipeline = self.real_binary_pipeline(selected_precision, true, op)?;
         // Compute broadcasted output shape
-        let route = broadcast_plan::BroadcastRoute::new(
+        let route = broadcast_plan::BroadcastRoute::with_enabled_limit(
             &entry_a.shape,
             &entry_b.shape,
             BCAST_MAX_RANK,
-            self.element_size as u64,
+            entry_a.element_type.element_size() as u64,
+            self.adapter_limits.max_compute_workgroups_per_dimension,
         )?;
         let (shape_a, shape_b, out_shape) = (&route.shape_a, &route.shape_b, &route.out_shape);
         let rank = out_shape.len();
         let len = route.len;
+        if len != 0 || op == crate::backend::wgpu::types::BinaryOpCode::Max {
+            pipeline.preflight()?;
+        }
+        self.validate_real_floating_output_extent(len, selected_precision)?;
+        self.binary_broadcast_buffer_demand_for_precision(u64::try_from(len)?, selected_precision)
+            .ok_or_else(|| anyhow!("selected real broadcast resource extent overflow"))?;
         if len == 0 {
             let out_buffer = self.with_emission(|emission, _| {
-                self.create_storage_buffer(emission, 0, "runmat-binary-bcast-out")
+                self.create_storage_buffer_checked_with_element_size(
+                    emission,
+                    0,
+                    "runmat-binary-bcast-out",
+                    BufferUsageClass::Generic,
+                    entry_a.element_type.element_size(),
+                )
             })??;
-            return self.register_existing_buffer(out_buffer, out_shape.clone(), 0);
+            if let Some(observed) = observed {
+                observed.borrow_mut().output(&out_buffer);
+            }
+            return self.register_real_floating_output(
+                out_buffer,
+                out_shape.clone(),
+                0,
+                selected_precision,
+            );
         }
         // Compute strides (column-major)
         let mut stride_a: Vec<u32> = vec![0; rank];
@@ -1693,8 +2183,19 @@ impl WgpuProvider {
 
         // Create output buffer
         let (out_buffer, start) = self.with_emission(|emission, pending| -> Result<_> {
-            let out_buffer =
-                self.create_storage_buffer_checked(emission, len, "runmat-binary-bcast-out")?;
+            if let Some(observed) = observed {
+                observed.borrow_mut().begin_effect();
+            }
+            let out_buffer = self.create_storage_buffer_checked_with_element_size(
+                emission,
+                len,
+                "runmat-binary-bcast-out",
+                BufferUsageClass::Generic,
+                entry_a.element_type.element_size(),
+            )?;
+            if let Some(observed) = observed {
+                observed.borrow_mut().output(&out_buffer);
+            }
             // Prepare params buffer and bind group once; update params per chunk
             let params_size = std::mem::size_of::<BinaryBroadcastParams>() as u64;
             let params_buffer = self.kernel_resources.uniform_buffer(
@@ -1703,7 +2204,10 @@ impl WgpuProvider {
                 params_size,
                 "runmat-binary-bcast-params",
             )?;
-            let bind_group_layout = &self.pipelines.binary_broadcast.get(emission)?.layout;
+            if let Some(observed) = observed {
+                observed.borrow_mut().uniform(&params_buffer)?;
+            }
+            let bind_group_layout = &pipeline.get(emission)?.layout;
             let bind_group = emission
                 .device()
                 .create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1712,11 +2216,11 @@ impl WgpuProvider {
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: self.get_entry(a)?.buffer.as_ref().as_entire_binding(),
+                            resource: entry_a.buffer.as_ref().as_entire_binding(),
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
-                            resource: self.get_entry(b)?.buffer.as_ref().as_entire_binding(),
+                            resource: entry_b.buffer.as_ref().as_entire_binding(),
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
@@ -1764,14 +2268,24 @@ impl WgpuProvider {
                 crate::backend::wgpu::dispatch::elementwise::run(
                     emission,
                     pending,
-                    &self.pipelines.binary_broadcast.get(emission)?.pipeline,
+                    &pipeline.get(emission)?.pipeline,
                     &bind_group,
                     groups,
                 )?;
+                if let Some(observed) = observed {
+                    observed
+                        .borrow_mut()
+                        .submitted(RealBinarySubmission::Dispatch)?;
+                }
             }
             Ok((out_buffer, start))
         })??;
-        let handle = self.register_existing_buffer(out_buffer, out_shape.clone(), len)?;
+        let handle = self.register_real_floating_output(
+            out_buffer,
+            out_shape.clone(),
+            len,
+            selected_precision,
+        )?;
         self.telemetry
             .record_fused_elementwise_duration(start.elapsed());
         Ok(handle)
@@ -1792,6 +2306,7 @@ impl WgpuProvider {
             len,
             FusedElementwiseRepresentation {
                 input_precision: self.precision,
+                output_precision: self.precision,
                 output_storage,
                 logical_output: false,
             },
@@ -1806,106 +2321,354 @@ impl WgpuProvider {
         len: usize,
         representation: FusedElementwiseRepresentation,
     ) -> Result<GpuTensorHandle> {
+        self.fused_elementwise_typed_exec_observed(
+            shader,
+            inputs,
+            output_shape,
+            len,
+            representation,
+            |_| Ok(()),
+        )
+    }
+
+    pub(super) fn fused_elementwise_typed_exec_observed(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        output_shape: &[usize],
+        len: usize,
+        representation: FusedElementwiseRepresentation,
+        mut after_allocation: impl FnMut(&runmat_accelerate_api::WgpuBufferOwner) -> Result<()>,
+    ) -> Result<GpuTensorHandle> {
+        self.fused_elementwise_typed_exec_recorded(
+            shader,
+            inputs,
+            FusedElementwiseWork {
+                output_shape,
+                len,
+                representation,
+                uniform_abi: None,
+            },
+            &mut after_allocation,
+            SingleFusionEvidence::Legacy {
+                observed: None,
+                prepared: None,
+            },
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn fused_elementwise_prepared_exec(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        work: FusedElementwiseWork<'_>,
+        prepared: &FrozenFusionRecipe,
+    ) -> Result<(
+        GpuTensorHandle,
+        runmat_accelerate_api::ProviderRealElementwiseObserved,
+    )> {
+        let (output, resources, _) =
+            self.fused_elementwise_prepared_inner_exec(shader, inputs, work, prepared, false)?;
+        Ok((output, resources))
+    }
+
+    pub(super) fn fused_elementwise_prepared_probe_exec(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        work: FusedElementwiseWork<'_>,
+        prepared: &FrozenFusionRecipe,
+    ) -> Result<(
+        GpuTensorHandle,
+        runmat_accelerate_api::ProviderRealElementwiseObserved,
+        Vec<crate::backend::wgpu::dispatch::observation::ProbeFenceTicket>,
+    )> {
+        self.fused_elementwise_prepared_inner_exec(shader, inputs, work, prepared, true)
+    }
+
+    fn fused_elementwise_prepared_inner_exec(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        work: FusedElementwiseWork<'_>,
+        prepared: &FrozenFusionRecipe,
+        capture_probe_tickets: bool,
+    ) -> Result<(
+        GpuTensorHandle,
+        runmat_accelerate_api::ProviderRealElementwiseObserved,
+        Vec<crate::backend::wgpu::dispatch::observation::ProbeFenceTicket>,
+    )> {
+        let observed = RefCell::new(RealObserved {
+            capture_probe_tickets,
+            ..RealObserved::default()
+        });
+        let output = self.fused_elementwise_typed_exec_recorded(
+            shader,
+            inputs,
+            work,
+            |_| Ok(()),
+            SingleFusionEvidence::Legacy {
+                observed: Some(&observed),
+                prepared: Some(prepared),
+            },
+        )?;
+        prepared.require(&observed.borrow().resources)?;
+        let observed = observed.into_inner();
+        Ok((output, observed.resources, observed.probe_tickets))
+    }
+
+    pub(super) fn fused_elementwise_validated_exec(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        output_shape: &[usize],
+        len: usize,
+        frame: &SingleFrame,
+        validated: &super::validated_fusion::ValidatedFusionPipeline,
+    ) -> Result<GpuTensorHandle> {
+        self.fused_elementwise_typed_exec_recorded(
+            shader,
+            inputs,
+            FusedElementwiseWork {
+                output_shape,
+                len,
+                representation: FusedElementwiseRepresentation {
+                    input_precision: self.precision,
+                    output_precision: self.precision,
+                    output_storage: GpuTensorStorage::Real,
+                    logical_output: frame.logical_output,
+                },
+                uniform_abi: None,
+            },
+            |_| Ok(()),
+            SingleFusionEvidence::Validated {
+                frame,
+                pipeline: validated,
+            },
+        )
+    }
+
+    fn fused_elementwise_typed_exec_recorded(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        work: FusedElementwiseWork<'_>,
+        mut after_allocation: impl FnMut(&runmat_accelerate_api::WgpuBufferOwner) -> Result<()>,
+        evidence: SingleFusionEvidence<'_>,
+    ) -> Result<GpuTensorHandle> {
+        let (observed, prepared, validated) = match evidence {
+            SingleFusionEvidence::Legacy { observed, prepared } => (observed, prepared, None),
+            SingleFusionEvidence::Validated { frame, pipeline } => {
+                (None, None, Some((frame, pipeline)))
+            }
+        };
+        let FusedElementwiseWork {
+            output_shape,
+            len,
+            representation,
+            uniform_abi,
+        } = work;
         let output_storage = representation.output_storage;
-        if inputs.is_empty() {
-            return Err(anyhow!("fused_elementwise: no inputs"));
+        let validated_frame = validated.map(|(frame, _)| frame);
+        if validated_frame.is_none() {
+            if inputs.is_empty() {
+                return Err(anyhow!("fused_elementwise: no inputs"));
+            }
+            if len > u32::MAX as usize {
+                return Err(anyhow!("fused_elementwise: tensor too large"));
+            }
+            fusion_recipe::validate_output_words(output_shape, len, &representation)?;
         }
-        if len > u32::MAX as usize {
-            return Err(anyhow!("fused_elementwise: tensor too large"));
+        let derived = uniform_abi
+            .filter(|_| validated_frame.is_none())
+            .map(|_| {
+                FrozenFusionRecipe::plan(
+                    shader,
+                    inputs.len(),
+                    &work,
+                    self.linear_launch,
+                    &self.adapter_limits,
+                )
+            })
+            .transpose()?;
+        if let Some(prepared) = prepared {
+            ensure!(
+                derived
+                    .as_ref()
+                    .is_some_and(|derived| prepared.same_work(derived)),
+                "fused_elementwise: prepared physical work changed before execution"
+            );
         }
-        let workgroup_size = self.workgroup_config.scalar;
-        let chunk_capacity =
-            crate::backend::wgpu::config::elementwise_chunk_capacity(workgroup_size)
-                .ok_or_else(|| anyhow!("fused_elementwise: workgroup size is zero"))?
-                as usize;
+        let frozen = validated_frame
+            .map(|frame| &frame.recipe)
+            .or(prepared)
+            .or(derived.as_ref());
+        let launch = frozen.map_or(self.linear_launch, FrozenFusionRecipe::launch);
+        let chunk_capacity = launch
+            .chunk_capacity()
+            .ok_or_else(|| anyhow!("fused_elementwise: launch capacity overflows"))?;
         // Freeze the selector for the shader, cache identity, and dispatch. The
         // generic shader helper must not re-read a different @WG@ selection.
-        let recipe = super::pipeline_recipe::PipelineRecipe::fusion(
-            shader,
-            inputs.len(),
-            super::pipeline_recipe::FusionPipelineLayout::Single,
-            workgroup_size,
-        );
+        let legacy_recipe = if frozen.is_none() {
+            Some(super::pipeline_recipe::PipelineRecipe::fusion(
+                shader,
+                inputs.len(),
+                super::pipeline_recipe::FusionPipelineLayout::Single,
+                launch.workgroup(),
+            ))
+        } else {
+            None
+        };
+        let recipe = frozen
+            .map(FrozenFusionRecipe::pipeline)
+            .or(legacy_recipe.as_ref())
+            .expect("typed or legacy fusion recipe");
+        if let Some((frame, validated)) = validated {
+            frame.require_execution(validated, inputs.len(), output_shape, len, &representation)?;
+        }
         let shader = recipe.shader.as_str();
-        let storage_bindings = checked_binding_count("fused_elementwise", inputs.len(), 1)?;
-        let total_bindings = checked_binding_count("fused_elementwise", inputs.len(), 2)?;
-        validate_compute_binding_counts(
-            "fused_elementwise",
-            storage_bindings,
-            total_bindings,
-            &self.adapter_limits,
-        )?;
-        let entries = inputs
-            .iter()
-            .map(|handle| {
-                if representation.input_precision == self.precision {
-                    return self.get_entry(handle);
-                }
-                ensure!(
-                    representation.input_precision == NumericPrecision::F32
-                        && self.precision == NumericPrecision::F64,
-                    "fused input precision cannot be represented exactly"
-                );
-                let entry = self.get_entry_raw(handle)?;
-                ensure!(
-                    entry.element_type == runmat_accelerate_api::NumericElementType::F32
-                        && entry.precision == NumericPrecision::F32
-                        && entry.storage == GpuTensorStorage::Real
-                        && handle.descriptor().element_type == Some(entry.element_type)
-                        && handle.descriptor().storage == Some(GpuTensorStorage::Real)
-                        && !runmat_accelerate_api::handle_is_logical(handle),
-                    "fused typed input does not match its shader ABI"
-                );
-                Ok(entry)
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let broadcast_mode = shader.contains("out_shape") || shader.contains("a_shape");
-        let layouts = if broadcast_mode {
+        let (storage_bindings, total_bindings) = if let Some(frame) = validated_frame {
+            (frame.storage_bindings, frame.total_bindings)
+        } else {
+            let storage_bindings = checked_binding_count("fused_elementwise", inputs.len(), 1)?;
+            let total = checked_binding_count("fused_elementwise", inputs.len(), 2)?;
+            validate_compute_binding_counts(
+                "fused_elementwise",
+                storage_bindings,
+                total,
+                &self.adapter_limits,
+            )?;
+            (storage_bindings, total)
+        };
+        let entries = if let Some(frame) = validated_frame {
+            frame.entries.clone()
+        } else {
             inputs
                 .iter()
-                .zip(&entries)
-                .map(|(handle, entry)| {
-                    super::backend_shared::fusion_operand_layout(handle, entry, output_shape)
+                .map(|handle| {
+                    if representation.input_precision == self.precision {
+                        return self.get_entry(handle);
+                    }
+                    ensure!(
+                        representation.input_precision == NumericPrecision::F32
+                            && self.precision == NumericPrecision::F64,
+                        "fused input precision cannot be represented exactly"
+                    );
+                    let entry = self.get_entry_raw(handle)?;
+                    ensure!(
+                        entry.element_type == runmat_accelerate_api::NumericElementType::F32
+                            && entry.precision == NumericPrecision::F32
+                            && entry.storage == GpuTensorStorage::Real
+                            && handle.descriptor().element_type == Some(entry.element_type)
+                            && handle.descriptor().storage == Some(GpuTensorStorage::Real)
+                            && !runmat_accelerate_api::handle_is_logical(handle),
+                        "fused typed input does not match its shader ABI"
+                    );
+                    Ok(entry)
                 })
                 .collect::<Result<Vec<_>>>()?
-        } else {
-            if inputs
-                .iter()
-                .any(runmat_accelerate_api::handle_is_transposed)
-            {
-                return Err(runmat_accelerate_api::unsupported_provider_operation(
-                    "linear fused shader does not support a lazy transpose",
-                ));
+        };
+        let abi = match frozen {
+            Some(frozen) => frozen.uniform_abi(),
+            // Legacy shader inspection does not mint a physical recipe/receipt.
+            None => {
+                if shader.contains("out_shape") || shader.contains("a_shape") {
+                    FusionUniformAbi::Broadcast
+                } else {
+                    FusionUniformAbi::Simple
+                }
             }
-            Vec::new()
+        };
+        let layouts = if let Some(frame) = validated_frame {
+            frame.layouts.clone()
+        } else {
+            match abi {
+                FusionUniformAbi::Broadcast => inputs
+                    .iter()
+                    .zip(&entries)
+                    .map(|(handle, entry)| {
+                        super::backend_shared::fusion_operand_layout(handle, entry, output_shape)
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+                FusionUniformAbi::Simple => {
+                    if inputs
+                        .iter()
+                        .any(runmat_accelerate_api::handle_is_transposed)
+                    {
+                        return Err(runmat_accelerate_api::unsupported_provider_operation(
+                            "linear fused shader does not support a lazy transpose",
+                        ));
+                    }
+                    Vec::new()
+                }
+            }
         };
         let (output_buffer, bind_group_layout, pipeline) =
             self.with_emission(|emission, pending| -> Result<_> {
-                let (output_buffer, _) = self.create_storage_buffer_for_usage(
+                if let Some(frame) = validated_frame {
+                    for (handle, prepared) in inputs.iter().zip(&frame.entries) {
+                        let live = self.get_entry(handle)?;
+                        ensure!(
+                            runmat_accelerate_api::WgpuBufferOwner::ptr_eq(
+                                &live.buffer,
+                                &prepared.buffer,
+                            ),
+                            "validated fused input changed before emission"
+                        );
+                    }
+                }
+                let output_element_size = match representation.output_precision {
+                    NumericPrecision::F32 => 4,
+                    NumericPrecision::F64 => 8,
+                };
+                let output_buffer = self.create_storage_buffer_checked_with_element_size(
                     emission,
-                    BufferUsageClass::FusionOut,
                     len,
                     "runmat-fusion-output",
+                    BufferUsageClass::FusionOut,
+                    output_element_size,
                 )?;
-                let bind_group_layout =
-                    self.cached_fusion_bind_group_layout(emission, inputs.len())?;
-                let pipeline = self.recipe_pipeline(
-                    emission,
-                    &recipe,
-                    bind_group_layout.as_ref(),
-                    "runmat-fusion-pipeline",
-                )?;
+                after_allocation(&output_buffer)?;
+                if let Some(observed) = observed {
+                    if observed.borrow().capture_probe_tickets {
+                        observed.borrow_mut().output_resource_ticket =
+                            self.issue_power_probe_resource_ticket(output_buffer.size())?;
+                    }
+                    observed.borrow_mut().output(&output_buffer);
+                }
+                let (bind_group_layout, pipeline) = if let Some((_, validated)) = validated {
+                    (validated.layout.clone(), validated.pipeline.clone())
+                } else {
+                    let layout = self.cached_fusion_bind_group_layout(emission, inputs.len())?;
+                    let pipeline = self.recipe_pipeline(
+                        emission,
+                        recipe,
+                        layout.as_ref(),
+                        "runmat-fusion-pipeline",
+                    )?;
+                    (layout, pipeline)
+                };
                 // Warmup once
+                let ticket = observed
+                    .filter(|observed| observed.borrow().capture_probe_tickets)
+                    .map(|_| pending.arm_probe_completion());
                 crate::backend::wgpu::dispatch::elementwise::warmup_noop(
                     emission, pending, &pipeline,
                 )?;
+                if let (Some(observed), Some(ticket)) = (observed, ticket) {
+                    observed.borrow_mut().probe_tickets.push(ticket);
+                }
+                if let Some(observed) = observed {
+                    observed.borrow_mut().submitted(false)?;
+                }
                 Ok((output_buffer, bind_group_layout, pipeline))
             })??;
         self.access.poll(wgpu::Maintain::Poll);
         let emitted = self.with_emission(|emission, pending| -> Result<_> {
 
         struct BroadcastUniformState {
-            buffer: Arc<wgpu::Buffer>,
+            buffer: runmat_accelerate_api::WgpuBufferOwner,
             template: Vec<u8>,
         }
 
@@ -1919,18 +2682,15 @@ impl WgpuProvider {
 
         enum FusionUniformState {
             Broadcast(BroadcastUniformState),
-            Simple { buffer: Arc<wgpu::Buffer> },
+            Simple { buffer: runmat_accelerate_api::WgpuBufferOwner },
         }
 
-        let uniform_state = if broadcast_mode {
+        let uniform_state = match abi {
+            FusionUniformAbi::Broadcast => {
             let rank = output_shape.len();
             let max_rank = crate::backend::wgpu::params::BCAST_MAX_RANK;
-            let uniform_bytes = crate::backend::wgpu_geometry::fusion_broadcast_uniform_bytes(
-                inputs.len(),
-                max_rank,
-            )
-            .and_then(|bytes| usize::try_from(bytes).ok())
-            .ok_or_else(|| anyhow!("fused broadcast uniform size overflow"))?;
+            let uniform_bytes = usize::try_from(abi.requested_bytes(inputs.len())?)
+                .map_err(|_| anyhow!("fused broadcast uniform size overflow"))?;
             ensure!(
                 uniform_bytes <= self.adapter_limits.max_uniform_buffer_binding_size as usize,
                 "fused broadcast uniform exceeds adapter limit"
@@ -1961,7 +2721,7 @@ impl WgpuProvider {
                 write_packed_array(&mut bytes, shape_u32);
                 write_packed_array(&mut bytes, strides);
             }
-            let buffer = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
+            let buffer = runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-fusion-params"),
                 size: bytes.len() as u64,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -1974,10 +2734,11 @@ impl WgpuProvider {
                 template: bytes,
             };
             (FusionUniformState::Broadcast(state), uniform_buffer)
-        } else {
-            let buffer = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
+            }
+            FusionUniformAbi::Simple => {
+            let buffer = runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-fusion-params"),
-                size: std::mem::size_of::<crate::backend::wgpu::params::FusionParams>() as u64,
+                    size: abi.requested_bytes(inputs.len())?,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }));
@@ -1987,9 +2748,18 @@ impl WgpuProvider {
                 },
                 buffer,
             )
+            }
         };
 
         let (mut uniform_state, uniform_buffer) = uniform_state;
+        let mut uniform_resource_ticket = if observed
+            .is_some_and(|observed| observed.borrow().capture_probe_tickets)
+        {
+            self.issue_power_probe_resource_ticket(uniform_buffer.size())?
+        } else {
+            None
+        };
+        if let Some(observed) = observed { observed.borrow_mut().uniform(&uniform_buffer)?; }
 
         let mut bind_entries = Vec::with_capacity(total_bindings);
         for (idx, entry) in entries.iter().enumerate() {
@@ -2058,10 +2828,9 @@ impl WgpuProvider {
                 }
             }
 
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                workgroup_size,
-            );
+            let workgroups = launch
+                .dispatch_groups(chunk_len)
+                .ok_or_else(|| anyhow!("fused_elementwise: launch exceeds enabled limits"))?;
             let mut enc =
                 emission.device()
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -2078,7 +2847,19 @@ impl WgpuProvider {
                     pass.dispatch_workgroups(workgroups, 1, 1);
                 }
             }
+            let ticket = observed
+                .filter(|observed| observed.borrow().capture_probe_tickets)
+                .map(|_| pending.arm_probe_completion());
+            if chunk_len == remaining {
+                if let Some(resource) = uniform_resource_ticket.take() {
+                    pending.retain_probe_resource_until_next_submit(resource);
+                }
+            }
             let submission_id = self.submit(emission, pending, enc)?;
+            if let (Some(observed), Some(ticket)) = (observed, ticket) {
+                observed.borrow_mut().probe_tickets.push(ticket);
+            }
+            if let Some(observed) = observed { observed.borrow_mut().submitted(workgroups > 0)?; }
             last_submission_id = Some(submission_id);
             log::trace!(
                 "fusion elementwise chunk complete out_ptr=0x{:x} chunk_len={} offset={} submission_id={}",
@@ -2105,14 +2886,29 @@ impl WgpuProvider {
                 BufferUsageClass::FusionOut,
             )?
         } else {
-            self.register_existing_buffer_with_usage_and_storage(
+            let element_type = match representation.output_precision {
+                NumericPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
+                NumericPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
+            };
+            let allocated_bytes = output_buffer.size();
+            self.register_numeric_buffer(
                 output_buffer,
-                output_shape.to_vec(),
-                len,
-                output_storage,
-                BufferUsageClass::FusionOut,
+                super::backend_types::NumericBufferRegistration {
+                    shape: output_shape.to_vec(),
+                    len,
+                    physical_element_type: element_type,
+                    storage: output_storage,
+                    allocated_bytes,
+                    usage: BufferUsageClass::FusionOut,
+                },
             )?
         };
+        if let Some(observed) = observed {
+            if let Some(ticket) = observed.borrow_mut().output_resource_ticket.take() {
+                self.allocations
+                    .attach_probe_resource_ticket(&handle, ticket)?;
+            }
+        }
         log::trace!(
             "fusion elementwise complete buffer_id={} out_ptr=0x{:x} len={} chunks={} last_submission_id={:?}",
             handle.buffer_id(),
@@ -2126,41 +2922,50 @@ impl WgpuProvider {
         }
         Ok(handle)
     }
-    pub(crate) fn fused_elementwise_multi_exec(
+    pub(super) fn fused_elementwise_multi_validated_exec(
         &self,
         shader: &str,
         inputs: &[GpuTensorHandle],
-        output_shape: &[usize],
-        len: usize,
-        output_classes: &[runmat_accelerate_api::ProviderElementType],
+        frame: &MultiFrame,
+        validated: &super::validated_fusion::ValidatedFusionPipeline,
     ) -> Result<Vec<GpuTensorHandle>> {
-        self.fused_elementwise_multi_layout_exec(FusionMultiRequest {
-            shader,
-            inputs,
-            output_shape,
-            len,
-            output_classes,
-            layout: MultiFusionLayout::Broadcast,
-        })
+        self.fused_elementwise_multi_layout_exec(
+            FusionMultiRequest {
+                shader,
+                inputs,
+                output_shape: &frame.shape,
+                len: frame.len,
+                output_classes: &frame.output_classes,
+                layout: MultiFusionLayout::Broadcast,
+            },
+            Some((frame, validated)),
+        )
     }
 
     pub(super) fn fused_indexed_multi_exec(
         &self,
         request: IndexedFusionMultiRequest<'_>,
     ) -> Result<Vec<GpuTensorHandle>> {
-        self.fused_elementwise_multi_layout_exec(FusionMultiRequest {
-            shader: request.shader,
-            inputs: request.inputs,
-            output_shape: request.output_shape,
-            len: request.len,
-            output_classes: request.output_classes,
-            layout: MultiFusionLayout::Indexed(request.operands),
-        })
+        self.fused_elementwise_multi_layout_exec(
+            FusionMultiRequest {
+                shader: request.shader,
+                inputs: request.inputs,
+                output_shape: request.output_shape,
+                len: request.len,
+                output_classes: request.output_classes,
+                layout: MultiFusionLayout::Indexed(request.operands),
+            },
+            None,
+        )
     }
 
     fn fused_elementwise_multi_layout_exec(
         &self,
         request: FusionMultiRequest<'_>,
+        validated: Option<(
+            &MultiFrame,
+            &super::validated_fusion::ValidatedFusionPipeline,
+        )>,
     ) -> Result<Vec<GpuTensorHandle>> {
         let FusionMultiRequest {
             shader,
@@ -2170,77 +2975,121 @@ impl WgpuProvider {
             output_classes,
             layout,
         } = request;
-        runmat_accelerate_api::validate_fused_output_classes(
-            self.provider_precision_exec(),
-            output_classes,
-        )?;
+        let validated_frame = validated.map(|(frame, _)| frame);
+        if validated_frame.is_none() {
+            runmat_accelerate_api::validate_fused_output_classes(
+                self.provider_precision_exec(),
+                output_classes,
+            )?;
+        }
         let num_outputs = output_classes.len();
-        if inputs.is_empty() {
-            return Err(anyhow!("fused_elementwise_multi: no inputs"));
+        if validated_frame.is_none() {
+            if inputs.is_empty() {
+                return Err(anyhow!("fused_elementwise_multi: no inputs"));
+            }
+            if num_outputs == 0 {
+                return Err(anyhow!("fused_elementwise_multi: num_outputs is zero"));
+            }
+            if len > u32::MAX as usize {
+                return Err(anyhow!("fused_elementwise_multi: tensor too large"));
+            }
         }
-        if num_outputs == 0 {
-            return Err(anyhow!("fused_elementwise_multi: num_outputs is zero"));
-        }
-        if len > u32::MAX as usize {
-            return Err(anyhow!("fused_elementwise_multi: tensor too large"));
-        }
-        let workgroup_size = self.workgroup_config.scalar;
-        let chunk_capacity =
+        let workgroup_size = validated_frame
+            .map(|frame| frame.recipe.workgroup)
+            .unwrap_or(self.workgroup_config.scalar);
+        let chunk_capacity = if let Some(frame) = validated_frame {
+            frame.chunk_capacity
+        } else {
             crate::backend::wgpu::config::elementwise_chunk_capacity(workgroup_size)
                 .ok_or_else(|| anyhow!("fused_elementwise_multi: workgroup size is zero"))?
-                as usize;
-        let recipe = super::pipeline_recipe::PipelineRecipe::fusion(
-            shader,
-            inputs.len(),
-            super::pipeline_recipe::FusionPipelineLayout::Multiple(num_outputs),
-            workgroup_size,
-        );
-        let storage_bindings =
-            checked_binding_count("fused_elementwise_multi", inputs.len(), num_outputs)?;
-        let total_bindings = checked_binding_count("fused_elementwise_multi", storage_bindings, 1)?;
-        validate_compute_binding_counts(
-            "fused_elementwise_multi",
-            storage_bindings,
-            total_bindings,
-            &self.adapter_limits,
-        )?;
+                as usize
+        };
+        let legacy_recipe = validated_frame.is_none().then(|| {
+            super::pipeline_recipe::PipelineRecipe::fusion(
+                shader,
+                inputs.len(),
+                super::pipeline_recipe::FusionPipelineLayout::Multiple(num_outputs),
+                workgroup_size,
+            )
+        });
+        let recipe = validated_frame
+            .map(|frame| &frame.recipe)
+            .or(legacy_recipe.as_ref())
+            .expect("validated or legacy multi recipe");
+        if let Some((frame, validated)) = validated {
+            frame.require_execution(validated, inputs.len(), output_shape, len, output_classes)?;
+        }
+        let (storage_bindings, total_bindings) = if let Some(frame) = validated_frame {
+            (frame.storage_bindings, frame.total_bindings)
+        } else {
+            let storage_bindings =
+                checked_binding_count("fused_elementwise_multi", inputs.len(), num_outputs)?;
+            let total = checked_binding_count("fused_elementwise_multi", storage_bindings, 1)?;
+            validate_compute_binding_counts(
+                "fused_elementwise_multi",
+                storage_bindings,
+                total,
+                &self.adapter_limits,
+            )?;
+            (storage_bindings, total)
+        };
 
-        let entries = inputs
-            .iter()
-            .map(|h| self.get_entry(h))
-            .collect::<Result<Vec<_>>>()?;
-        let layouts = match layout {
-            MultiFusionLayout::Broadcast => inputs
+        let entries = if let Some(frame) = validated_frame {
+            frame.entries.clone()
+        } else {
+            inputs
                 .iter()
-                .zip(&entries)
-                .map(|(handle, entry)| {
-                    super::backend_shared::fusion_operand_layout(handle, entry, output_shape)
-                })
-                .collect::<Result<Vec<_>>>()?,
-            MultiFusionLayout::Indexed(operands) => {
-                let observed = inputs
+                .map(|h| self.get_entry(h))
+                .collect::<Result<Vec<_>>>()?
+        };
+        let layouts = if let Some(frame) = validated_frame {
+            frame.layouts.clone()
+        } else {
+            match layout {
+                MultiFusionLayout::Broadcast => inputs
                     .iter()
                     .zip(&entries)
-                    .map(|(handle, entry)| IndexedFusionObserved {
-                        allocation_shape: &entry.shape,
-                        view_shape: handle.shape(),
-                        lanes: entry.len,
-                        storage: entry.storage,
-                        view_storage: runmat_accelerate_api::handle_storage(handle),
-                        transposed: runmat_accelerate_api::handle_is_transposed(handle),
+                    .map(|(handle, entry)| {
+                        super::backend_shared::fusion_operand_layout(handle, entry, output_shape)
                     })
-                    .collect::<Vec<_>>();
-                validate_indexed_layout(
-                    &observed,
-                    operands,
-                    output_shape,
-                    len,
-                    crate::backend::wgpu::params::BCAST_MAX_RANK,
-                )?
+                    .collect::<Result<Vec<_>>>()?,
+                MultiFusionLayout::Indexed(operands) => {
+                    let observed = inputs
+                        .iter()
+                        .zip(&entries)
+                        .map(|(handle, entry)| IndexedFusionObserved {
+                            allocation_shape: &entry.shape,
+                            view_shape: handle.shape(),
+                            lanes: entry.len,
+                            storage: entry.storage,
+                            view_storage: runmat_accelerate_api::handle_storage(handle),
+                            transposed: runmat_accelerate_api::handle_is_transposed(handle),
+                        })
+                        .collect::<Vec<_>>();
+                    validate_indexed_layout(
+                        &observed,
+                        operands,
+                        output_shape,
+                        len,
+                        crate::backend::wgpu::params::BCAST_MAX_RANK,
+                    )?
+                }
             }
         };
         let (output_buffers, bind_group_layout, pipeline) =
             self.with_emission(|emission, pending| -> Result<_> {
+                if let Some(frame) = validated_frame {
+                    for (handle, prepared) in inputs.iter().zip(&frame.entries) {
+                        let live = self.get_entry(handle)?;
+                        ensure!(
+                            runmat_accelerate_api::WgpuBufferOwner::ptr_eq(
+                                &live.buffer,
+                                &prepared.buffer,
+                            ),
+                            "validated fused input changed before emission"
+                        );
+                    }
+                }
                 let output_buffers: Vec<_> = (0..num_outputs)
                     .map(|_| {
                         self.create_storage_buffer_for_usage(
@@ -2252,26 +3101,31 @@ impl WgpuProvider {
                     })
                     .collect::<Result<Vec<_>>>()?;
 
-                let bind_group_layout = {
-                    let key = format!(
-                        "runmat-fusion-multi-layout-{}-{}",
-                        inputs.len(),
-                        num_outputs
-                    );
-                    self.cached_bind_group_layout(emission, &key, |emission| {
-                        crate::backend::wgpu::bindings::build_fusion_multi_bgl(
-                            emission,
+                let (bind_group_layout, pipeline) = if let Some((_, validated)) = validated {
+                    (validated.layout.clone(), validated.pipeline.clone())
+                } else {
+                    let bind_group_layout = {
+                        let key = format!(
+                            "runmat-fusion-multi-layout-{}-{}",
                             inputs.len(),
-                            num_outputs,
-                        )
-                    })?
+                            num_outputs
+                        );
+                        self.cached_bind_group_layout(emission, &key, |emission| {
+                            crate::backend::wgpu::bindings::build_fusion_multi_bgl(
+                                emission,
+                                inputs.len(),
+                                num_outputs,
+                            )
+                        })?
+                    };
+                    let pipeline = self.recipe_pipeline(
+                        emission,
+                        recipe,
+                        bind_group_layout.as_ref(),
+                        "runmat-fusion-multi-pipeline",
+                    )?;
+                    (bind_group_layout, pipeline)
                 };
-                let pipeline = self.recipe_pipeline(
-                    emission,
-                    &recipe,
-                    bind_group_layout.as_ref(),
-                    "runmat-fusion-multi-pipeline",
-                )?;
                 crate::backend::wgpu::dispatch::elementwise::warmup_noop(
                     emission, pending, &pipeline,
                 )?;
@@ -2280,7 +3134,7 @@ impl WgpuProvider {
         self.access.poll(wgpu::Maintain::Poll);
         let last_submission_id = self.with_emission(|emission, pending| -> Result<_> {
             struct BroadcastUniformState {
-                buffer: Arc<wgpu::Buffer>,
+                buffer: runmat_accelerate_api::WgpuBufferOwner,
                 template: Vec<u8>,
             }
             impl BroadcastUniformState {
@@ -2326,13 +3180,14 @@ impl WgpuProvider {
                 write_packed_array(&mut bytes, shape_u32);
                 write_packed_array(&mut bytes, strides);
             }
-            let uniform_buffer =
-                Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
+            let uniform_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
+                emission.device().create_buffer(&wgpu::BufferDescriptor {
                     label: Some("runmat-fusion-multi-params"),
                     size: bytes.len() as u64,
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
-                }));
+                }),
+            );
             emission
                 .queue()
                 .write_buffer(uniform_buffer.as_ref(), 0, &bytes);
@@ -3763,9 +4618,7 @@ mod tests {
             .elem_add(&complex, &real)
             .await
             .expect_err("shader ABI cannot address this rank");
-        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-            &error
-        ));
+        assert!(error.is_unsupported());
         assert_eq!(provider.telemetry_snapshot(), telemetry);
         assert_eq!(
             provider
@@ -4101,6 +4954,7 @@ mod tests {
             })
             .expect("upload native f64");
 
+        let before = provider.telemetry_snapshot();
         for error in [
             provider.unary_exp(&input).await.expect_err("exp mismatch"),
             provider
@@ -4111,9 +4965,11 @@ mod tests {
             assert!(runmat_accelerate_api::is_unsupported_provider_operation(
                 &error
             ));
-            assert!(error
-                .to_string()
-                .contains("precision-aware provider kernel"));
         }
+        assert_eq!(provider.telemetry_snapshot(), before);
+        assert_eq!(
+            input.descriptor().element_type,
+            Some(runmat_accelerate_api::NumericElementType::F64)
+        );
     }
 }

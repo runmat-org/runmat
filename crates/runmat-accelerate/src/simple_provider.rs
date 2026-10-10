@@ -1,27 +1,27 @@
 use crate::host_lu::{lu_factor_host, LuHostFactors};
 mod allocation_state;
 use allocation_state::{integer_registry, numeric_registry, registry};
-mod power;
-mod select;
-mod elementwise_extrema;
-mod logical;
-mod nan;
-mod logarithms;
-mod remainder;
-mod unary;
 mod arithmetic;
+mod deep_learning_activation;
 mod dimensional_extrema;
-mod median;
 mod dot;
-mod matmul;
-mod numeric_reduction;
-mod integer_floating_sum;
+mod elementwise_extrema;
 mod gather;
 mod iir;
-mod deep_learning_activation;
 mod imfilter;
+mod integer_floating_sum;
+mod logarithms;
+mod logical;
+mod matmul;
+mod median;
+mod nan;
+mod numeric_reduction;
 #[cfg(test)]
 mod owning_routes;
+mod power;
+mod remainder;
+mod select;
+mod unary;
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
 use crate::telemetry::AccelTelemetry;
 use anyhow::{anyhow, ensure, Result};
@@ -1857,6 +1857,22 @@ impl InProcessProvider {
         self.allocate_produced(data, shape, storage, false)
     }
 
+    /// Shared in-process upload routine for the typed raw hook and legacy
+    /// host-upload adapters. The raw hook remains the provider contract.
+    pub fn upload_numeric_host(&self, host: &HostNumericTensorView) -> Result<GpuTensorHandle> {
+        host.validate()?;
+        let data = InProcessNumericData::from_view(host.data);
+        self.telemetry.record_upload_bytes(data.byte_len());
+        let output = self.allocate_numeric_data(data, host.shape.to_vec(), host.storage)?;
+        let operation = runmat_accelerate_api::ProviderOperationIdentity::new("transfer.upload");
+        if let Some(recorder) = runmat_accelerate_api::observation::current_provider_observation()
+            .filter(|recorder| recorder.expects_operation(&operation))
+        {
+            recorder.confirm_provider_execution(self.device_id, &operation);
+        }
+        Ok(output)
+    }
+
     fn allocate_integer_tensor(
         &self,
         data: HostIntegerDataOwned,
@@ -1877,9 +1893,13 @@ impl InProcessProvider {
         input: &GpuTensorHandle,
         target: NumericElementType,
     ) -> Result<GpuTensorHandle> {
+        let storage = input.physical().storage();
         ensure!(
-            input.physical().storage() == GpuTensorStorage::Real,
-            "floating cast requires real storage"
+            matches!(
+                storage,
+                GpuTensorStorage::Real | GpuTensorStorage::ComplexInterleaved
+            ),
+            "floating cast requires real or interleaved complex storage"
         );
         let guard = numeric_registry()
             .lock_for(self.device_id)
@@ -1916,7 +1936,7 @@ impl InProcessProvider {
             }
         };
         drop(guard);
-        self.allocate_numeric_data(output, input.shape().to_vec(), GpuTensorStorage::Real)
+        self.allocate_numeric_data(output, input.shape().to_vec(), storage)
     }
 
     fn complex_constructor_shape(
@@ -4116,18 +4136,11 @@ impl AccelProvider for InProcessProvider {
         ProviderPrecision::F64
     }
 
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> Result<GpuTensorHandle> {
-        host.validate()?;
-        let data = InProcessNumericData::from_view(host.data);
-        self.telemetry.record_upload_bytes(data.byte_len());
-        let output = self.allocate_numeric_data(data, host.shape.to_vec(), host.storage)?;
-        let operation = runmat_accelerate_api::ProviderOperationIdentity::new("transfer.upload");
-        if let Some(recorder) = runmat_accelerate_api::observation::current_provider_observation()
-            .filter(|recorder| recorder.expects_operation(&operation))
-        {
-            recorder.confirm_provider_execution(self.device_id, &operation);
-        }
-        Ok(output)
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        Ok(self.upload_numeric_host(host)?)
     }
 
     fn upload_logical_raw(
@@ -4206,7 +4219,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn upload(&self, host: &HostTensorView) -> Result<GpuTensorHandle> {
-        self.upload_numeric_raw(&HostNumericTensorView {
+        self.upload_numeric_host(&HostNumericTensorView {
             data: HostNumericDataView::F64(host.data),
             shape: host.shape,
             storage: GpuTensorStorage::Real,
@@ -4247,7 +4260,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn upload_integer(&self, host: &HostIntegerTensorView) -> Result<GpuTensorHandle> {
-        self.upload_numeric_raw(&(*host).into())
+        self.upload_numeric_host(&(*host).into())
     }
 
     fn download_integer<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelIntegerDownloadFuture<'a> {
@@ -5227,7 +5240,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn fill_like(&self, prototype: &GpuTensorHandle, value: f64) -> Result<GpuTensorHandle> {
-        if value == 0.0 {
+        if value.to_bits() == 0.0f64.to_bits() {
             return self.zeros_like(prototype, prototype.shape());
         }
         {
@@ -5576,9 +5589,10 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             self.floating_remainder_impl(a, b, runmat_types::FloatingRemainderKind::Remainder)
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from)
         })
     }
 
@@ -5586,9 +5600,10 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             self.floating_remainder_impl(a, b, runmat_types::FloatingRemainderKind::Modulus)
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from)
         })
     }
 
@@ -5596,8 +5611,11 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.native_binary(a, b, arithmetic::Operation::Add) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.native_binary(a, b, arithmetic::Operation::Add)
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from)
+        })
     }
 
     fn select<'a>(
@@ -5613,60 +5631,75 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.native_binary(a, b, arithmetic::Operation::Mul) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.native_binary(a, b, arithmetic::Operation::Mul)
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from)
+        })
     }
 
     fn elem_max<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.native_elem_max(a, b) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.native_elem_max(a, b)
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from)
+        })
     }
 
     fn elem_sub<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.native_binary(a, b, arithmetic::Operation::Sub) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.native_binary(a, b, arithmetic::Operation::Sub)
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from)
+        })
     }
 
     fn elem_div<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.native_binary(a, b, arithmetic::Operation::Div) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.native_binary(a, b, arithmetic::Operation::Div)
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from)
+        })
     }
 
     fn elem_pow<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            require_non_integer_elementwise_inputs("elem_pow", a, b)?;
-            let (out, shape) = {
-                let guard = registry(self.device_id).lock().unwrap();
-                let abuf = guard
-                    .get(a)
-                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-                let bbuf = guard
-                    .get(b)
-                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id()))?;
-                elementwise_pow_broadcast_data(
-                    "elem_pow",
-                    abuf,
-                    runmat_accelerate_api::handle_storage(a),
-                    a.shape(),
-                    bbuf,
-                    runmat_accelerate_api::handle_storage(b),
-                    b.shape(),
-                )?
-            };
-            self.allocate_tensor(out, shape)
+            (|| -> anyhow::Result<GpuTensorHandle> {
+                require_non_integer_elementwise_inputs("elem_pow", a, b)?;
+                let (out, shape) = {
+                    let guard = registry(self.device_id).lock().unwrap();
+                    let abuf = guard
+                        .get(a)
+                        .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
+                    let bbuf = guard
+                        .get(b)
+                        .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id()))?;
+                    elementwise_pow_broadcast_data(
+                        "elem_pow",
+                        abuf,
+                        runmat_accelerate_api::handle_storage(a),
+                        a.shape(),
+                        bbuf,
+                        runmat_accelerate_api::handle_storage(b),
+                        b.shape(),
+                    )?
+                };
+                self.allocate_tensor(out, shape)
+            })()
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from)
         })
     }
 
@@ -5802,195 +5835,201 @@ impl AccelProvider for InProcessProvider {
     fn modulate_constellation<'a>(
         &'a self,
         request: ProviderModulationRequest<'a>,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            {
-                let guard = numeric_registry()
-                    .lock_for(self.device_id)
-                    .map_err(|_| anyhow!("modulate_constellation: allocation owner is poisoned"))?;
-                ensure!(
-                    guard.get(request.input).is_some(),
-                    "modulate_constellation: unknown buffer"
-                );
-                if request.input.physical().element_type() != NumericElementType::F64 {
-                    return Err(runmat_accelerate_api::unsupported_provider_operation(
-                        "modulate_constellation: kernel requires F64 symbol storage",
-                    ));
+            (|| -> Result<GpuTensorHandle> {
+                {
+                    let guard = numeric_registry().lock_for(self.device_id).map_err(|_| {
+                        anyhow!("modulate_constellation: allocation owner is poisoned")
+                    })?;
+                    ensure!(
+                        guard.get(request.input).is_some(),
+                        "modulate_constellation: unknown buffer"
+                    );
+                    if request.input.physical().element_type() != NumericElementType::F64 {
+                        return Err(runmat_accelerate_api::unsupported_provider_operation(
+                            "modulate_constellation: kernel requires F64 symbol storage",
+                        ));
+                    }
                 }
-            }
-            ensure!(
-                runmat_accelerate_api::handle_storage(request.input)
-                    != GpuTensorStorage::ComplexInterleaved,
-                "modulate_constellation requires a real-valued symbol input"
-            );
-            ensure!(
-                !request.constellation.is_empty() && request.constellation.len().is_multiple_of(2),
-                "modulate_constellation requires interleaved real/imag constellation pairs"
-            );
-            let order = request.constellation.len() / 2;
-            let data = {
-                let guard = registry(self.device_id).lock().unwrap();
-                guard
-                    .get(request.input)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("buffer not found: {}", request.input.buffer_id())
-                    })?
-                    .clone()
-            };
-            let logical_len = request
-                .input
-                .shape()
-                .iter()
-                .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
-                .ok_or_else(|| anyhow!("modulate_constellation: input shape overflow"))?;
-            ensure!(
-                logical_len == data.len(),
-                "modulate_constellation: input data length does not match shape"
-            );
-            let mut out = Vec::with_capacity(
-                logical_len
-                    .checked_mul(2)
-                    .ok_or_else(|| anyhow!("modulate_constellation: output length overflow"))?,
-            );
-            for value in data {
                 ensure!(
-                    value.is_finite(),
-                    "modulate_constellation: symbols must be finite integers"
+                    runmat_accelerate_api::handle_storage(request.input)
+                        != GpuTensorStorage::ComplexInterleaved,
+                    "modulate_constellation requires a real-valued symbol input"
                 );
                 ensure!(
-                    value >= 0.0 && value.fract() == 0.0,
-                    "modulate_constellation: symbols must be nonnegative integers"
+                    !request.constellation.is_empty()
+                        && request.constellation.len().is_multiple_of(2),
+                    "modulate_constellation requires interleaved real/imag constellation pairs"
                 );
-                let symbol = value as usize;
+                let order = request.constellation.len() / 2;
+                let data = {
+                    let guard = registry(self.device_id).lock().unwrap();
+                    guard
+                        .get(request.input)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("buffer not found: {}", request.input.buffer_id())
+                        })?
+                        .clone()
+                };
+                let logical_len = request
+                    .input
+                    .shape()
+                    .iter()
+                    .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+                    .ok_or_else(|| anyhow!("modulate_constellation: input shape overflow"))?;
                 ensure!(
-                    symbol < order,
-                    "modulate_constellation: symbols must be in range"
+                    logical_len == data.len(),
+                    "modulate_constellation: input data length does not match shape"
                 );
-                let point = symbol * 2;
-                out.push(request.constellation[point]);
-                out.push(request.constellation[point + 1]);
-            }
-            let handle = self.allocate_tensor_with_storage(
-                out,
-                request.input.shape().to_vec(),
-                GpuTensorStorage::ComplexInterleaved,
-            )?;
-            Ok(handle)
+                let mut out =
+                    Vec::with_capacity(logical_len.checked_mul(2).ok_or_else(|| {
+                        anyhow!("modulate_constellation: output length overflow")
+                    })?);
+                for value in data {
+                    ensure!(
+                        value.is_finite(),
+                        "modulate_constellation: symbols must be finite integers"
+                    );
+                    ensure!(
+                        value >= 0.0 && value.fract() == 0.0,
+                        "modulate_constellation: symbols must be nonnegative integers"
+                    );
+                    let symbol = value as usize;
+                    ensure!(
+                        symbol < order,
+                        "modulate_constellation: symbols must be in range"
+                    );
+                    let point = symbol * 2;
+                    out.push(request.constellation[point]);
+                    out.push(request.constellation[point + 1]);
+                }
+                let handle = self.allocate_tensor_with_storage(
+                    out,
+                    request.input.shape().to_vec(),
+                    GpuTensorStorage::ComplexInterleaved,
+                )?;
+                Ok(handle)
+            })()
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from)
         })
     }
 
     fn modulate_bits_constellation<'a>(
         &'a self,
         request: ProviderBitModulationRequest<'a>,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            {
-                let guard = numeric_registry().lock_for(self.device_id).map_err(|_| {
-                    anyhow!("modulate_bits_constellation: allocation owner is poisoned")
-                })?;
-                ensure!(
-                    guard.get(request.input).is_some(),
-                    "modulate_bits_constellation: unknown buffer"
-                );
-                if request.input.physical().element_type() != NumericElementType::F64 {
-                    return Err(runmat_accelerate_api::unsupported_provider_operation(
-                        "modulate_bits_constellation: kernel requires F64 symbol storage",
-                    ));
+            (|| -> Result<GpuTensorHandle> {
+                {
+                    let guard = numeric_registry().lock_for(self.device_id).map_err(|_| {
+                        anyhow!("modulate_bits_constellation: allocation owner is poisoned")
+                    })?;
+                    ensure!(
+                        guard.get(request.input).is_some(),
+                        "modulate_bits_constellation: unknown buffer"
+                    );
+                    if request.input.physical().element_type() != NumericElementType::F64 {
+                        return Err(runmat_accelerate_api::unsupported_provider_operation(
+                            "modulate_bits_constellation: kernel requires F64 symbol storage",
+                        ));
+                    }
                 }
-            }
-            ensure!(
-                runmat_accelerate_api::handle_storage(request.input)
-                    != GpuTensorStorage::ComplexInterleaved,
-                "modulate_bits_constellation requires a real-valued bit input"
-            );
-            ensure!(
+                ensure!(
+                    runmat_accelerate_api::handle_storage(request.input)
+                        != GpuTensorStorage::ComplexInterleaved,
+                    "modulate_bits_constellation requires a real-valued bit input"
+                );
+                ensure!(
                 !request.constellation.is_empty() && request.constellation.len().is_multiple_of(2),
                 "modulate_bits_constellation requires interleaved real/imag constellation pairs"
             );
-            ensure!(
-                request.input_rows > 0 && request.bits_per_symbol > 0,
-                "modulate_bits_constellation: invalid bit grouping"
-            );
-            ensure!(
-                request.input_rows.is_multiple_of(request.bits_per_symbol),
-                "modulate_bits_constellation: bit rows must be a multiple of bits_per_symbol"
-            );
-            let order = request.constellation.len() / 2;
-            let data = {
-                let guard = registry(self.device_id).lock().unwrap();
-                guard
-                    .get(request.input)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("buffer not found: {}", request.input.buffer_id())
-                    })?
-                    .clone()
-            };
-            let logical_len = request
-                .input
-                .shape()
-                .iter()
-                .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
-                .ok_or_else(|| anyhow!("modulate_bits_constellation: input shape overflow"))?;
-            ensure!(
-                logical_len == data.len(),
-                "modulate_bits_constellation: input data length does not match shape"
-            );
-            ensure!(
+                ensure!(
+                    request.input_rows > 0 && request.bits_per_symbol > 0,
+                    "modulate_bits_constellation: invalid bit grouping"
+                );
+                ensure!(
+                    request.input_rows.is_multiple_of(request.bits_per_symbol),
+                    "modulate_bits_constellation: bit rows must be a multiple of bits_per_symbol"
+                );
+                let order = request.constellation.len() / 2;
+                let data = {
+                    let guard = registry(self.device_id).lock().unwrap();
+                    guard
+                        .get(request.input)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("buffer not found: {}", request.input.buffer_id())
+                        })?
+                        .clone()
+                };
+                let logical_len = request
+                    .input
+                    .shape()
+                    .iter()
+                    .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
+                    .ok_or_else(|| anyhow!("modulate_bits_constellation: input shape overflow"))?;
+                ensure!(
+                    logical_len == data.len(),
+                    "modulate_bits_constellation: input data length does not match shape"
+                );
+                ensure!(
                 request.input.shape().first().copied() == Some(request.input_rows),
                 "modulate_bits_constellation: input_rows must match the input leading dimension"
             );
-            ensure!(
-                logical_len.is_multiple_of(request.input_rows),
-                "modulate_bits_constellation: bit input shape is inconsistent"
-            );
-            let output_rows = request.input_rows / request.bits_per_symbol;
-            let channels = logical_len / request.input_rows;
-            let output_len = output_rows
-                .checked_mul(channels)
-                .ok_or_else(|| anyhow!("modulate_bits_constellation: output shape overflow"))?;
-            let out_capacity = output_len
-                .checked_mul(2)
-                .ok_or_else(|| anyhow!("modulate_bits_constellation: output length overflow"))?;
-            let mut out = Vec::with_capacity(out_capacity);
-            for channel in 0..channels {
-                let channel_offset = channel * request.input_rows;
-                for group in 0..output_rows {
-                    let mut symbol = 0usize;
-                    for bit_idx in 0..request.bits_per_symbol {
-                        let value =
-                            data[channel_offset + group * request.bits_per_symbol + bit_idx];
+                ensure!(
+                    logical_len.is_multiple_of(request.input_rows),
+                    "modulate_bits_constellation: bit input shape is inconsistent"
+                );
+                let output_rows = request.input_rows / request.bits_per_symbol;
+                let channels = logical_len / request.input_rows;
+                let output_len = output_rows
+                    .checked_mul(channels)
+                    .ok_or_else(|| anyhow!("modulate_bits_constellation: output shape overflow"))?;
+                let out_capacity = output_len.checked_mul(2).ok_or_else(|| {
+                    anyhow!("modulate_bits_constellation: output length overflow")
+                })?;
+                let mut out = Vec::with_capacity(out_capacity);
+                for channel in 0..channels {
+                    let channel_offset = channel * request.input_rows;
+                    for group in 0..output_rows {
+                        let mut symbol = 0usize;
+                        for bit_idx in 0..request.bits_per_symbol {
+                            let value =
+                                data[channel_offset + group * request.bits_per_symbol + bit_idx];
+                            ensure!(
+                                value.is_finite(),
+                                "modulate_bits_constellation: bits must be finite"
+                            );
+                            ensure!(
+                                value == 0.0 || value == 1.0,
+                                "modulate_bits_constellation: bits must be 0 or 1"
+                            );
+                            symbol = (symbol << 1) | value as usize;
+                        }
                         ensure!(
-                            value.is_finite(),
-                            "modulate_bits_constellation: bits must be finite"
+                            symbol < order,
+                            "modulate_bits_constellation: symbols must be in range"
                         );
-                        ensure!(
-                            value == 0.0 || value == 1.0,
-                            "modulate_bits_constellation: bits must be 0 or 1"
-                        );
-                        symbol = (symbol << 1) | value as usize;
+                        let point = symbol * 2;
+                        out.push(request.constellation[point]);
+                        out.push(request.constellation[point + 1]);
                     }
-                    ensure!(
-                        symbol < order,
-                        "modulate_bits_constellation: symbols must be in range"
-                    );
-                    let point = symbol * 2;
-                    out.push(request.constellation[point]);
-                    out.push(request.constellation[point + 1]);
                 }
-            }
-            let mut output_shape = request.input.shape().to_vec();
-            if output_shape.is_empty() {
-                output_shape.push(output_rows);
-                output_shape.push(1);
-            } else {
-                output_shape[0] = output_rows;
-            }
-            let handle = self.allocate_tensor_with_storage(
-                out,
-                output_shape,
-                GpuTensorStorage::ComplexInterleaved,
-            )?;
-            Ok(handle)
+                let mut output_shape = request.input.shape().to_vec();
+                if output_shape.is_empty() {
+                    output_shape.push(output_rows);
+                    output_shape.push(1);
+                } else {
+                    output_shape[0] = output_rows;
+                }
+                let handle = self.allocate_tensor_with_storage(
+                    out,
+                    output_shape,
+                    GpuTensorStorage::ComplexInterleaved,
+                )?;
+                Ok(handle)
+            })()
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from)
         })
     }
 
@@ -5998,20 +6037,23 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             self.binary_predicate_impl(
                 a,
                 b,
                 logical::BinaryPredicate::Compare(runmat_builtins::RelationalOperator::NotEqual),
             )
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
         })
     }
     fn elem_ge<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             self.binary_predicate_impl(
                 a,
@@ -6020,6 +6062,9 @@ impl AccelProvider for InProcessProvider {
                     runmat_builtins::RelationalOperator::GreaterThanOrEqual,
                 ),
             )
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
         })
     }
 
@@ -6027,7 +6072,7 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             self.binary_predicate_impl(
                 a,
@@ -6036,6 +6081,9 @@ impl AccelProvider for InProcessProvider {
                     runmat_builtins::RelationalOperator::LessThanOrEqual,
                 ),
             )
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
         })
     }
 
@@ -6043,13 +6091,16 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             self.binary_predicate_impl(
                 a,
                 b,
                 logical::BinaryPredicate::Compare(runmat_builtins::RelationalOperator::LessThan),
             )
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
         })
     }
 
@@ -6057,13 +6108,16 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             self.binary_predicate_impl(
                 a,
                 b,
                 logical::BinaryPredicate::Compare(runmat_builtins::RelationalOperator::GreaterThan),
             )
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
         })
     }
 
@@ -6071,13 +6125,16 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             self.binary_predicate_impl(
                 a,
                 b,
                 logical::BinaryPredicate::Compare(runmat_builtins::RelationalOperator::Equal),
             )
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
         })
     }
     fn logical_and(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -6117,8 +6174,12 @@ impl AccelProvider for InProcessProvider {
         self.unary_predicate_impl(a, logical::UnaryPredicate::Infinite)
     }
 
-    fn map_nan_to_zero(&self, input: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+    fn map_nan_to_zero(
+        &self,
+        input: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.nan_map_impl(input, nan::NanMap::Zero)
+            .map_err(Into::into)
     }
 
     fn not_nan_mask(&self, input: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -6524,31 +6585,36 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         digits: i32,
         significant: bool,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            use runmat_runtime::builtins::math::rounding::digits::{
-                decimal_f64 as round_decimals, significant_f64 as round_significant,
-            };
-            if significant && digits <= 0 {
-                anyhow::bail!("round significant digits must be positive");
-            }
+            (|| -> Result<GpuTensorHandle> {
+                use runmat_runtime::builtins::math::rounding::digits::{
+                    decimal_f64 as round_decimals, significant_f64 as round_significant,
+                };
+                if significant && digits <= 0 {
+                    anyhow::bail!("round significant digits must be positive");
+                }
 
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let out: Vec<f64> = abuf
-                .iter()
-                .map(|&x| {
-                    if significant {
-                        round_significant(x, digits)
-                    } else {
-                        round_decimals(x, digits)
-                    }
-                })
-                .collect();
-            drop(guard);
-            self.allocate_tensor_with_storage(out, a.shape().to_vec(), GpuTensorStorage::Real)
+                let guard = registry(self.device_id).lock().unwrap();
+                let abuf = guard
+                    .get(a)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
+                let out: Vec<f64> = abuf
+                    .iter()
+                    .map(|&x| {
+                        if significant {
+                            round_significant(x, digits)
+                        } else {
+                            round_decimals(x, digits)
+                        }
+                    })
+                    .collect();
+                drop(guard);
+                self.allocate_tensor_with_storage(out, a.shape().to_vec(), GpuTensorStorage::Real)
+            })()
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
         })
     }
 
@@ -6779,8 +6845,8 @@ impl AccelProvider for InProcessProvider {
     fn activation_softmax_rows<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.native_softmax_rows(a) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.native_softmax_rows(a).map_err(Into::into) })
     }
 
     fn unary_log<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
@@ -6818,15 +6884,21 @@ impl AccelProvider for InProcessProvider {
     fn unary_double<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.cast_float(a, NumericElementType::F64) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.cast_float(a, NumericElementType::F64)
+                .map_err(Into::into)
+        })
     }
 
     fn unary_single<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.cast_float(a, NumericElementType::F32) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.cast_float(a, NumericElementType::F32)
+                .map_err(Into::into)
+        })
     }
 
     fn unary_pow2<'a>(
@@ -8017,7 +8089,7 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         target: IntegerElementType,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let integer_data = {
                 integer_registry(self.device_id)
@@ -8028,7 +8100,9 @@ impl AccelProvider for InProcessProvider {
             };
             if let Some(data) = integer_data {
                 let out = cast_integer_data_to_integer(&data, target);
-                return self.allocate_integer_tensor(out, a.shape().to_vec());
+                return self
+                    .allocate_integer_tensor(out, a.shape().to_vec())
+                    .map_err(runmat_accelerate_api::ProviderExecutionError::from);
             }
             let data = {
                 registry(self.device_id)
@@ -8040,6 +8114,7 @@ impl AccelProvider for InProcessProvider {
             .ok_or_else(|| anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out = cast_f64_to_integer_data(&data, target);
             self.allocate_integer_tensor(out, a.shape().to_vec())
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from)
         })
     }
 
@@ -8314,31 +8389,53 @@ impl AccelProvider for InProcessProvider {
     fn reduce_min<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.native_extremum(a, true) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.native_extremum(a, true).map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
+        })
     }
 
     fn reduce_min_dim<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         dim: usize,
-    ) -> AccelProviderFuture<'a, runmat_accelerate_api::ReduceDimResult> {
-        Box::pin(async move { self.native_dimensional_extremum(a, dim, true) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, runmat_accelerate_api::ReduceDimResult>
+    {
+        Box::pin(async move {
+            self.native_dimensional_extremum(a, dim, true)
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error)
+                        .with_unproven_effects()
+                })
+        })
     }
 
     fn reduce_max<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.native_extremum(a, false) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.native_extremum(a, false).map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
+        })
     }
 
     fn reduce_max_dim<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         dim: usize,
-    ) -> AccelProviderFuture<'a, runmat_accelerate_api::ReduceDimResult> {
-        Box::pin(async move { self.native_dimensional_extremum(a, dim, false) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, runmat_accelerate_api::ReduceDimResult>
+    {
+        Box::pin(async move {
+            self.native_dimensional_extremum(a, dim, false)
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error)
+                        .with_unproven_effects()
+                })
+        })
     }
 
     fn cumsum_scan(
@@ -8692,139 +8789,146 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
         ep: &'a runmat_accelerate_api::MatmulEpilogue,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            // Compute plain matmul first
-            let base = self.matmul(a, b).await?;
-            let (rows, cols) = (base.shape()[0], base.shape()[1]);
-            let mut data = {
-                let guard = registry(self.device_id).lock().unwrap();
-                guard.get(&base).cloned().ok_or_else(|| {
-                    anyhow!("matmul_epilogue: unknown buffer {}", base.buffer_id())
-                })?
-            };
+            let result: anyhow::Result<GpuTensorHandle> = async {
+                // Compute plain matmul first
+                let base = self.matmul(a, b).await?;
+                let (rows, cols) = (base.shape()[0], base.shape()[1]);
+                let mut data = {
+                    let guard = registry(self.device_id).lock().unwrap();
+                    guard.get(&base).cloned().ok_or_else(|| {
+                        anyhow!("matmul_epilogue: unknown buffer {}", base.buffer_id())
+                    })?
+                };
 
-            // Load optional scales from registry
-            let row_scale: Option<Vec<f64>> = if let Some(ref h) = ep.row_scale {
-                let guard = registry(self.device_id).lock().unwrap();
-                Some(guard.get(h).cloned().ok_or_else(|| {
-                    anyhow!(
-                        "matmul_epilogue: unknown row scale buffer {}",
-                        h.buffer_id()
-                    )
-                })?)
-            } else {
-                None
-            };
-            let col_scale: Option<Vec<f64>> = if let Some(ref h) = ep.col_scale {
-                let guard = registry(self.device_id).lock().unwrap();
-                Some(guard.get(h).cloned().ok_or_else(|| {
-                    anyhow!(
-                        "matmul_epilogue: unknown col scale buffer {}",
-                        h.buffer_id()
-                    )
-                })?)
-            } else {
-                None
-            };
-            let mut diag_output: Option<Vec<f64>> = if let Some(ref h) = ep.diag_output {
-                let guard = registry(self.device_id).lock().unwrap();
-                let vec = guard.get(h).cloned().ok_or_else(|| {
-                    anyhow!(
-                        "matmul_epilogue: unknown diag output buffer {}",
-                        h.buffer_id()
-                    )
-                })?;
-                Some(vec)
-            } else {
-                None
-            };
-            if let Some(ref diag) = diag_output {
-                let expected = rows.min(cols);
-                if diag.len() < expected {
-                    return Err(anyhow!(
-                        "matmul_epilogue: diag_output length {} insufficient for diag size {}",
-                        diag.len(),
-                        expected
-                    ));
+                // Load optional scales from registry
+                let row_scale: Option<Vec<f64>> = if let Some(ref h) = ep.row_scale {
+                    let guard = registry(self.device_id).lock().unwrap();
+                    Some(guard.get(h).cloned().ok_or_else(|| {
+                        anyhow!(
+                            "matmul_epilogue: unknown row scale buffer {}",
+                            h.buffer_id()
+                        )
+                    })?)
+                } else {
+                    None
+                };
+                let col_scale: Option<Vec<f64>> = if let Some(ref h) = ep.col_scale {
+                    let guard = registry(self.device_id).lock().unwrap();
+                    Some(guard.get(h).cloned().ok_or_else(|| {
+                        anyhow!(
+                            "matmul_epilogue: unknown col scale buffer {}",
+                            h.buffer_id()
+                        )
+                    })?)
+                } else {
+                    None
+                };
+                let mut diag_output: Option<Vec<f64>> = if let Some(ref h) = ep.diag_output {
+                    let guard = registry(self.device_id).lock().unwrap();
+                    let vec = guard.get(h).cloned().ok_or_else(|| {
+                        anyhow!(
+                            "matmul_epilogue: unknown diag output buffer {}",
+                            h.buffer_id()
+                        )
+                    })?;
+                    Some(vec)
+                } else {
+                    None
+                };
+                if let Some(ref diag) = diag_output {
+                    let expected = rows.min(cols);
+                    if diag.len() < expected {
+                        return Err(anyhow!(
+                            "matmul_epilogue: diag_output length {} insufficient for diag size {}",
+                            diag.len(),
+                            expected
+                        ));
+                    }
                 }
-            }
 
-            // Preserve each ordered affine operation, then row/column scales.
-            for j in 0..cols {
-                for i in 0..rows {
-                    let idx = i + j * rows;
-                    let mut v = ep.affine.apply(data[idx]);
-                    if let Some(ref rs) = row_scale {
-                        let s = *rs.get(i).unwrap_or(&1.0);
-                        v = match ep.row_op {
-                            runmat_accelerate_api::ScaleOp::Multiply => v * s,
-                            runmat_accelerate_api::ScaleOp::Divide => v / s,
-                        };
-                    }
-                    if let Some(ref cs) = col_scale {
-                        let s = *cs.get(j).unwrap_or(&1.0);
-                        v = match ep.col_op {
-                            runmat_accelerate_api::ScaleOp::Multiply => v * s,
-                            runmat_accelerate_api::ScaleOp::Divide => v / s,
-                        };
-                    }
-                    if let Some(min_v) = ep.clamp_min {
-                        v = {
-                            if v.is_nan() || min_v.is_nan() {
-                                f64::NAN
-                            } else if min_v > v
-                                || (min_v == 0.0 && v == 0.0 && min_v.is_sign_positive())
-                            {
-                                min_v
-                            } else {
-                                v
-                            }
-                        };
-                    }
-                    if let Some(max_v) = ep.clamp_max {
-                        v = {
-                            if v.is_nan() || max_v.is_nan() {
-                                f64::NAN
-                            } else if max_v < v
-                                || (max_v == 0.0 && v == 0.0 && max_v.is_sign_negative())
-                            {
-                                max_v
-                            } else {
-                                v
-                            }
-                        };
-                    }
-                    if let Some(pow_v) = ep.pow_exponent {
-                        v = if v.is_nan() || pow_v.is_nan() {
-                            f64::NAN
-                        } else {
-                            v.powf(pow_v)
-                        };
-                    }
-                    if let Some(ref mut diag) = diag_output {
-                        if i == j && i < diag.len() {
-                            diag[i] = v;
+                // Preserve each ordered affine operation, then row/column scales.
+                for j in 0..cols {
+                    for i in 0..rows {
+                        let idx = i + j * rows;
+                        let mut v = ep.affine.apply(data[idx]);
+                        if let Some(ref rs) = row_scale {
+                            let s = *rs.get(i).unwrap_or(&1.0);
+                            v = match ep.row_op {
+                                runmat_accelerate_api::ScaleOp::Multiply => v * s,
+                                runmat_accelerate_api::ScaleOp::Divide => v / s,
+                            };
                         }
+                        if let Some(ref cs) = col_scale {
+                            let s = *cs.get(j).unwrap_or(&1.0);
+                            v = match ep.col_op {
+                                runmat_accelerate_api::ScaleOp::Multiply => v * s,
+                                runmat_accelerate_api::ScaleOp::Divide => v / s,
+                            };
+                        }
+                        if let Some(min_v) = ep.clamp_min {
+                            v = {
+                                if v.is_nan() || min_v.is_nan() {
+                                    f64::NAN
+                                } else if min_v > v
+                                    || (min_v == 0.0 && v == 0.0 && min_v.is_sign_positive())
+                                {
+                                    min_v
+                                } else {
+                                    v
+                                }
+                            };
+                        }
+                        if let Some(max_v) = ep.clamp_max {
+                            v = {
+                                if v.is_nan() || max_v.is_nan() {
+                                    f64::NAN
+                                } else if max_v < v
+                                    || (max_v == 0.0 && v == 0.0 && max_v.is_sign_negative())
+                                {
+                                    max_v
+                                } else {
+                                    v
+                                }
+                            };
+                        }
+                        if let Some(pow_v) = ep.pow_exponent {
+                            v = if v.is_nan() || pow_v.is_nan() {
+                                f64::NAN
+                            } else {
+                                v.powf(pow_v)
+                            };
+                        }
+                        if let Some(ref mut diag) = diag_output {
+                            if i == j && i < diag.len() {
+                                diag[i] = v;
+                            }
+                        }
+                        data[idx] = v;
                     }
-                    data[idx] = v;
                 }
-            }
 
-            if let (Some(values), Some(target)) = (diag_output, ep.diag_output.as_ref()) {
-                let mut guard = registry(self.device_id)
-                    .lock()
-                    .map_err(|_| anyhow!("in-process allocation owner is poisoned"))?;
-                let destination = guard.get_mut_for_write(target, &values).ok_or_else(|| {
-                    anyhow!("matmul epilogue diagonal destination is incompatible")
-                })?;
-                ensure!(
-                    destination.len() == values.len(),
-                    "matmul epilogue diagonal destination length mismatch"
-                );
-                destination.copy_from_slice(&values);
+                if let (Some(values), Some(target)) = (diag_output, ep.diag_output.as_ref()) {
+                    let mut guard = registry(self.device_id)
+                        .lock()
+                        .map_err(|_| anyhow!("in-process allocation owner is poisoned"))?;
+                    let destination =
+                        guard.get_mut_for_write(target, &values).ok_or_else(|| {
+                            anyhow!("matmul epilogue diagonal destination is incompatible")
+                        })?;
+                    ensure!(
+                        destination.len() == values.len(),
+                        "matmul epilogue diagonal destination length mismatch"
+                    );
+                    destination.copy_from_slice(&values);
+                }
+                self.allocate_tensor(data, base.shape().to_vec())
             }
-            self.allocate_tensor(data, base.shape().to_vec())
+            .await;
+            result.map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
         })
     }
 
@@ -8892,6 +8996,61 @@ impl AccelProvider for InProcessProvider {
                 (desc.batch, desc.height, desc.width),
                 input.shape()
             );
+
+            if input.physical().element_type() == NumericElementType::F32 {
+                let data = {
+                    let guard = numeric_registry()
+                        .lock_for(self.device_id)
+                        .map_err(|_| anyhow!("in-process allocation owner is poisoned"))?;
+                    match guard.get(input) {
+                        Some(InProcessNumericData::F32(values)) => values.clone(),
+                        _ => return Err(runmat_accelerate_api::unsupported_provider_operation(
+                            "image_normalize: native single input is not a live owned allocation",
+                        )),
+                    }
+                };
+                let batch = desc.batch;
+                let plane = desc.height * desc.width;
+                let mut output = vec![0.0f32; data.len()];
+                if plane != 0 {
+                    for b in 0..batch {
+                        let mut sum = 0.0f32;
+                        for index in 0..plane {
+                            sum += data[b + batch * index];
+                        }
+                        let mean = sum / plane as f32;
+                        let mut squared_sum = 0.0f32;
+                        for index in 0..plane {
+                            let diff = data[b + batch * index] - mean;
+                            squared_sum += diff * diff;
+                        }
+                        let sigma = (squared_sum / plane as f32 + desc.epsilon as f32).sqrt();
+                        let inverse_sigma = if sigma > 0.0 { 1.0 / sigma } else { 0.0 };
+                        for index in 0..plane {
+                            let offset = b + batch * index;
+                            let mut value = (data[offset] - mean) * inverse_sigma;
+                            if let Some(gain) = desc.gain {
+                                value *= gain as f32;
+                            }
+                            if let Some(bias) = desc.bias {
+                                value += bias as f32;
+                            }
+                            if desc.clamp_zero {
+                                value = value.max(0.0);
+                            }
+                            if let Some(gamma) = desc.gamma {
+                                value = value.powf(gamma as f32);
+                            }
+                            output[offset] = value;
+                        }
+                    }
+                }
+                return self.allocate_numeric_data(
+                    InProcessNumericData::F32(output),
+                    input.shape().to_vec(),
+                    GpuTensorStorage::Real,
+                );
+            }
 
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
@@ -9320,89 +9479,105 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
-    fn sub2ind(
-        &self,
-        dims: &[usize],
-        strides: &[usize],
-        inputs: &[&GpuTensorHandle],
-        scalar_mask: &[bool],
+    fn sub2ind<'a>(
+        &'a self,
+        dims: &'a [usize],
+        strides: &'a [usize],
+        inputs: &'a [&'a GpuTensorHandle],
+        scalar_mask: &'a [bool],
         len: usize,
-        output_shape: &[usize],
-    ) -> Result<GpuTensorHandle> {
-        if inputs.len() != dims.len() || inputs.len() != scalar_mask.len() {
-            return Err(anyhow::anyhow!(
-                "sub2ind: expected {} subscripts for {} dimensions",
-                dims.len(),
-                dims.len()
-            ));
-        }
-        let expected_len: usize = output_shape.iter().copied().product();
-        if expected_len != len {
-            return Err(anyhow::anyhow!(
-                "sub2ind: output shape does not match subscript sizes"
-            ));
-        }
-        if len == 0 {
-            return self.allocate_tensor(Vec::new(), output_shape.to_vec());
-        }
+        output_shape: &'a [usize],
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            (|| -> Result<_> {
+                if inputs.len() != dims.len() || inputs.len() != scalar_mask.len() {
+                    return Err(anyhow::anyhow!(
+                        "sub2ind: expected {} subscripts for {} dimensions",
+                        dims.len(),
+                        dims.len()
+                    ));
+                }
+                let expected_len: usize = output_shape.iter().copied().product();
+                if expected_len != len {
+                    return Err(anyhow::anyhow!(
+                        "sub2ind: output shape does not match subscript sizes"
+                    ));
+                }
+                if len == 0 {
+                    return self.allocate_tensor(Vec::new(), output_shape.to_vec());
+                }
 
-        let mut host_values: Vec<Vec<f64>> = Vec::with_capacity(inputs.len());
-        {
-            let guard = registry(self.device_id).lock().unwrap();
-            for handle in inputs {
-                let data = guard
-                    .get(handle)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("sub2ind: unknown buffer {}", handle.buffer_id())
-                    })?
-                    .clone();
-                host_values.push(data);
-            }
-        }
+                let mut host_values: Vec<Vec<f64>> = Vec::with_capacity(inputs.len());
+                {
+                    let guard = registry(self.device_id).lock().unwrap();
+                    for handle in inputs {
+                        let data = guard
+                            .get(handle)
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("sub2ind: unknown buffer {}", handle.buffer_id())
+                            })?
+                            .clone();
+                        host_values.push(data);
+                    }
+                }
 
-        let mut output = Vec::with_capacity(len);
-        for idx in 0..len {
-            let mut offset: usize = 0;
-            for (dim_index, ((&dim_size, &stride), data)) in dims
-                .iter()
-                .zip(strides.iter())
-                .zip(host_values.iter())
-                .enumerate()
-            {
-                let raw = if scalar_mask[dim_index] {
-                    *data.first().unwrap_or(&0.0)
-                } else {
-                    data[idx]
-                };
-                let coerced = coerce_sub2ind_value(raw, dim_index + 1, dim_size)?;
-                let term = coerced
-                    .checked_sub(1)
-                    .and_then(|base| base.checked_mul(stride))
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("sub2ind: computed index exceeds platform limits")
-                    })?;
-                offset = offset.checked_add(term).ok_or_else(|| {
-                    anyhow::anyhow!("sub2ind: computed index exceeds platform limits")
-                })?;
-            }
-            output.push((offset + 1) as f64);
-        }
+                let mut output = Vec::with_capacity(len);
+                for idx in 0..len {
+                    let mut offset: usize = 0;
+                    for (dim_index, ((&dim_size, &stride), data)) in dims
+                        .iter()
+                        .zip(strides.iter())
+                        .zip(host_values.iter())
+                        .enumerate()
+                    {
+                        let raw = if scalar_mask[dim_index] {
+                            *data.first().unwrap_or(&0.0)
+                        } else {
+                            data[idx]
+                        };
+                        let coerced = coerce_sub2ind_value(raw, dim_index + 1, dim_size)?;
+                        let term = coerced
+                            .checked_sub(1)
+                            .and_then(|base| base.checked_mul(stride))
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("sub2ind: computed index exceeds platform limits")
+                            })?;
+                        offset = offset.checked_add(term).ok_or_else(|| {
+                            anyhow::anyhow!("sub2ind: computed index exceeds platform limits")
+                        })?;
+                    }
+                    output.push((offset + 1) as f64);
+                }
 
-        self.allocate_tensor_with_storage(output, output_shape.to_vec(), GpuTensorStorage::Real)
+                self.allocate_tensor_with_storage(
+                    output,
+                    output_shape.to_vec(),
+                    GpuTensorStorage::Real,
+                )
+            })()
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from)
+        })
     }
 
-    fn fused_elementwise(
-        &self,
-        _shader: &str,
-        _inputs: &[GpuTensorHandle],
-        _output_shape: &[usize],
+    fn fused_elementwise<'a>(
+        &'a self,
+        _shader: &'a str,
+        _requirements: runmat_accelerate_api::ProviderShaderRequirements,
+        _inputs: &'a [GpuTensorHandle],
+        _output_shape: &'a [usize],
         _len: usize,
         output_class: runmat_accelerate_api::ProviderElementType,
-    ) -> Result<GpuTensorHandle> {
-        runmat_accelerate_api::validate_fused_output_classes(self.precision(), &[output_class])?;
-        Err(runmat_accelerate_api::unsupported_provider_operation(
-            "fused_elementwise not supported by in-process provider",
-        ))
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            runmat_accelerate_api::validate_fused_output_classes(
+                self.precision(),
+                &[output_class],
+            )?;
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "fused_elementwise not supported by in-process provider",
+            )
+            .into())
+        })
     }
 }
 

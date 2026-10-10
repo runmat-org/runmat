@@ -475,6 +475,7 @@ impl PlacementSession {
                         guards: Vec::new(),
                     },
                     resources: item.candidate.resources,
+                    output_facts: None,
                     transactional_results: item.candidate.transactional_results,
                 })
                 .collect(),
@@ -572,3 +573,6 @@ mod tests;
 #[cfg(test)]
 #[path = "whole_work/host_effect_tests.rs"]
 mod host_effect_tests;
+#[cfg(test)]
+#[path = "whole_work/direct_call_tests.rs"]
+mod direct_call_tests;

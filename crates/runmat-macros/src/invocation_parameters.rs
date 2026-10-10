@@ -38,9 +38,20 @@ pub(super) fn is_optional_usize(ty: &Type) -> bool {
     inner.path.is_ident("usize")
 }
 
+pub(super) fn is_optional_call_admission_sink(ty: &Type) -> bool {
+    let Some(Type::Path(inner)) = option_inner_type(ty) else {
+        return false;
+    };
+    inner
+        .path
+        .segments
+        .last()
+        .is_some_and(|segment| segment.ident == "CallAdmissionSink")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{is_optional_runtime_context, is_optional_usize};
+    use super::{is_optional_call_admission_sink, is_optional_runtime_context, is_optional_usize};
 
     #[test]
     fn invocation_metadata_requires_structural_types() {
@@ -53,5 +64,11 @@ mod tests {
         assert!(is_optional_usize(&outputs));
         assert!(!is_optional_runtime_context(&wrong_context));
         assert!(!is_optional_usize(&wrong_outputs));
+        let observation = syn::parse_str::<syn::Type>(
+            "Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>",
+        )
+        .unwrap();
+        assert!(is_optional_call_admission_sink(&observation));
+        assert!(!is_optional_call_admission_sink(&wrong_context));
     }
 }

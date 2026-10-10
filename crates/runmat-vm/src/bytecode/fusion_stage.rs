@@ -7,7 +7,7 @@ use std::sync::Arc;
 use runmat_mir::analysis::{
     AnalysisRevision, AnalysisStore, FusionStageContract, FusionStageFactStatus,
 };
-use runmat_mir::{CatchScopeId, MirBody};
+use runmat_mir::{CatchScopeId, MirBody, MirLocalKind};
 use runmat_types::{CapabilitySet, EffectSet, ProgramFunctionId, ProgramPointId, RegionValueId};
 use serde::{Deserialize, Serialize};
 
@@ -23,17 +23,39 @@ pub struct CompiledFusionStageStatement {
     pub pc: StatementPcRange,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CompiledPrivateTemporarySlot {
+    pub local: u32,
+    pub slot: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FusionStageProjection {
     pub revision: AnalysisRevision,
     /// Immutable analyzed program-body identity, never a session function ID.
     pub portable_origin: ProgramFunctionId,
+    /// Compiler-selected executable carrier, sealed with the source stream.
+    /// Legacy projections without this field cannot authorize image stores.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) selection_origin: Option<FusionStageSelectionOrigin>,
     pub owner: ProgramFunctionId,
     pub mir_local_count: usize,
     pub statements: Vec<CompiledFusionStageStatement>,
+    /// Compiler-derived MIR Temporary roles joined to their exact VM slots.
+    /// Missing in legacy artifacts means no private bridge authority.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) private_temporary_slots: Vec<CompiledPrivateTemporarySlot>,
     /// Binds the selected facts to the exact serialized executable stream.
     pub source_fingerprint: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum FusionStageSelectionOrigin {
+    EntrypointStream,
+    FunctionBody,
 }
 
 /// A retained definition's local statement facts without transport/session
@@ -41,8 +63,12 @@ pub struct FusionStageProjection {
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub(crate) struct FusionStageDefinitionIdentity<'a> {
     revision: &'a AnalysisRevision,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    selection_origin: Option<FusionStageSelectionOrigin>,
     mir_local_count: usize,
     statements: Vec<FusionStageStatementIdentity<'a>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    private_temporary_slots: &'a Vec<CompiledPrivateTemporarySlot>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -89,9 +115,14 @@ impl FusionStageProjection {
     pub(crate) fn project(
         body: &MirBody,
         selected: OrderedFusionStageAnalysis<'_>,
+        selection_origin: FusionStageSelectionOrigin,
+        layout: &crate::layout::VmFunctionLayout,
         stream: FusionStageStream<'_>,
     ) -> Option<Self> {
         let analysis = selected.analysis;
+        if layout.function != body.function {
+            return None;
+        }
         let ranges = project_statement_pcs(stream.resume_points, stream.instructions.len()).ok()?;
         let owner = ranges.first()?.statement.function;
         if stream.catch_scopes.len() != stream.instructions.len() {
@@ -123,12 +154,50 @@ impl FusionStageProjection {
                 Some(CompiledFusionStageStatement { contract, pc })
             })
             .collect::<Option<Vec<_>>>()?;
+        let mut private_temporary_slots = body
+            .locals
+            .iter()
+            .filter(|local| matches!(&local.kind, MirLocalKind::Temporary))
+            .map(|local| {
+                if local.binding.is_some() {
+                    return None;
+                }
+                let slot = layout.mir_local_slots.get(&local.id)?;
+                if layout.binding_slots.values().any(|bound| bound == slot) {
+                    return None;
+                }
+                Some(CompiledPrivateTemporarySlot {
+                    local: u32::try_from(local.id.0).ok()?,
+                    slot: slot.0,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        private_temporary_slots.sort_unstable_by_key(|pair| pair.local);
+        if private_temporary_slots
+            .windows(2)
+            .any(|pair| pair[0].local == pair[1].local)
+            || private_temporary_slots
+                .iter()
+                .any(|pair| pair.slot >= stream.var_count)
+            || private_temporary_slots
+                .iter()
+                .enumerate()
+                .any(|(index, pair)| {
+                    private_temporary_slots[index + 1..]
+                        .iter()
+                        .any(|later| later.slot == pair.slot)
+                })
+        {
+            return None;
+        }
         let mut result = Self {
             revision: analysis.revision.clone(),
             portable_origin: owner,
+            selection_origin: Some(selection_origin),
             owner,
             mir_local_count: body.locals.len(),
             statements,
+            private_temporary_slots,
             source_fingerprint: String::new(),
         };
         if !result.structurally_valid(&stream) {
@@ -191,7 +260,9 @@ impl FusionStageProjection {
     pub(crate) fn portable_definition_identity(&self) -> FusionStageDefinitionIdentity<'_> {
         FusionStageDefinitionIdentity {
             revision: &self.revision,
+            selection_origin: self.selection_origin,
             mir_local_count: self.mir_local_count,
+            private_temporary_slots: &self.private_temporary_slots,
             statements: self
                 .statements
                 .iter()
@@ -240,6 +311,25 @@ impl FusionStageProjection {
         if self.statements.is_empty() || stream.catch_scopes.len() != stream.instructions.len() {
             return false;
         }
+        if self.private_temporary_slots.iter().any(|pair| {
+            usize::try_from(pair.local).map_or(true, |local| local >= self.mir_local_count)
+                || pair.slot >= stream.var_count
+        }) || self
+            .private_temporary_slots
+            .windows(2)
+            .any(|pair| pair[0].local >= pair[1].local)
+            || self
+                .private_temporary_slots
+                .iter()
+                .enumerate()
+                .any(|(index, pair)| {
+                    self.private_temporary_slots[index + 1..]
+                        .iter()
+                        .any(|later| later.slot == pair.slot)
+                })
+        {
+            return false;
+        }
         let Ok(ranges) = project_statement_pcs(stream.resume_points, stream.instructions.len())
         else {
             return false;
@@ -256,14 +346,7 @@ impl FusionStageProjection {
     }
 
     fn fingerprint(&self, stream: &FusionStageStream<'_>) -> Result<String, serde_json::Error> {
-        fusion_stage_source_fingerprint(
-            &self.revision,
-            self.portable_origin,
-            self.owner,
-            self.mir_local_count,
-            &self.statements,
-            stream,
-        )
+        fusion_stage_source_fingerprint(self, stream)
     }
 }
 
@@ -333,7 +416,10 @@ impl super::FunctionBytecode {
         let Some(projection) = self.fusion_stage_projection.as_ref() else {
             return Ok(());
         };
-        (projection.portable_origin == self.portable_function
+        (matches!(
+            projection.selection_origin,
+            None | Some(FusionStageSelectionOrigin::FunctionBody)
+        ) && projection.portable_origin == self.portable_function
             && projection.validate(FusionStageStream {
                 instructions: &self.instructions,
                 catch_scopes: &self.catch_scopes,

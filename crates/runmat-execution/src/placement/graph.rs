@@ -2,7 +2,14 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use super::{ExecutionCandidateDescriptor, PlacementResourceSnapshot, PlacementSignature};
+use super::{
+    CandidateOutputResidency, ExecutionCandidateDescriptor, PlacementResourceSnapshot,
+    PlacementSignature,
+};
+
+mod source_output;
+pub use source_output::SourceOutputOrdinal;
+mod output_authority;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ResourceBoundUnavailable {
@@ -84,8 +91,22 @@ impl Default for CandidateResourceDemand {
 pub struct PlacementGraphCandidate {
     pub descriptor: ExecutionCandidateDescriptor,
     pub resources: CandidateResourceDemand,
+    /// Public outputs in source order. Absence is legacy one-output authority
+    /// for consumed nodes; only a single-node, edge-free whole-work envelope
+    /// may retain mixed outputs with aggregate resource facts alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_facts: Option<Vec<PlacementGraphOutputFact>>,
     /// Provider failure may fall back only when outputs remain uncommitted.
     pub transactional_results: bool,
+}
+
+/// A public output's post-publication residency and retained byte bound.
+/// Provider execution peak and readback staging remain separate resource facts.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlacementGraphOutputFact {
+    pub residency: CandidateOutputResidency,
+    pub retained_bytes: ResourceByteBound,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -100,6 +121,10 @@ pub struct PlacementGraphNode {
 pub struct PlacementGraphEdge {
     pub from: u32,
     pub to: u32,
+    /// The producing public output, not a provider-internal physical result.
+    /// Omission is accepted only for a one-output source node.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_output: Option<SourceOutputOrdinal>,
     pub bytes: u64,
     pub host_to_provider_ns: u64,
     pub provider_to_host_ns: u64,
@@ -153,6 +178,12 @@ pub struct PlacementPlanRequest {
 }
 
 impl PlacementPlanRequest {
+    /// Bind the exact graph output contract before submitting a request. A
+    /// changed role, byte bound, or source ordinal changes feedback identity.
+    pub fn bind_graph_output_authority(&mut self) {
+        self.signature.graph_output_authority = output_authority::digest(&self.graph);
+    }
+
     pub fn validate(&self) -> Result<(), &'static str> {
         self.signature.validate()?;
         if self.graph.nodes.is_empty() {
@@ -168,6 +199,8 @@ impl PlacementPlanRequest {
             return Err("placement resources exceed provider limit");
         }
         let mut node_identities = BTreeSet::new();
+        let mut output_arities = Vec::with_capacity(self.graph.nodes.len());
+        let whole_work_envelope = self.graph.nodes.len() == 1 && self.graph.edges.is_empty();
         for node in &self.graph.nodes {
             if node.identity.is_empty()
                 || node.identity.len() > 128
@@ -191,19 +224,50 @@ impl PlacementPlanRequest {
                 return Err("every placement node requires a CPU/runtime fallback");
             }
             let mut candidates = BTreeSet::new();
+            let mut candidate_arities = Vec::with_capacity(node.candidates.len());
             for candidate in &node.candidates {
                 candidate.descriptor.validate()?;
+                let arity = source_output::output_arity(candidate)?;
+                candidate_arities.push(arity);
                 if !candidates.insert(candidate.descriptor.identity.as_str()) {
                     return Err("candidate identities must be unique within a node");
                 }
             }
+            if !whole_work_envelope && candidate_arities.iter().any(Option::is_none) {
+                return Err("placement source candidates lack matching output roles");
+            }
+            if let Some(first) = candidate_arities.iter().copied().flatten().next() {
+                if candidate_arities
+                    .iter()
+                    .flatten()
+                    .any(|candidate| *candidate != first)
+                {
+                    return Err("placement candidates disagree on public output count");
+                }
+            }
+            output_arities.push(candidate_arities);
         }
         let mut edges = BTreeSet::new();
         for edge in &self.graph.edges {
             if edge.from >= edge.to || edge.to as usize >= self.graph.nodes.len() {
                 return Err("placement edges must follow topological node order");
             }
-            if !edges.insert((edge.from, edge.to)) {
+            let arities = &output_arities[edge.from as usize];
+            let Some(arity) = arities[0] else {
+                return Err("placement source candidates lack matching output roles");
+            };
+            if arities.iter().any(|candidate| *candidate != Some(arity)) {
+                return Err("placement source candidates lack matching output roles");
+            }
+            let ordinal = match edge.source_output {
+                Some(ordinal) => ordinal,
+                None if arity == 1 => SourceOutputOrdinal::new(0),
+                None => return Err("mixed placement edge requires a source-output ordinal"),
+            };
+            if ordinal.index() as usize >= arity {
+                return Err("placement edge source-output ordinal is out of range");
+            }
+            if !edges.insert((edge.from, ordinal, edge.to)) {
                 return Err("placement graph edges must be unique");
             }
         }
@@ -214,9 +278,16 @@ impl PlacementPlanRequest {
         {
             return Err("placement search limits must be non-zero");
         }
-        self.resources.validate()
+        self.resources.validate()?;
+        if self.signature.graph_output_authority != output_authority::digest(&self.graph) {
+            return Err("placement graph output authority does not match signature");
+        }
+        Ok(())
     }
 }
+
+#[cfg(test)]
+mod source_output_tests;
 
 #[cfg(test)]
 mod tests {
@@ -228,7 +299,7 @@ mod tests {
 
     use super::*;
 
-    fn candidate(identity: &str, provider: bool) -> PlacementGraphCandidate {
+    pub(super) fn candidate(identity: &str, provider: bool) -> PlacementGraphCandidate {
         let kind = if provider {
             ExecutionCandidateKind::ProviderFusion
         } else {
@@ -265,16 +336,19 @@ mod tests {
                 scratch_bytes: 0.into(),
                 ..CandidateResourceDemand::default()
             },
+            output_facts: None,
             transactional_results: true,
         }
     }
 
-    fn request() -> PlacementPlanRequest {
+    pub(super) fn request() -> PlacementPlanRequest {
         PlacementPlanRequest {
             signature: PlacementSignature {
                 region: None,
                 operation: "test.graph".into(),
                 runtime_facts: Digest::sha256(b"facts"),
+                provider_provenance: None,
+                graph_output_authority: None,
                 revision: PlacementRevision {
                     program: None,
                     catalog: Digest::sha256(b"catalog"),
@@ -347,6 +421,7 @@ mod tests {
         let edge = PlacementGraphEdge {
             from: 0,
             to: 1,
+            source_output: None,
             bytes: 1,
             host_to_provider_ns: 1,
             provider_to_host_ns: 1,

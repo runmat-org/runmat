@@ -27,7 +27,7 @@ pub(super) async fn try_pair(
         .to_vec();
     let output = match divide(provider, numerator, denominator).await {
         Ok(output) => output,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
+        Err(error) if error.is_unsupported() => return Ok(None),
         Err(error) => return Err(context.provider_error(error)),
     };
     if valid_real_binary_output(
@@ -75,9 +75,11 @@ pub(super) async fn try_resident_numerator(
         let uploaded = &uploaded_owner;
         let result = match divide(provider, numerator, uploaded).await {
             Ok(output) => Some(output),
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => None,
+            Err(error) if error.is_unsupported() => {
+                return Err(context.provider_error_after_effect(error));
+            }
             Err(error) => {
-                return Err(context.provider_error(error));
+                return Err(context.provider_error_after_effect(error));
             }
         };
         let valid = result.as_ref().is_some_and(|output| {
@@ -153,9 +155,11 @@ pub(super) async fn try_resident_denominator(
         let uploaded = &uploaded_owner;
         let result = match divide(provider, uploaded, denominator).await {
             Ok(output) => Some(output),
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => None,
+            Err(error) if error.is_unsupported() => {
+                return Err(context.provider_error_after_effect(error));
+            }
             Err(error) => {
-                return Err(context.provider_error(error));
+                return Err(context.provider_error_after_effect(error));
             }
         };
         let valid = result.as_ref().is_some_and(|output| {
@@ -214,7 +218,7 @@ async fn divide(
     provider: &dyn AccelProvider,
     left: &GpuTensorHandle,
     right: &GpuTensorHandle,
-) -> anyhow::Result<GpuTensorHandle> {
+) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
     let _left = gpu_helpers::ResidencyRestoreGuard::new(left);
     let _right = gpu_helpers::ResidencyRestoreGuard::new(right);
     provider.elem_div(left, right).await

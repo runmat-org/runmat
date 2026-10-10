@@ -1,6 +1,11 @@
 //! Power capability is conditional on request-owned numerical-domain evidence.
 use super::*;
-use runmat_accelerate_api::{NumericalDomainEvidence, PowerResultDomain};
+use runmat_accelerate_api::{
+    NumericalDomainEvidence, PowerResultDomain, RealPowerArithmeticMode, RealPowerOperand,
+};
+
+#[path = "power/mixed.rs"]
+mod mixed;
 
 #[derive(Clone, Copy)]
 pub(crate) enum HookProfile {
@@ -13,6 +18,7 @@ pub(crate) struct PowerWork {
     #[cfg(feature = "wgpu")]
     pub(crate) elements: u64,
     pub(crate) temporary_bytes: u64,
+    pub(crate) unknown_peak: bool,
     #[cfg(feature = "wgpu")]
     pub(crate) readback_bytes: u64,
     pub(crate) dispatches: u32,
@@ -31,13 +37,14 @@ pub(super) fn append(snapshot: &mut ProviderCapabilitySnapshot) {
 pub(super) fn feasibility(
     profile: HookProfile,
     precision: ProviderPrecision,
+    provider: &(impl AccelProvider + ?Sized),
     snapshot: &ProviderCapabilitySnapshot,
     query: &ProviderFeasibilityQuery,
 ) -> Option<ProviderFeasibility> {
     if query.operation.0 != runmat_builtins::POWER_CATALOG_ENTRY.identity.name {
         return None;
     }
-    let work = match work(profile, precision, query) {
+    let work = match work(profile, precision, provider, query) {
         Ok(work) => work,
         Err((code, detail)) => return Some(ProviderFeasibility::rejected(code, detail)),
     };
@@ -52,8 +59,31 @@ pub(super) fn feasibility(
     if accounted.outputs.is_empty() {
         accounted.outputs.push(work.output.clone());
     }
-    let result = match dense_feasibility(snapshot, &accounted) {
+    // F32 on a Double-preferred WGPU owner is admitted only by an explicit
+    // arithmetic mode and the profile-specific POWER recipe below. The mixed
+    // mode retains its distinct Double-compute/Single-publication contract.
+    let mut admitted_snapshot = snapshot.clone();
+    if query.workload.real_power_mode.is_some_and(|mode| {
+        matches!(
+            mode,
+            RealPowerArithmeticMode::MixedDoubleThenSingle { .. }
+                | RealPowerArithmeticMode::NativeSingle
+        )
+    }) {
+        for class in [ProviderElementType::F32, ProviderElementType::ComplexF32] {
+            if !admitted_snapshot.element_types.contains(&class) {
+                admitted_snapshot.element_types.push(class);
+            }
+        }
+    }
+    let result = match dense_feasibility(&admitted_snapshot, &accounted) {
         ProviderFeasibility::Supported { mut estimate } => {
+            if work.unknown_peak && snapshot.max_allocation_bytes.is_some() {
+                return Some(ProviderFeasibility::rejected(
+                    ProviderRejectionCode::UnknownResourceEstimate,
+                    "power.mixed.resident_peak.unknown",
+                ));
+            }
             let Some(total) = estimate
                 .transient_bytes
                 .and_then(|bytes| bytes.checked_add(work.temporary_bytes))
@@ -63,16 +93,17 @@ pub(super) fn feasibility(
                     "power.bytes.overflow",
                 ));
             };
-            if snapshot
-                .max_allocation_bytes
-                .is_some_and(|maximum| total > maximum)
+            if !work.unknown_peak
+                && snapshot
+                    .max_allocation_bytes
+                    .is_some_and(|maximum| total > maximum)
             {
                 return Some(ProviderFeasibility::rejected(
                     ProviderRejectionCode::ResourceLimit,
                     "power.probe.memory_limit",
                 ));
             }
-            estimate.transient_bytes = Some(total);
+            estimate.transient_bytes = if work.unknown_peak { None } else { Some(total) };
             estimate.dispatches = Some(work.dispatches);
             ProviderFeasibility::Supported { estimate }
         }
@@ -84,17 +115,19 @@ pub(super) fn feasibility(
 #[cfg(feature = "wgpu")]
 pub(crate) fn wgpu_work(
     precision: ProviderPrecision,
+    provider: &(impl AccelProvider + ?Sized),
     query: &ProviderFeasibilityQuery,
 ) -> Option<PowerWork> {
     if query.operation.0 != runmat_builtins::POWER_CATALOG_ENTRY.identity.name {
         return None;
     }
-    work(HookProfile::Wgpu, precision, query).ok()
+    work(HookProfile::Wgpu, precision, provider, query).ok()
 }
 
 fn work(
     profile: HookProfile,
     precision: ProviderPrecision,
+    provider: &(impl AccelProvider + ?Sized),
     query: &ProviderFeasibilityQuery,
 ) -> Result<PowerWork, (ProviderRejectionCode, &'static str)> {
     use ProviderRejectionCode as Rejection;
@@ -110,7 +143,44 @@ fn work(
     {
         return Err((Rejection::InvalidShape, "power.operand_roles.invalid"));
     }
-    let (element, complex, bytes) = match precision {
+    let mode = query.workload.real_power_mode;
+    let typed_single_on_double = {
+        #[cfg(feature = "wgpu")]
+        {
+            matches!(profile, HookProfile::Wgpu) && precision == ProviderPrecision::F64
+        }
+        #[cfg(not(feature = "wgpu"))]
+        {
+            false
+        }
+    };
+    let mixed_single_operand = match mode {
+        Some(RealPowerArithmeticMode::MixedDoubleThenSingle { single_operand }) => {
+            if precision != ProviderPrecision::F64 {
+                return Err((
+                    Rejection::UnsupportedElementType,
+                    "power.mixed.native_double.required",
+                ));
+            }
+            Some(single_operand)
+        }
+        Some(RealPowerArithmeticMode::NativeSingle)
+            if precision != ProviderPrecision::F32 && !typed_single_on_double =>
+        {
+            return Err((
+                Rejection::UnsupportedElementType,
+                "power.native_single.required",
+            ));
+        }
+        Some(RealPowerArithmeticMode::NativeDouble) if precision != ProviderPrecision::F64 => {
+            return Err((
+                Rejection::UnsupportedElementType,
+                "power.native_double.required",
+            ));
+        }
+        _ => None,
+    };
+    let (native_element, native_complex, bytes) = match precision {
         ProviderPrecision::F32 => (
             ProviderElementType::F32,
             ProviderElementType::ComplexF32,
@@ -122,13 +192,18 @@ fn work(
             8u64,
         ),
     };
+    let (element, complex) = if mode == Some(RealPowerArithmeticMode::NativeSingle) {
+        (ProviderElementType::F32, ProviderElementType::ComplexF32)
+    } else {
+        (native_element, native_complex)
+    };
     if matches!(profile, HookProfile::InProcess) && precision != ProviderPrecision::F64 {
         return Err((
             Rejection::UnsupportedElementType,
             "power.native_double.required",
         ));
     }
-    for input in &query.inputs {
+    for (ordinal, input) in query.inputs.iter().enumerate() {
         let strided_allowed = {
             #[cfg(feature = "wgpu")]
             {
@@ -144,7 +219,15 @@ fn work(
         if input.layout != ProviderLayout::ColumnMajorContiguous && !strided_allowed {
             return Err((Rejection::UnsupportedLayout, "power.layout.unsupported"));
         }
-        if input.element_type != element {
+        let expected_type = if matches!(
+            (mixed_single_operand, ordinal),
+            (Some(RealPowerOperand::Base), 0) | (Some(RealPowerOperand::Exponent), 1)
+        ) {
+            ProviderElementType::F32
+        } else {
+            element
+        };
+        if input.element_type != expected_type {
             return Err((
                 Rejection::UnsupportedElementType,
                 "power.precision.mismatch",
@@ -153,6 +236,36 @@ fn work(
         if input.storage != ProviderStorage::DenseReal {
             return Err((Rejection::UnsupportedStorage, "power.real_storage.required"));
         }
+    }
+    if mixed_single_operand.is_some() {
+        let host_inputs: Vec<_> = query
+            .inputs
+            .iter()
+            .filter(|input| input.residency == ProviderResidency::Host)
+            .collect();
+        if host_inputs.len() != 1
+            || host_inputs[0].checked_element_count() != Some(1)
+            || query
+                .inputs
+                .iter()
+                .filter(|input| input.residency == ProviderResidency::Device)
+                .count()
+                != 1
+        {
+            return Err((Rejection::InvalidShape, "power.mixed.host_scalar.required"));
+        }
+    }
+    if typed_single_on_double
+        && mode == Some(RealPowerArithmeticMode::NativeSingle)
+        && !query
+            .inputs
+            .iter()
+            .any(|input| input.residency == ProviderResidency::Device)
+    {
+        return Err((
+            Rejection::InvalidShape,
+            "power.native_single.resident.required",
+        ));
     }
     let rank = query.inputs[0].shape.len().max(query.inputs[1].shape.len());
     let align = |shape: &[u64]| {
@@ -190,8 +303,22 @@ fn work(
     let words = elements
         .checked_mul(width)
         .ok_or((Rejection::ResourceLimit, "power.output.overflow"))?;
+    let public_element = if mixed_single_operand.is_some() {
+        ProviderElementType::F32
+    } else {
+        element
+    };
+    let public_complex = if mixed_single_operand.is_some() {
+        ProviderElementType::ComplexF32
+    } else {
+        complex
+    };
     let output = ProviderRepresentation {
-        element_type: if width == 2 { complex } else { element },
+        element_type: if width == 2 {
+            public_complex
+        } else {
+            public_element
+        },
         storage: if width == 2 {
             ProviderStorage::DenseComplexInterleaved
         } else {
@@ -199,12 +326,20 @@ fn work(
         },
         shape,
         layout: ProviderLayout::ColumnMajorContiguous,
-        residency: ProviderResidency::Host,
+        residency: if mixed_single_operand.is_some()
+            || (typed_single_on_double && mode == Some(RealPowerArithmeticMode::NativeSingle))
+        {
+            ProviderResidency::Device
+        } else {
+            ProviderResidency::Host
+        },
     };
     if let Some(declared) = query.outputs.first() {
         if declared.shape != output.shape
             || declared.element_type != output.element_type
             || declared.storage != output.storage
+            || declared.layout != output.layout
+            || declared.residency != output.residency
         {
             return Err((Rejection::InvalidShape, "power.output_contract.mismatch"));
         }
@@ -213,12 +348,23 @@ fn work(
         #[cfg(feature = "wgpu")]
         elements,
         temporary_bytes: 0,
+        unknown_peak: false,
         #[cfg(feature = "wgpu")]
         readback_bytes: 0,
         dispatches: 0,
         output,
     };
     let _ = (profile, words, bytes);
+    if matches!(profile, HookProfile::InProcess) {
+        let mut result = result;
+        if mixed_single_operand.is_some() {
+            let extra = mixed::in_process_physical_work(provider, query, &result.output, words)?;
+            result.temporary_bytes = extra.temporary_bytes;
+            result.dispatches = extra.dispatches;
+            result.unknown_peak = extra.unknown_peak;
+        }
+        return Ok(result);
+    }
     #[cfg(feature = "wgpu")]
     if matches!(profile, HookProfile::Wgpu) {
         let mut result = result;
@@ -237,10 +383,34 @@ fn work(
             result.readback_bytes = bytes;
             result.dispatches = 4;
         }
+        if mixed_single_operand.is_some() {
+            let extra = mixed::physical_work(provider, query, &result.output, words)?;
+            result.temporary_bytes = result
+                .temporary_bytes
+                .checked_add(extra.temporary_bytes)
+                .ok_or((Rejection::ResourceLimit, "power.mixed.bytes.overflow"))?;
+            result.dispatches = result
+                .dispatches
+                .checked_add(extra.dispatches)
+                .ok_or((Rejection::ResourceLimit, "power.mixed.dispatch.overflow"))?;
+            result.unknown_peak = extra.unknown_peak;
+        }
         return Ok(result);
     }
     Ok(result)
 }
+
+#[cfg(all(test, feature = "wgpu"))]
+#[path = "power/mixed_tests.rs"]
+mod mixed_tests;
+
+#[cfg(all(test, feature = "wgpu"))]
+#[path = "power/native_single_tests.rs"]
+mod native_single_tests;
+
+#[cfg(test)]
+#[path = "power/inprocess_tests.rs"]
+mod inprocess_tests;
 
 #[cfg(test)]
 mod tests {
@@ -269,6 +439,7 @@ mod tests {
         assert!(!feasibility(
             HookProfile::InProcess,
             ProviderPrecision::F64,
+            &provider,
             &snapshot,
             &query
         )
@@ -279,6 +450,7 @@ mod tests {
         let ProviderFeasibility::Supported { estimate } = feasibility(
             HookProfile::InProcess,
             ProviderPrecision::F64,
+            &provider,
             &snapshot,
             &query,
         )
@@ -289,36 +461,42 @@ mod tests {
         assert_eq!(estimate.transient_bytes, Some(96));
         #[cfg(feature = "wgpu")]
         {
-            let work = wgpu_work(ProviderPrecision::F64, &query).unwrap();
+            let work = wgpu_work(ProviderPrecision::F64, &provider, &query).unwrap();
             assert_eq!(work.temporary_bytes, 40);
             assert_eq!(work.readback_bytes, 8);
             assert_eq!(work.dispatches, 4);
             query.inputs[0].layout = ProviderLayout::Strided;
-            let strided = wgpu_work(ProviderPrecision::F64, &query).unwrap();
+            let strided = wgpu_work(ProviderPrecision::F64, &provider, &query).unwrap();
             assert_eq!(strided.temporary_bytes, work.temporary_bytes);
             assert_eq!(strided.readback_bytes, work.readback_bytes);
             assert_eq!(strided.dispatches, work.dispatches);
-            assert!(super::work(HookProfile::InProcess, ProviderPrecision::F64, &query).is_err());
+            assert!(super::work(
+                HookProfile::InProcess,
+                ProviderPrecision::F64,
+                &provider,
+                &query
+            )
+            .is_err());
             query.inputs[0].shape = vec![1, 3, 1];
-            assert!(wgpu_work(ProviderPrecision::F64, &query).is_none());
+            assert!(wgpu_work(ProviderPrecision::F64, &provider, &query).is_none());
             query.inputs[0].shape = vec![1, 3];
             query.inputs[0].layout = ProviderLayout::ColumnMajorContiguous;
             query.inputs[0].element_type = ProviderElementType::F32;
             query.inputs[1].element_type = ProviderElementType::F32;
             // A typed classification probe is not full standalone execution.
-            assert!(wgpu_work(ProviderPrecision::F64, &query).is_none());
+            assert!(wgpu_work(ProviderPrecision::F64, &provider, &query).is_none());
             query.inputs[0].element_type = ProviderElementType::F64;
             query.inputs[1].element_type = ProviderElementType::F64;
             for input in &mut query.inputs {
                 input.shape = vec![0, 3];
             }
-            let empty = wgpu_work(ProviderPrecision::F64, &query).unwrap();
+            let empty = wgpu_work(ProviderPrecision::F64, &provider, &query).unwrap();
             assert_eq!(empty.temporary_bytes, 0);
             assert_eq!(empty.readback_bytes, 0);
             assert_eq!(empty.dispatches, 0);
             query.inputs[0].shape = vec![u64::MAX, 2];
             query.inputs[1].shape = vec![1, 1];
-            assert!(wgpu_work(ProviderPrecision::F64, &query).is_none());
+            assert!(wgpu_work(ProviderPrecision::F64, &provider, &query).is_none());
         }
     }
 }

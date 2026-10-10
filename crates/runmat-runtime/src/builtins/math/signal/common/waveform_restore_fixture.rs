@@ -63,9 +63,12 @@ impl AccelProvider for RestoreProbeProvider {
         self.inner.upload(host)
     }
 
-    fn upload_numeric_raw(&self, _: &HostNumericTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        _: &HostNumericTensorView<'_>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         if self.fail_upload.load(Ordering::SeqCst) {
-            anyhow::bail!("late waveform restoration fault");
+            return Err(anyhow::anyhow!("late waveform restoration fault").into());
         }
         Ok(self.alias.lock().unwrap().take().expect("configured alias"))
     }

@@ -137,7 +137,7 @@ pub(super) async fn try_blsprice_gpu(
                 match gpu_helpers::upload_tensor_protecting_typed(provider, &tensor, &protected) {
                     Ok(handle) => handle,
                     Err(runmat_accelerate_api::NumericUploadError::Provider(cause))
-                        if runmat_accelerate_api::is_unsupported_provider_operation(&cause) =>
+                        if cause.is_unsupported() =>
                     {
                         return Ok(None)
                     }

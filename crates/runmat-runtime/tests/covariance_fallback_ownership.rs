@@ -50,16 +50,12 @@ impl AccelProvider for Provider {
         self.inner.device_info()
     }
     fn upload(&self, host: &HostTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
-        self.upload_numeric_raw(&HostNumericTensorView {
-            data: HostNumericDataView::F64(host.data),
-            shape: host.shape,
-            storage: GpuTensorStorage::Real,
-        })
+        self.inner.upload(host)
     }
     fn upload_numeric_raw(
         &self,
         host: &HostNumericTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let attempt = self.uploads.fetch_add(1, Ordering::SeqCst);
         match self.mode {
             Mode::Alias => {
@@ -74,21 +70,20 @@ impl AccelProvider for Provider {
                     .map_err(Into::into)
             }
             Mode::UploadFailure => {
-                return Err(runmat_runtime::build_runtime_error(
-                    "operational covariance weight upload",
-                )
-                .with_gpu_gather_retry(GpuGatherRetry::Requested)
-                .with_source(std::io::Error::new(
-                    std::io::ErrorKind::BrokenPipe,
-                    "weight transport failed",
+                return Err(runmat_accelerate_api::ProviderExecutionError::from_source(
+                    runmat_runtime::build_runtime_error("operational covariance weight upload")
+                        .with_gpu_gather_retry(GpuGatherRetry::Requested)
+                        .with_source(std::io::Error::new(
+                            std::io::ErrorKind::BrokenPipe,
+                            "weight transport failed",
+                        ))
+                        .build(),
                 ))
-                .build()
-                .into())
             }
             Mode::UnsupportedWeight if attempt == 0 => {
-                return Err(unsupported_provider_operation(
-                    "fixture does not upload weights",
-                ))
+                return Err(
+                    unsupported_provider_operation("fixture does not upload weights").into(),
+                )
             }
             _ => {}
         }
@@ -183,7 +178,8 @@ fn fallback_upload_rejects_aliases_of_second_input_and_weights() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn operational_weight_upload_failure_is_terminal_even_with_nested_retry_request() {
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let provider = Provider::new(Mode::UploadFailure);
@@ -198,20 +194,29 @@ fn operational_weight_upload_failure_is_terminal_even_with_nested_retry_request(
     assert_eq!(error.identifier(), Some("RunMat:cov:Internal"));
     assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
     let mut source: &(dyn std::error::Error + 'static) = &error;
+    let mut retained_inner_request = false;
     loop {
+        retained_inner_request |= source
+            .downcast_ref::<runmat_runtime::RuntimeError>()
+            .is_some_and(|nested| nested.gpu_gather_retry == GpuGatherRetry::Requested);
         if let Some(cause) = source.downcast_ref::<std::io::Error>() {
             assert_eq!(cause.kind(), std::io::ErrorKind::BrokenPipe);
             break;
         }
         source = source.source().expect("original transport cause");
     }
+    assert!(
+        retained_inner_request,
+        "inner retry request remains in the cause chain"
+    );
     assert_eq!(provider.uploads.load(Ordering::SeqCst), 1);
     assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
     assert!(input.allocation_lease().validate_live().is_ok());
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn typed_unsupported_weight_upload_uses_supported_host_compute_and_restore() {
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let provider = Provider::new(Mode::UnsupportedWeight);

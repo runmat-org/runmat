@@ -559,12 +559,16 @@ impl AccelProvider for LiveRouteChangeProbe {
     fn upload_numeric_raw(
         &self,
         host: &HostNumericTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::SeqCst);
         let data = match host.data {
             HostNumericDataView::F32(values) => HostNumericDataOwned::F32(values.to_vec()),
             HostNumericDataView::F64(values) => HostNumericDataOwned::F64(values.to_vec()),
-            _ => anyhow::bail!("host-origin route requires native floating payload"),
+            _ => {
+                return Err(
+                    anyhow::anyhow!("host-origin route requires native floating payload").into(),
+                )
+            }
         };
         let allocated = self.owner.allocate_numeric(HostNumericTensorOwned {
             data,

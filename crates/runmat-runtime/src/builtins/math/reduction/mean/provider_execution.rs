@@ -1,12 +1,13 @@
 //! Mean provider strategies retain typed failures and own every intermediate.
 use super::*;
 use runmat_accelerate_api::GpuTensorStorage;
+use runmat_accelerate_api::ProviderRealMeanNaNMode;
 
 #[path = "provider_execution/admission.rs"]
 mod admission;
 use admission::{
     adapt_output_class, admit_double_omitnan_stage, admit_omitnan_preparation, admit_result,
-    desired_precision, OmitNanStageAlias,
+    desired_precision, ClassAdaptationStage, OmitNanStageAlias,
 };
 
 #[cfg(test)]
@@ -32,6 +33,12 @@ fn mean_provider_error(
     MeanProviderFailure::Execution(Box::new(failure))
 }
 
+fn mean_provider_error_after_effect(
+    source: impl Into<runmat_accelerate_api::ProviderExecutionError>,
+) -> MeanProviderFailure {
+    mean_provider_error(source.into().after_effect())
+}
+
 pub(super) async fn execute(
     provider: &dyn AccelProvider,
     input: &GpuTensorHandle,
@@ -48,12 +55,62 @@ pub(super) async fn execute(
     {
         return Ok(None);
     }
-    if dims.is_empty() {
-        return match adapt_output_class(provider, input, input.clone(), output_class).await {
+    if dims.is_empty() || is_scalar_shape(input.shape()) {
+        return match adapt_output_class(
+            provider,
+            input,
+            input.clone(),
+            output_class,
+            ClassAdaptationStage::BeforeReduction,
+        )
+        .await
+        {
             Ok(output) => Ok(Some(output)),
             Err(MeanProviderFailure::Unsupported) => Ok(None),
             Err(MeanProviderFailure::Execution(error)) => Err(*error),
         };
+    }
+    // One ordinary call, whether Dim or Vec, may use the same Double
+    // accumulation route. Vec keeps Double scratch across its ordered axes;
+    // nested calls re-enter here separately after their own Single publication.
+    // `All` has a distinct single linear-scan host order, not sequential axes.
+    if !matches!(axes, MeanAxes::All) {
+        if let Some(target) = desired_precision(input, output_class) {
+            let selected = match provider.prepare_ordered_real_mean(
+                input,
+                &dims,
+                target,
+                match nan_mode {
+                    ReductionNaN::Include => ProviderRealMeanNaNMode::Include,
+                    ReductionNaN::Omit => ProviderRealMeanNaNMode::Omit,
+                },
+            ) {
+                Ok(selected) => selected,
+                Err(source) => match mean_provider_error(source) {
+                    MeanProviderFailure::Unsupported => None,
+                    MeanProviderFailure::Execution(error) => return Err(*error),
+                },
+            };
+            if let Some(selected) = selected {
+                match provider.execute_ordered_real_mean(selected) {
+                    Ok(executed) => {
+                        return admit_result(
+                            provider,
+                            input,
+                            executed.output,
+                            axes,
+                            &dims,
+                            Some(target),
+                        )
+                        .map(Some);
+                    }
+                    Err(source) => match mean_provider_error(source) {
+                        MeanProviderFailure::Unsupported => {}
+                        MeanProviderFailure::Execution(error) => return Err(*error),
+                    },
+                }
+            }
+        }
     }
     let result = if nan_mode == ReductionNaN::Include {
         mean_gpu_try(provider, input, axes).await
@@ -68,7 +125,15 @@ pub(super) async fn execute(
                 runmat_accelerate_api::handle_precision(input)
             };
             let output = admit_result(provider, input, output, axes, &dims, stage_precision)?;
-            match adapt_output_class(provider, input, output, output_class).await {
+            match adapt_output_class(
+                provider,
+                input,
+                output,
+                output_class,
+                ClassAdaptationStage::AfterReduction,
+            )
+            .await
+            {
                 Ok(output) => admit_result(
                     provider,
                     input,
@@ -98,9 +163,9 @@ async fn mean_gpu_try(
                 return Ok(handle.clone());
             }
             let dim = default_dimension_from_shape(handle.shape());
-            reduce_mean_dim_gpu(provider, handle.clone(), dim).await
+            reduce_mean_dim_gpu(provider, handle.clone(), dim, false).await
         }
-        MeanAxes::Dim(dim) => reduce_mean_dim_gpu(provider, handle.clone(), *dim).await,
+        MeanAxes::Dim(dim) => reduce_mean_dim_gpu(provider, handle.clone(), *dim, false).await,
         MeanAxes::Vec(dims) => {
             // Prefer provider N-D reduce if available
             let mut dims0: Vec<usize> = dims
@@ -134,6 +199,7 @@ async fn mean_gpu_try(
             }
             // Sequential per-dimension reductions
             let mut result = handle.clone();
+            let mut prior_effect = false;
             let mut dims_sorted = dims.clone();
             dims_sorted.sort_unstable();
             dims_sorted.dedup();
@@ -141,7 +207,8 @@ async fn mean_gpu_try(
                 if is_scalar_shape(result.shape()) {
                     break;
                 }
-                result = reduce_mean_dim_gpu(provider, result, dim).await?;
+                result = reduce_mean_dim_gpu(provider, result, dim, prior_effect).await?;
+                prior_effect = true;
             }
             Ok(result)
         }
@@ -165,8 +232,12 @@ async fn mean_gpu_try(
                             Ok(result) => Ok(result),
                             Err(MeanProviderFailure::Unsupported) => {
                                 let mut result = handle.clone();
+                                let mut prior_effect = false;
                                 for dim in 1..=rank {
-                                    result = reduce_mean_dim_gpu(provider, result, dim).await?;
+                                    result =
+                                        reduce_mean_dim_gpu(provider, result, dim, prior_effect)
+                                            .await?;
+                                    prior_effect = true;
                                 }
                                 Ok(result)
                             }
@@ -184,6 +255,7 @@ async fn reduce_mean_dim_gpu(
     provider: &dyn AccelProvider,
     handle: GpuTensorHandle,
     dim: usize,
+    prior_effect: bool,
 ) -> Result<GpuTensorHandle, MeanProviderFailure> {
     if dim == 0 {
         return Err(MeanProviderFailure::Unsupported);
@@ -194,7 +266,13 @@ async fn reduce_mean_dim_gpu(
     provider
         .reduce_mean_dim(&handle, dim - 1)
         .await
-        .map_err(mean_provider_error)
+        .map_err(|source| {
+            if prior_effect {
+                mean_provider_error_after_effect(source)
+            } else {
+                mean_provider_error(source)
+            }
+        })
 }
 
 /// Reduce mean across multiple (1-based) dimensions in a single device pass by
@@ -260,12 +338,12 @@ pub(super) async fn reduce_mean_vecdim_nd_gpu(
     // Reshape permuted view to [rows, cols]
     let reshaped2d = provider
         .reshape(&permuted, &[reduce_len, num_slices])
-        .map_err(mean_provider_error)?;
+        .map_err(mean_provider_error_after_effect)?;
     // Reduce along rows (dim 0) -> [1, num_slices]
     let reduced_rows = provider
         .reduce_mean_dim(&reshaped2d, 0)
         .await
-        .map_err(mean_provider_error)?;
+        .map_err(mean_provider_error_after_effect)?;
     // Reshape to kept sizes (permuted order)
     let kept_sizes: Vec<usize> = kept_dims.iter().map(|&d| handle.shape()[d]).collect();
     let kept_shape = if kept_sizes.is_empty() {
@@ -275,14 +353,14 @@ pub(super) async fn reduce_mean_vecdim_nd_gpu(
     };
     let reshaped_kept = provider
         .reshape(&reduced_rows, &kept_shape)
-        .map_err(mean_provider_error)?;
+        .map_err(mean_provider_error_after_effect)?;
     // Expand permuted shape by inserting ones for reduced axes
     let mut expanded_perm_shape: Vec<usize> = Vec::with_capacity(rank);
     expanded_perm_shape.extend(std::iter::repeat_n(1usize, reduce_dims.len()));
     expanded_perm_shape.extend_from_slice(&kept_sizes);
     let expanded = provider
         .reshape(&reshaped_kept, &expanded_perm_shape)
-        .map_err(mean_provider_error)?;
+        .map_err(mean_provider_error_after_effect)?;
     // Inverse permute back to original axis order
     let mut inv_order = vec![0usize; rank];
     for (dst, &src) in order.iter().enumerate() {
@@ -290,7 +368,7 @@ pub(super) async fn reduce_mean_vecdim_nd_gpu(
     }
     let out = provider
         .permute(&expanded, &inv_order)
-        .map_err(mean_provider_error)?;
+        .map_err(mean_provider_error_after_effect)?;
     Ok(out)
 }
 
@@ -345,7 +423,9 @@ async fn mean_gpu_omitnan(
         .map_nan_to_zero(handle)
         .map_err(mean_provider_error)?;
     let cleaned = admit_omitnan_preparation(provider, handle, cleaned, &[])?;
-    let mask = provider.not_nan_mask(handle).map_err(mean_provider_error)?;
+    let mask = provider
+        .not_nan_mask(handle)
+        .map_err(mean_provider_error_after_effect)?;
     let mask = admit_omitnan_preparation(provider, handle, mask, &[&cleaned])?;
 
     // Reduce cleaned (sum) and mask (count) along the requested dims
@@ -357,7 +437,7 @@ async fn mean_gpu_omitnan(
         let next_sum = provider
             .reduce_sum_dim(&sum_h, dim)
             .await
-            .map_err(mean_provider_error)?;
+            .map_err(mean_provider_error_after_effect)?;
         sum_h = admit_double_omitnan_stage(
             provider,
             handle,
@@ -369,7 +449,7 @@ async fn mean_gpu_omitnan(
         let next_count = provider
             .reduce_sum_dim(&cnt_h, dim)
             .await
-            .map_err(mean_provider_error)?;
+            .map_err(mean_provider_error_after_effect)?;
         cnt_h = admit_double_omitnan_stage(
             provider,
             handle,
@@ -384,7 +464,7 @@ async fn mean_gpu_omitnan(
     let out = provider
         .elem_div(&sum_h, &cnt_h)
         .await
-        .map_err(mean_provider_error)?;
+        .map_err(mean_provider_error_after_effect)?;
     admit_double_omitnan_stage(
         provider,
         handle,

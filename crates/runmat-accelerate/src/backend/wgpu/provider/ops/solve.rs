@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "solve/validated_triangular.rs"]
+mod validated_triangular;
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "solve/ownership_tests.rs"]
 mod ownership_tests;
@@ -330,67 +333,6 @@ impl WgpuProvider {
         options.need_rcond || options.rcond.is_some()
     }
 
-    fn triangular_solve_bind_group_layout(
-        &self,
-        emission: &runmat_accelerate_api::WgpuEmission<'_>,
-    ) -> Result<Arc<wgpu::BindGroupLayout>> {
-        self.cached_bind_group_layout(emission, "runmat-triangular-solve-layout", |emission| {
-            let entries = [
-                crate::backend::wgpu::bindings::storage_read_entry(0),
-                crate::backend::wgpu::bindings::storage_read_entry(1),
-                crate::backend::wgpu::bindings::storage_read_entry(2),
-                crate::backend::wgpu::bindings::storage_read_write_entry(3),
-                crate::backend::wgpu::bindings::uniform_entry(4),
-            ];
-            emission
-                .device()
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("runmat-triangular-solve-bgl"),
-                    entries: &entries,
-                })
-        })
-    }
-
-    fn triangular_solve_pipeline(
-        &self,
-        emission: &runmat_accelerate_api::WgpuEmission<'_>,
-        transpose: bool,
-        lower: bool,
-    ) -> Result<Arc<wgpu::ComputePipeline>> {
-        let shader = crate::backend::wgpu::shaders::solve::triangular_linsolve_shader(
-            self.precision,
-            transpose,
-            lower,
-        );
-        let bind_group_layout = self.triangular_solve_bind_group_layout(emission)?;
-        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            emission,
-            "runmat-triangular-solve-pipeline-layout",
-            bind_group_layout.as_ref(),
-        );
-        let layout_tag = "runmat-triangular-solve-layout";
-        let shader_hash = self.compute_pipeline_hash_bytes(
-            shader.as_bytes(),
-            layout_tag,
-            Some(crate::backend::wgpu::config::effective_workgroup_size()),
-        );
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            emission,
-            "runmat-triangular-solve-shader",
-            &shader,
-        );
-        self.get_or_create_pipeline(
-            emission,
-            shader_hash,
-            &pipeline_layout,
-            &module,
-            "runmat-triangular-solve-pipeline",
-            Some(shader.as_bytes()),
-            Some(layout_tag),
-            Some(crate::backend::wgpu::config::effective_workgroup_size()),
-        )
-    }
-
     fn triangular_solve_bind_group(
         &self,
         emission: &runmat_accelerate_api::WgpuEmission<'_>,
@@ -442,41 +384,53 @@ impl WgpuProvider {
         )
     }
 
-    fn run_triangular_linsolve_device(
+    async fn run_triangular_linsolve_device(
         &self,
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
         transpose: bool,
         effective_lower: bool,
-    ) -> Result<ProviderLinsolveResult> {
-        let (lhs_rows, lhs_cols) = Self::matrix_dims_for_solve(lhs.shape())?;
-        let (rhs_rows, rhs_cols) = Self::matrix_dims_for_solve(rhs.shape())?;
-        ensure!(
-            lhs_rows == lhs_cols && rhs_rows == lhs_rows,
-            "linsolve: triangular device path requires square lhs and matching rhs rows"
-        );
-        if lhs_rows == 0 || rhs_cols == 0 {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<ProviderLinsolveResult> {
+        use runmat_accelerate_api::ProviderExecutionError;
+        let frame = validated_triangular::TriangularSolveFrame::plan(
+            self,
+            lhs,
+            rhs,
+            transpose,
+            effective_lower,
+        )?;
+        if frame.rows == 0 || frame.rhs_cols == 0 {
             return Ok(ProviderLinsolveResult {
                 solution: self.zeros(rhs.shape())?,
                 reciprocal_condition: f64::NAN,
             });
         }
-
-        let len = rhs_rows
-            .checked_mul(rhs_cols)
-            .ok_or_else(|| anyhow!("linsolve: rhs dimensions overflow"))?;
-        let mut current = self.zeros(rhs.shape())?;
-        let mut scratch = self.zeros(rhs.shape())?;
+        let validated = self
+            .prepare_validated_triangular_solve_pipeline(&frame.recipe)
+            .await?;
+        validated
+            .require_triangular_solve(&frame.recipe)
+            .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
+        frame
+            .require_live_inputs(self, lhs, rhs)
+            .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
+        let mut current = self
+            .zeros(rhs.shape())
+            .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
+        let mut scratch = self
+            .zeros(rhs.shape())
+            .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
         self.with_emission(|emission, pending| -> Result<()> {
-            let bind_group_layout = self.triangular_solve_bind_group_layout(emission)?;
-            let pipeline = self.triangular_solve_pipeline(emission, transpose, effective_lower)?;
-            crate::backend::wgpu::dispatch::solve::warmup_noop(emission, pending, &pipeline)?;
+            frame.require_live_inputs(self, lhs, rhs)?;
+            let bind_group_layout = validated.layout.as_ref();
+            let pipeline = validated.pipeline.as_ref();
+            crate::backend::wgpu::dispatch::solve::warmup_noop(emission, pending, pipeline)?;
             let mut params = crate::backend::wgpu::params::TriangularSolveParams {
-                len: len as u32,
+                len: frame.len as u32,
                 offset: 0,
-                total: len as u32,
-                rows: lhs_rows as u32,
-                rhs_cols: rhs_cols as u32,
+                total: frame.len as u32,
+                rows: frame.rows as u32,
+                rhs_cols: frame.rhs_cols as u32,
                 target_row: 0,
                 _pad0: 0,
                 _pad1: 0,
@@ -484,21 +438,21 @@ impl WgpuProvider {
             let params_buffer =
                 self.uniform_buffer(emission, &params, "runmat-triangular-solve-params")?;
             let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
+                frame.len as u32,
+                frame.recipe.workgroup,
             );
-            for step in 0..lhs_rows {
+            for step in 0..frame.rows {
                 params.target_row = if effective_lower {
                     step
                 } else {
-                    lhs_rows - 1 - step
+                    frame.rows - 1 - step
                 } as u32;
                 emission
                     .queue()
                     .write_buffer(&params_buffer, 0, bytes_of(&params));
                 let bind_group = self.triangular_solve_bind_group(
                     emission,
-                    bind_group_layout.as_ref(),
+                    bind_group_layout,
                     TriangularSolveOperands {
                         lhs,
                         rhs,
@@ -510,14 +464,16 @@ impl WgpuProvider {
                 crate::backend::wgpu::dispatch::solve::run(
                     emission,
                     pending,
-                    &pipeline,
+                    pipeline,
                     bind_group.as_ref(),
                     workgroups,
                 )?;
                 std::mem::swap(&mut current, &mut scratch);
             }
             Ok(())
-        })??;
+        })
+        .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?
+        .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
         drop(scratch);
         Ok(ProviderLinsolveResult {
             solution: current,
@@ -698,26 +654,27 @@ impl WgpuProvider {
         } else {
             f64::NAN
         };
-        let projected_rhs = match self.run_triangular_linsolve_device(&r_handle, rhs, true, true) {
+        let projected_rhs = match self
+            .run_triangular_linsolve_device(&r_handle, rhs, true, true)
+            .await
+        {
             Ok(value) => value,
             Err(err) => {
                 drop(r_handle);
                 drop(r_inv_handle);
-                return Err(err.into());
+                return Err(err.with_unproven_effects());
             }
         };
-        let mut solution = match self.run_triangular_linsolve_device(
-            &r_handle,
-            &projected_rhs.solution,
-            false,
-            false,
-        ) {
+        let mut solution = match self
+            .run_triangular_linsolve_device(&r_handle, &projected_rhs.solution, false, false)
+            .await
+        {
             Ok(value) => value,
             Err(err) => {
                 drop(projected_rhs.solution);
                 drop(r_handle);
                 drop(r_inv_handle);
-                return Err(err.into());
+                return Err(err.with_unproven_effects());
             }
         };
         drop(projected_rhs.solution);
@@ -811,8 +768,10 @@ impl WgpuProvider {
                 let q_t_handle = self.transpose_exec(&q_handle)?;
                 let projected_rhs =
                     self.matmul_exec_with_usage(&q_t_handle, rhs, BufferUsageClass::FusionOut)?;
-                let mut triangular =
-                    self.run_triangular_linsolve_device(&r_handle, &projected_rhs, false, false)?;
+                let mut triangular = self
+                    .run_triangular_linsolve_device(&r_handle, &projected_rhs, false, false)
+                    .await
+                    .map_err(|error| error.with_unproven_effects())?;
                 drop(projected_rhs);
                 drop(q_t_handle);
                 drop(q_handle);
@@ -867,7 +826,10 @@ impl WgpuProvider {
             } else {
                 f64::NAN
             };
-            let intermediate = self.run_triangular_linsolve_device(&r_handle, rhs, true, true)?;
+            let intermediate = self
+                .run_triangular_linsolve_device(&r_handle, rhs, true, true)
+                .await
+                .map_err(|error| error.with_unproven_effects())?;
             let solution = self.matmul_exec_with_usage(
                 &q_handle,
                 &intermediate.solution,
@@ -903,7 +865,7 @@ impl WgpuProvider {
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
         options: &ProviderLinsolveOptions,
-    ) -> Result<Option<ProviderLinsolveResult>> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<ProviderLinsolveResult>> {
         if options.rectangular || options.symmetric || options.posdef {
             return Ok(None);
         }
@@ -916,14 +878,6 @@ impl WgpuProvider {
         if lhs_rows != lhs_cols || rhs_rows != lhs_rows {
             return Ok(None);
         }
-        if lhs_rows == 0 || rhs_cols == 0 {
-            let solution = self.zeros(rhs.shape())?;
-            return Ok(Some(ProviderLinsolveResult {
-                solution,
-                reciprocal_condition: f64::NAN,
-            }));
-        }
-
         let effective_lower = if options.transposed {
             options.upper
         } else {
@@ -937,6 +891,12 @@ impl WgpuProvider {
         if effective_lower == effective_upper {
             return Ok(None);
         }
+        if lhs_rows == 0 || rhs_cols == 0 {
+            return self
+                .run_triangular_linsolve_device(lhs, rhs, options.transposed, effective_lower)
+                .await
+                .map(Some);
+        }
 
         let rcond = if Self::needs_rcond(options) {
             let rcond = self.triangular_rcond(lhs).await?;
@@ -946,8 +906,16 @@ impl WgpuProvider {
             f64::NAN
         };
         let start = Instant::now();
-        let mut result =
-            self.run_triangular_linsolve_device(lhs, rhs, options.transposed, effective_lower)?;
+        let mut result = self
+            .run_triangular_linsolve_device(lhs, rhs, options.transposed, effective_lower)
+            .await
+            .map_err(|error| {
+                if Self::needs_rcond(options) {
+                    error.with_unproven_effects()
+                } else {
+                    error
+                }
+            })?;
         result.reciprocal_condition = rcond;
         self.telemetry.record_linsolve_duration(start.elapsed());
         let shape = [

@@ -84,7 +84,7 @@ const OPTION_INPUTS: [BuiltinParamDescriptor; 4] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Logical scalar or numeric zero/one.",
+        description: "One-element logical or real double value equal to zero or one.",
     },
 ];
 const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [

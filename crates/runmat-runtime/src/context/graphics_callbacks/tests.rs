@@ -111,6 +111,7 @@ fn queue(capacity: usize) -> RuntimeGraphicsCallbackQueue {
     )
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn production_registration_requires_live_receiver_and_selected_queue_owner() {
     use crate::builtins::plotting::state::{
@@ -204,6 +205,7 @@ fn event(kind: GraphicsCallbackKind) -> GraphicsCallbackHostEvent {
     }
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn property_replacement_fences_queued_old_claim_and_reuses_bounded_slot() {
     use crate::builtins::plotting::state::{
@@ -285,6 +287,7 @@ fn property_replacement_fences_queued_old_claim_and_reuses_bounded_slot() {
     assert!(owner.0.registrations.borrow().is_empty());
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn replaced_callback_destructor_can_retire_another_property() {
     use crate::builtins::plotting::state::{
@@ -374,6 +377,7 @@ fn replaced_callback_destructor_can_retire_another_property() {
     assert_eq!(owner.0.registrations.borrow().len(), 1);
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn direct_registration_drop_releases_map_before_callback_destructor() {
     use crate::builtins::plotting::state::{
@@ -450,6 +454,7 @@ fn direct_registration_drop_releases_map_before_callback_destructor() {
     assert!(queue.0.registrations.borrow().is_empty());
 }
 
+#[cfg(feature = "plot-core")]
 #[test]
 fn retired_figure_property_roots_prune_before_numeric_reuse() {
     use crate::builtins::plotting::state::{

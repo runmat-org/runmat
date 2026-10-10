@@ -4,8 +4,10 @@ use runmat_accelerate_api::{
     test_support::TestAllocationOwner, AccelProvider, HostIntegerDataView, HostIntegerTensorView,
     HostLogicalTensorView, HostNumericDataOwned, HostNumericDataView, HostNumericTensorView,
 };
+use std::error::Error;
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn temporary_completion_retains_primary_and_typed_cleanup_owners() {
     let owner = TestAllocationOwner::new();
     let failed = owner
@@ -13,37 +15,41 @@ fn temporary_completion_retains_primary_and_typed_cleanup_owners() {
         .unwrap();
     failed.probe.fail_retirement("temporary retirement failed");
     let error = finish_temporary(
-        Err(anyhow!("primary execution failed")),
+        Err(ProviderExecutionError::from(anyhow!(
+            "primary execution failed"
+        ))),
         failed.handle,
-        "sum",
     )
     .unwrap_err();
     let carrier = error
         .source()
         .unwrap()
-        .downcast_ref::<TemporaryCompletionError>()
+        .downcast_ref::<ProviderExecutionCompletionError>()
         .unwrap();
     assert_eq!(
-        carrier.primary.as_ref().unwrap().to_string(),
+        carrier.primary().unwrap().to_string(),
         "primary execution failed"
     );
     assert_eq!(failed.probe.retirements(), 1);
-    assert!(carrier.output_cleanup.is_none());
-    assert!(carrier.temporary_cleanup.physical.is_err());
+    assert_eq!(carrier.cleanup_errors().len(), 1);
+    assert!(carrier.cleanup_errors()[0].physical.is_err());
 
-    let supported_fallback = owner
+    let late_unsupported = owner
         .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
     let error = finish_temporary(
-        Err(runmat_accelerate_api::unsupported_provider_operation(
-            "primary unsupported route",
+        Err(ProviderExecutionError::from(
+            runmat_accelerate_api::unsupported_provider_operation("primary unsupported route"),
         )),
-        supported_fallback.handle,
-        "sum",
+        late_unsupported.handle,
     )
     .unwrap_err();
-    assert!(error.is_unsupported(), "completed cleanup permits fallback");
-    assert_eq!(supported_fallback.probe.retirements(), 1);
+    assert!(error.is_after_effect());
+    assert!(
+        !error.is_unsupported(),
+        "an allocated temporary forbids replay"
+    );
+    assert_eq!(late_unsupported.probe.retirements(), 1);
 
     let unsupported_temporary = owner
         .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
@@ -52,11 +58,10 @@ fn temporary_completion_retains_primary_and_typed_cleanup_owners() {
         .probe
         .fail_retirement("unsupported route retirement failed");
     let error = finish_temporary(
-        Err(runmat_accelerate_api::unsupported_provider_operation(
-            "primary unsupported route",
+        Err(ProviderExecutionError::from(
+            runmat_accelerate_api::unsupported_provider_operation("primary unsupported route"),
         )),
         unsupported_temporary.handle,
-        "sum",
     )
     .unwrap_err();
     assert!(
@@ -66,9 +71,10 @@ fn temporary_completion_retains_primary_and_typed_cleanup_owners() {
     let carrier = error
         .source()
         .unwrap()
-        .downcast_ref::<TemporaryCompletionError>()
+        .downcast_ref::<ProviderExecutionCompletionError>()
         .unwrap();
-    assert!(carrier.primary.is_some());
+    assert!(carrier.primary().is_some());
+    assert_eq!(carrier.cleanup_errors().len(), 1);
     assert_eq!(unsupported_temporary.probe.retirements(), 1);
 
     let temporary = owner
@@ -81,17 +87,37 @@ fn temporary_completion_retains_primary_and_typed_cleanup_owners() {
         .probe
         .fail_retirement("temporary retirement failed");
     output.probe.fail_retirement("output retirement failed");
-    let error = finish_temporary(Ok(output.handle), temporary.handle, "sum").unwrap_err();
+    let error = finish_temporary(Ok(output.handle), temporary.handle).unwrap_err();
     let carrier = error
         .source()
         .unwrap()
-        .downcast_ref::<TemporaryCompletionError>()
+        .downcast_ref::<ProviderExecutionCompletionError>()
         .unwrap();
-    assert!(carrier.primary.is_none());
-    assert!(carrier.temporary_cleanup.physical.is_err());
-    assert!(carrier.output_cleanup.as_ref().unwrap().physical.is_err());
+    assert!(carrier.primary().is_none());
+    assert_eq!(carrier.cleanup_errors().len(), 2);
+    assert!(carrier.cleanup_errors()[0].physical.is_err());
+    assert!(carrier.cleanup_errors()[1].physical.is_err());
     assert_eq!(temporary.probe.retirements(), 1);
     assert_eq!(output.probe.retirements(), 1);
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn successful_conversion_forbids_later_unsupported_replay() {
+    let owner = TestAllocationOwner::new();
+    let converted = owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let error = finish_temporary(
+        Err(ProviderExecutionError::from(
+            runmat_accelerate_api::unsupported_provider_operation("late reduction unsupported"),
+        )),
+        converted.handle,
+    )
+    .unwrap_err();
+    assert!(error.is_after_effect());
+    assert!(!error.is_unsupported());
+    assert_eq!(converted.probe.retirements(), 1);
 }
 
 fn actual_adapter() -> &'static WgpuProvider {
@@ -123,6 +149,42 @@ fn wide_word_conversion_has_one_rounding_boundary() {
     for value in [i64::MIN, -((1_i64 << 53) + 1), -1, 0, 1, i64::MAX] {
         assert_eq!(signed(value), value as f64);
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "requires an actual shader-f64 WGPU adapter; unpolled drop and retry"]
+fn unpolled_f64_sum_drops_without_publishing_then_retries_numerically() {
+    let provider = WgpuProvider::new(Default::default()).expect("actual WGPU adapter required");
+    assert_eq!(
+        provider.precision(),
+        runmat_accelerate_api::ProviderPrecision::F64,
+    );
+    let input = provider
+        .upload_integer_exec(&HostIntegerTensorView {
+            data: HostIntegerDataView::I16(&[1, 2]),
+            shape: &[2, 1],
+        })
+        .unwrap();
+    let records_before = provider.allocations.record_count().unwrap();
+    let cache_before = provider.validated_fusion_cache.lock().unwrap().len();
+    let future = provider.integer_floating_sum_global_exec(&input);
+    drop(future);
+    assert_eq!(provider.allocations.record_count().unwrap(), records_before);
+    assert_eq!(
+        provider.validated_fusion_cache.lock().unwrap().len(),
+        cache_before
+    );
+    input.allocation_lease().validate_live().unwrap();
+
+    let output = block_on(provider.integer_floating_sum_global_exec(&input)).unwrap();
+    assert_eq!(
+        block_on(provider.download_numeric(&output)).unwrap().data,
+        HostNumericDataOwned::F64(vec![3.0]),
+    );
+    input.allocation_lease().validate_live().unwrap();
+    output.release().unwrap();
+    input.release().unwrap();
 }
 
 #[test]
@@ -192,6 +254,10 @@ fn ordinary_integer_sum_handles_wide_rounding_nd_and_lazy_transpose() {
         block_on(provider.download_numeric(&reduced)).unwrap().data,
         HostNumericDataOwned::F64(vec![4.0, 6.0, 12.0, 14.0])
     );
+    let invalid_axis = block_on(provider.reduce_sum_dim(&input, 3)).unwrap_err();
+    assert!(!invalid_axis.is_after_effect());
+    assert!(!invalid_axis.is_unsupported());
+    input.allocation_lease().validate_live().unwrap();
     reduced.release().unwrap();
     input.release().unwrap();
 
@@ -210,6 +276,57 @@ fn ordinary_integer_sum_handles_wide_rounding_nd_and_lazy_transpose() {
     columns.release().unwrap();
     view.release().unwrap();
     matrix.release().unwrap();
+
+    let logical = provider
+        .upload_logical(&HostLogicalTensorView {
+            data: &[0, 1, 1, 0, 1, 1, 0, 0],
+            shape: &[2, 2, 2],
+        })
+        .unwrap();
+    let logical_sum = block_on(provider.reduce_sum_dim(&logical, 1)).unwrap();
+    assert_eq!(logical_sum.shape(), &[2, 1, 2]);
+    assert_eq!(
+        logical_sum.physical().element_type(),
+        NumericElementType::F64
+    );
+    assert_eq!(
+        block_on(provider.download_numeric(&logical_sum))
+            .unwrap()
+            .data,
+        HostNumericDataOwned::F64(vec![1.0, 1.0, 1.0, 1.0]),
+    );
+    logical.allocation_lease().validate_live().unwrap();
+    logical_sum.release().unwrap();
+    logical.release().unwrap();
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen_test::wasm_bindgen_test]
+async fn browser_sum_requires_real_double_capability_or_executes_actual_output() {
+    let provider = WgpuProvider::new_async(Default::default())
+        .await
+        .expect("actual browser WebGPU adapter required");
+    let input = provider
+        .upload_integer_exec(&HostIntegerTensorView {
+            data: HostIntegerDataView::I16(&[1, 2, 3, 4, 5, 6, 7, 8]),
+            shape: &[2, 2, 2],
+        })
+        .unwrap();
+    if provider.precision() == runmat_accelerate_api::ProviderPrecision::F64 {
+        let output = provider.reduce_sum_dim(&input, 1).await.unwrap();
+        assert_eq!(output.shape(), &[2, 1, 2]);
+        assert_eq!(
+            provider.download_numeric(&output).await.unwrap().data,
+            HostNumericDataOwned::F64(vec![4.0, 6.0, 12.0, 14.0]),
+        );
+        output.release().unwrap();
+    } else {
+        let error = provider.reduce_sum_dim(&input, 1).await.unwrap_err();
+        assert!(error.is_unsupported());
+        assert!(!error.is_after_effect());
+    }
+    input.allocation_lease().validate_live().unwrap();
+    input.release().unwrap();
 }
 
 #[test]

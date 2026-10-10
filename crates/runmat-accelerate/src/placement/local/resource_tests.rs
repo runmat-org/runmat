@@ -1,11 +1,13 @@
 use super::*;
+mod multi;
 use runmat_accelerate_api::{
     AccelDownloadFuture, GpuTensorHandle, HostTensorView, ProviderCapabilitySnapshot,
-    ProviderPrecision, ProviderResourceEstimate,
+    ProviderCostQuery, ProviderFeasibility, ProviderPrecision, ProviderResourceEstimate,
 };
 use runmat_execution::{
-    EstimateConfidence, EstimateSource, ExecutionCostComponents, PlacementDecision,
-    PlacementFeedback, PlacementInvalidation, ProviderResourceSnapshot,
+    CandidateExecutionLocation, CandidateOutputResidency, EstimateConfidence, EstimateSource,
+    ExecutionCostComponents, PlacementDecision, PlacementFeedback, PlacementInvalidation,
+    PlacementPlanRequest, ProviderResourceSnapshot,
 };
 use runmat_runtime::context::{RuntimeContext, RuntimePlacementService, RuntimeServicePorts};
 use std::{cell::RefCell, rc::Rc};
@@ -154,6 +156,8 @@ fn try_plan_with_outputs(
         LocalPlacementRequest {
             operation: "resource.fixture",
             semantic_identity: None,
+            observation_contract: TotalCandidateObservationContract::PreparationBodyCleanup,
+            prepared_authority: None,
             family: ProviderOperationFamily::Elementwise,
             provider_kind: ExecutionCandidateKind::ProviderOperation,
             inputs: &[],
@@ -161,6 +165,7 @@ fn try_plan_with_outputs(
             workload: ProviderWorkload::default(),
             preparation: CandidatePreparationState::Ready,
             preparation_program: program,
+            shader_requirements: None,
             cpu: ExecutionCandidateDescriptor {
                 identity: "cpu.fixture".into(),
                 region: None,
@@ -188,6 +193,22 @@ fn is_provider(outcome: LocalPlacementOutcome) -> bool {
         panic!("expected selected candidate")
     };
     selected.kind.is_provider()
+}
+
+#[test]
+fn full_call_authority_rejects_non_session_revision_variants() {
+    let provider = crate::placement::revision::local(
+        None,
+        Digest::sha256(b"provider-revision"),
+        PlacementPolicy::default(),
+    );
+    assert!(session_revision_only(provider.clone()).is_none());
+    let mut session = provider;
+    session.authority =
+        runmat_execution::PlacementExecutionAuthorityRevision::RuntimeBindingSession(
+            Digest::sha256(b"selected-binding-session"),
+        );
+    assert_eq!(session_revision_only(session.clone()), Some(session));
 }
 
 #[test]
@@ -247,6 +268,8 @@ fn admitted_sum_does_not_turn_unknown_peak_bytes_into_a_sixteen_byte_bound() {
         LocalPlacementRequest {
             operation: "sum",
             semantic_identity: None,
+            observation_contract: TotalCandidateObservationContract::PreparationBodyCleanup,
+            prepared_authority: None,
             family: ProviderOperationFamily::Reduction,
             provider_kind: ExecutionCandidateKind::ProviderOperation,
             inputs: &[],
@@ -266,6 +289,7 @@ fn admitted_sum_does_not_turn_unknown_peak_bytes_into_a_sixteen_byte_bound() {
             },
             preparation: CandidatePreparationState::Cold,
             preparation_program: None,
+            shader_requirements: None,
             cpu: ExecutionCandidateDescriptor {
                 identity: "cpu.sum".into(),
                 region: None,
@@ -455,6 +479,9 @@ fn unknown_is_not_zero_or_exceeded_capacity_and_explicit_execution_stays_support
         panic!("CPU-only placement session must retain an observation ticket")
     };
     assert_eq!(feedback.candidate, "cpu.fixture");
+    // This custom service implements only the historical plan hook. It may
+    // still select and execute, but it cannot authorize a learned sample.
+    assert!(!feedback.is_current());
     let requests = capture.requests.borrow();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].graph.nodes[0].candidates.len(), 1);
@@ -463,6 +490,8 @@ fn unknown_is_not_zero_or_exceeded_capacity_and_explicit_execution_stays_support
         ExecutionCandidateKind::SharedRuntime
     );
     drop(requests);
+    feedback.observe(13, true);
+    assert!(capture.session.profile_snapshot().feedback.is_empty());
     assert!(is_provider(plan(&provider, &capture, false, 0)));
     assert_eq!(capture.requests.borrow().len(), 1);
     let encoded = serde_json::to_string(&ProviderRejectionCode::UnknownResourceEstimate).unwrap();

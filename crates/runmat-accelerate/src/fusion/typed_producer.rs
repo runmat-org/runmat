@@ -37,6 +37,23 @@ impl TypedProducer {
         let selected = roots
             .map(|roots| producer_indices(plan, &expressions, roots))
             .transpose()?;
+        for (index, operation) in plan.operations.iter().enumerate() {
+            if selected
+                .as_ref()
+                .is_some_and(|indices| !indices.contains(&index))
+            {
+                continue;
+            }
+            let (_, output) = operands(operation);
+            if let Some(output) = output {
+                let precision = match buffer_type {
+                    ScalarType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+                    ScalarType::F64 => runmat_accelerate_api::ProviderPrecision::F64,
+                    _ => return Err(anyhow!("ordinary fusion has no floating precision")),
+                };
+                program.require_ordinary_arithmetic(output, precision)?;
+            }
+        }
         // Multi-output and complete legacy emission do not construct a scalar
         // program. Advertised closed bindings still have to pass their typed
         // class and arity contract before their legacy WGSL expression is used.
@@ -108,7 +125,41 @@ impl TypedProducer {
                     Ok((*id, format!("{operation_name}({expression})")))
                 })
                 .collect::<Result<HashMap<_, _>>>()?;
-            let expression = if let Some(declaration) = program.declaration(output) {
+            let selected_add = matches!(
+                operation,
+                FusionOp::Primitive {
+                    op: crate::graph::PrimitiveOp::Add,
+                    ..
+                }
+            ) || program
+                .declaration(output)
+                .and_then(|declaration| declaration.semantics)
+                .and_then(|semantics| semantics.scalar_operation)
+                == Some(runmat_types::ScalarOperation::Operator(
+                    runmat_types::OperatorKind::Add,
+                ));
+            let mixed_real_add = selected_add
+                && matches!(
+                    program::resolved_operation(program, operation)?,
+                    Some(runmat_types::ScalarOperation::MixedRealAddToSingle)
+                );
+            let expression = if mixed_real_add {
+                if buffer_type == ScalarType::F32 {
+                    return Err(anyhow!(
+                        "fusion provider cannot represent mixed Double addition"
+                    ));
+                }
+                let [left, right] = inputs.as_slice() else {
+                    return Err(anyhow!("mixed real addition has invalid arity"));
+                };
+                let left = expressions
+                    .get(left)
+                    .ok_or_else(|| anyhow!("missing mixed Add left operand"))?;
+                let right = expressions
+                    .get(right)
+                    .ok_or_else(|| anyhow!("missing mixed Add right operand"))?;
+                Some(format!("f32((f64({left}) + f64({right})))"))
+            } else if let Some(declaration) = program.declaration(output) {
                 if selected.is_some() {
                     let entry = program
                         .catalog_entry(output)

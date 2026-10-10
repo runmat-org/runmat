@@ -4,7 +4,7 @@ use crate::{
     },
     BuiltinCatalogEntry,
 };
-use runmat_types::{CallInference, CallRequest, DynamicReason, ValueFact};
+use runmat_types::{CallInference, CallRequest, DynamicReason, ValueFact, ValueKindFact};
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
@@ -15,13 +15,21 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             request.arguments.len().min(1),
         ));
     }
-    for (index, argument) in request.arguments.iter().enumerate() {
-        if invalid_text_comparison_container(argument) {
-            diagnostics.push(argument_error(
-                "RM-CATALOG-STRCMPI-TEXT",
-                "strcmpi requires text containers or direct numeric inputs",
-                index,
-            ));
+    let direct_false = request.arguments.iter().take(2).any(|argument| {
+        matches!(
+            &argument.kind,
+            ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Symbolic
+        )
+    });
+    if !direct_false {
+        for (index, argument) in request.arguments.iter().take(2).enumerate() {
+            if invalid_text_comparison_container(argument) {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-STRCMPI-TEXT",
+                    "strcmpi requires text containers or direct numeric inputs",
+                    index,
+                ));
+            }
         }
     }
     let output =
@@ -50,7 +58,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn character_rows_broadcast_against_string_columns() {
         let entry = &super::super::STRCMPI_CATALOG_ENTRY;
         let chars = ValueFact::proven(
@@ -72,7 +81,8 @@ mod tests {
         assert!(inferred.diagnostics.is_empty());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn bad_arity_is_not_silent() {
         let entry = &super::super::STRCMPI_CATALOG_ENTRY;
         let inferred = infer(&request(vec![]), entry);
@@ -80,5 +90,34 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.code == "RM-CATALOG-STRCMPI-ARITY"));
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn direct_numeric_false_precedes_invalid_peer_container() {
+        let numeric = ValueFact::scalar(ValueKindFact::Numeric(runmat_types::NumericFact {
+            class: runmat_types::NumericClass::Double,
+            domain: runmat_types::NumericDomain::Real,
+        }));
+        let invalid = ValueFact::scalar(ValueKindFact::Struct(runmat_types::StructFact::scalar(
+            Default::default(),
+            true,
+        )));
+        for arguments in [
+            vec![numeric.clone(), invalid.clone()],
+            vec![invalid.clone(), numeric.clone()],
+        ] {
+            let result = infer(&request(arguments), &super::super::STRCMPI_CATALOG_ENTRY);
+            assert!(result.diagnostics.is_empty());
+            assert_eq!(result.outputs[0], ValueFact::scalar(ValueKindFact::Logical));
+        }
+        let result = infer(
+            &request(vec![invalid, ValueFact::scalar(ValueKindFact::String)]),
+            &super::super::STRCMPI_CATALOG_ENTRY,
+        );
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CATALOG-STRCMPI-TEXT"));
     }
 }

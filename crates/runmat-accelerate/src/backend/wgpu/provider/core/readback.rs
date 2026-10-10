@@ -6,6 +6,14 @@ use runmat_accelerate_api::allocation::catch_allocation_cleanup_unwind;
 use runmat_accelerate_api::{WgpuAccessError, WgpuDeviceAccess};
 use std::{borrow::Borrow, error::Error, fmt};
 
+pub(crate) trait ReadbackResourceOwner: Borrow<wgpu::Buffer> {
+    fn cleanup_failed(&self) {}
+}
+
+impl ReadbackResourceOwner for wgpu::Buffer {}
+
+impl ReadbackResourceOwner for std::sync::Arc<wgpu::Buffer> {}
+
 #[cfg(test)]
 #[path = "readback/tests.rs"]
 mod tests;
@@ -64,13 +72,13 @@ fn complete<T>(result: Result<T>, cleanup: std::result::Result<(), CleanupError>
     }
 }
 
-struct Readback<B: Borrow<wgpu::Buffer>> {
+struct Readback<B: ReadbackResourceOwner> {
     access: WgpuDeviceAccess,
     buffer: Option<B>,
     map_registered: bool,
 }
 
-impl<B: Borrow<wgpu::Buffer>> Readback<B> {
+impl<B: ReadbackResourceOwner> Readback<B> {
     fn cleanup(&mut self) -> std::result::Result<(), CleanupError> {
         let Some(buffer) = self.buffer.take() else {
             return Ok(());
@@ -90,8 +98,8 @@ impl<B: Borrow<wgpu::Buffer>> Readback<B> {
         })
         .map_err(|_| CleanupError::UnmapPanicked)
         .and_then(|result| result.map_err(CleanupError::Access));
-        drop(buffer);
         if result.is_err() {
+            buffer.cleanup_failed();
             if let Some(recorder) =
                 runmat_accelerate_api::observation::current_provider_observation()
             {
@@ -100,11 +108,12 @@ impl<B: Borrow<wgpu::Buffer>> Readback<B> {
                 );
             }
         }
+        drop(buffer);
         result
     }
 }
 
-impl<B: Borrow<wgpu::Buffer>> Drop for Readback<B> {
+impl<B: ReadbackResourceOwner> Drop for Readback<B> {
     fn drop(&mut self) {
         if let Err(error) = self.cleanup() {
             log::error!("WGPU staging cancellation/unwind cleanup failed: {error}");
@@ -131,7 +140,7 @@ pub(super) fn read(
 
 pub(super) fn read_with<'a, T: 'a>(
     access: WgpuDeviceAccess,
-    buffer: impl Borrow<wgpu::Buffer> + 'a,
+    buffer: impl ReadbackResourceOwner + 'a,
     context: &'a str,
     decode: impl FnOnce(&[u8]) -> Result<T> + 'a,
 ) -> impl std::future::Future<Output = Result<T>> + 'a {

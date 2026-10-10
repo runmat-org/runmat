@@ -1,0 +1,84 @@
+use super::*;
+
+fn compiled_axis_control() -> crate::bytecode::Bytecode {
+    let ast = runmat_parser::parse(
+        "x = gpuArray(single([1, 2; 3, 4])); y = min(x + x, [], 2); z = gather(y);",
+    )
+    .expect("parse authentic empty-axis reduction");
+    let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty()).expect("HIR");
+    let mir = runmat_mir::lowering::lower_assembly(&hir.assembly).expect("MIR");
+    crate::bytecode::compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id)
+        .expect("authentic empty-axis bytecode")
+}
+
+#[test]
+fn host_structural_control_requires_exact_sealed_empty_literal_and_store() {
+    let bytecode = compiled_axis_control();
+    let bridges = crate::bytecode::fusion_private_temp::bridges(&bytecode);
+    let controls = crate::bytecode::fusion_private_temp::empty_controls(&bytecode);
+    let [control] = controls.as_slice() else {
+        panic!(
+            "one compiler-derived empty control: {:?}",
+            bytecode.instructions
+        );
+    };
+    assert_eq!(
+        host_instruction_kind(
+            &bytecode.instructions[control.producer_pc],
+            control.producer_pc,
+            &bridges,
+            &controls,
+            false,
+        ),
+        VmFusionHostInstruction::Structural,
+    );
+    assert_eq!(
+        host_instruction_kind(
+            &bytecode.instructions[control.store_pc],
+            control.store_pc,
+            &bridges,
+            &controls,
+            false,
+        ),
+        VmFusionHostInstruction::Structural,
+    );
+    assert_eq!(
+        host_instruction_kind(
+            &bytecode.instructions[control.producer_pc],
+            control.producer_pc,
+            &bridges,
+            &[],
+            false,
+        ),
+        VmFusionHostInstruction::Unproved,
+    );
+    assert_eq!(
+        host_instruction_kind(
+            &bytecode.instructions[control.store_pc],
+            control.store_pc,
+            &bridges,
+            &[],
+            false,
+        ),
+        VmFusionHostInstruction::Unproved,
+    );
+
+    let mut changed = bytecode;
+    changed.instructions[control.producer_pc] = Instr::CreateMatrix(1, 1);
+    changed.reseal_fusion_stage_after_owned_remap();
+    let changed_controls = crate::bytecode::fusion_private_temp::empty_controls(&changed);
+    assert!(
+        changed_controls.is_empty(),
+        "nonempty literal has no [] proof"
+    );
+    assert_eq!(
+        host_instruction_kind(
+            &changed.instructions[control.producer_pc],
+            control.producer_pc,
+            &crate::bytecode::fusion_private_temp::bridges(&changed),
+            &changed_controls,
+            false,
+        ),
+        VmFusionHostInstruction::Unproved,
+    );
+}

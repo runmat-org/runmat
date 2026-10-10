@@ -11,18 +11,125 @@ use runmat_accelerate::{prepare_fusion_plan, FusionPlanRef};
 use crate::accel::graph::{build_accel_graph_with_stores, AccelStore};
 use crate::bytecode::Instr;
 
+use runmat_runtime::context::{RuntimeContext, VmFusionCompletionRight, VmFusionInstalledRegion};
+
+#[path = "vm_fusion_plan/semantic_identity.rs"]
+mod semantic_identity;
+use semantic_identity::{vm_fusion_executable_identity, vm_fusion_semantic_identity};
+
+/// VM-private owner retained beside the exact store-reconciled plan. Runtime
+/// can certify session/generation but only this module can check actual
+/// bytecode preparation and `Rc<FusionPlan>` identity.
+pub(crate) struct VmFusionPlanInstallation {
+    plan: FusionPlanRef,
+    regions: Vec<(usize, VmFusionInstalledRegion, Option<usize>)>,
+}
+
+impl std::fmt::Debug for VmFusionPlanInstallation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("VmFusionPlanInstallation")
+            .field("groups", &self.regions.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl VmFusionPlanInstallation {
+    pub(crate) fn right_for(
+        &self,
+        active_plan: &FusionPlanRef,
+        selected: &runmat_accelerate::FusionGroupPlan,
+        runtime: &RuntimeContext,
+    ) -> Option<VmFusionCompletionRight> {
+        if !Rc::ptr_eq(&self.plan, active_plan) || !selected.kernel.supported {
+            return None;
+        }
+        let original = self.plan.groups.iter().find(|group| {
+            group.index == selected.index
+                && group.group.id == selected.group.id
+                && group.group.span == selected.group.span
+                && group.output == selected.output
+        })?;
+        let installed = self
+            .regions
+            .iter()
+            .find_map(|(index, installed, _)| (*index == original.index).then_some(installed))?;
+        installed
+            .matches_group(
+                selected.group.id,
+                selected.group.span.start,
+                selected.group.span.end,
+            )
+            .then(|| installed.right(runtime))
+            .flatten()
+    }
+
+    pub(crate) fn publication_pc_for(
+        &self,
+        active_plan: &FusionPlanRef,
+        selected: &runmat_accelerate::FusionGroupPlan,
+    ) -> Option<usize> {
+        if !Rc::ptr_eq(&self.plan, active_plan) || !selected.kernel.supported {
+            return None;
+        }
+        let original = self.plan.groups.iter().find(|group| {
+            group.index == selected.index
+                && group.group.id == selected.group.id
+                && group.group.span == selected.group.span
+                && group.output == selected.output
+        })?;
+        self.regions.iter().find_map(|(index, _, publication)| {
+            (*index == original.index).then_some(*publication).flatten()
+        })
+    }
+}
+
 use super::Bytecode;
 
 impl Bytecode {
+    /// Read-only diagnostic projection of the same graph and sanitized groups
+    /// used by VM preparation. This does not grant execution, binding, session,
+    /// capability, or publication authority.
+    pub fn reconciled_runtime_fusion_graph(
+        &self,
+    ) -> Option<(AccelGraph, Vec<runmat_accelerate::FusionGroup>)> {
+        let (plan, graph) = self.prepare_vm_fusion_plan();
+        Some((
+            graph?,
+            plan?
+                .groups
+                .iter()
+                .map(|selected| selected.group.clone())
+                .collect(),
+        ))
+    }
+
     /// Prepare one VM-owned projection of the cached compute plan. No store
     /// transcript is consulted again during instruction dispatch.
     pub(crate) fn prepare_vm_fusion_plan(&self) -> (Option<FusionPlanRef>, Option<AccelGraph>) {
+        let (plan, graph, _) = self.prepare_vm_fusion_plan_with_stores();
+        (plan, graph)
+    }
+
+    fn prepare_vm_fusion_plan_with_stores(
+        &self,
+    ) -> (Option<FusionPlanRef>, Option<AccelGraph>, Vec<AccelStore>) {
         let groups = self.runtime_fusion_groups();
         if groups.is_empty() || self.fusion_metadata.mir_fusion_candidate_group_count == 0 {
-            return (None, None);
+            return (None, None, Vec::new());
         }
 
-        let (graph, stores) = build_accel_graph_with_stores(&self.instructions, &self.var_types);
+        let (mut graph, stores) =
+            build_accel_graph_with_stores(&self.instructions, &self.var_types);
+        if !crate::bytecode::fusion_private_temp::project_private_bindings(
+            &mut graph,
+            &groups,
+            &crate::bytecode::fusion_private_temp::bridges(self),
+            &crate::bytecode::fusion_private_temp::empty_controls(self),
+            &stores,
+        ) {
+            return (None, Some(graph), stores);
+        }
         let groups = self.runtime_fusion_groups_for_graph(&graph);
         let cached = prepare_fusion_plan(
             Some(&graph),
@@ -34,7 +141,70 @@ impl Bytecode {
             reconcile_stores(&mut owned, &self.instructions, &stores);
             Rc::new(owned)
         });
-        (plan, Some(graph))
+        (plan, Some(graph), stores)
+    }
+
+    /// Install only groups from the actual reconciled bytecode projection.
+    /// This VM-owned path never accepts a serialized recipe or caller span.
+    pub(crate) fn prepare_vm_fusion_plan_with_installation(
+        &self,
+        runtime: &RuntimeContext,
+    ) -> (
+        Option<FusionPlanRef>,
+        Option<AccelGraph>,
+        Option<VmFusionPlanInstallation>,
+    ) {
+        let (plan, graph, stores) = self.prepare_vm_fusion_plan_with_stores();
+        let installation = plan.as_ref().map(|plan| {
+            let executable = vm_fusion_executable_identity(self);
+            let regions = plan
+                .groups
+                .iter()
+                .filter(|group| group.kernel.supported)
+                .filter_map(|group| {
+                    let semantic = vm_fusion_semantic_identity(executable?, group)?;
+                    VmFusionInstalledRegion::install(
+                        runtime,
+                        semantic,
+                        group.group.id,
+                        group.group.span.start,
+                        group.group.span.end,
+                    )
+                    .map(|installed| {
+                        let publication = group
+                            .group
+                            .span
+                            .end
+                            .checked_add(1)
+                            .and_then(|pc| {
+                                let output = group.output?;
+                                stores.iter().find(|store| {
+                                    store.pc == pc
+                                        && store.value_id == output
+                                        && match self.instructions.get(pc) {
+                                            Some(Instr::StoreVar(slot)) => {
+                                                store.binding.kind == VarKind::Global
+                                                    && store.binding.index == *slot
+                                            }
+                                            Some(Instr::StoreLocal(slot)) => {
+                                                store.binding.kind == VarKind::Local
+                                                    && store.binding.index == *slot
+                                            }
+                                            _ => false,
+                                        }
+                                })
+                            })
+                            .map(|store| store.pc);
+                        (group.index, installed, publication)
+                    })
+                })
+                .collect();
+            VmFusionPlanInstallation {
+                plan: Rc::clone(plan),
+                regions,
+            }
+        });
+        (plan, graph, installation)
     }
 }
 

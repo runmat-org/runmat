@@ -1,11 +1,11 @@
 //! Automatic argument placement and its invocation-owned observation.
-pub(super) mod observation;
 mod admitted;
+pub(super) mod observation;
 pub use admitted::{install_preparation_service, AdmittedAcceleration};
-mod ownership;
-mod preparation;
 mod nary;
 mod owner_admission;
+mod ownership;
+mod preparation;
 #[cfg(test)]
 mod tests;
 
@@ -28,12 +28,6 @@ struct BuiltinCallGuard {
 }
 
 impl BuiltinCallGuard {
-    fn begin_execution(&mut self) {
-        if let Some(observation) = self.observation.as_mut() {
-            observation.execution_started();
-        }
-    }
-
     fn finish(mut self, result: &Result<Value, RuntimeError>) -> PreparationResult<()> {
         // Release unused staging before sealing the candidate's publication.
         if let Some(uploads) = self.uploads.as_mut() {
@@ -93,13 +87,12 @@ impl PreparedBuiltinCall {
         F: FnOnce(Vec<Value>) -> Fut,
         Fut: std::future::Future<Output = Result<Value, RuntimeError>>,
     {
-        let (args, mut guard) = self.into_execution();
+        let (args, guard) = self.into_execution();
         let recorder = guard
             .observation
             .as_ref()
             .and_then(BuiltinCallObservation::recorder);
         runmat_accelerate_api::observation::observe_provider_future(recorder, async move {
-            guard.begin_execution();
             let result = call(args).await;
             let cleanup = guard.finish(&result).map_err(|error| *error);
             runmat_runtime::runtime_error::complete_with_cleanup(result, cleanup)

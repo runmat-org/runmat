@@ -7,25 +7,35 @@ use std::rc::{Rc, Weak};
 use std::sync::OnceLock;
 
 use runmat_accelerate_api::ReductionFlavor;
+use runmat_builtins::{
+    builtin_catalog_entry_by_name, MeanControl, MeanOutputClass, SINGLE_CATALOG_ENTRY,
+};
 use runmat_runtime::builtins::common::tensor::tensor_element_len;
 use runmat_types::OperatorKind;
 use runmat_value::Value;
 use serde::{Deserialize, Serialize};
 
 use crate::graph::{
-    AccelGraph, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, NodeId, PrimitiveOp,
-    ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding,
+    AccelGraph, AccelNode, AccelNodeLabel, AccelOpCategory, FusionCallOrigin, InstrSpan, NodeId,
+    PrimitiveOp, ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding,
 };
 use crate::reduction_meta::{detect_reduction_signature, ReductionAxes, ReductionBehavior};
 use runmat_accelerate_api::CovNormalization;
 
 mod expression;
+mod reduction_group_nodes;
+mod reduction_shader;
+pub(crate) use reduction_shader::GeneratedReductionShader;
 mod admission;
-pub(crate) mod semantics;
-mod typed_shader;
-pub(crate) mod typed_producer;
-pub(crate) mod semantic_bindings;
+pub mod image_reduction;
+mod real_domain;
+pub(crate) mod reduction_emission;
 pub mod reduction_recipe;
+pub(crate) mod semantic_bindings;
+pub(crate) mod semantics;
+pub use semantics::exact_source_plan_identity;
+pub(crate) mod typed_producer;
+mod typed_shader;
 mod work;
 
 /// Fusion plans can contain `Value` constants, including GC handles. Keep them
@@ -94,6 +104,14 @@ pub struct ImageNormalizePattern {
     pub gamma: Option<ImageScalar>,
     #[serde(default)]
     pub clamp_zero: bool,
+    /// Tensor `single` conversions in the matched chain are redundant only
+    /// when its runtime input retains native single storage throughout.
+    #[serde(default)]
+    pub requires_single_input: bool,
+    /// Exact source reduction form for a future staged execution certificate.
+    /// Older plans and structurally matched but unproven routes retain `None`.
+    #[serde(default)]
+    pub reduction_routes: Option<Box<image_reduction::ImageReductionRoutes>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -783,6 +801,11 @@ fn sanitize_runtime_groups(graph: &AccelGraph, groups: &[FusionGroup]) -> Vec<Fu
     groups
         .iter()
         .filter_map(|group| {
+            if group.kind == FusionKind::Reduction {
+                let mut checked = group.clone();
+                checked.nodes = reduction_group_nodes::checked(graph, group)?;
+                return Some(checked);
+            }
             let had_explicit_mapped_nodes = !group.nodes.is_empty();
             let mut sanitized = group.clone();
             sanitized.nodes.retain(|id| {
@@ -918,6 +941,12 @@ impl FusionPlan {
             .iter()
             .find(|plan| pc >= plan.group.span.start && pc <= plan.group.span.end)
             .map(|plan| plan.index)
+    }
+
+    /// Select from this retained plan, never ambient active-plan TLS.
+    pub fn group_for_pc_clone(&self, pc: usize) -> Option<FusionGroupPlan> {
+        let index = self.group_for_pc(pc)?;
+        self.groups.get(index).cloned()
     }
 }
 
@@ -1290,10 +1319,14 @@ impl FusionGroupPlan {
                         }
                     }
                 }
-                // Ensure direct parents of the reduction data are materialized as inputs
+                // Only genuinely external direct parents are materialized
+                // inputs. An in-group producer output is a computed DAG value;
+                // adding it as a leaf truncates typed producer traversal and
+                // makes the VM gather an intermediate that was not published.
                 if let Some(parents) = prod.get(&data_vid) {
                     for &p in parents {
-                        if !deps.contains(&p) {
+                        if !prod.contains_key(&p) && !added_nodes.contains(&p) && !deps.contains(&p)
+                        {
                             // Skip trivial constants embedded in const_values; those are handled separately
                             let is_const = plan.const_values.contains_key(&p)
                                 || graph.value(p).and_then(|vi| vi.constant.as_ref()).is_some();
@@ -1358,6 +1391,16 @@ impl FusionGroupPlan {
                 if new_stack_pattern.is_empty() {
                     for (idx, vid) in plan.inputs.iter().enumerate() {
                         if plan.constants.contains_key(&idx) {
+                            continue;
+                        }
+                        if graph.var_binding(*vid).is_some()
+                            || graph.value(*vid).is_some_and(|info| {
+                                matches!(&info.origin, ValueOrigin::NodeOutput { node, .. }
+                                    if graph.node_binding(*node).is_some())
+                            })
+                        {
+                            // Published values are recovered from their exact
+                            // binding, not from an imagined stack operand.
                             continue;
                         }
                         if let Some(info) = graph.value(*vid) {
@@ -1570,6 +1613,7 @@ impl FusionGroupPlan {
         params_binding_idx: usize,
         body: &str,
         final_writes: &str,
+        include_ieee_helpers: bool,
     ) -> String {
         let mut shader = String::new();
 
@@ -1611,10 +1655,10 @@ impl FusionGroupPlan {
                 "    return hi * sqrt(1.0 + r * r);\n",
                 "}\n\n",
             ));
-        } else {
-            shader.push_str("fn isNan(x: f64) -> bool { let bits = bitcast<u64>(x); return (bits & 0x7ff0000000000000u) == 0x7ff0000000000000u && (bits & 0x000fffffffffffffu) != 0u; }\n");
-            shader.push_str("fn isFinite(x: f64) -> bool { return (bitcast<u64>(x) & 0x7ff0000000000000u) != 0x7ff0000000000000u; }\n");
-            shader.push_str("fn isInf(x: f64) -> bool { return (bitcast<u64>(x) & 0x7fffffffffffffffu) == 0x7ff0000000000000u; }\n");
+        } else if include_ieee_helpers {
+            shader.push_str("fn isNan(x: f64) -> bool { let low = runmat_f64_low(x); let high = runmat_f64_high(x); return (high & 0x7ff00000u) == 0x7ff00000u && ((high & 0x000fffffu) != 0u || low != 0u); }\n");
+            shader.push_str("fn isFinite(x: f64) -> bool { return (runmat_f64_high(x) & 0x7ff00000u) != 0x7ff00000u; }\n");
+            shader.push_str("fn isInf(x: f64) -> bool { return (runmat_f64_high(x) & 0x7fffffffu) == 0x7ff00000u && runmat_f64_low(x) == 0u; }\n");
             shader.push_str(concat!(
                 "fn hypot(a: f64, b: f64) -> f64 {\n",
                 "    if isNan(a) || isNan(b) { return a + b; }\n",
@@ -1661,7 +1705,11 @@ impl FusionGroupPlan {
         shader.push_str(body);
         shader.push_str(final_writes);
         shader.push_str("}\n");
-        shader
+        if scalar_ty == "f64" && include_ieee_helpers {
+            crate::wgsl::ieee_words::inject(&shader)
+        } else {
+            shader
+        }
     }
 
     /// Generate a single WGSL shader that writes all `output_ids` in one compute pass,
@@ -1751,6 +1799,7 @@ impl FusionGroupPlan {
             n_inputs + num_outputs,
             &body,
             &final_writes,
+            true,
         ))
     }
 
@@ -1810,10 +1859,67 @@ impl FusionGroupPlan {
             n_inputs + 1,
             &body,
             &final_writes,
+            true,
         ))
     }
 
+    pub(crate) fn legacy_reduction_axis(&self) -> Option<usize> {
+        let reduce_all = self
+            .constants
+            .values()
+            .chain(self.const_values.values())
+            .any(|value| matches!(value, Value::String(text) if text.eq_ignore_ascii_case("all")));
+        if reduce_all {
+            return Some(0);
+        }
+        if let Some(dim_vid) = self.reduction_dim {
+            return match self.const_values.get(&dim_vid) {
+                Some(Value::Num(dim)) if *dim >= 1.0 => Some((*dim as usize).saturating_sub(1)),
+                Some(Value::Int(_)) => None,
+                _ => Some(0),
+            };
+        }
+        for value in self.constants.values() {
+            match value {
+                Value::Num(dim) if *dim >= 1.0 => return Some((*dim as usize).saturating_sub(1)),
+                Value::Int(_) => return None,
+                _ => {}
+            }
+        }
+        Some(0)
+    }
+
+    /// Compatibility source generator; the planner only probes whether it can
+    /// generate source. Executable legacy admission supplies the selected
+    /// operation's canonical flavor separately.
     pub fn generate_reduction_wgsl(&self, scalar_ty: &str) -> Option<String> {
+        self.generate_reduction_wgsl_inner(
+            scalar_ty,
+            self.reduction_flavor.unwrap_or(ReductionFlavor::Sum),
+            None,
+        )
+    }
+
+    pub(crate) fn prepare_reduction_shader(
+        &self,
+        precision: runmat_accelerate_api::ProviderPrecision,
+        flavor: ReductionFlavor,
+        selected: Option<&reduction_emission::ReductionProducerEmission>,
+    ) -> Option<GeneratedReductionShader> {
+        let scalar_ty = match precision {
+            runmat_accelerate_api::ProviderPrecision::F32 => "f32",
+            runmat_accelerate_api::ProviderPrecision::F64 => "f64",
+        };
+        let source = self.generate_reduction_wgsl_inner(scalar_ty, flavor, selected)?;
+        Some(GeneratedReductionShader::new(source, precision))
+    }
+
+    fn generate_reduction_wgsl_inner(
+        &self,
+        scalar_ty: &str,
+        flavor: ReductionFlavor,
+        selected: Option<&reduction_emission::ReductionProducerEmission>,
+    ) -> Option<String> {
         if self.has_native_integer_constants() {
             return None;
         }
@@ -1825,148 +1931,127 @@ impl FusionGroupPlan {
         if self.inputs.is_empty() {
             return None;
         }
-        // Determine axis from the reduction builtin's explicit dim argument when available.
-        // MATLAB dim is 1-based: dim=1 reduces rows (axis=0), dim=2 reduces cols (axis=1).
-        let mut axis = 0usize;
-        // Support 'all' via either index-keyed constants or value-id keyed const_values
-        let reduce_all = self
-            .constants
-            .values()
-            .any(|v| matches!(v, Value::String(s) if s.eq_ignore_ascii_case("all")))
-            || self
-                .const_values
-                .values()
-                .any(|v| matches!(v, Value::String(s) if s.eq_ignore_ascii_case("all")));
-        if reduce_all {
-            // We'll flatten in VM by setting nrows = total and ncols = 1; axis=0 works with that.
-            axis = 0;
-        } else if let Some(dim_vid) = self.reduction_dim {
-            if let Some(v) = self.const_values.get(&dim_vid) {
-                match v {
-                    Value::Num(n) if *n >= 1.0 => {
-                        axis = (*n as usize).saturating_sub(1);
-                    }
-                    Value::Int(_) => return None,
-                    _ => {}
-                }
-            }
-        } else {
-            // Fallback: scan constant table for a plausible dim
-            for v in self.constants.values() {
-                match v {
-                    Value::Num(n) if *n >= 1.0 => {
-                        axis = (*n as usize).saturating_sub(1);
-                        break;
-                    }
-                    Value::Int(_) => return None,
-                    _ => {}
-                }
-            }
-        }
-
+        let axis = self.legacy_reduction_axis()?;
         // Detect omitnan constant (compile-time selection)
         let omitnan = self.constants.values().any(|v| match v {
             Value::String(s) => s.eq_ignore_ascii_case("omitnan"),
             _ => false,
         });
 
-        // Build reduction operand expression by folding the producer chain
         let data_vid = self.reduction_data?;
-        let ext_input = self.inputs[0];
-        let mut exprs: HashMap<ValueId, String> = HashMap::new();
-        exprs.insert(ext_input, "v".to_string());
-        // Map additional external inputs to v1, v2, ...
-        for (idx, &vid) in self.inputs.iter().enumerate().skip(1) {
-            exprs.insert(vid, format!("v{idx}"));
-        }
-        for (vid, val) in &self.const_values {
-            let lit = match val {
-                Value::Num(n) => {
-                    if scalar_ty == "f64" {
-                        format!("f64({})", n)
-                    } else {
-                        format!("{:?}", *n as f32)
-                    }
-                }
-                Value::Int(_) => return None,
-                Value::Tensor(t) if t.integer_storage().is_none() && t.len() == 1 => {
-                    let scalar = t
-                        .numeric_value_at(0)
-                        .expect("validated floating scalar tensor")
-                        .materialize_f64();
-                    if scalar_ty == "f64" {
-                        format!("f64({})", scalar)
-                    } else {
-                        format!("{:?}", scalar as f32)
-                    }
-                }
-                _ => {
-                    if scalar_ty == "f64" {
-                        "f64(0.0)".to_string()
-                    } else {
-                        "0.0".to_string()
-                    }
-                }
+        let (val_expr, producer_body, producer_preamble) = if let Some(emission) = selected {
+            let precision = match scalar_ty {
+                "f32" => runmat_accelerate_api::ProviderPrecision::F32,
+                "f64" => runmat_accelerate_api::ProviderPrecision::F64,
+                _ => return None,
             };
-            exprs.insert(*vid, lit);
-        }
-        let mut progressed = true;
-        while progressed {
-            progressed = false;
-            for op in &self.operations {
-                match op {
-                    FusionOp::Primitive { op, inputs, output } => {
-                        if let Some(out) = output {
-                            if exprs.contains_key(out) {
-                                continue;
-                            }
-                            if let Some(code) = primitive_expr(*op, inputs, &exprs) {
-                                exprs.insert(*out, code);
-                                progressed = true;
-                            }
-                        }
-                    }
-                    FusionOp::Builtin {
-                        name,
-                        inputs,
-                        output,
-                        ..
-                    } => {
-                        if let Some(out) = output {
-                            if exprs.contains_key(out) {
-                                continue;
-                            }
-                            if let Some(code) = builtin_expr(name, inputs, &exprs, scalar_ty) {
-                                exprs.insert(*out, code);
-                                progressed = true;
-                            }
-                        }
-                    }
-                }
-            }
-            if exprs.contains_key(&data_vid) {
-                break;
-            }
-        }
-        // Require a folded expression for the reduction operand; if missing, defer (no WGSL).
-        let val_expr = match exprs.get(&data_vid) {
-            Some(s) => s.clone(),
-            None => {
-                if fusion_debug_enabled() {
-                    let expr_keys: Vec<ValueId> = exprs.keys().copied().collect();
-                    log::debug!(
-                        "fusion reduction WGSL: missing expression for data {:?}; inputs={:?} expr_keys={:?} ops={:?}",
-                        data_vid,
-                        self.inputs,
-                        expr_keys,
-                        self.operations
-                    );
-                }
+            if emission.root() != data_vid
+                || emission.precision() != precision
+                || emission.input_count() != self.inputs.len()
+            {
                 return None;
             }
+            (
+                emission.expression().to_owned(),
+                emission.body().to_owned(),
+                emission.preamble().to_owned(),
+            )
+        } else {
+            // Non-required producers retain the established legacy expression
+            // route. A required arithmetic declaration cannot enter here.
+            let ext_input = self.inputs[0];
+            let mut exprs: HashMap<ValueId, String> = HashMap::new();
+            exprs.insert(ext_input, "v".to_string());
+            for (idx, &vid) in self.inputs.iter().enumerate().skip(1) {
+                exprs.insert(vid, format!("v{idx}"));
+            }
+            for (vid, val) in &self.const_values {
+                let lit = match val {
+                    Value::Num(n) => {
+                        if scalar_ty == "f64" {
+                            format!("f64({})", n)
+                        } else {
+                            format!("{:?}", *n as f32)
+                        }
+                    }
+                    Value::Int(_) => return None,
+                    Value::Tensor(t) if t.integer_storage().is_none() && t.len() == 1 => {
+                        let scalar = t
+                            .numeric_value_at(0)
+                            .expect("validated floating scalar tensor")
+                            .materialize_f64();
+                        if scalar_ty == "f64" {
+                            format!("f64({})", scalar)
+                        } else {
+                            format!("{:?}", scalar as f32)
+                        }
+                    }
+                    _ => {
+                        if scalar_ty == "f64" {
+                            "f64(0.0)".to_string()
+                        } else {
+                            "0.0".to_string()
+                        }
+                    }
+                };
+                exprs.insert(*vid, lit);
+            }
+            let mut progressed = true;
+            while progressed {
+                progressed = false;
+                for op in &self.operations {
+                    match op {
+                        FusionOp::Primitive { op, inputs, output } => {
+                            if let Some(out) = output {
+                                if exprs.contains_key(out) {
+                                    continue;
+                                }
+                                if let Some(code) = primitive_expr(*op, inputs, &exprs) {
+                                    exprs.insert(*out, code);
+                                    progressed = true;
+                                }
+                            }
+                        }
+                        FusionOp::Builtin {
+                            name,
+                            inputs,
+                            output,
+                            ..
+                        } => {
+                            if let Some(out) = output {
+                                if exprs.contains_key(out) {
+                                    continue;
+                                }
+                                if let Some(code) = builtin_expr(name, inputs, &exprs, scalar_ty) {
+                                    exprs.insert(*out, code);
+                                    progressed = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                if exprs.contains_key(&data_vid) {
+                    break;
+                }
+            }
+            let val_expr = match exprs.get(&data_vid) {
+                Some(expression) => expression.clone(),
+                None => {
+                    if fusion_debug_enabled() {
+                        let expr_keys: Vec<ValueId> = exprs.keys().copied().collect();
+                        log::debug!(
+                            "fusion reduction WGSL: missing expression for data {:?}; inputs={:?} expr_keys={:?} ops={:?}",
+                            data_vid, self.inputs, expr_keys, self.operations
+                        );
+                    }
+                    return None;
+                }
+            };
+            (val_expr, String::new(), String::new())
         };
 
         let mut shader = String::new();
+        shader.push_str(&producer_preamble);
         shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}>, }};\n"));
         shader.push_str("struct MParams { nrows: u32, ncols: u32, ld: u32, flags: u32 }\n\n");
         // Bind all input tensors dynamically, followed by output and params
@@ -1992,8 +2077,9 @@ impl FusionGroupPlan {
             "const OMITNAN: bool = {};\n\n",
             if omitnan { "true" } else { "false" }
         ));
-        // Determine mean semantics from planner-populated reduction flavor
-        let is_mean = matches!(self.reduction_flavor, Some(ReductionFlavor::Mean));
+        // The executable flavor comes from the selected operation declaration,
+        // not the planner's old name-based shape heuristic.
+        let is_mean = matches!(flavor, ReductionFlavor::Mean);
         let post_scale = if is_mean {
             let dim = if axis == 0 {
                 "params.nrows"
@@ -2012,11 +2098,13 @@ impl FusionGroupPlan {
         };
         // Helper(s) at module scope
         shader.push_str(&format!(
-            "fn isNanF(x: {scalar}) -> bool {{ return x != x; }}\n",
+            "fn isNanF(value: {scalar}) -> bool {{ @IEEE_NAN_PREDICATE@ }}\n",
             scalar = scalar_ty
         ));
         if scalar_ty == "f64" {
-            shader.push_str("fn canonicalNan() -> f64 {\n  var bits: u64 = 0x7ff8000000000000u;\n  return bitcast<f64>(bits);\n}\n\n");
+            shader.push_str(
+                "fn canonicalNan() -> f64 { return runmat_f64_from_words(0u, 0x7ff80000u); }\n\n",
+            );
         } else {
             shader.push_str("fn canonicalNan() -> f32 {\n  var bits: u32 = 0x7fc00000u;\n  return bitcast<f32>(bits);\n}\n\n");
         }
@@ -2041,13 +2129,22 @@ impl FusionGroupPlan {
                 // Build the per-iteration loads
                 let mut loop_body = String::new();
                 // input0 as 'v'
-                loop_body.push_str("    let v = input0.data[ (col * params.nrows) + r ];\n");
+                let first_index = if let Some(emission) = selected {
+                    emission.index_expression(0, axis)?
+                } else {
+                    "(col * params.nrows) + r".to_owned()
+                };
+                loop_body.push_str(&format!("    let v = input0.data[{first_index}];\n"));
                 // additional inputs as v1, v2, ...
                 for (idx, _) in self.inputs.iter().enumerate().skip(1) {
-                    loop_body.push_str(&format!(
-                        "    let v{idx} = input{idx}.data[ (col * params.nrows) + r ];\n"
-                    ));
+                    let index = if let Some(emission) = selected {
+                        emission.index_expression(idx, axis)?
+                    } else {
+                        "(col * params.nrows) + r".to_owned()
+                    };
+                    loop_body.push_str(&format!("    let v{idx} = input{idx}.data[{index}];\n"));
                 }
+                loop_body.push_str(&producer_body);
                 // compute val and accumulate
                 loop_body.push_str(&format!(
                     "    let val: {scalar} = {val};\n    if (OMITNAN) {{ if (!isNanF(val)) {{ acc = acc + val; }} }} else {{ if (isNanF(val)) {{ saw_nan = true; }} else {{ acc = acc + val; }} }}\n",
@@ -2086,13 +2183,22 @@ impl FusionGroupPlan {
             {
                 let mut loop_body = String::new();
                 // input0 as 'v' — provider encodes rows in params.ncols for axis=1
-                loop_body.push_str("    let v = input0.data[ row + (c * params.ncols) ];\n");
+                let first_index = if let Some(emission) = selected {
+                    emission.index_expression(0, axis)?
+                } else {
+                    "row + (c * params.ncols)".to_owned()
+                };
+                loop_body.push_str(&format!("    let v = input0.data[{first_index}];\n"));
                 // additional inputs as v1, v2, ...
                 for (idx, _) in self.inputs.iter().enumerate().skip(1) {
-                    loop_body.push_str(&format!(
-                        "    let v{idx} = input{idx}.data[ row + (c * params.ncols) ];\n"
-                    ));
+                    let index = if let Some(emission) = selected {
+                        emission.index_expression(idx, axis)?
+                    } else {
+                        "row + (c * params.ncols)".to_owned()
+                    };
+                    loop_body.push_str(&format!("    let v{idx} = input{idx}.data[{index}];\n"));
                 }
+                loop_body.push_str(&producer_body);
                 loop_body.push_str(&format!(
                     "    let val: {scalar} = {val};\n    if (OMITNAN) {{ if (!isNanF(val)) {{ acc = acc + val; }} }} else {{ if (isNanF(val)) {{ saw_nan = true; }} else {{ acc = acc + val; }} }}\n",
                 scalar = scalar_ty,
@@ -2113,7 +2219,14 @@ impl FusionGroupPlan {
                 post_scale
             ));
         }
-        Some(shader)
+        Some(crate::wgsl::nan_predicate::inject(
+            &shader,
+            if scalar_ty == "f64" {
+                crate::wgsl::NumericPrecision::F64
+            } else {
+                crate::wgsl::NumericPrecision::F32
+            },
+        ))
     }
 }
 
@@ -2384,6 +2497,8 @@ fn detect_image_normalize(
             bias: match_info.bias.clone(),
             gamma: match_info.gamma.clone(),
             clamp_zero: match_info.clamp_zero,
+            requires_single_input: match_info.requires_single_input,
+            reduction_routes: match_info.reduction_routes.clone().map(Box::new),
         };
 
         groups.push(FusionGroup {
@@ -2792,7 +2907,12 @@ fn collect_scalar_constant(graph: &AccelGraph, vid: ValueId) -> Option<ConstantT
                     // The graph builder owns both the conversion and its
                     // represented result. A shape/type hint alone is not a
                     // constant, and native integer mirrors are not evidence.
-                    if !matches!(&info.constant, Some(Value::Num(_))) {
+                    if !matches!(
+                        &info.constant,
+                        Some(Value::Tensor(tensor))
+                            if tensor.shape() == [1, 1]
+                                && tensor.as_f32_slice().is_some_and(|values| values.len() == 1)
+                    ) {
                         return None;
                     }
                     // Capture only sign changes outside this proved result.
@@ -2875,11 +2995,29 @@ fn capture_image_scalar(
     None
 }
 
+fn is_canonical_single_cast(node: &AccelNode) -> bool {
+    let AccelNodeLabel::Builtin {
+        name,
+        origin: FusionCallOrigin::Named { binding },
+    } = &node.label
+    else {
+        return false;
+    };
+    node.inputs.len() == 1
+        && builtin_catalog_entry_by_name(name).is_some_and(|entry| {
+            entry.identity == SINGLE_CATALOG_ENTRY.identity
+                && entry
+                    .bindings
+                    .iter()
+                    .any(|variant| entry.binding_identity(variant) == *binding)
+        })
+}
+
 fn peel_numeric_casts(
     graph: &AccelGraph,
     mut vid: ValueId,
     assigned: &HashSet<NodeId>,
-    _nodes: &mut Vec<NodeId>,
+    nodes: &mut Vec<NodeId>,
 ) -> Option<ValueId> {
     loop {
         let info = graph.value(vid)?;
@@ -2890,9 +3028,27 @@ fn peel_numeric_casts(
                 }
                 let node_ref = graph.node(*node)?;
                 if let AccelNodeLabel::Builtin { name, .. } = &node_ref.label {
-                    if name.eq_ignore_ascii_case("gpuarray") {
+                    let single_cast = is_canonical_single_cast(node_ref);
+                    if name.eq_ignore_ascii_case("gpuarray") || single_cast {
                         if node_ref.inputs.len() != 1 {
                             return None;
+                        }
+                        if single_cast {
+                            let input_shape = &graph.value(node_ref.inputs[0])?.shape;
+                            // Mean/elementwise outputs in a compiled vecdim
+                            // chain may remain Unknown even though the source
+                            // image is a known tensor. A known scalar cannot
+                            // be a tensor cast in this path. The complete
+                            // image matcher and execution's native-single
+                            // input guard own the remaining dynamic proof.
+                            if !matches!(&info.shape, ShapeInfo::Tensor(_) | ShapeInfo::Unknown)
+                                || !matches!(input_shape, ShapeInfo::Tensor(_) | ShapeInfo::Unknown)
+                            {
+                                return None;
+                            }
+                            // The executor checks authoritative input storage before
+                            // admitting a chain that passes through this conversion.
+                            nodes.push(*node);
                         }
                         vid = node_ref.inputs[0];
                         continue;
@@ -3279,8 +3435,20 @@ fn match_mean_axes(graph: &AccelGraph, vid: ValueId) -> Option<(NodeId, ValueId,
         AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("mean") => {}
         _ => return None,
     }
-    if node.inputs.len() < 2 {
+    if !(2..=3).contains(&node.inputs.len()) {
         return None;
+    }
+    if let Some(control_vid) = node.inputs.get(2) {
+        let control = match graph.value(*control_vid)?.constant.as_ref()? {
+            Value::String(text) => MeanControl::from_public_option(text),
+            Value::CharArray(chars) if chars.rows == 1 => {
+                MeanControl::from_public_option(&chars.data.iter().collect::<String>())
+            }
+            _ => None,
+        };
+        if control != Some(MeanControl::Output(MeanOutputClass::Native)) {
+            return None;
+        }
     }
     let data_vid = node.inputs[0];
     let dims_vid = node.inputs[1];
@@ -3299,31 +3467,6 @@ fn dims_match_unordered(found: &[f64], expected: &[f64]) -> bool {
     a == b
 }
 
-fn peel_mean_dims(
-    graph: &AccelGraph,
-    vid: ValueId,
-    expected_dims: &[f64],
-    assigned: &HashSet<NodeId>,
-    nodes: &mut Vec<NodeId>,
-) -> Option<ValueId> {
-    if expected_dims.is_empty() {
-        return Some(vid);
-    }
-    let (node_id, data_vid, dims) = match_mean_axes(graph, vid)?;
-    if assigned.contains(&node_id) {
-        return None;
-    }
-    if dims.len() == expected_dims.len() && dims_match_unordered(&dims, expected_dims) {
-        nodes.push(node_id);
-        return Some(data_vid);
-    }
-    if dims.len() == 1 && approx_eq(dims[0], expected_dims[0]) {
-        nodes.push(node_id);
-        return peel_mean_dims(graph, data_vid, &expected_dims[1..], assigned, nodes);
-    }
-    None
-}
-
 struct ImageNormalizeMatch {
     nodes: Vec<NodeId>,
     input: ValueId,
@@ -3332,6 +3475,8 @@ struct ImageNormalizeMatch {
     bias: Option<ImageScalar>,
     gamma: Option<ImageScalar>,
     clamp_zero: bool,
+    requires_single_input: bool,
+    reduction_routes: Option<image_reduction::ImageReductionRoutes>,
 }
 
 fn analyze_image_normalize(
@@ -3462,9 +3607,12 @@ fn analyze_image_normalize(
     }
     nodes.push(add_node_id);
     let epsilon = epsilon_scalar;
+    let variance_observed = mean_sq_vid;
     let mean_sq_vid = peel_numeric_casts(graph, mean_sq_vid, assigned, &mut nodes)?;
 
-    let squared_diff_vid = peel_mean_dims(graph, mean_sq_vid, &[3.0, 2.0], assigned, &mut nodes)?;
+    let variance =
+        image_reduction::peel_mean_dims(graph, mean_sq_vid, &[3.0, 2.0], assigned, &mut nodes)?;
+    let squared_diff_vid = variance.source;
 
     let (square_pow_node_id, square_pow_node) = node_from_value(graph, squared_diff_vid)?;
     if assigned.contains(&square_pow_node_id) {
@@ -3489,6 +3637,10 @@ fn analyze_image_normalize(
     nodes.push(square_pow_node_id);
     nodes.extend(exponent_trace.nodes.iter().copied());
 
+    let variance_route = variance
+        .route
+        .and_then(|route| route.with_cast_path(graph, variance_observed, mean_sq_vid));
+
     let diff_var_vid = square_pow_node.inputs[0];
     let (diff_var_node_id, diff_var_node) = node_from_value(graph, diff_var_vid)?;
     if assigned.contains(&diff_var_node_id) {
@@ -3504,6 +3656,7 @@ fn analyze_image_normalize(
         img_norm_fail!("diff variance arity");
     }
     let imgs_vid = diff_var_node.inputs[0];
+    let mu_variance_observed = diff_var_node.inputs[1];
     let mu_vid = peel_numeric_casts(graph, diff_var_node.inputs[1], assigned, &mut nodes)?;
     nodes.push(diff_var_node_id);
 
@@ -3517,16 +3670,22 @@ fn analyze_image_normalize(
     if diff_node.inputs.len() != 2 {
         img_norm_fail!("diff node arity");
     }
+    let mu_output_observed = diff_node.inputs[1];
     let diff_mu_vid = peel_numeric_casts(graph, diff_node.inputs[1], assigned, &mut nodes)?;
     if diff_node.inputs[0] != imgs_vid || diff_mu_vid != mu_vid {
         img_norm_fail!("diff inputs mismatch with variance pair");
     }
     nodes.push(diff_node_id);
 
-    let mean_mu_input_vid = peel_mean_dims(graph, mu_vid, &[3.0, 2.0], assigned, &mut nodes)?;
+    let mu = image_reduction::peel_mean_dims(graph, mu_vid, &[3.0, 2.0], assigned, &mut nodes)?;
+    let mean_mu_input_vid = mu.source;
     if mean_mu_input_vid != imgs_vid {
         img_norm_fail!("mean mu input mismatch");
     }
+    let mu_route = mu
+        .route
+        .and_then(|route| route.with_cast_path(graph, mu_variance_observed, mu_vid))
+        .and_then(|route| route.with_cast_path(graph, mu_output_observed, diff_mu_vid));
 
     let input_info = graph.value(imgs_vid)?;
     match &input_info.shape {
@@ -3543,6 +3702,9 @@ fn analyze_image_normalize(
         }
     }
 
+    let requires_single_input = nodes
+        .iter()
+        .any(|id| graph.node(*id).is_some_and(is_canonical_single_cast));
     nodes.sort_unstable();
     nodes.dedup();
 
@@ -3554,6 +3716,21 @@ fn analyze_image_normalize(
         bias: bias_opt,
         gamma: gamma_opt,
         clamp_zero,
+        requires_single_input,
+        reduction_routes: mu_route.zip(variance_route).map(|(mu, variance)| {
+            image_reduction::ImageReductionRoutes {
+                mu,
+                variance,
+                stage_producers: Some(image_reduction::ImageStageProducers {
+                    mu: mu_vid,
+                    variance: mean_sq_vid,
+                    sigma: sigma_vid,
+                    pre_clamp_output: clamp_zero.then_some(clamp_input_vid),
+                    clamp_output: clamp_zero.then_some(pow_base_vid),
+                    output: pow_node.outputs[0],
+                }),
+            }
+        }),
     })
 }
 
@@ -3567,6 +3744,39 @@ mod tests {
     use runmat_builtins::Type;
     use runmat_value::{IntValue, Value};
     use std::collections::HashMap as StdHashMap;
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn image_single_cast_requires_the_selected_catalog_binding() {
+        let [variant] = SINGLE_CATALOG_ENTRY.bindings else {
+            panic!("single catalog binding must be unambiguous");
+        };
+        let mut node = AccelNode {
+            id: 0,
+            label: AccelNodeLabel::Builtin {
+                name: "SINGLE".into(),
+                origin: FusionCallOrigin::Named {
+                    binding: SINGLE_CATALOG_ENTRY.binding_identity(variant),
+                },
+            },
+            category: AccelOpCategory::Elementwise,
+            inputs: vec![0],
+            outputs: vec![1],
+            span: InstrSpan { start: 0, end: 0 },
+            tags: vec![AccelGraphTag::Elementwise],
+        };
+        assert!(is_canonical_single_cast(&node));
+        let AccelNodeLabel::Builtin { name, .. } = &mut node.label else {
+            unreachable!()
+        };
+        *name = "double".into();
+        assert!(!is_canonical_single_cast(&node));
+        node.label = AccelNodeLabel::Builtin {
+            name: "single".into(),
+            origin: FusionCallOrigin::NamedUnresolved,
+        };
+        assert!(!is_canonical_single_cast(&node));
+    }
 
     fn simple_elementwise_graph() -> AccelGraph {
         let values = vec![
@@ -3827,18 +4037,13 @@ mod tests {
         let graph = simple_elementwise_graph();
         let groups = detect_fusion_groups(&graph);
         let plan = FusionPlan::from_graph(&graph, &groups);
-        for (scalar, word, exponent, magnitude) in [
-            ("f32", "u32", "0x7f800000u", "0x7fffffffu"),
-            ("f64", "u64", "0x7ff0000000000000u", "0x7fffffffffffffffu"),
-        ] {
-            let shader = plan.groups[0].generate_wgsl(scalar).unwrap();
-            assert!(shader.contains(&format!(
-                "fn isFinite(x: {scalar}) -> bool {{ return (bitcast<{word}>(x) & {exponent}) != {exponent}; }}"
-            )));
-            assert!(shader.contains(&format!(
-                "fn isInf(x: {scalar}) -> bool {{ return (bitcast<{word}>(x) & {magnitude}) == {exponent}; }}"
-            )));
-        }
+        let single = plan.groups[0].generate_wgsl("f32").unwrap();
+        assert!(single.contains("(bitcast<u32>(x) & 0x7f800000u) != 0x7f800000u"));
+        assert!(single.contains("(bitcast<u32>(x) & 0x7fffffffu) == 0x7f800000u"));
+        let double = plan.groups[0].generate_wgsl("f64").unwrap();
+        assert!(double.contains("(runmat_f64_high(x) & 0x7ff00000u) != 0x7ff00000u"));
+        assert!(double.contains("runmat_f64_low(x) == 0u"));
+        assert!(!double.contains("0x7ff0000000000000u"));
     }
 
     #[test]
@@ -3941,8 +4146,10 @@ mod tests {
                 ValueInfo {
                     id: 2,
                     origin: ValueOrigin::NodeOutput { node: 0, output: 0 },
-                    ty: Type::Num,
-                    shape: ShapeInfo::Scalar,
+                    ty: Type::Tensor {
+                        shape: Some(vec![Some(1), Some(1)]),
+                    },
+                    shape: ShapeInfo::Tensor(vec![Some(1), Some(1)]),
                     constant: folded,
                 },
                 ValueInfo {
@@ -3984,9 +4191,13 @@ mod tests {
         }
     }
 
+    fn folded_single(value: f32) -> Value {
+        Value::Tensor(runmat_value::Tensor::from_f32(vec![value], vec![1, 1]).unwrap())
+    }
+
     #[test]
     fn image_clamp_accepts_only_a_certified_folded_single_zero() {
-        let graph = folded_single_clamp_graph(Value::Num(0.0), Some(Value::Num(0.0)));
+        let graph = folded_single_clamp_graph(Value::Num(0.0), Some(folded_single(0.0)));
         let trace = collect_scalar_constant(&graph, 2).expect("certified single zero");
         assert_eq!(trace.value.to_bits(), 0.0f64.to_bits());
         assert_eq!(trace.nodes, vec![0]);
@@ -4009,19 +4220,23 @@ mod tests {
 
     #[test]
     fn image_clamp_rejects_nonzero_unknown_and_unsafe_integer_controls() {
-        let mut untagged = folded_single_clamp_graph(Value::Num(0.0), Some(Value::Num(0.0)));
+        let mut untagged = folded_single_clamp_graph(Value::Num(0.0), Some(folded_single(0.0)));
         untagged.nodes[0]
             .tags
             .retain(|tag| *tag != AccelGraphTag::UnaryScalarFold);
-        let mut wrong_output = folded_single_clamp_graph(Value::Num(0.0), Some(Value::Num(0.0)));
+        let mut wrong_output = folded_single_clamp_graph(Value::Num(0.0), Some(folded_single(0.0)));
         wrong_output.nodes[0].outputs.clear();
-        let mut wrong_arity = folded_single_clamp_graph(Value::Num(0.0), Some(Value::Num(0.0)));
+        let mut wrong_arity = folded_single_clamp_graph(Value::Num(0.0), Some(folded_single(0.0)));
         wrong_arity.nodes[0].inputs.push(1);
         for graph in [
-            folded_single_clamp_graph(Value::Num(0.25), Some(Value::Num(0.25))),
+            folded_single_clamp_graph(Value::Num(0.25), Some(folded_single(0.25))),
             folded_single_clamp_graph(Value::Num(0.0), None),
             folded_single_clamp_graph(Value::Int(IntValue::U64(u64::MAX)), None),
-            folded_single_clamp_graph(Value::Int(IntValue::U64(u64::MAX)), Some(Value::Num(0.0))),
+            folded_single_clamp_graph(
+                Value::Int(IntValue::U64(u64::MAX)),
+                Some(folded_single(0.0)),
+            ),
+            folded_single_clamp_graph(Value::Num(0.0), Some(Value::Num(0.0))),
             untagged,
             wrong_output,
             wrong_arity,
@@ -4035,8 +4250,7 @@ mod tests {
 
     #[test]
     fn image_scalar_trace_preserves_single_rounding_and_unclamped_source() {
-        let graph =
-            folded_single_clamp_graph(Value::Num(0.1), Some(Value::Num((0.1f64 as f32) as f64)));
+        let graph = folded_single_clamp_graph(Value::Num(0.1), Some(folded_single(0.1)));
         let trace = collect_scalar_constant(&graph, 2).expect("rounded single constant");
         assert_eq!(trace.value.to_bits(), ((0.1f64 as f32) as f64).to_bits());
         assert_eq!(trace.nodes, vec![0]);
@@ -4053,7 +4267,7 @@ mod tests {
         // The current graph owner folds literal single calls. This exercises
         // the generic proof tag if a later owner folds a unary expression
         // whose source itself contains a negation.
-        let mut graph = folded_single_clamp_graph(Value::Num(2.0), Some(Value::Num(-2.0)));
+        let mut graph = folded_single_clamp_graph(Value::Num(2.0), Some(folded_single(-2.0)));
         graph.values.push(ValueInfo {
             id: 4,
             origin: ValueOrigin::NodeOutput { node: 2, output: 0 },

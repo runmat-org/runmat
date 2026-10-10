@@ -123,7 +123,7 @@ pub(crate) fn is_handle_target_valid(handle: &runmat_value::HandleRef) -> bool {
                 runmat_value::GraphicsReceiverKind::Axes { .. } => runmat_types::standard::AXES,
             };
             handle.class_name == expected_class
-                && builtins::plotting::state::graphics_receiver_valid(&receiver)
+                && plotting_hooks::graphics_receiver_valid(&receiver)
         }
         Some((valid, _, None)) => valid,
         Some((_, _, Some(_))) => false,

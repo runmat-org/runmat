@@ -267,8 +267,11 @@ impl AccelProvider for CudaProvider {
         })
     }
 
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView<'_>) -> Result<GpuTensorHandle> {
-        self.upload_numeric_impl(host)
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView<'_>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        Ok(self.upload_numeric_impl(host)?)
     }
 
     fn upload_logical_raw(&self, host: &HostLogicalTensorView<'_>) -> Result<GpuTensorHandle> {

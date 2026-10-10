@@ -6,7 +6,10 @@ use runmat_accelerate_api::{
     HostTensorView, NumericElementType, ProviderPrecision, ThreadProviderGuard,
 };
 use runmat_value::Value;
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
+
+#[path = "support/retained_provider.rs"]
+mod retained_provider;
 
 struct PendingProvider {
     owner: TestAllocationOwner,
@@ -92,8 +95,7 @@ impl AccelProvider for PendingProvider {
 
 #[test]
 fn abandoned_component_and_construction_calls_preserve_borrows_and_retire_pending_temporaries() {
-    static PROVIDER: OnceLock<PendingProvider> = OnceLock::new();
-    let provider = PROVIDER.get_or_init(|| PendingProvider {
+    let provider = retained_provider::retained_test_provider!(PROVIDER: PendingProvider = PendingProvider {
         owner: TestAllocationOwner::new(),
         pending_allocation: Mutex::new(None),
     });

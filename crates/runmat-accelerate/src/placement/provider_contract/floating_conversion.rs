@@ -6,6 +6,8 @@ use runmat_builtins::{DOUBLE_CATALOG_ENTRY, SINGLE_CATALOG_ENTRY};
 mod tests;
 mod work;
 #[cfg(feature = "wgpu")]
+pub(crate) use work::build_for_input;
+#[cfg(feature = "wgpu")]
 pub(crate) use work::{observation_capability, physical_work};
 
 pub(super) fn append(snapshot: &mut ProviderCapabilitySnapshot) {
@@ -81,15 +83,53 @@ fn validate_target(
         );
     }
     let input = &query.inputs[0];
-    if input.storage != ProviderStorage::DenseReal {
+    if !matches!(
+        input.storage,
+        ProviderStorage::DenseReal | ProviderStorage::DenseComplexInterleaved
+    ) {
         return reject(
             ProviderRejectionCode::UnsupportedStorage,
-            "floating_cast.real.required",
+            "floating_cast.floating_storage.required",
         );
     }
-    let input_supported = match (input.element_type, target) {
-        (ProviderElementType::F32, ProviderElementType::F32) => true,
-        (ProviderElementType::F64, _) => provider.precision() == ProviderPrecision::F64,
+    if !matches!(
+        (input.storage, input.element_type),
+        (
+            ProviderStorage::DenseReal,
+            ProviderElementType::F32 | ProviderElementType::F64
+        ) | (
+            ProviderStorage::DenseComplexInterleaved,
+            ProviderElementType::ComplexF32 | ProviderElementType::ComplexF64
+        )
+    ) {
+        return reject(
+            ProviderRejectionCode::UnsupportedElementType,
+            "floating_cast.input_storage_class.mismatch",
+        );
+    }
+    let output_type = match (input.storage, target) {
+        (ProviderStorage::DenseReal, target) => target,
+        (ProviderStorage::DenseComplexInterleaved, ProviderElementType::F32) => {
+            ProviderElementType::ComplexF32
+        }
+        (ProviderStorage::DenseComplexInterleaved, ProviderElementType::F64) => {
+            ProviderElementType::ComplexF64
+        }
+        _ => {
+            return reject(
+                ProviderRejectionCode::UnsupportedElementType,
+                "floating_cast.target_type",
+            )
+        }
+    };
+    let input_supported = match (input.element_type, output_type) {
+        (ProviderElementType::F32, ProviderElementType::F32)
+        | (ProviderElementType::ComplexF32, ProviderElementType::ComplexF32) => true,
+        (ProviderElementType::F32, ProviderElementType::F64)
+        | (ProviderElementType::ComplexF32, ProviderElementType::ComplexF64)
+        | (ProviderElementType::F64 | ProviderElementType::ComplexF64, _) => {
+            provider.precision() == ProviderPrecision::F64
+        }
         _ => false,
     };
     if !input_supported {
@@ -99,8 +139,8 @@ fn validate_target(
         );
     }
     let output = ProviderRepresentation {
-        element_type: target,
-        storage: ProviderStorage::DenseReal,
+        element_type: output_type,
+        storage: input.storage,
         layout: ProviderLayout::ColumnMajorContiguous,
         shape: input.shape.clone(),
         residency: ProviderResidency::Device,
@@ -121,7 +161,14 @@ fn validate_target(
             "floating_cast.shape.overflow",
         );
     };
-    if wgpu && elements > u64::from(u32::MAX) {
+    let scalar_visits = elements.checked_mul(
+        if input.storage == ProviderStorage::DenseComplexInterleaved {
+            2
+        } else {
+            1
+        },
+    );
+    if wgpu && scalar_visits.is_none_or(|count| count > u64::from(u32::MAX)) {
         return reject(
             ProviderRejectionCode::ResourceLimit,
             "floating_cast.dispatch.length",
@@ -130,7 +177,7 @@ fn validate_target(
     let mut complete = query.clone();
     // Same-type WGPU casts publish an alias registration, not a second physical
     // payload. Output descriptor consistency was checked above.
-    complete.outputs = if wgpu && input.element_type == target {
+    complete.outputs = if wgpu && input.element_type == output_type {
         vec![]
     } else {
         vec![output]
@@ -141,6 +188,12 @@ fn validate_target(
     // infer support for unrelated native-precision legacy operations.
     if !snapshot.element_types.contains(&ProviderElementType::F32) {
         snapshot.element_types.push(ProviderElementType::F32);
+    }
+    if !snapshot
+        .element_types
+        .contains(&ProviderElementType::ComplexF32)
+    {
+        snapshot.element_types.push(ProviderElementType::ComplexF32);
     }
     let allocation_bytes: fn(&ProviderRepresentation) -> Option<u64> = if wgpu {
         crate::backend::wgpu_storage::checked_allocation_bytes
@@ -183,4 +236,21 @@ fn validate_target(
         }
     }
     Some(feasibility)
+}
+
+/// Exact synchronous in-process cast output evidence. Unlike the WGPU recipe,
+/// this route has no shader geometry or queue submission; both real and
+/// interleaved complex components are converted by the owning cast hook.
+pub(crate) fn in_process_physical_work(
+    provider: &(impl AccelProvider + ?Sized),
+    query: &ProviderFeasibilityQuery,
+) -> Option<ProviderResourceEstimate> {
+    let target = target(query)?;
+    if !has_exact_route(query, target) {
+        return None;
+    }
+    match validate_target(provider, false, query, target)? {
+        ProviderFeasibility::Supported { estimate } => Some(estimate),
+        ProviderFeasibility::Rejected { .. } => None,
+    }
 }

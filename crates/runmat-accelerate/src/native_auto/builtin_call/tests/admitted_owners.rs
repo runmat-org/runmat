@@ -15,6 +15,7 @@ use std::sync::{
 struct Owner {
     inner: crate::simple_provider::InProcessProvider,
     uploads: AtomicUsize,
+    downloads: AtomicUsize,
     allocations: Mutex<Vec<WeakGpuTensorHandle>>,
 }
 impl Owner {
@@ -57,7 +58,10 @@ impl AccelProvider for Owner {
         self.uploads.fetch_add(1, Ordering::Relaxed);
         Ok(self.publish(self.inner.upload(host)?))
     }
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView<'_>) -> Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView<'_>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::Relaxed);
         Ok(self.publish(self.inner.upload_numeric_raw(host)?))
     }
@@ -65,6 +69,7 @@ impl AccelProvider for Owner {
         &'a self,
         handle: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::Relaxed);
         self.inner.download(handle)
     }
     fn query_feasibility(
@@ -79,6 +84,7 @@ fn owner() -> &'static Owner {
     let provider = Box::leak(Box::new(Owner {
         inner: crate::simple_provider::InProcessProvider::new(),
         uploads: AtomicUsize::new(0),
+        downloads: AtomicUsize::new(0),
         allocations: Mutex::new(Vec::new()),
     }));
     // SAFETY: leaked owners have process lifetime and unique monotonically allocated IDs.
@@ -112,10 +118,11 @@ fn admitted_mixed_or_other_owner_bypasses_selected_provider_and_preserves_runtim
         let theta_owner = if mixed { selected } else { other };
         let theta = theta_owner.input(&[0.0, 0.0]);
         let rho = other.input(&[2.0, 3.0]);
+        let z = other.input(&[7.0]);
         let args = vec![
             Value::GpuTensor(theta.clone()),
             Value::GpuTensor(rho.clone()),
-            Value::Tensor(Tensor::new(vec![7.0], vec![1, 1]).unwrap()),
+            Value::GpuTensor(z.clone()),
         ];
         let original = args.clone();
         let _ambient = ThreadProviderGuard::set(Some(selected));
@@ -150,9 +157,70 @@ fn admitted_mixed_or_other_owner_bypasses_selected_provider_and_preserves_runtim
         drop(original);
         drop(theta);
         drop(rho);
+        drop(z);
         assert_eq!(selected.live_count(), 0);
         assert_eq!(other.live_count(), 0);
     }
+}
+
+#[test]
+fn admitted_other_owner_refusal_after_staging_is_terminal_and_retires_upload() {
+    let selected = owner();
+    let other = owner();
+    let theta = other.input(&[0.0, 0.0]);
+    let rho = other.input(&[2.0, 3.0]);
+    let args = vec![
+        Value::GpuTensor(theta.clone()),
+        Value::GpuTensor(rho.clone()),
+        Value::Tensor(Tensor::new(vec![7.0], vec![1, 1]).unwrap()),
+    ];
+    let _ambient = ThreadProviderGuard::set(Some(selected));
+    let probe = Rc::new(Probe::default());
+    probe.provider.set(true);
+    let context = runtime(&probe);
+    let auto = NativeAutoOffload::new(selected, ThresholdConfig::default());
+    let prepared = super::super::admitted::prepare_with(&auto, &context, request(args)).unwrap();
+    assert_eq!(selected.uploads.load(Ordering::Relaxed), 0);
+    assert!(probe.requests.borrow().is_empty());
+    let error = futures::executor::block_on(context.scope(prepared.execute(|args| async move {
+        runmat_runtime::dispatcher::call_builtin_async_with_outputs("pol2cart", &args, 3).await
+    })))
+    .unwrap_err();
+    let source = error
+        .source
+        .as_ref()
+        .and_then(|source| source.downcast_ref::<runmat_accelerate_api::ProviderExecutionError>())
+        .expect("provider failure retains its typed effect boundary");
+    assert!(source.is_after_effect());
+    assert!(
+        !source.is_unsupported(),
+        "post-staging failure cannot authorize replay"
+    );
+    assert_eq!(selected.uploads.load(Ordering::Relaxed), 0);
+    assert_eq!(other.uploads.load(Ordering::Relaxed), 1);
+    assert_eq!(other.downloads.load(Ordering::Relaxed), 0);
+    assert!(probe.feedback.borrow().is_empty());
+    assert_eq!(
+        other.live_count(),
+        2,
+        "staging retired; both borrowed inputs survive"
+    );
+    assert_eq!(selected.live_count(), 0);
+    assert_eq!(
+        futures::executor::block_on(other.download(&theta))
+            .unwrap()
+            .data,
+        vec![0.0, 0.0]
+    );
+    assert_eq!(
+        futures::executor::block_on(other.download(&rho))
+            .unwrap()
+            .data,
+        vec![2.0, 3.0]
+    );
+    drop(theta);
+    drop(rho);
+    assert_eq!(other.live_count(), 0);
 }
 
 #[test]

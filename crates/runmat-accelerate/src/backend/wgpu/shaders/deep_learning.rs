@@ -71,13 +71,18 @@ pub fn stable_pool_1d(precision: super::super::types::NumericPrecision) -> Strin
         ),
         super::super::types::NumericPrecision::F64 => (
             "f64",
-            "return (bitcast<vec2<u32>>(value).y & 0x7ff00000u) == 0x7ff00000u;",
+            "return (runmat_f64_high(value) & 0x7ff00000u) == 0x7ff00000u;",
             "1.7976931348623157e308",
         ),
     };
-    STABLE_POOL_1D
+    let source = STABLE_POOL_1D
         .replace("$SCALAR$", scalar)
         .replace("$SPECIAL$", special)
         .replace("$MAX_FINITE$", max_finite)
-        .replace("$WG$", &POOL_WORKGROUP_SIZE.to_string())
+        .replace("$WG$", &POOL_WORKGROUP_SIZE.to_string());
+    if precision == super::super::types::NumericPrecision::F64 {
+        super::ieee_words::inject(&source)
+    } else {
+        source
+    }
 }

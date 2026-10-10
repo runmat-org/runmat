@@ -1,4 +1,4 @@
-use runmat_types::codec::{decode_canonical, encode_canonical};
+use runmat_types::codec::{decode_canonical, encode_canonical, CanonicalCodecError};
 use runmat_types::{
     infer_binary, infer_call, infer_index, CallContract, CallRequest, CallableFact, ClassKind,
     DynamicReason, ExternalClassDeclaration, IndexKind, IndexResultContext, IndexSelectorFact,
@@ -14,9 +14,31 @@ fn canonical_encoding_is_deterministic_and_round_trips() {
     assert_eq!(first, second);
     assert_eq!(
         std::str::from_utf8(&first).unwrap(),
-        r#"{"schema":"runmat-types","major":1,"minor":1,"fact":{"kind":"Unknown","shape":"Unknown","storage":"Unknown","layout":"Unknown","contiguity":"Unknown","view":"Unknown","residency":"Unknown","alias":"Unknown","mutation":"Unknown","certainty":{"Dynamic":"ForeignBoundary"},"invalidation":[]}}"#
+        r#"{"schema":"runmat-types","major":1,"minor":2,"fact":{"kind":"Unknown","shape":"Unknown","storage":"Unknown","layout":"Unknown","contiguity":"Unknown","view":"Unknown","residency":"Unknown","alias":"Unknown","mutation":"Unknown","certainty":{"Dynamic":"ForeignBoundary"},"invalidation":[]}}"#
     );
     assert_eq!(decode_canonical(&first).unwrap(), fact);
+}
+
+#[test]
+fn canonical_schema_minor_compatibility_is_backward_only() {
+    let fact = ValueFact::unknown(DynamicReason::ForeignBoundary);
+    let encoded = encode_canonical(&fact).unwrap();
+    let mut envelope: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
+
+    envelope["minor"] = serde_json::json!(1);
+    let schema_1_1 = serde_json::to_vec(&envelope).unwrap();
+    assert_eq!(decode_canonical(&schema_1_1).unwrap(), fact);
+
+    envelope["minor"] = serde_json::json!(3);
+    let future = serde_json::to_vec(&envelope).unwrap();
+    assert!(matches!(
+        decode_canonical(&future),
+        Err(CanonicalCodecError::UnsupportedSchema {
+            schema,
+            major: 1,
+            minor: 3,
+        }) if schema == "runmat-types"
+    ));
 }
 
 #[test]

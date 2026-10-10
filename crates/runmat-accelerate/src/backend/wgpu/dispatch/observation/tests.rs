@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
 
 #[test]
 fn fence_size_is_mapping_aligned_and_small_not_payload_dependent() {
@@ -25,6 +27,7 @@ fn actual_private_fences_survive_cancel_and_unrelated_queue_submission() {
         provider.export_context(AccelContextKind::Plotting).unwrap();
     let emit_empty = || {
         let mut pending = PendingSubmissions::new(context.access.clone());
+        let ticket = pending.arm_probe_completion();
         context
             .access
             .with_shared(|emission| {
@@ -38,6 +41,7 @@ fn actual_private_fences_survive_cancel_and_unrelated_queue_submission() {
             .expect("emission available")
             .expect("same device");
         pending.commit();
+        ticket
     };
     let value = ProviderRepresentation {
         element_type: ProviderElementType::F32,
@@ -58,9 +62,11 @@ fn actual_private_fences_survive_cancel_and_unrelated_queue_submission() {
         ProviderObservationSupport::Unsupported => panic!("required native completion driver"),
     };
     let mut first = begin();
-    with_provider_observation(Some(first.recorder()), || {
-        emit_empty();
-    });
+    let first_ticket = with_provider_observation(Some(first.recorder()), emit_empty);
+    assert!(matches!(
+        first_ticket.state(),
+        ProbeFenceState::Pending | ProbeFenceState::Completed
+    ));
     first.fail(ProviderObservationFailure::Cancelled);
     // Unrelated work uses the same access authority but no observation helper;
     // measurement cannot depend on the newest global queue prefix.
@@ -77,9 +83,8 @@ fn actual_private_fences_survive_cancel_and_unrelated_queue_submission() {
         ProviderObservationStatus::Failed(ProviderObservationFailure::Cancelled)
     );
     let mut next = begin();
-    with_provider_observation(Some(next.recorder()), || {
-        emit_empty();
-    });
+    let next_ticket = with_provider_observation(Some(next.recorder()), emit_empty);
+    assert_eq!(next_ticket.fence_requested_bytes(), Some(8));
     next.publish().unwrap();
     // No second caller poll/submit is needed to drive native completion.
     struct Signal(std::sync::mpsc::SyncSender<()>);
@@ -108,4 +113,8 @@ fn actual_private_fences_survive_cancel_and_unrelated_queue_submission() {
         evidence.status,
         ProviderObservationStatus::Completed { submissions: 1, .. }
     ));
+    assert_eq!(next_ticket.state(), ProbeFenceState::Completed);
+    let absent = emit_empty();
+    assert_eq!(absent.state(), ProbeFenceState::Absent);
+    assert_eq!(absent.fence_requested_bytes(), None);
 }

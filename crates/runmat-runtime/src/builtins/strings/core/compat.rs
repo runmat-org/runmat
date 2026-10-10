@@ -1679,7 +1679,7 @@ mod tests {
         isletter::isletter_builtin, isspace::isspace_builtin, isstrprop::isstrprop_builtin,
         letters_pattern::letters_pattern_builtin, newline::newline_builtin,
         pattern::pattern_builtin, regexp_pattern::regexp_pattern_builtin,
-        strncmpi::strncmpi_builtin, text_boundary::text_boundary_builtin,
+        strncmpi::strncmpi_builtin as strncmpi_with_metadata, text_boundary::text_boundary_builtin,
         wildcard_pattern::wildcard_pattern_builtin,
     };
     use runmat_builtins::{
@@ -1693,6 +1693,14 @@ mod tests {
         TEXT_BOUNDARY_ERROR_TOO_MANY_OUTPUTS, WILDCARD_PATTERN_ERROR_TOO_MANY_OUTPUTS,
     };
     use runmat_value::{CellArray, IntValue, IntegerStorage, NumericDType, StructValue};
+
+    fn strncmpi_builtin(
+        a: Value,
+        b: Value,
+        n: Value,
+    ) -> impl std::future::Future<Output = BuiltinResult<Value>> {
+        strncmpi_with_metadata(None, None, a, b, n)
+    }
 
     #[test]
     fn text_broadcast_helpers_append_trailing_singletons() {

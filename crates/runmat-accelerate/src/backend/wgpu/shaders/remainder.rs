@@ -12,7 +12,7 @@ pub(crate) fn shader(precision: NumericPrecision, kind: FloatingRemainderKind) -
     let name = crate::kernel_math::floating_remainder::entrypoint(precision);
     let modulus = kind == FloatingRemainderKind::Modulus;
     let rank = crate::backend::wgpu::params::BCAST_MAX_RANK;
-    format!(
+    let source = format!(
         r#"
 struct PackedValue {{ value: u32, _pad0: u32, _pad1: u32, _pad2: u32 }};
 alias PackedArray = array<PackedValue, {rank}>;
@@ -43,5 +43,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     Out.data[idx] = {name}(A.data[left], B.data[right], {modulus});
 }}
 "#
-    )
+    );
+    if precision == runmat_accelerate_api::ProviderPrecision::F64 {
+        super::ieee_words::inject(&source)
+    } else {
+        source
+    }
 }

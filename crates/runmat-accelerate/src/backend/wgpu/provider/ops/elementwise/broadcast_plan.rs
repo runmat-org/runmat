@@ -13,7 +13,24 @@ pub(super) struct BroadcastRoute {
 }
 
 impl BroadcastRoute {
+    #[cfg(test)]
     pub fn new(a: &[usize], b: &[usize], max_rank: usize, element_bytes: u64) -> Result<Self> {
+        Self::with_enabled_limit(
+            a,
+            b,
+            max_rank,
+            element_bytes,
+            crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS,
+        )
+    }
+
+    pub fn with_enabled_limit(
+        a: &[usize],
+        b: &[usize],
+        max_rank: usize,
+        element_bytes: u64,
+        enabled_max_dispatch_groups: u32,
+    ) -> Result<Self> {
         let (shape_a, shape_b, out_shape) = super::super::backend_shared::matlab_broadcast_shapes(
             "binary operation",
             a,
@@ -32,10 +49,12 @@ impl BroadcastRoute {
                 ),
             );
         }
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            .checked_mul(crate::backend::wgpu::config::WORKGROUP_SIZE as usize)
-            .filter(|capacity| *capacity > 0)
-            .ok_or_else(|| anyhow!("broadcast dispatch capacity overflow"))?;
+        let chunk_capacity = crate::backend::wgpu::pipelines::FrozenLinearLaunch::new(
+            crate::backend::wgpu::config::WORKGROUP_SIZE,
+            enabled_max_dispatch_groups,
+        )
+        .and_then(|launch| launch.chunk_capacity())
+        .ok_or_else(|| anyhow!("broadcast dispatch capacity overflow"))?;
         let submissions = if len == 0 {
             0
         } else {

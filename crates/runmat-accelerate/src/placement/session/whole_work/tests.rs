@@ -304,6 +304,8 @@ fn signature() -> PlacementSignature {
         region: None,
         operation: "network".into(),
         runtime_facts: Digest::sha256(b"same-semantic-work"),
+        provider_provenance: None,
+        graph_output_authority: None,
         revision: PlacementRevision {
             program: None,
             catalog: Digest::sha256(b"catalog"),
@@ -1180,6 +1182,47 @@ fn provider_input_stages_include_live_preparation_and_peak_against_execution() {
             .select_whole_work(bounded)
             .err()
             .expect("whole-work route must be rejected")
+            .code,
+        "RunMat:Placement:NoLegalCandidate"
+    );
+}
+
+#[test]
+fn typed_prepared_inputs_and_final_kernel_share_exact_memory_boundary() {
+    let session = PlacementSession::default();
+    let mut provider = candidate(ExecutionCandidateKind::ProviderOperation);
+    provider.resources.retained_bytes = 16.into();
+    // Two preparation uploads retain 32 bytes; the selected kernel adds an
+    // 80-byte output-plus-partial peak while both prepared inputs are live.
+    provider.resources.peak_live = Some(runmat_execution::CandidatePeakLiveDemand {
+        peak_bytes: 112,
+        already_live_bytes: 0,
+    });
+    provider.resources.provider_input_stages = Some(
+        ProviderInputStageDemands::sequential([
+            ProviderInputStageDemand {
+                device_id: 7,
+                incremental_peak_bytes: 16.into(),
+                queue_slots: 1,
+            },
+            ProviderInputStageDemand {
+                device_id: 7,
+                incremental_peak_bytes: 32.into(),
+                queue_slots: 1,
+            },
+        ])
+        .unwrap(),
+    );
+    let mut route = request(vec![provider]);
+    route.constraint = WholeWorkConstraint::ProviderRequired { device_id: 7 };
+    route.resources.providers[0].scratch_available_bytes = Some(112);
+    assert!(session.select_whole_work(route.clone()).is_ok());
+    route.resources.providers[0].scratch_available_bytes = Some(111);
+    assert_eq!(
+        session
+            .select_whole_work(route)
+            .err()
+            .expect("over budget")
             .code,
         "RunMat:Placement:NoLegalCandidate"
     );

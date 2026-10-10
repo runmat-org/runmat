@@ -12,13 +12,19 @@ use thiserror::Error;
 
 use super::{partition::evaluate_selections, partition::solve_partition, PlacementPolicy};
 mod evidence;
-mod observation_permits;
+mod exploration;
+#[cfg(test)]
+mod graph_permit_fixture;
 mod managed_feedback;
+mod observation_permits;
 mod pending;
+mod prepared_request;
 mod whole_work;
+pub(super) use prepared_request::PreparedPlacementRequest;
 #[cfg(test)]
 #[path = "session/authority_tests.rs"]
 mod authority_tests;
+mod runtime_binding_authority;
 
 pub const PLACEMENT_PROFILE_SCHEMA_VERSION: u32 = 3;
 const MAX_FEEDBACK_OBSERVATIONS: u64 = 1_048_576;
@@ -181,6 +187,7 @@ struct PlacementSessionState {
 }
 
 pub struct PlacementSession {
+    runtime_binding_session: runtime_binding_authority::SessionRuntimeBindingAuthority,
     config: PlacementSessionConfig,
     state: RefCell<PlacementSessionState>,
     pending: pending::PendingFeedback,
@@ -199,6 +206,8 @@ impl Default for PlacementSession {
 impl PlacementSession {
     pub fn new(config: PlacementSessionConfig) -> Self {
         Self {
+            runtime_binding_session: runtime_binding_authority::SessionRuntimeBindingAuthority::new(
+            ),
             config,
             state: RefCell::new(PlacementSessionState::default()),
             pending: pending::PendingFeedback::default(),
@@ -231,26 +240,27 @@ impl PlacementSession {
 
     pub fn plan(
         &self,
-        mut request: PlacementPlanRequest,
+        request: PlacementPlanRequest,
     ) -> Result<PlacementDecision, PlacementPlanError> {
         self.drain_observations();
-        request.validate().map_err(|message| PlacementPlanError {
-            code: "RunMat:Placement:InvalidRequest",
-            message: message.into(),
-        })?;
-        let key = request.signature.cache_key();
+        let mut prepared =
+            PreparedPlacementRequest::new(request).map_err(|message| PlacementPlanError {
+                code: "RunMat:Placement:InvalidRequest",
+                message: message.into(),
+            })?;
+        let key = prepared.request().signature.cache_key();
         let mut state = self.state.borrow_mut();
         state.decisions.retain(|_, entry| {
-            entry.decision.signature.operation != request.signature.operation
-                || entry.decision.signature.revision == request.signature.revision
+            entry.decision.signature.operation != prepared.request().signature.operation
+                || entry.decision.signature.revision == prepared.request().signature.revision
         });
         state.tick = state.tick.saturating_add(1);
         let tick = state.tick;
-        apply_feedback_evidence(&mut request, key, tick, &state.feedback);
+        prepared.apply_feedback(key, tick, &state.feedback);
         let partition =
-            solve_partition(&request, PlacementPolicy::default()).map_err(|message| {
+            solve_partition(&prepared, PlacementPolicy::default()).map_err(|message| {
                 PlacementPlanError {
-                    code: if request.resources.cancellation_requested {
+                    code: if prepared.request().resources.cancellation_requested {
                         "RunMat:Placement:Cancelled"
                     } else {
                         "RunMat:Placement:NoLegalCandidate"
@@ -258,13 +268,14 @@ impl PlacementSession {
                     message: message.into(),
                 }
             })?;
-        let mut fresh = decision_from_partition(&request, &partition);
+        let request = prepared.request();
+        let mut fresh = decision_from_partition(request, &partition);
         if let Some(cached) = state.decisions.get_mut(&key) {
             if cached.resources == request.resources
                 && cached.decision.signature.revision == request.signature.revision
             {
                 if let Some(incumbent_ns) =
-                    evaluate_selections(&request, &cached.decision.selections)
+                    evaluate_selections(&prepared, &cached.decision.selections)
                 {
                     if !clears_leave_margin(incumbent_ns, fresh.predicted_total_ns, self.config) {
                         cached.last_used = tick;
@@ -277,23 +288,23 @@ impl PlacementSession {
             }
         }
         if should_explore(self.config, tick, request.deterministic) {
-            if let Some((selections, alternate_ns)) = partition.alternate.as_ref() {
-                if alternate_is_transactional(&request, &partition.selections, selections)
-                    && within_exploration_bound(
-                        partition.total_ns,
-                        *alternate_ns,
-                        self.config.exploration_max_overhead_basis_points,
-                    )
-                {
-                    fresh = decision_from_selections(
-                        &request,
-                        selections,
-                        *alternate_ns,
-                        partition.explored_states,
-                        partition.pruned_states,
-                        false,
-                    );
-                }
+            if let Some((selections, alternate_ns)) = exploration::choose_alternate(
+                request,
+                &partition,
+                self.config,
+                key,
+                &state.feedback,
+                self.managed_feedback.as_ref(),
+                tick,
+            ) {
+                fresh = decision_from_selections(
+                    request,
+                    selections,
+                    *alternate_ns,
+                    partition.explored_states,
+                    partition.pruned_states,
+                    false,
+                );
             }
         }
         state.decisions.insert(
@@ -439,6 +450,8 @@ impl PlacementSession {
     }
 
     pub fn invalidate(&self, invalidation: PlacementInvalidation) {
+        self.runtime_binding_session
+            .invalidate_vm_generations(&invalidation);
         self.observation_permits.invalidate(&invalidation);
         if let Some(pool) = &self.managed_observations {
             pool.invalidate(&invalidation);
@@ -462,14 +475,13 @@ impl PlacementSession {
                 });
             }
             PlacementInvalidation::Provider { digest } => {
-                state.decisions.retain(|_, entry| {
-                    entry.decision.signature.revision.authority
-                        != runmat_execution::PlacementExecutionAuthorityRevision::Provider(digest)
-                });
-                state.feedback.retain(|_, series| {
-                    series.signature.revision.authority
-                        != runmat_execution::PlacementExecutionAuthorityRevision::Provider(digest)
-                });
+                let provider = PlacementInvalidation::Provider { digest };
+                state
+                    .decisions
+                    .retain(|_, entry| !provider.matches_signature(&entry.decision.signature));
+                state
+                    .feedback
+                    .retain(|_, series| !provider.matches_signature(&series.signature));
             }
             PlacementInvalidation::HostService { digest } => {
                 state.decisions.retain(|_, entry| {
@@ -483,6 +495,16 @@ impl PlacementSession {
                         != runmat_execution::PlacementExecutionAuthorityRevision::HostService(
                             digest,
                         )
+                });
+            }
+            PlacementInvalidation::RuntimeBindingSession { digest } => {
+                state.decisions.retain(|_, entry| {
+                    entry.decision.signature.revision.authority
+                        != runmat_execution::PlacementExecutionAuthorityRevision::RuntimeBindingSession(digest)
+                });
+                state.feedback.retain(|_, series| {
+                    series.signature.revision.authority
+                        != runmat_execution::PlacementExecutionAuthorityRevision::RuntimeBindingSession(digest)
                 });
             }
             PlacementInvalidation::Policy { digest } => {
@@ -516,6 +538,12 @@ impl PlacementSession {
             });
             feedback.extend(managed);
         }
+        feedback.retain(|series| {
+            !matches!(
+                series.signature.revision.authority,
+                runmat_execution::PlacementExecutionAuthorityRevision::RuntimeBindingSession(_)
+            )
+        });
         PlacementProfileSnapshot {
             schema_version: PLACEMENT_PROFILE_SCHEMA_VERSION,
             feedback,
@@ -572,6 +600,8 @@ impl PlacementSession {
         // A successful import replaces the observation epoch. In-flight samples
         // from the previous profile must not repopulate the replacement later.
         // Validate the entire import first, so rejected imports change nothing.
+        self.runtime_binding_session
+            .invalidate_vm_generations(&PlacementInvalidation::All);
         self.pending.invalidate(&PlacementInvalidation::All);
         self.observation_permits
             .invalidate(&PlacementInvalidation::All);
@@ -591,7 +621,12 @@ impl PlacementSession {
 }
 
 fn valid_profile_series(series: &PlacementFeedbackSeries) -> bool {
-    series.signature.validate().is_ok()
+    series.signature.provider_provenance.is_none()
+        && !matches!(
+            series.signature.revision.authority,
+            runmat_execution::PlacementExecutionAuthorityRevision::RuntimeBindingSession(_)
+        )
+        && series.signature.validate().is_ok()
         && !series.candidate.is_empty()
         && series.candidate.len() <= 128
         && !series.candidate.chars().any(char::is_control)
@@ -616,6 +651,34 @@ impl runmat_runtime::context::RuntimePlacementService for PlacementSession {
         provider: Digest,
     ) -> Option<runmat_execution::PlacementRevision> {
         Some(super::revision::whole_work(program, provider, self.config))
+    }
+
+    fn whole_work_runtime_binding_session_revision(
+        &self,
+        program: Option<runmat_execution::ProgramRevision>,
+        binding: runmat_builtins::BuiltinBindingIdentity,
+        registration: Digest,
+    ) -> Option<runmat_execution::PlacementRevision> {
+        let (revision, replaced) = self.runtime_binding_session.revision_and_replaced(
+            program,
+            binding,
+            registration,
+            self.config,
+        );
+        if let Some(digest) = replaced {
+            self.invalidate(PlacementInvalidation::RuntimeBindingSession { digest });
+        }
+        Some(revision)
+    }
+
+    fn whole_work_vm_fusion_region_session_revision(
+        &self,
+        program: Option<runmat_execution::ProgramRevision>,
+        region: runmat_runtime::context::VmFusionRegionRegistration,
+        liveness: std::sync::Weak<()>,
+    ) -> Option<runmat_runtime::context::VmFusionSessionRegistration> {
+        self.runtime_binding_session
+            .vm_registration(program, region, liveness, self.config)
     }
 
     fn whole_work_host_service_revision(
@@ -774,6 +837,21 @@ impl runmat_runtime::context::RuntimePlacementService for PlacementSession {
         PlacementSession::plan(self, request).map_err(runtime_error)
     }
 
+    fn plan_with_observation_permit(
+        &self,
+        request: PlacementPlanRequest,
+    ) -> Result<runmat_runtime::context::RuntimeGraphPlacementSelection, runmat_runtime::RuntimeError>
+    {
+        let decision = PlacementSession::plan(self, request).map_err(runtime_error)?;
+        // Both operations run on this Rc-owned service before it returns to
+        // the executor. No effect/publication can interleave this boundary.
+        let observation_permit = self.observation_permits.register_graph(&decision);
+        Ok(runmat_runtime::context::RuntimeGraphPlacementSelection {
+            decision,
+            observation_permit,
+        })
+    }
+
     fn observe(&self, feedback: PlacementFeedback) -> Result<(), runmat_runtime::RuntimeError> {
         PlacementSession::observe(self, feedback).map_err(runtime_error)
     }
@@ -796,6 +874,8 @@ impl PlacementSession {
 impl Drop for PlacementSession {
     fn drop(&mut self) {
         self.drain_observations();
+        self.runtime_binding_session
+            .invalidate_vm_generations(&PlacementInvalidation::All);
     }
 }
 
@@ -983,6 +1063,7 @@ mod tests {
         ExecutionCandidateKind, ExecutionCostComponents, ExecutionCostEstimate, PlacementGraph,
         PlacementGraphCandidate, PlacementGraphEdge, PlacementGraphLimits, PlacementGraphNode,
         PlacementResourceSnapshot, PlacementRevision, PlacementSignature, ProviderResourceSnapshot,
+        SourceOutputOrdinal,
     };
 
     use super::*;
@@ -991,11 +1072,13 @@ mod tests {
         Digest::sha256(token.as_bytes())
     }
 
-    fn signature(token: &str) -> PlacementSignature {
+    pub(super) fn signature(token: &str) -> PlacementSignature {
         PlacementSignature {
             region: None,
             operation: token.into(),
             runtime_facts: digest(token),
+            provider_provenance: None,
+            graph_output_authority: None,
             revision: PlacementRevision {
                 program: None,
                 catalog: digest("catalog"),
@@ -1075,7 +1158,7 @@ mod tests {
         );
     }
 
-    fn candidate(
+    pub(super) fn candidate(
         identity: &str,
         kind: ExecutionCandidateKind,
         cost_ns: u64,
@@ -1119,11 +1202,12 @@ mod tests {
                 queue_slots: if kind.is_provider() { 1 } else { 0 },
                 peak_live: None,
             },
+            output_facts: None,
             transactional_results: transactional,
         }
     }
 
-    fn resources(capacity: u64) -> PlacementResourceSnapshot {
+    pub(super) fn resources(capacity: u64) -> PlacementResourceSnapshot {
         PlacementResourceSnapshot {
             cpu_millicores_available: 1_000,
             memory_available_bytes: None,
@@ -1194,6 +1278,7 @@ mod tests {
                 edges: vec![PlacementGraphEdge {
                     from: 0,
                     to: 1,
+                    source_output: None,
                     bytes: 64,
                     host_to_provider_ns: 100_000,
                     provider_to_host_ns: 100_000,
@@ -1417,6 +1502,7 @@ mod tests {
             PlacementGraphEdge {
                 from: 0,
                 to: 2,
+                source_output: None,
                 bytes: 600,
                 host_to_provider_ns: 0,
                 provider_to_host_ns: 0,
@@ -1425,6 +1511,7 @@ mod tests {
             PlacementGraphEdge {
                 from: 1,
                 to: 2,
+                source_output: None,
                 bytes: 600,
                 host_to_provider_ns: 0,
                 provider_to_host_ns: 0,
@@ -1741,7 +1828,9 @@ mod tests {
         session.invalidate(PlacementInvalidation::Provider {
             digest: match signature.revision.authority {
                 runmat_execution::PlacementExecutionAuthorityRevision::Provider(digest) => digest,
-                runmat_execution::PlacementExecutionAuthorityRevision::HostService(_) => {
+                runmat_execution::PlacementExecutionAuthorityRevision::HostService(_)
+                | runmat_execution::PlacementExecutionAuthorityRevision::RuntimeBindingSession(_) =>
+                {
                     unreachable!("provider fixture")
                 }
             },
@@ -1900,6 +1989,58 @@ mod tests {
             .selections
             .iter()
             .all(|selected| selected.kind.is_provider()));
+    }
+
+    #[test]
+    fn graph_output_authority_separates_failure_profiles_and_cached_decisions() {
+        let mut old = two_node_request("output-feedback", (100_000, 10_000), (100_000, 10_000));
+        old.resources.providers[0].queue_depth = None;
+        old.resources.providers[0].queue_limit = None;
+        old.graph.edges[0].host_to_provider_ns = 0;
+        old.graph.edges[0].provider_to_host_ns = 0;
+        old.graph.edges[0].cross_provider_ns = 0;
+        let failed = &old.graph.nodes[0].candidates[1].descriptor;
+        let candidate = failed.identity.clone();
+        let kind = failed.kind;
+        let session = PlacementSession::default();
+        assert!(session.plan(old.clone()).unwrap().selections[0]
+            .kind
+            .is_provider());
+        for _ in 0..2 {
+            session
+                .observe(PlacementFeedback {
+                    signature: old.signature.clone(),
+                    candidate: candidate.clone(),
+                    kind,
+                    total_elapsed_ns: 0,
+                    succeeded: false,
+                })
+                .unwrap();
+        }
+        assert!(!session.plan(old.clone()).unwrap().selections[0]
+            .kind
+            .is_provider());
+        let mut changed = old;
+        changed.graph.edges[0].source_output = Some(SourceOutputOrdinal::new(0));
+        assert_eq!(
+            session.plan(changed.clone()).unwrap_err().code,
+            "RunMat:Placement:InvalidRequest"
+        );
+        changed.bind_graph_output_authority();
+        assert_ne!(
+            changed.signature.cache_key(),
+            session.profile_snapshot().feedback[0].signature.cache_key()
+        );
+        assert!(session.plan(changed.clone()).unwrap().selections[0]
+            .kind
+            .is_provider());
+        let restored = PlacementSession::default();
+        restored
+            .restore_profile(session.profile_snapshot())
+            .unwrap();
+        assert!(restored.plan(changed).unwrap().selections[0]
+            .kind
+            .is_provider());
     }
 
     #[test]

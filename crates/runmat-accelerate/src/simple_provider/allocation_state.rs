@@ -6,7 +6,12 @@ use runmat_accelerate_api::allocation::{
     AllocationIdentity, AllocationRetirementOutcome, GpuPhysicalDescriptor, WeakAllocationLease,
 };
 use std::collections::HashMap;
-use std::sync::{Arc, LockResult, Mutex};
+use std::sync::{LockResult, Mutex};
+
+#[cfg(not(target_arch = "wasm32"))]
+type NumericOwner = std::sync::Arc<NumericAllocationState>;
+#[cfg(target_arch = "wasm32")]
+type NumericOwner = std::rc::Rc<NumericAllocationState>;
 
 mod guards;
 mod ownership;

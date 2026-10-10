@@ -5,7 +5,13 @@
 //! state. An absent service preserves ordinary runtime/provider execution.
 mod owned;
 mod request;
-pub use owned::{BuiltinPreparationObservation, PreparedBuiltinOperands};
+pub use crate::dispatcher::direct_call_observation::{
+    PreparedBindingAuthority, PreparedCompletionRight,
+};
+pub use owned::{
+    BuiltinPreparationObservation, PreparedBuiltinOperands, PreparedCallCompletion,
+    PreparedCallStatus,
+};
 pub use request::{AdmittedBuiltinPreparation, AdmittedSumReduction, BuiltinPreparationAdmission};
 
 use super::RuntimeContext;

@@ -53,6 +53,9 @@ const FUSION_SEMANTICS: crate::builtins::common::spec::FusionSemanticDeclaration
         },
         revision: 1,
         admit: None,
+        admit_static: None,
+        required_real_unary: None,
+        required_arithmetic: None,
         helpers: &[crate::builtins::common::spec::FusionMathHelper::Round],
         scalar_operation: None,
     };
@@ -181,6 +184,10 @@ fn has_exact_integer_storage(value: &Value) -> bool {
 }
 
 async fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> BuiltinResult<Value> {
+    enum RoundingHookFailure {
+        Digits(runmat_accelerate_api::ProviderExecutionError),
+        Unary(anyhow::Error),
+    }
     let provider = super::unary::input_provider(&handle, BUILTIN_NAME, &ROUND_ERROR_INTERNAL)?;
     if matches!(strategy, RoundStrategy::Integer)
         && runmat_accelerate_api::handle_integer_type(&handle).is_some()
@@ -192,15 +199,22 @@ async fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> BuiltinR
         let provider_result = {
             let _metadata = gpu_helpers::ResidencyRestoreGuard::new(&handle);
             match strategy.provider_digits() {
-                Some((digits, significant)) => {
-                    provider.round_digits(&handle, digits, significant).await
-                }
+                Some((digits, significant)) => provider
+                    .round_digits(&handle, digits, significant)
+                    .await
+                    .map_err(RoundingHookFailure::Digits),
                 None if runmat_accelerate_api::handle_storage(&handle)
                     == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved =>
                 {
-                    provider.round_digits(&handle, 0, false).await
+                    provider
+                        .round_digits(&handle, 0, false)
+                        .await
+                        .map_err(RoundingHookFailure::Digits)
                 }
-                None => provider.unary_round(&handle).await,
+                None => provider
+                    .unary_round(&handle)
+                    .await
+                    .map_err(RoundingHookFailure::Unary),
             }
         };
         match provider_result {
@@ -214,8 +228,20 @@ async fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> BuiltinR
                     &ROUND_ERROR_INTERNAL,
                 )
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
-            Err(error) => {
+            Err(RoundingHookFailure::Digits(error))
+                if runmat_accelerate_api::is_unsupported_provider_error(&error) => {}
+            Err(RoundingHookFailure::Unary(error))
+                if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(RoundingHookFailure::Digits(error)) => {
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    builtin_error_with_detail(
+                        &ROUND_ERROR_INTERNAL,
+                        format!("provider rounding failed: {error}"),
+                    ),
+                    error,
+                ));
+            }
+            Err(RoundingHookFailure::Unary(error)) => {
                 return Err(builtin_error_with_detail(
                     &ROUND_ERROR_INTERNAL,
                     format!("provider rounding failed: {error}"),

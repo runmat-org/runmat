@@ -72,6 +72,8 @@ mod run;
 mod source_evaluation;
 mod user_path;
 mod workspace;
+#[cfg(test)]
+mod s1_compiled_call_tests;
 
 /// Host-agnostic RunMat execution session (parser + interpreter + optional JIT).
 #[cfg(not(target_arch = "wasm32"))]

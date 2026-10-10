@@ -11,6 +11,17 @@ fn binary(op: PrimitiveOp) -> FusionGroupPlan {
         2,
     )
 }
+fn named_plus() -> FusionGroupPlan {
+    plan(
+        vec![FusionOp::Builtin {
+            origin: crate::graph::FusionCallOrigin::named("plus"),
+            name: "plus".into(),
+            inputs: vec![0, 1],
+            output: Some(2),
+        }],
+        2,
+    )
+}
 fn tensor(single: bool, data: &[f64], shape: &[usize]) -> Value {
     Value::Tensor(if single {
         Tensor::from_f32(data.iter().map(|&x| x as f32).collect(), shape.to_vec()).unwrap()
@@ -36,6 +47,84 @@ fn host_values(value: Value) -> Vec<f64> {
         Value::Num(value) => vec![value],
         Value::Tensor(value) => value.materialize_f64(),
         value => panic!("unexpected numerical carrier {value:?}"),
+    }
+}
+
+#[test]
+fn mixed_add_uses_double_sum_then_single_result_in_checked_and_legacy_emission() {
+    runmat_gc::gc_test_context(|| {
+        let below_one = f64::from(f32::from_bits(0x3f7f_ffff));
+        let half_ulp = f64::from(f32::EPSILON) / 4.0;
+        for plan in [binary(PrimitiveOp::Add), named_plus()] {
+            for scalar in [half_ulp - f64::EPSILON, half_ulp + f64::EPSILON] {
+                for reverse in [false, true] {
+                    let single = tensor(true, &[below_one, below_one], &[1, 2]);
+                    let double = Value::Num(scalar);
+                    let inputs = if reverse {
+                        [double, single]
+                    } else {
+                        [single, double]
+                    };
+                    let program = resolve(&plan, &inputs, ProviderPrecision::F64);
+                    assert_eq!(program.floating_class(2).unwrap(), NumericClass::Single);
+                    let checked =
+                        TypedProducer::emit_checked_program(&plan, &program, ScalarType::F64, 2)
+                            .unwrap()
+                            .unwrap();
+                    assert!(matches!(
+                        checked.wire().nodes.last(),
+                        Some(runmat_accelerate_api::scalar_program::ScalarNode::Apply {
+                            operation: runmat_types::ScalarOperation::MixedRealAddToSingle,
+                            ..
+                        })
+                    ));
+                    let selected =
+                        TypedProducer::emit(&plan, &program, ScalarType::F64, leaves(), Some(&[2]))
+                            .unwrap();
+                    let legacy =
+                        TypedProducer::emit(&plan, &program, ScalarType::F64, leaves(), None)
+                            .unwrap();
+                    assert_eq!(selected.body, legacy.body);
+                    assert!(selected
+                        .body
+                        .contains("f32((f64(input0.data[i0]) + f64(input1.data[i1])))"));
+                    assert!(
+                        TypedProducer::emit(&plan, &program, ScalarType::F32, leaves(), None)
+                            .is_err()
+                    );
+                    let expected = f64::from((below_one + scalar) as f32);
+                    assert_eq!(host_values(host("plus", &inputs)), vec![expected; 2]);
+                }
+            }
+        }
+    });
+}
+
+#[test]
+fn mixed_add_broadcast_array_is_typed_but_incompatible_shape_is_not() {
+    let single = tensor(true, &[0.25, 0.5], &[2, 1]);
+    let double = tensor(false, &[0.5, 0.25, 0.125], &[1, 3]);
+    let bad = tensor(false, &[0.5, 0.25, 0.125], &[3, 1]);
+    for plan in [binary(PrimitiveOp::Add), named_plus()] {
+        let program = resolve(
+            &plan,
+            &[single.clone(), double.clone()],
+            ProviderPrecision::F64,
+        );
+        assert_eq!(program.floating_class(2).unwrap(), NumericClass::Single);
+        assert_eq!(
+            program.fact(2).unwrap().shape,
+            runmat_types::ShapeFact::from(vec![Some(2), Some(3)])
+        );
+        assert!(
+            futures::executor::block_on(ResolvedProgram::resolve_with_policy(
+                &plan,
+                &[single.clone(), bad.clone()],
+                ProviderPrecision::F64,
+                PrecisionPolicy::Exact,
+            ))
+            .is_err()
+        );
     }
 }
 

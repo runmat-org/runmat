@@ -13,6 +13,9 @@ use runmat_runtime::{
 use runmat_value::{Value, ValueSequence};
 use std::{cell::RefCell, error::Error, io, rc::Rc};
 
+#[path = "support/retained_provider.rs"]
+mod retained_provider;
+
 #[path = "dispatcher_selection/legacy.rs"]
 mod legacy;
 
@@ -226,9 +229,7 @@ fn direct_embedding_call_does_not_inherit_entered_session_binding() {
 fn requested_gather_adapts_only_the_selected_implementation() {
     use runmat_accelerate::simple_provider::InProcessProvider;
     use runmat_accelerate_api::{AccelProvider, HostTensorView, ThreadProviderGuard};
-    use std::sync::OnceLock;
-    static PROVIDER: OnceLock<InProcessProvider> = OnceLock::new();
-    let provider = PROVIDER.get_or_init(InProcessProvider::new);
+    let provider = retained_provider::retained_test_provider!(PROVIDER: InProcessProvider = InProcessProvider::new());
     let _provider = ThreadProviderGuard::set(Some(provider));
     fn host_only(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
         let is_resident = matches!(invocation.args[0], Value::GpuTensor(_));

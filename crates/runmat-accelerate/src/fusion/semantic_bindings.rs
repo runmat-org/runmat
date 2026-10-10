@@ -3,9 +3,9 @@
 use super::{FusionGroupPlan, FusionOp};
 use crate::graph::PrimitiveOp;
 use anyhow::{anyhow, Result};
-use runmat_builtins::{builtin_catalog_entry_by_name, BuiltinCatalogEntry};
+use runmat_builtins::{builtin_catalog_entry_by_name, BuiltinBindingIdentity, BuiltinCatalogEntry};
 use runmat_runtime::builtins::common::spec::{
-    canonical_fusion_declaration, CanonicalFusionDeclaration,
+    canonical_fusion_declaration, selected_builtin_binding, CanonicalFusionDeclaration,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -39,6 +39,27 @@ impl SemanticBinding {
             .ok_or_else(|| anyhow!("missing canonical fusion declaration"))?;
         Ok(Some(Self { entry, declaration }))
     }
+}
+
+/// A fusion primitive has no named call snapshot, but its ordinary numeric VM
+/// instruction still selects a canonical builtin. Resolve that implementation
+/// through the same runtime dispatch authority before domain admission awaits.
+/// Other primitive instructions have no certified host route yet.
+pub(crate) fn selected_host_binding_for_primitive(
+    op: PrimitiveOp,
+    runtime: Option<&runmat_runtime::context::RuntimeContext>,
+) -> Option<BuiltinBindingIdentity> {
+    let entry = match op {
+        PrimitiveOp::Add => &runmat_builtins::PLUS_CATALOG_ENTRY,
+        _ => return None,
+    };
+    let [binding] = entry.bindings else {
+        return None;
+    };
+    let expected = entry.binding_identity(binding);
+    let selected = selected_builtin_binding(entry.identity.name, Some(expected), runtime)?;
+    canonical_fusion_declaration(selected.identity)?;
+    Some(selected.identity)
 }
 pub(crate) fn matches(operation: &FusionOp, snapshot: Option<SemanticBinding>) -> bool {
     match (operation, snapshot) {

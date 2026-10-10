@@ -162,7 +162,7 @@ pub fn restore_class_preserving_value_with_operands(
                 Err(error)
                     if expected_integer.is_none()
                         && !explicit
-                        && matches!(&error, runmat_accelerate_api::NumericUploadError::Provider(error) if provider_hook_is_unsupported(error)) =>
+                        && matches!(&error, runmat_accelerate_api::NumericUploadError::Provider(error) if error.is_unsupported()) =>
                 {
                     return Ok(value)
                 }
@@ -240,7 +240,7 @@ pub fn restore_class_preserving_value_with_operands(
                 Err(error)
                     if expected_integer.is_none()
                         && !explicit
-                        && matches!(&error, runmat_accelerate_api::NumericUploadError::Provider(error) if provider_hook_is_unsupported(error)) =>
+                        && matches!(&error, runmat_accelerate_api::NumericUploadError::Provider(error) if error.is_unsupported()) =>
                 {
                     return Ok(value)
                 }

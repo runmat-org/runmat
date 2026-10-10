@@ -87,7 +87,7 @@ impl AccelProvider for ContinuationProvider {
         &'a self,
         left: &'a GpuTensorHandle,
         right: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             self.elements.fetch_add(1, Ordering::SeqCst);
             assert!(matches!(self.stage, FillStage::Success));
@@ -109,7 +109,7 @@ impl AccelProvider for ContinuationProvider {
                     assert_eq!(values, &[2.0, 2.0]);
                 })
                 .unwrap();
-            self.failure()
+            self.failure().map_err(Into::into)
         })
     }
 }

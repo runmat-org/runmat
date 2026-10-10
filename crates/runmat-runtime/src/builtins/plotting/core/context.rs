@@ -166,6 +166,7 @@ pub(crate) mod tests {
                     label: Some("plotting-context-test-device"),
                     required_features: adapter_features,
                     required_limits: adapter_limits.clone(),
+                    memory_hints: wgpu::MemoryHints::default(),
                 },
                 None,
             )

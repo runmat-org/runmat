@@ -5,6 +5,61 @@ use runmat_accelerate_api::{
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+fn fixture_ordered_recipe(
+    source: &GpuTensorHandle,
+    steps: Vec<runmat_accelerate_api::ProviderOrderedRealMeanStep>,
+    nan_mode: ProviderRealMeanNaNMode,
+    incremental_peak_bytes: u64,
+) -> runmat_accelerate_api::ProviderOrderedRealMeanRecipe {
+    use runmat_accelerate_api::{
+        ProviderElementType, ProviderLayout, ProviderOrderedRealMeanControl,
+        ProviderOrderedRealMeanLimits, ProviderOrderedRealMeanRecipe,
+        ProviderOrderedRealMeanResources, ProviderOrderedRealMeanSource, ProviderRepresentation,
+        ProviderResidency, ProviderStorage,
+    };
+
+    let element_type = match runmat_accelerate_api::handle_precision(source)
+        .expect("fixture source has a real physical class")
+    {
+        ProviderPrecision::F32 => ProviderElementType::F32,
+        ProviderPrecision::F64 => ProviderElementType::F64,
+    };
+    let axes = steps.iter().map(|step| step.axis()).collect();
+    let output_precision = steps
+        .last()
+        .expect("fixture has a selected axis")
+        .output_precision();
+    ProviderOrderedRealMeanRecipe::new(
+        ProviderOrderedRealMeanSource {
+            representation: ProviderRepresentation {
+                element_type,
+                storage: ProviderStorage::DenseReal,
+                layout: ProviderLayout::ColumnMajorContiguous,
+                shape: source.shape().iter().map(|&dim| dim as u64).collect(),
+                residency: ProviderResidency::Device,
+            },
+            buffer_bytes: source.physical().requested_bytes(),
+        },
+        ProviderOrderedRealMeanControl {
+            axes,
+            output_precision,
+            nan_mode,
+        },
+        ProviderOrderedRealMeanResources {
+            limits: ProviderOrderedRealMeanLimits {
+                max_buffer_size: u64::MAX,
+                max_storage_buffer_binding_size: u32::MAX,
+                max_uniform_buffer_binding_size: u32::MAX,
+                max_compute_invocations_per_workgroup: u32::MAX,
+                max_compute_workgroup_size_x: u32::MAX,
+                max_compute_workgroups_per_dimension: u32::MAX,
+            },
+            steps,
+            incremental_peak_bytes,
+        },
+    )
+}
+
 struct Provider(TestAllocationOwner);
 impl AccelProvider for Provider {
     fn device_id(&self) -> u32 {
@@ -31,6 +86,326 @@ impl AccelProvider for Provider {
                 storage: GpuTensorStorage::Real,
             })?
             .handle)
+    }
+}
+
+#[test]
+fn class_adaptation_unsupported_is_terminal_only_after_a_completed_reduction() {
+    let provider: &'static Provider = Box::leak(Box::new(Provider(TestAllocationOwner::new())));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let input = provider
+        .0
+        .allocate_zeroed(vec![2, 1], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    let reduced = provider
+        .0
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let before = futures::executor::block_on(adapt_output_class(
+        provider,
+        &input.handle,
+        reduced.handle.clone(),
+        &OutputTemplate::Native,
+        ClassAdaptationStage::BeforeReduction,
+    ));
+    assert!(matches!(before, Err(MeanProviderFailure::Unsupported)));
+    let after = futures::executor::block_on(adapt_output_class(
+        provider,
+        &input.handle,
+        reduced.handle,
+        &OutputTemplate::Native,
+        ClassAdaptationStage::AfterReduction,
+    ));
+    let Err(MeanProviderFailure::Execution(error)) = after else {
+        panic!("completed reduction must not authorize numerical replay")
+    };
+    assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    assert!(error.source.is_some(), "typed provider cause must survive");
+    input.handle.allocation_lease().validate_live().unwrap();
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn scalar_vecdim_keeps_the_original_signed_zero_allocation() {
+    let provider: &'static Provider = Box::leak(Box::new(Provider(TestAllocationOwner::new())));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let input = provider
+        .0
+        .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+            data: runmat_accelerate_api::HostNumericDataOwned::F32(vec![-0.0]),
+            shape: vec![1, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let result = futures::executor::block_on(execute(
+        provider,
+        &input.handle,
+        &MeanAxes::Vec(vec![1, 2]),
+        ReductionNaN::Include,
+        &OutputTemplate::Native,
+    ))
+    .unwrap()
+    .unwrap();
+    assert!(result.shares_allocation_with(&input.handle));
+    assert_eq!(result.shape(), &[1, 1]);
+    assert_eq!(input.probe.retirements(), 0);
+}
+
+struct OrderedFailureProvider {
+    owner: TestAllocationOwner,
+    fallback_calls: AtomicUsize,
+}
+
+impl AccelProvider for OrderedFailureProvider {
+    fn device_id(&self) -> u32 {
+        self.owner.device_id()
+    }
+    fn device_info(&self) -> String {
+        "ordered mean effect boundary fixture".into()
+    }
+    fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        anyhow::bail!("unused upload")
+    }
+    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        Box::pin(async { anyhow::bail!("unused download") })
+    }
+    fn fill(&self, _: &[usize], _: f64) -> anyhow::Result<GpuTensorHandle> {
+        anyhow::bail!("unused fill")
+    }
+    fn prepare_ordered_real_mean(
+        &self,
+        source: &GpuTensorHandle,
+        _: &[usize],
+        _: ProviderPrecision,
+        nan_mode: ProviderRealMeanNaNMode,
+    ) -> anyhow::Result<Option<runmat_accelerate_api::ProviderOrderedRealMean>> {
+        let step = runmat_accelerate_api::ProviderOrderedRealMeanStep::new(
+            0,
+            vec![2, 2],
+            vec![1, 2],
+            ProviderPrecision::F32,
+            ProviderPrecision::F64,
+        )
+        .with_physical_resources(16, 16, 16, 1);
+        Ok(Some(runmat_accelerate_api::ProviderOrderedRealMean::new(
+            source.clone(),
+            fixture_ordered_recipe(source, vec![step], nan_mode, 32),
+        )))
+    }
+    fn execute_ordered_real_mean(
+        &self,
+        _: runmat_accelerate_api::ProviderOrderedRealMean,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        runmat_accelerate_api::ProviderExecutedOrderedRealMean,
+    > {
+        Err(runmat_accelerate_api::ProviderExecutionError::from(
+            runmat_accelerate_api::unsupported_provider_operation("second selected axis failed"),
+        )
+        .after_effect())
+    }
+    fn reduce_mean_nd<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: &'a [usize],
+    ) -> runmat_accelerate_api::AccelProviderFuture<'a, GpuTensorHandle> {
+        self.fallback_calls.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { anyhow::bail!("selected route must not replay") })
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn prepared_ordered_mean_failure_after_effect_cannot_replay_old_nd_route() {
+    let provider: &'static OrderedFailureProvider = Box::leak(Box::new(OrderedFailureProvider {
+        owner: TestAllocationOwner::new(),
+        fallback_calls: AtomicUsize::new(0),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let input = provider
+        .owner
+        .allocate_zeroed(vec![2, 2], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    let failure = futures::executor::block_on(execute(
+        provider,
+        &input.handle,
+        &MeanAxes::Vec(vec![1, 2]),
+        ReductionNaN::Include,
+        &OutputTemplate::Native,
+    ))
+    .unwrap_err();
+    assert_eq!(failure.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    assert!(failure.source.is_some());
+    assert_eq!(provider.fallback_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(input.probe.retirements(), 0);
+    input.handle.allocation_lease().validate_live().unwrap();
+}
+
+struct OrderedPublicationProvider(TestAllocationOwner);
+
+impl AccelProvider for OrderedPublicationProvider {
+    fn device_id(&self) -> u32 {
+        self.0.device_id()
+    }
+    fn device_info(&self) -> String {
+        "ordered mean publication fixture".into()
+    }
+    fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        anyhow::bail!("unused upload")
+    }
+    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        Box::pin(async { anyhow::bail!("unused download") })
+    }
+    fn fill(&self, _: &[usize], _: f64) -> anyhow::Result<GpuTensorHandle> {
+        anyhow::bail!("unused fill")
+    }
+    fn prepare_ordered_real_mean(
+        &self,
+        source: &GpuTensorHandle,
+        axes: &[usize],
+        output_precision: ProviderPrecision,
+        nan_mode: ProviderRealMeanNaNMode,
+    ) -> anyhow::Result<Option<runmat_accelerate_api::ProviderOrderedRealMean>> {
+        if source.shape() != [1, 1, 2] || axes != [2] {
+            return Ok(None);
+        }
+        let input_precision = runmat_accelerate_api::handle_precision(source)
+            .expect("fixture source has a real physical class");
+        let output_bytes = match output_precision {
+            ProviderPrecision::F32 => 4,
+            ProviderPrecision::F64 => 8,
+        };
+        let step = runmat_accelerate_api::ProviderOrderedRealMeanStep::new(
+            2,
+            source.shape().to_vec(),
+            vec![1, 1, 1],
+            input_precision,
+            output_precision,
+        )
+        .with_physical_resources(source.physical().requested_bytes(), output_bytes, 16, 1);
+        Ok(Some(runmat_accelerate_api::ProviderOrderedRealMean::new(
+            source.clone(),
+            fixture_ordered_recipe(source, vec![step], nan_mode, output_bytes + 16),
+        )))
+    }
+    fn execute_ordered_real_mean(
+        &self,
+        selected: runmat_accelerate_api::ProviderOrderedRealMean,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        runmat_accelerate_api::ProviderExecutedOrderedRealMean,
+    > {
+        let precision = selected.steps()[0].output_precision();
+        let data = match precision {
+            ProviderPrecision::F32 => runmat_accelerate_api::HostNumericDataOwned::F32(vec![4.0]),
+            ProviderPrecision::F64 => runmat_accelerate_api::HostNumericDataOwned::F64(vec![4.0]),
+        };
+        let output = self
+            .0
+            .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+                data,
+                shape: vec![1, 1, 1],
+                storage: GpuTensorStorage::Real,
+            })
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
+        let requested_incremental_peak_bytes = selected.requested_incremental_peak_bytes();
+        Ok(runmat_accelerate_api::ProviderExecutedOrderedRealMean {
+            output: output.handle,
+            requested_incremental_peak_bytes,
+            observed_incremental_peak_bytes: requested_incremental_peak_bytes,
+            observed_output_bytes: selected.steps()[0].output_bytes(),
+            selected_submissions: 1,
+        })
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn default_dim_and_vec_one_element_means_publish_the_shared_public_shape() {
+    let provider: &'static OrderedPublicationProvider = Box::leak(Box::new(
+        OrderedPublicationProvider(TestAllocationOwner::new()),
+    ));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let controls = [
+        Vec::new(),
+        vec![Value::Num(3.0)],
+        vec![Value::Tensor(
+            Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap(),
+        )],
+    ];
+    for precision in [ProviderPrecision::F32, ProviderPrecision::F64] {
+        for axes in &controls {
+            let data = match precision {
+                ProviderPrecision::F32 => {
+                    runmat_accelerate_api::HostNumericDataOwned::F32(vec![3.0, 5.0])
+                }
+                ProviderPrecision::F64 => {
+                    runmat_accelerate_api::HostNumericDataOwned::F64(vec![3.0, 5.0])
+                }
+            };
+            let input = provider
+                .0
+                .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+                    data,
+                    shape: vec![1, 1, 2],
+                    storage: GpuTensorStorage::Real,
+                })
+                .unwrap();
+            let mut arguments = axes.clone();
+            arguments.push(Value::from("native"));
+            let result = futures::executor::block_on(mean_builtin(
+                Value::GpuTensor(input.handle.clone()),
+                arguments.clone(),
+            ))
+            .unwrap();
+            let Value::GpuTensor(result) = result else {
+                panic!("successful resident mean must retain the selected owner");
+            };
+            assert_eq!(result.shape(), &[1, 1]);
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(&result),
+                Some(precision)
+            );
+            assert!(!result.shares_allocation_with(&input.handle));
+            input.handle.allocation_lease().validate_live().unwrap();
+            assert_eq!(input.probe.retirements(), 0);
+
+            let host = match precision {
+                ProviderPrecision::F32 => {
+                    Value::Tensor(Tensor::from_f32(vec![3.0, 5.0], vec![1, 1, 2]).unwrap())
+                }
+                ProviderPrecision::F64 => {
+                    Value::Tensor(Tensor::new(vec![3.0, 5.0], vec![1, 1, 2]).unwrap())
+                }
+            };
+            let host = futures::executor::block_on(mean_builtin(host, arguments)).unwrap();
+            match (precision, host) {
+                (ProviderPrecision::F32, Value::Tensor(tensor)) => {
+                    assert_eq!(tensor.shape(), &[1, 1]);
+                    assert_eq!(tensor.materialize_f64(), vec![4.0]);
+                }
+                (ProviderPrecision::F64, Value::Num(value)) => assert_eq!(value, 4.0),
+                other => panic!("unexpected one-element host mean: {other:?}"),
+            }
+        }
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn empty_mean_keeps_non_scalar_shape_and_nan_publication() {
+    assert_eq!(mean_public_shape(&[1, 0, 2], 0), vec![1, 0, 2]);
+    for single in [false, true] {
+        let input = if single {
+            Value::Tensor(Tensor::from_f32(Vec::new(), vec![1, 0, 2]).unwrap())
+        } else {
+            Value::Tensor(Tensor::new(Vec::new(), vec![1, 0, 2]).unwrap())
+        };
+        let output =
+            futures::executor::block_on(mean_builtin(input, vec![Value::from("native")])).unwrap();
+        let Value::Tensor(output) = output else {
+            panic!("empty-source mean with two output elements remains a tensor");
+        };
+        assert_eq!(output.shape(), &[1, 1, 2]);
+        assert!(output.materialize_f64().iter().all(|value| value.is_nan()));
     }
 }
 
@@ -290,7 +665,10 @@ impl AccelProvider for PreparationProvider {
         Box::pin(async { anyhow::bail!("unexpected download") })
     }
 
-    fn map_nan_to_zero(&self, input: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+    fn map_nan_to_zero(
+        &self,
+        input: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         match self.mode {
             MalformedPreparation::AliasedMap => Ok(input.clone()),
             MalformedPreparation::WrongMaskClass => Ok(self

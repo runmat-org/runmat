@@ -10,7 +10,9 @@ use syn::{
 };
 
 mod invocation_parameters;
-use invocation_parameters::{is_optional_runtime_context, is_optional_usize};
+use invocation_parameters::{
+    is_optional_call_admission_sink, is_optional_runtime_context, is_optional_usize,
+};
 
 static WASM_REGISTRY_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 static WASM_REGISTRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -59,6 +61,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut binding_variant_lit: Option<LitStr> = None;
     let mut explicit_context = false;
     let mut explicit_requested_outputs = false;
+    let mut explicit_call_observation = false;
     let mut output_sequence = false;
     let mut sink_flag = false;
     let mut suppress_auto_output_flag = false;
@@ -153,6 +156,12 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                         explicit_requested_outputs = value.value;
                     } else {
                         panic!("requested_outputs must be a boolean literal");
+                    }
+                } else if path.is_ident("call_observation") {
+                    if let Lit::Bool(value) = lit {
+                        explicit_call_observation = value.value;
+                    } else {
+                        panic!("call_observation must be a boolean literal");
                     }
                 } else if path.is_ident("output_sequence") {
                     if let Lit::Bool(value) = lit {
@@ -276,7 +285,9 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             _ => panic!("self parameter not allowed"),
         }
     }
-    if (explicit_context || explicit_requested_outputs) && binding_variant_lit.is_none() {
+    if (explicit_context || explicit_requested_outputs || explicit_call_observation)
+        && binding_variant_lit.is_none()
+    {
         panic!("invocation metadata requires a canonical binding_variant");
     }
     if output_sequence && binding_variant_lit.is_none() {
@@ -299,6 +310,17 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
         );
         if !is_optional_usize(output_type) {
             panic!("requested_outputs injection requires Option<usize> after context");
+        }
+        Some((param_idents.remove(0), param_types.remove(0)))
+    } else {
+        None
+    };
+    let call_observation_param = if explicit_call_observation {
+        let observation_type = param_types.first().expect(
+            "call_observation injection requires an Option<CallAdmissionSink> parameter after invocation metadata",
+        );
+        if !is_optional_call_admission_sink(observation_type) {
+            panic!("call_observation injection requires Option<CallAdmissionSink> after invocation metadata");
         }
         Some((param_idents.remove(0), param_types.remove(0)))
     } else {
@@ -390,6 +412,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let invocation_parameters = context_param
         .iter()
         .chain(requested_outputs_param.iter())
+        .chain(call_observation_param.iter())
         .map(|(ident, _)| ident)
         .collect::<Vec<_>>();
     let call_expr = if is_async {
@@ -403,6 +426,9 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     });
     let requested_outputs_binding = requested_outputs_param.as_ref().map(|(ident, ty)| {
         quote! { let #ident: #ty = invocation.requested_outputs; }
+    });
+    let call_observation_binding = call_observation_param.as_ref().map(|(ident, ty)| {
+        quote! { let #ident: #ty = invocation.call_observation; }
     });
 
     let wrapper_input = if binding_variant_lit.is_some() {
@@ -440,6 +466,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             #wrapper_args
             #context_binding
             #requested_outputs_binding
+            #call_observation_binding
             Box::pin(async move {
                 if #is_last_variadic {
                     if args.len() < #param_len - 1 {

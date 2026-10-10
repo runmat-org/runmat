@@ -10,7 +10,7 @@ use runmat_execution::Digest;
 use runmat_types::{NumericClass, ScalarOperation};
 use serde::{Deserialize, Serialize};
 
-pub const SCALAR_PROGRAM_REVISION: u32 = 1;
+pub const SCALAR_PROGRAM_REVISION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScalarLiteral {
@@ -127,13 +127,26 @@ impl ScalarProgram {
                     .arity()
                     .ok_or_else(|| anyhow!("operation has no pure scalar lowering"))?;
                 ensure!(operands.len() == arity, "scalar operation arity mismatch");
+                let mut input_classes = Vec::with_capacity(operands.len());
                 for operand in operands {
                     let input_class = previous
                         .get(operand)
                         .ok_or_else(|| anyhow!("forward or missing scalar operand"))?;
-                    if !matches!(operation, ScalarOperation::Cast(_)) {
+                    input_classes.push(*input_class);
+                    if matches!(operation, ScalarOperation::Operator(_)) {
                         ensure!(*input_class == class, "scalar operation class mismatch");
                     }
+                }
+                if matches!(operation, ScalarOperation::MixedRealAddToSingle) {
+                    ensure!(
+                        class == NumericClass::Single
+                            && matches!(
+                                input_classes.as_slice(),
+                                [NumericClass::Single, NumericClass::Double]
+                                    | [NumericClass::Double, NumericClass::Single]
+                            ),
+                        "mixed real addition requires one Single and one Double operand"
+                    );
                 }
                 if let ScalarOperation::Cast(target) = operation {
                     ensure!(*target == class, "scalar cast result class mismatch");
@@ -157,7 +170,7 @@ impl ScalarProgram {
             required.len() == wire.nodes.len(),
             "unreachable scalar program node"
         );
-        let identity = Digest::sha256(serde_json::to_vec(&("scalar-program-v1", &wire))?);
+        let identity = Digest::sha256(serde_json::to_vec(&("scalar-program-v2", &wire))?);
         Ok(Self { wire, identity })
     }
 

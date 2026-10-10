@@ -1,10 +1,14 @@
 //! MATLAB-compatible `regexp` builtin for RunMat.
 
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 
 use regex::RegexBuilder;
 #[cfg(test)]
 use runmat_builtins::REGEXP_DESCRIPTOR;
+use runmat_builtins::{
+    project_regex_options, EmptyMatchPolicy, RegexOptionError, RegexOptions,
+    RegexOutput as OutputSpec, RegexParseMode,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, StringArray, StructValue, Tensor, Value};
 
@@ -60,6 +64,16 @@ pub async fn evaluate_with(
     pattern: Value,
     rest: &[Value],
 ) -> BuiltinResult<RegexpEvaluation> {
+    evaluate_with_default(builtin, subject, pattern, rest, false).await
+}
+
+pub(crate) async fn evaluate_with_default(
+    builtin: &'static str,
+    subject: Value,
+    pattern: Value,
+    rest: &[Value],
+    case_insensitive_by_default: bool,
+) -> BuiltinResult<RegexpEvaluation> {
     if contains_numeric_or_resident_text_input(&subject)
         || contains_numeric_or_resident_text_input(&pattern)
         || rest.iter().any(contains_numeric_or_resident_text_input)
@@ -75,7 +89,7 @@ pub async fn evaluate_with(
     let pattern = gather_if_needed_async(&pattern)
         .await
         .map_err(|err| with_builtin_context(builtin, err))?;
-    let options = RegexpOptions::parse(builtin, rest)?;
+    let options = parse_options(builtin, rest, case_insensitive_by_default)?;
     RegexpEvaluation::new(builtin, subject, pattern, options).await
 }
 
@@ -115,116 +129,32 @@ async fn regexp_builtin(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OutputSpec {
-    Start,
-    End,
-    Match,
-    Tokens,
-    TokenExtents,
-    Names,
-    Split,
-}
+type RegexpOptions = RegexOptions;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EmptyMatchPolicy {
-    Remove,
-    Allow,
-}
-
-#[derive(Debug, Clone)]
-struct RegexpOptions {
-    outputs: Vec<OutputSpec>,
-    once: bool,
-    emptymatch: EmptyMatchPolicy,
-    force_cell_output: bool,
-    case_insensitive: bool,
-    multi_line: bool,
-    dot_all: bool,
-}
-
-impl RegexpOptions {
-    fn parse(builtin: &'static str, rest: &[Value]) -> BuiltinResult<Self> {
-        let mut outputs = Vec::new();
-        let mut once = false;
-        let mut emptymatch = EmptyMatchPolicy::Remove;
-        let mut force_cell_output = false;
-        let mut case_insensitive = false;
-        let mut multi_line = false;
-        let mut dot_all = true;
-        let mut idx = 0usize;
-        while idx < rest.len() {
-            let raw = value_to_lower_string(&rest[idx]).ok_or_else(|| {
-                runtime_error_for(
-                    builtin,
-                    format!("{builtin}: expected option string, got {:?}", rest[idx]),
-                )
-            })?;
-            idx += 1;
-            match raw.as_str() {
-                "match" => outputs.push(OutputSpec::Match),
-                "tokens" => outputs.push(OutputSpec::Tokens),
-                "tokenextents" => outputs.push(OutputSpec::TokenExtents),
-                "names" => outputs.push(OutputSpec::Names),
-                "split" => outputs.push(OutputSpec::Split),
-                "start" => outputs.push(OutputSpec::Start),
-                "end" => outputs.push(OutputSpec::End),
-                "once" => once = true,
-                "forcecelloutput" => force_cell_output = true,
-                "ignorecase" => case_insensitive = true,
-                "matchcase" => case_insensitive = false,
-                "lineanchors" => {
-                    let flag = parse_on_off(rest.get(idx));
-                    multi_line = flag.unwrap_or(true);
-                    idx += usize::from(flag.is_some());
-                }
-                "dotall" => {
-                    let flag = parse_on_off(rest.get(idx));
-                    dot_all = flag.unwrap_or(true);
-                    idx += usize::from(flag.is_some());
-                }
-                "dotexceptnewline" => {
-                    let flag = parse_on_off(rest.get(idx));
-                    dot_all = !flag.unwrap_or(true);
-                    idx += usize::from(flag.is_some());
-                }
-                "emptymatch" => {
-                    emptymatch = EmptyMatchPolicy::Allow;
-                    match rest.get(idx).and_then(value_to_lower_string).as_deref() {
-                        Some("allow") => idx += 1,
-                        Some("remove") => {
-                            emptymatch = EmptyMatchPolicy::Remove;
-                            idx += 1;
-                        }
-                        _ => {}
-                    }
-                }
-                "noemptymatch" => emptymatch = EmptyMatchPolicy::Remove,
-                "stringanchors" => multi_line = false,
-                "warnings" => {
-                    // MATLAB accepts 'on'/'off' here but RunMat currently ignores it.
-                    if rest.get(idx).is_some() {
-                        idx += 1;
-                    }
-                }
-                other => {
-                    return Err(runtime_error_for(
-                        builtin,
-                        format!("{builtin}: unrecognised option '{other}'"),
-                    ));
-                }
-            }
+fn parse_options(
+    builtin: &'static str,
+    rest: &[Value],
+    case_insensitive_by_default: bool,
+) -> BuiltinResult<RegexpOptions> {
+    let mut options = project_regex_options(
+        rest.len(),
+        |index| value_to_option_text(&rest[index]),
+        RegexParseMode::Runtime,
+    )
+    .map_err(|error| match error {
+        RegexOptionError::NonText(index) => runtime_error_for(
+            builtin,
+            format!("{builtin}: expected option string, got {:?}", rest[index]),
+        ),
+        RegexOptionError::Unknown { name, .. } => {
+            runtime_error_for(builtin, format!("{builtin}: unrecognised option '{name}'"))
         }
-        Ok(Self {
-            outputs,
-            once,
-            emptymatch,
-            force_cell_output,
-            case_insensitive,
-            multi_line,
-            dot_all,
-        })
+    })?
+    .options;
+    if case_insensitive_by_default {
+        options.apply_regexpi_default();
     }
+    Ok(options)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -398,22 +328,11 @@ fn extract_string(value: &Value) -> Option<String> {
     }
 }
 
-fn value_to_lower_string(value: &Value) -> Option<String> {
+fn value_to_option_text(value: &Value) -> Option<Cow<'_, str>> {
     match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].to_ascii_lowercase()),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            Some(ca.data.iter().collect::<String>().to_ascii_lowercase())
-        }
-        _ => None,
-    }
-}
-
-fn parse_on_off(value: Option<&Value>) -> Option<bool> {
-    let text = value_to_lower_string(value?)?;
-    match text.as_str() {
-        "on" => Some(true),
-        "off" => Some(false),
+        Value::String(s) => Some(Cow::Borrowed(s.as_str())),
+        Value::StringArray(sa) if sa.data.len() == 1 => Some(Cow::Borrowed(sa.data[0].as_str())),
+        Value::CharArray(ca) if ca.rows == 1 => Some(Cow::Owned(ca.data.iter().collect())),
         _ => None,
     }
 }
@@ -513,28 +432,12 @@ impl RegexpEvaluation {
     }
 
     pub fn outputs_for_single(&self) -> BuiltinResult<Vec<Value>> {
-        let specs = if self.options.outputs.is_empty() {
-            vec![OutputSpec::Start]
-        } else {
-            self.options.outputs.clone()
-        };
+        let specs = self.options.outputs_for_single();
         self.values_for_specs(&specs)
     }
 
     pub fn outputs_for_multi(&self) -> BuiltinResult<Vec<Value>> {
-        let specs = if self.options.outputs.is_empty() {
-            vec![
-                OutputSpec::Start,
-                OutputSpec::End,
-                OutputSpec::TokenExtents,
-                OutputSpec::Match,
-                OutputSpec::Tokens,
-                OutputSpec::Names,
-                OutputSpec::Split,
-            ]
-        } else {
-            self.options.outputs.clone()
-        };
+        let specs = self.options.outputs_for_multi();
         self.values_for_specs(&specs)
     }
 
@@ -933,6 +836,7 @@ fn names_struct(names: &[String], match_data: Option<&MatchComponents>) -> Value
 pub(crate) mod tests {
     use super::*;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexp_descriptor_signatures_cover_core_forms() {
         let labels: Vec<&str> = REGEXP_DESCRIPTOR
@@ -1553,5 +1457,109 @@ pub(crate) mod tests {
             }
             other => panic!("unexpected output {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn regexp_registered_option_projection_and_output_counts() {
+        let call = |rest: Vec<Value>| {
+            futures::executor::block_on(regexp_builtin(
+                Value::String("aba".into()),
+                Value::String("a".into()),
+                rest,
+            ))
+            .expect("registered regexp")
+        };
+        {
+            let _outputs = crate::output_count::push_output_count(Some(1));
+            match call(vec![
+                Value::String("warnings".into()),
+                Value::String("match".into()),
+            ]) {
+                Value::OutputList(values) => match &values[0] {
+                    Value::Tensor(indices) => assert_eq!(indices.materialize_f64(), vec![1.0, 3.0]),
+                    other => panic!("expected start indices, got {other:?}"),
+                },
+                other => panic!("expected output list, got {other:?}"),
+            }
+        }
+        {
+            let _outputs = crate::output_count::push_output_count(Some(1));
+            match call(vec![Value::String("match".into())]) {
+                Value::OutputList(values) => match &values[0] {
+                    Value::Cell(cell) => assert_eq!((cell.rows, cell.cols), (1, 2)),
+                    other => panic!("expected match cell, got {other:?}"),
+                },
+                other => panic!("expected output list, got {other:?}"),
+            }
+            for rest in [
+                vec!["lineanchors", "off", "match"],
+                vec!["emptymatch", "remove", "match"],
+                vec!["warnings", "on", "match"],
+            ] {
+                let rest = rest
+                    .into_iter()
+                    .map(|flag| Value::String(flag.into()))
+                    .collect();
+                match call(rest) {
+                    Value::OutputList(values) => assert!(matches!(values[0], Value::Cell(_))),
+                    other => panic!("expected selected match output, got {other:?}"),
+                }
+            }
+        }
+        {
+            let _outputs = crate::output_count::push_output_count(Some(0));
+            assert_eq!(
+                call(vec![Value::String("match".into())]),
+                Value::OutputList(vec![])
+            );
+        }
+        for count in [7, 8] {
+            let _outputs = crate::output_count::push_output_count(Some(count));
+            match call(vec![]) {
+                Value::OutputList(values) => {
+                    assert_eq!(values.len(), count);
+                    assert!(matches!(values[6], Value::Cell(_)));
+                    if count == 8 {
+                        assert_eq!(values[7], Value::Num(0.0));
+                    }
+                }
+                other => panic!("expected output list, got {other:?}"),
+            }
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn regexp_ignored_warning_operand_and_early_error_order_remain_intact() {
+        let ignored = Value::Cell(
+            runmat_value::CellArray::new(vec![Value::String("not an option".into())], 1, 1)
+                .unwrap(),
+        );
+        let subject = Value::String("aba".into());
+        let pattern = Value::String("a".into());
+        let evaluation = evaluate(
+            subject.clone(),
+            pattern.clone(),
+            &[
+                Value::String("warnings".into()),
+                ignored.clone(),
+                Value::String("match".into()),
+            ],
+        )
+        .expect("ignored warning operand is not decoded");
+        assert!(matches!(
+            evaluation.outputs_for_single().unwrap()[0],
+            Value::Cell(_)
+        ));
+
+        let error = evaluate(
+            subject,
+            pattern,
+            &[Value::String("invalid".into()), ignored],
+        )
+        .err()
+        .expect("invalid first option must reject");
+        assert!(error.message().contains("unrecognised option 'invalid'"));
     }
 }

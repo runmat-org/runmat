@@ -257,6 +257,8 @@ pub(in crate::builtins::deep_learning) fn select<'h, 'n>(
         region: None,
         operation: request.caller.function().into(),
         runtime_facts: common.semantic_timing_digest(invocation),
+        provider_provenance: None,
+        graph_output_authority: None,
         revision,
     };
     let chosen = service.select_whole_work(WholeWorkPlacementRequest {

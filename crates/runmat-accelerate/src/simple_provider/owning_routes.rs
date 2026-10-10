@@ -206,6 +206,60 @@ fn fill_like_preserves_single_and_flip_requests_typed_fallback() {
 }
 
 #[test]
+fn floating_cast_preserves_interleaved_components_and_negative_zero_fill() {
+    let provider = InProcessProvider::new();
+    let source = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F64(&[f64::MAX, -0.0, 1.25, -2.5]),
+            shape: &[2],
+            storage: GpuTensorStorage::ComplexInterleaved,
+        })
+        .unwrap();
+    let rounded = block_on(provider.unary_single(&source)).unwrap();
+    assert_eq!(rounded.shape(), &[2]);
+    assert_eq!(
+        rounded.physical().storage(),
+        GpuTensorStorage::ComplexInterleaved
+    );
+    assert_eq!(rounded.physical().element_type(), NumericElementType::F32);
+    assert!(!rounded.shares_allocation_with(&source));
+    assert_eq!(
+        block_on(provider.download_numeric(&rounded)).unwrap().data,
+        HostNumericDataOwned::F32(vec![f32::INFINITY, -0.0, 1.25, -2.5])
+    );
+    let widened = block_on(provider.unary_double(&rounded)).unwrap();
+    assert_eq!(widened.physical().element_type(), NumericElementType::F64);
+    assert_eq!(
+        widened.physical().storage(),
+        GpuTensorStorage::ComplexInterleaved
+    );
+    assert_eq!(widened.shape(), &[2]);
+    assert_eq!(
+        block_on(provider.download_numeric(&widened)).unwrap().data,
+        HostNumericDataOwned::F64(vec![f64::INFINITY, -0.0, 1.25, -2.5])
+    );
+    let real = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F64(&[1.0, 2.0]),
+            shape: &[2],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let filled = provider.fill_like(&real, -0.0).unwrap();
+    let HostNumericDataOwned::F64(values) =
+        block_on(provider.download_numeric(&filled)).unwrap().data
+    else {
+        panic!("native Double fill")
+    };
+    assert!(values
+        .iter()
+        .all(|value| value.to_bits() == (-0.0f64).to_bits()));
+    for handle in [source, rounded, widened, real, filled] {
+        handle.release().unwrap();
+    }
+}
+
+#[test]
 fn ndgrid_unsupported_representation_does_not_hide_invalid_owner_or_request() {
     let provider = InProcessProvider::new();
     let foreign = InProcessProvider::new();

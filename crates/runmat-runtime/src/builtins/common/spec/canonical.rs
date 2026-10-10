@@ -78,6 +78,12 @@ pub fn canonical_fusion_declaration(
     if registration.spec.name != identity.builtin.name {
         return None;
     }
+    if registration.semantics.is_some_and(|semantics| {
+        semantics.required_real_unary.is_some()
+            && (semantics.admit.is_none() || registration.spec.elementwise.is_none())
+    }) {
+        return None;
+    }
     // A structural operation needs explicit binding authority and must not
     // compete with an unrelated scalar/reduction execution declaration.
     if registration.structural.is_some()

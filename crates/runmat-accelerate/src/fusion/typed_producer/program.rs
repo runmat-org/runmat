@@ -70,7 +70,9 @@ impl TypedProducer {
             }
             let class = program.floating_class(id)?;
             require_provider_class(class, buffer_type)?;
-            if let Some(value) = plan.const_values.get(&id) {
+            if program.is_invocation_input(id) {
+                nodes.push(ScalarNode::Input { id, class });
+            } else if let Some(value) = plan.const_values.get(&id) {
                 let Some(literal) = literal(value) else {
                     return Ok(None);
                 };
@@ -83,7 +85,7 @@ impl TypedProducer {
                 }
                 nodes.push(ScalarNode::Literal { id, value: literal });
             } else {
-                nodes.push(ScalarNode::Input { id, class });
+                return Err(anyhow!("scalar producer has an unbound leaf"));
             }
         }
         for (index, operation) in plan.operations.iter().enumerate() {
@@ -153,16 +155,26 @@ impl TypedProducer {
                         _ => return Err(anyhow!("nonfloating scalar operation")),
                     };
                     let name = scalar_name(scalar)?;
-                    let arguments = operands
+                    let raw_arguments = operands
                         .iter()
                         .map(|id| {
                             expressions
                                 .get(id)
-                                .map(|expression| format!("{name}({expression})"))
+                                .cloned()
                                 .ok_or_else(|| anyhow!("missing checked scalar operand"))
                         })
                         .collect::<Result<Vec<_>>>()?;
+                    let arguments = raw_arguments
+                        .iter()
+                        .map(|expression| format!("{name}({expression})"))
+                        .collect::<Vec<_>>();
                     let expression = match (operation, arguments.as_slice()) {
+                        (ScalarOperation::MixedRealAddToSingle, _) => {
+                            let [left, right] = raw_arguments.as_slice() else {
+                                return Err(anyhow!("mixed real addition has invalid arity"));
+                            };
+                            format!("f32((f64({left}) + f64({right})))")
+                        }
                         (ScalarOperation::Operator(operator), _) => {
                             crate::fusion::scalar_operator_expr(*operator, &arguments)
                                 .ok_or_else(|| anyhow!("scalar operation lacks WGSL lowering"))?
@@ -234,7 +246,7 @@ pub(super) fn resolved_operation(
     };
     let id = output.ok_or_else(|| anyhow!("scalar operation has no output"))?;
     let class = program.floating_class(id)?;
-    let identity = if let Some(declaration) = program.declaration(id) {
+    let selected_identity = if let Some(declaration) = program.declaration(id) {
         let entry = program
             .catalog_entry(id)
             .ok_or_else(|| anyhow!("missing captured scalar binding"))?;
@@ -266,6 +278,25 @@ pub(super) fn resolved_operation(
         };
         primitive_operation(*op)
     };
+    // A primitive Add and a selected canonical declaration of that same
+    // closed scalar operation share one represented-arithmetic owner. A
+    // textual builtin name or an unselected implementation cannot claim it.
+    let identity = if selected_identity == Some(ScalarOperation::Operator(OperatorKind::Add)) {
+        let [left, right] = inputs.as_slice() else {
+            return Err(anyhow!("scalar Add has invalid arity"));
+        };
+        match runmat_types::real_floating_add_mode(program.fact(*left)?, program.fact(*right)?) {
+            Some(runmat_types::RealFloatingAddMode::MixedDoubleThenSingle) => {
+                if class != NumericClass::Single {
+                    return Err(anyhow!("mixed real Add result class mismatch"));
+                }
+                Some(ScalarOperation::MixedRealAddToSingle)
+            }
+            _ => selected_identity,
+        }
+    } else {
+        selected_identity
+    };
     if let Some(identity) = identity {
         if identity.arity() != Some(inputs.len()) {
             return Err(anyhow!("captured scalar operation arity mismatch"));
@@ -273,7 +304,7 @@ pub(super) fn resolved_operation(
         if matches!(identity, ScalarOperation::Cast(target) if target != class) {
             return Err(anyhow!("captured scalar cast result class mismatch"));
         }
-        if !matches!(identity, ScalarOperation::Cast(_)) {
+        if matches!(identity, ScalarOperation::Operator(_)) {
             for input in inputs {
                 if program.floating_class(*input)? != class {
                     return Err(anyhow!("captured scalar operand class mismatch"));

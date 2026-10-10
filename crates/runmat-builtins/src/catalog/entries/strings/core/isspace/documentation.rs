@@ -2,7 +2,7 @@ use crate::*;
 const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
         "`isspace(text)` classifies Unicode whitespace in a host string scalar or character array. Character arrays retain their shape; a string scalar produces a logical row by character.",
-        "A one-element string array is accepted as a string scalar. A known multi-element string array errors. Other nontext inputs, including integers and resident numeric values, return scalar false without provider access.",
+        "A one-element string-array carrier is unwrapped and classified as a string scalar; a multi-element string array errors with `RunMat:isspace:InvalidStringArray`. This differs from `isletter`, which returns scalar false for every string-array carrier. Other nontext inputs, including integers and resident numeric values, return scalar false without provider access.",
     ] },
     BuiltinDocumentationSection { heading: "Placement and effects", paragraphs: &[
         "Character classification is host-only in native and browser runtimes, with no GPU kernel or fusion form. Result construction or an invalid string array can throw; no callback, workspace, filesystem, network, randomness, or time effect occurs.",
@@ -34,6 +34,19 @@ const EXAMPLES: &[BuiltinExample] = &[
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isequal(size(tf), [2 2])); assert(isequal(tf, logical([0 1; 1 0])));",
+        },
+    },
+    BuiltinExample {
+        id: "numeric-is-not-text",
+        title: "Do not reinterpret a numeric space code as text",
+        program: "tf = isspace(uint16(32))",
+        display_output: Some("tf = false"),
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isequal(tf, false));",
         },
     },
 ];

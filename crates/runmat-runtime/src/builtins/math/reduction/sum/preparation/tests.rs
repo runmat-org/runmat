@@ -97,6 +97,7 @@ fn sum_prepares_only_data_after_all_controls_are_admitted() {
     let _context = RuntimeContextGuard::enter(context);
     let data = || Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
     let result = block_on(super::super::sum_builtin(
+        None,
         data(),
         vec![
             Value::Num(1.0),
@@ -119,6 +120,7 @@ fn sum_prepares_only_data_after_all_controls_are_admitted() {
     drop(admitted);
 
     let error = block_on(super::super::sum_builtin(
+        None,
         data(),
         vec![
             Value::Num(0.0),

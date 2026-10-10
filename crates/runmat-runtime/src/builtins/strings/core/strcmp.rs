@@ -16,6 +16,23 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const BUILTIN_NAME: &str = "strcmp";
 
+#[derive(serde::Serialize)]
+pub(crate) struct ScalarStringCompareWorkload {
+    pub left_utf8_bytes: usize,
+    pub right_utf8_bytes: usize,
+    pub requested_outputs: Option<usize>,
+}
+
+impl crate::dispatcher::direct_call_observation::HostCallDomainFacts
+    for ScalarStringCompareWorkload
+{
+    const ROUTE_ID: &'static [u8] = b"runmat.strcmp.host-string-scalar.v1";
+
+    fn requested_outputs(&self) -> Option<usize> {
+        self.requested_outputs
+    }
+}
+
 fn strcmp_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     strcmp_error_with_message(error.message, error)
 }
@@ -38,9 +55,16 @@ fn remap_strcmp_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "strcmp",
     binding_variant = "default",
-    builtin_path = "crate::builtins::strings::core::strcmp"
+    builtin_path = "crate::builtins::strings::core::strcmp",
+    requested_outputs = true,
+    call_observation = true
 )]
-async fn strcmp_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
+async fn strcmp_builtin(
+    requested_outputs: Option<usize>,
+    observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
+    a: Value,
+    b: Value,
+) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &STRCMP_DESCRIPTOR,
         &STRCMP_ERROR_TOO_MANY_OUTPUTS,
@@ -49,6 +73,10 @@ async fn strcmp_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
     if contains_numeric_or_resident_text_input(&a) || contains_numeric_or_resident_text_input(&b) {
         return Ok(Value::Bool(false));
     }
+    let host_scalar_lengths = match (&a, &b) {
+        (Value::String(left), Value::String(right)) => Some((left.len(), right.len())),
+        _ => None,
+    };
     let a = gather_if_needed_async(&a)
         .await
         .map_err(remap_strcmp_flow)?;
@@ -59,13 +87,36 @@ async fn strcmp_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
         .map_err(|_| strcmp_error(&STRCMP_ERROR_INVALID_INPUT))?;
     let right = TextCollection::from_argument(BUILTIN_NAME, b, "second argument")
         .map_err(|_| strcmp_error(&STRCMP_ERROR_INVALID_INPUT))?;
-    evaluate_strcmp(&left, &right)
+    evaluate_strcmp(
+        &left,
+        &right,
+        host_scalar_lengths,
+        requested_outputs,
+        observation,
+    )
 }
 
-fn evaluate_strcmp(left: &TextCollection, right: &TextCollection) -> BuiltinResult<Value> {
+fn evaluate_strcmp(
+    left: &TextCollection,
+    right: &TextCollection,
+    host_scalar_lengths: Option<(usize, usize)>,
+    requested_outputs: Option<usize>,
+    observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
+) -> BuiltinResult<Value> {
     let shape = broadcast_shapes(BUILTIN_NAME, &left.shape, &right.shape)
         .map_err(|_| strcmp_error(&STRCMP_ERROR_SHAPE_MISMATCH))?;
     let total = tensor::element_count(&shape);
+    if total == 1 && left.shape == [1, 1] && right.shape == [1, 1] {
+        if let (Some((left_utf8_bytes, right_utf8_bytes)), Some(observation)) =
+            (host_scalar_lengths, observation)
+        {
+            observation.admit(ScalarStringCompareWorkload {
+                left_utf8_bytes,
+                right_utf8_bytes,
+                requested_outputs,
+            });
+        }
+    }
     if total == 0 {
         return logical_result(BUILTIN_NAME, Vec::new(), shape)
             .map_err(|_| strcmp_error(&STRCMP_ERROR_INTERNAL));
@@ -93,7 +144,7 @@ pub(crate) mod tests {
     use runmat_value::{CellArray, CharArray, LogicalArray, StringArray};
 
     fn strcmp_builtin(a: Value, b: Value) -> BuiltinResult<Value> {
-        futures::executor::block_on(super::strcmp_builtin(a, b))
+        futures::executor::block_on(super::strcmp_builtin(None, None, a, b))
     }
 
     fn error_message(err: RuntimeError) -> String {
@@ -274,5 +325,38 @@ pub(crate) mod tests {
         let result =
             strcmp_builtin(Value::Num(1.0), Value::String("a".into())).expect("comparison");
         assert_eq!(result, Value::Bool(false));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn strcmp_direct_numeric_false_precedes_invalid_peer_container() {
+        let malformed = Value::Struct(runmat_value::StructValue::new());
+        for (a, b) in [
+            (Value::Num(1.0), malformed.clone()),
+            (malformed, Value::Num(1.0)),
+        ] {
+            assert_eq!(strcmp_builtin(a, b).unwrap(), Value::Bool(false));
+        }
+        let malformed_cell = CellArray::new(vec![Value::Num(42.0)], 1, 1).unwrap();
+        let error = strcmp_builtin(Value::Cell(malformed_cell), Value::String("a".into()))
+            .expect_err("invalid host cell without direct numeric input");
+        assert_eq!(error.identifier(), STRCMP_ERROR_INVALID_INPUT.identifier);
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        assert_eq!(
+            strcmp_builtin(
+                Value::GpuTensor(allocation.handle.clone()),
+                Value::Struct(runmat_value::StructValue::new()),
+            )
+            .unwrap(),
+            Value::Bool(false)
+        );
+        assert!(allocation.handle.allocation_lease().validate_live().is_ok());
+        assert_eq!(allocation.probe.retirements(), 0);
     }
 }

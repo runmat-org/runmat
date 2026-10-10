@@ -3,8 +3,13 @@ use runmat_accelerate_api::observation::{
     current_provider_observation, ProviderObservationFailure,
 };
 
+#[cfg(test)]
+#[path = "telemetry/map_nan_tests.rs"]
+mod map_nan_tests;
+
 pub(crate) struct FusedReductionTelemetryRequest<'a> {
     pub(crate) shader: &'a str,
+    pub(crate) requirements: runmat_accelerate_api::ProviderShaderRequirements,
     pub(crate) inputs: &'a [GpuTensorHandle],
     pub(crate) output_shape: &'a [usize],
     pub(crate) reduce_len: usize,
@@ -28,6 +33,7 @@ impl WgpuProvider {
             len,
             super::elementwise::FusedElementwiseRepresentation {
                 input_precision: self.precision,
+                output_precision: self.precision,
                 output_storage: GpuTensorStorage::Real,
                 logical_output: true,
             },
@@ -64,6 +70,7 @@ impl WgpuProvider {
             len,
             super::elementwise::FusedElementwiseRepresentation {
                 input_precision: self.precision,
+                output_precision: self.precision,
                 output_storage,
                 logical_output: false,
             },
@@ -78,9 +85,66 @@ impl WgpuProvider {
         len: usize,
         representation: super::elementwise::FusedElementwiseRepresentation,
     ) -> Result<GpuTensorHandle> {
+        self.fused_elementwise_with_representation_telemetry_observed_exec(
+            shader,
+            inputs,
+            output_shape,
+            len,
+            representation,
+            |_| Ok(()),
+        )
+    }
+
+    pub(super) fn fused_elementwise_validated_with_telemetry_exec(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        output_shape: &[usize],
+        len: usize,
+        frame: &super::elementwise::SingleFrame,
+        validated: &super::validated_fusion::ValidatedFusionPipeline,
+    ) -> Result<GpuTensorHandle> {
         let start = Instant::now();
-        let result =
-            self.fused_elementwise_typed_exec(shader, inputs, output_shape, len, representation);
+        let result = self.fused_elementwise_validated_exec(
+            shader,
+            inputs,
+            output_shape,
+            len,
+            frame,
+            validated,
+        );
+        if result.is_ok() {
+            self.telemetry
+                .record_fused_elementwise_duration(start.elapsed());
+            let shape = [
+                ("len", len as u64),
+                ("inputs", inputs.len() as u64),
+                ("rank", output_shape.len() as u64),
+            ];
+            let tuning = [("wg", u64::from(self.linear_launch.workgroup()))];
+            self.record_kernel_launch_basic("fused_elementwise", &shape, &tuning);
+        }
+        result
+    }
+
+    pub(super) fn fused_elementwise_with_representation_telemetry_observed_exec(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        output_shape: &[usize],
+        len: usize,
+        representation: super::elementwise::FusedElementwiseRepresentation,
+        after_allocation: impl FnMut(&runmat_accelerate_api::WgpuBufferOwner) -> Result<()>,
+    ) -> Result<GpuTensorHandle> {
+        let start = Instant::now();
+        let result = self.fused_elementwise_typed_exec_observed(
+            shader,
+            inputs,
+            output_shape,
+            len,
+            representation,
+            after_allocation,
+        );
         if result.is_ok() {
             let elapsed = start.elapsed();
             self.telemetry.record_fused_elementwise_duration(elapsed);
@@ -96,28 +160,83 @@ impl WgpuProvider {
         result
     }
 
-    pub(crate) fn fused_elementwise_multi_with_telemetry_exec(
+    #[cfg(test)]
+    pub(super) fn fused_elementwise_prepared_with_telemetry_exec(
         &self,
         shader: &str,
         inputs: &[GpuTensorHandle],
-        output_shape: &[usize],
-        len: usize,
-        output_classes: &[runmat_accelerate_api::ProviderElementType],
-    ) -> Result<Vec<GpuTensorHandle>> {
+        work: super::elementwise::FusedElementwiseWork<'_>,
+        prepared: &super::elementwise::FrozenFusionRecipe,
+    ) -> Result<(
+        GpuTensorHandle,
+        runmat_accelerate_api::ProviderRealElementwiseObserved,
+    )> {
         let start = Instant::now();
-        let result =
-            self.fused_elementwise_multi_exec(shader, inputs, output_shape, len, output_classes);
+        let len = work.len;
+        let rank = work.output_shape.len();
+        let result = self.fused_elementwise_prepared_exec(shader, inputs, work, prepared);
         if result.is_ok() {
-            let elapsed = start.elapsed();
-            self.telemetry.record_fused_elementwise_duration(elapsed);
+            self.telemetry
+                .record_fused_elementwise_duration(start.elapsed());
             let shape = [
                 ("len", len as u64),
                 ("inputs", inputs.len() as u64),
-                ("rank", output_shape.len() as u64),
-                ("num_outputs", output_classes.len() as u64),
+                ("rank", rank as u64),
             ];
-            let wg = crate::backend::wgpu::config::effective_workgroup_size() as u64;
-            let tuning = [("wg", wg)];
+            let tuning = [("wg", u64::from(prepared.launch().workgroup()))];
+            self.record_kernel_launch_basic("fused_elementwise", &shape, &tuning);
+        }
+        result
+    }
+
+    pub(super) fn fused_elementwise_prepared_probe_with_telemetry_exec(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        work: super::elementwise::FusedElementwiseWork<'_>,
+        prepared: &super::elementwise::FrozenFusionRecipe,
+    ) -> Result<(
+        GpuTensorHandle,
+        runmat_accelerate_api::ProviderRealElementwiseObserved,
+        Vec<crate::backend::wgpu::dispatch::observation::ProbeFenceTicket>,
+    )> {
+        let start = Instant::now();
+        let len = work.len;
+        let rank = work.output_shape.len();
+        let result = self.fused_elementwise_prepared_probe_exec(shader, inputs, work, prepared);
+        if result.is_ok() {
+            self.telemetry
+                .record_fused_elementwise_duration(start.elapsed());
+            let shape = [
+                ("len", len as u64),
+                ("inputs", inputs.len() as u64),
+                ("rank", rank as u64),
+            ];
+            let tuning = [("wg", u64::from(prepared.launch().workgroup()))];
+            self.record_kernel_launch_basic("fused_elementwise", &shape, &tuning);
+        }
+        result
+    }
+
+    pub(super) fn fused_elementwise_multi_validated_with_telemetry_exec(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        frame: &super::elementwise::MultiFrame,
+        validated: &super::validated_fusion::ValidatedFusionPipeline,
+    ) -> Result<Vec<GpuTensorHandle>> {
+        let start = Instant::now();
+        let result = self.fused_elementwise_multi_validated_exec(shader, inputs, frame, validated);
+        if result.is_ok() {
+            self.telemetry
+                .record_fused_elementwise_duration(start.elapsed());
+            let shape = [
+                ("len", frame.len as u64),
+                ("inputs", inputs.len() as u64),
+                ("rank", frame.shape.len() as u64),
+                ("num_outputs", frame.output_classes.len() as u64),
+            ];
+            let tuning = [("wg", u64::from(self.workgroup_config.scalar))];
             self.record_kernel_launch_basic("fused_elementwise_multi", &shape, &tuning);
         }
         result
@@ -144,24 +263,64 @@ impl WgpuProvider {
         result
     }
 
-    pub(crate) fn map_nan_to_zero_exec(&self, handle: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+    pub(crate) fn map_nan_to_zero_exec_typed(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        self.map_nan_to_zero_exec_typed_after_allocation(handle, |_| Ok(()))
+    }
+
+    fn map_nan_to_zero_exec_typed_after_allocation(
+        &self,
+        handle: &GpuTensorHandle,
+        mut checkpoint: impl FnMut(&runmat_accelerate_api::WgpuBufferOwner) -> Result<()>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        let produced = std::cell::Cell::new(false);
+        self.map_nan_to_zero_exec_observed(handle, |output| {
+            produced.set(true);
+            checkpoint(output)
+        })
+        .map_err(|source| {
+            let error = runmat_accelerate_api::ProviderExecutionError::from(source);
+            if produced.get() {
+                error.after_effect()
+            } else {
+                error
+            }
+        })
+    }
+
+    fn map_nan_to_zero_exec_observed(
+        &self,
+        handle: &GpuTensorHandle,
+        mut after_allocation: impl FnMut(&runmat_accelerate_api::WgpuBufferOwner) -> Result<()>,
+    ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(handle)?;
         let len = entry.len;
         if len == 0 {
-            let out = self.with_emission(|emission, _| {
-                self.create_storage_buffer(emission, 0, "runmat-nan-to-zero-empty")
-            })??;
+            let out = self.with_emission(
+                |emission, _| -> Result<runmat_accelerate_api::WgpuBufferOwner> {
+                    let output =
+                        self.create_storage_buffer(emission, 0, "runmat-nan-to-zero-empty")?;
+                    after_allocation(&output)?;
+                    Ok(output)
+                },
+            )??;
             return self.register_existing_buffer(out, entry.shape, 0);
         }
-        let shader = match self.precision {
-            NumericPrecision::F64 => crate::backend::wgpu::shaders::nan::NAN_TO_ZERO_SHADER_F64,
-            NumericPrecision::F32 => crate::backend::wgpu::shaders::nan::NAN_TO_ZERO_SHADER_F32,
-        };
-        self.fused_elementwise_with_telemetry_exec(
-            shader,
+        let shader = crate::backend::wgpu::shaders::nan::map_source(self.precision);
+        self.fused_elementwise_with_representation_telemetry_observed_exec(
+            &shader,
             std::slice::from_ref(handle),
             &entry.shape,
             len,
+            super::elementwise::FusedElementwiseRepresentation {
+                input_precision: self.precision,
+                output_precision: self.precision,
+                output_storage: GpuTensorStorage::Real,
+                logical_output: false,
+            },
+            after_allocation,
         )
     }
 
@@ -174,12 +333,9 @@ impl WgpuProvider {
             })??;
             return self.register_existing_buffer(out, entry.shape, 0);
         }
-        let shader = match self.precision {
-            NumericPrecision::F64 => crate::backend::wgpu::shaders::nan::NOT_NAN_MASK_SHADER_F64,
-            NumericPrecision::F32 => crate::backend::wgpu::shaders::nan::NOT_NAN_MASK_SHADER_F32,
-        };
+        let shader = crate::backend::wgpu::shaders::nan::mask_source(self.precision);
         self.fused_elementwise_with_telemetry_exec(
-            shader,
+            &shader,
             std::slice::from_ref(handle),
             &entry.shape,
             len,
@@ -192,6 +348,7 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let FusedReductionTelemetryRequest {
             shader,
+            requirements,
             inputs,
             output_shape,
             reduce_len,
@@ -202,6 +359,7 @@ impl WgpuProvider {
         let start = Instant::now();
         let result = self.fused_reduction_exec(
             shader,
+            requirements,
             inputs,
             output_shape,
             reduce_len,
@@ -285,21 +443,25 @@ impl WgpuProvider {
                     pending,
                     &pl.scalar.get(emission)?.pipeline,
                 )?;
-                crate::backend::wgpu::dispatch::reduction::warmup_noop_single(
-                    emission,
-                    pending,
-                    &pl.reduce_dim_sum_mean.get(emission)?.pipeline,
-                )?;
+                if self.ieee_words_available(self.precision) {
+                    crate::backend::wgpu::dispatch::reduction::warmup_noop_single(
+                        emission,
+                        pending,
+                        &pl.reduce_dim_sum_mean.get(emission)?.pipeline,
+                    )?;
+                }
                 crate::backend::wgpu::dispatch::reduction::warmup_noop_single(
                     emission,
                     pending,
                     &pl.reduce_nd_mean.get(emission)?.pipeline,
                 )?;
-                crate::backend::wgpu::dispatch::reduction::warmup_noop_single(
-                    emission,
-                    pending,
-                    &pl.reduce_global.get(emission)?.pipeline,
-                )?;
+                if self.ieee_words_available(self.precision) {
+                    crate::backend::wgpu::dispatch::reduction::warmup_noop_single(
+                        emission,
+                        pending,
+                        &pl.reduce_global.get(emission)?.pipeline,
+                    )?;
+                }
                 crate::backend::wgpu::dispatch::elementwise::warmup_noop(
                     emission,
                     pending,

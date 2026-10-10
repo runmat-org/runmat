@@ -7,19 +7,19 @@ use runmat_accelerate_api::{
     NumericElementType, ProviderPrecision, WgpuEmission,
 };
 use std::sync::atomic::Ordering as AtomicOrdering;
-use std::sync::Arc;
 use tracing::info_span;
 use wgpu::util::DeviceExt;
 
 use super::backend_shared::NEXT_SUBMISSION_ID;
 use super::backend_types::{BufferEntry, NumericBufferRegistration, WgpuProvider};
 use crate::backend::wgpu::dispatch::observation::PendingSubmissions;
-use crate::backend::wgpu::residency::BufferUsageClass;
+use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};
 use crate::backend::wgpu::types::NumericPrecision;
 use crate::fusion::active_fusion;
 
 #[path = "core/readback.rs"]
 mod readback;
+pub(super) use readback::ReadbackResourceOwner;
 
 impl WgpuProvider {
     pub(crate) fn supports_native_real_element_type(
@@ -72,7 +72,7 @@ impl WgpuProvider {
 
     pub(super) fn map_readback_with<'a, T: 'a>(
         &'a self,
-        staging: wgpu::Buffer,
+        staging: impl ReadbackResourceOwner + 'a,
         context: &'a str,
         decode: impl FnOnce(&[u8]) -> Result<T> + 'a,
     ) -> impl std::future::Future<Output = Result<T>> + 'a {
@@ -99,14 +99,16 @@ impl WgpuProvider {
         }
     }
     pub(super) const BUFFER_RESIDENCY_MAX_PER_KEY: usize = 8;
-    pub(super) const IMAGE_NORMALIZE_AUTOTUNE_VERSION: u8 = 1;
+    // Native-single variance now uses a centered second scan. Old tuning
+    // entries describe the former one-scan shader and cannot be reused.
+    pub(super) const IMAGE_NORMALIZE_AUTOTUNE_VERSION: u8 = 2;
     pub(super) const IMAGE_NORMALIZE_STREAM_COLD_CAP: u32 = 8;
     pub(super) const IMAGE_NORMALIZE_TARGET_SAMPLES_PER_LANE: f64 = 256.0;
     pub(super) const IMAGE_NORMALIZE_TARGET_LOOP_ITERS_PER_LANE: f64 = 16.0;
 
     pub(super) fn register_existing_buffer(
         &self,
-        buffer: Arc<wgpu::Buffer>,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
         shape: Vec<usize>,
         len: usize,
     ) -> Result<GpuTensorHandle> {
@@ -115,7 +117,7 @@ impl WgpuProvider {
 
     pub(super) fn register_existing_buffer_with_storage(
         &self,
-        buffer: Arc<wgpu::Buffer>,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
         shape: Vec<usize>,
         len: usize,
         storage: GpuTensorStorage,
@@ -131,7 +133,7 @@ impl WgpuProvider {
 
     pub(super) fn register_existing_buffer_with_usage(
         &self,
-        buffer: Arc<wgpu::Buffer>,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
         shape: Vec<usize>,
         len: usize,
         usage: BufferUsageClass,
@@ -147,7 +149,7 @@ impl WgpuProvider {
 
     pub(super) fn register_existing_buffer_with_usage_and_storage(
         &self,
-        buffer: Arc<wgpu::Buffer>,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
         shape: Vec<usize>,
         len: usize,
         storage: GpuTensorStorage,
@@ -172,7 +174,7 @@ impl WgpuProvider {
 
     pub(super) fn register_numeric_buffer(
         &self,
-        buffer: Arc<wgpu::Buffer>,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
         registration: NumericBufferRegistration,
     ) -> Result<GpuTensorHandle> {
         self.register_numeric_buffer_produced(buffer, registration, false)
@@ -180,7 +182,7 @@ impl WgpuProvider {
 
     pub(super) fn register_logical_buffer(
         &self,
-        buffer: Arc<wgpu::Buffer>,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
         shape: Vec<usize>,
         len: usize,
         usage: BufferUsageClass,
@@ -206,7 +208,7 @@ impl WgpuProvider {
 
     pub(super) fn register_numeric_buffer_produced(
         &self,
-        buffer: Arc<wgpu::Buffer>,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
         registration: NumericBufferRegistration,
         logical: bool,
     ) -> Result<GpuTensorHandle> {
@@ -240,7 +242,7 @@ impl WgpuProvider {
 
     pub(super) fn register_integer_buffer(
         &self,
-        buffer: Arc<wgpu::Buffer>,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
         shape: Vec<usize>,
         len: usize,
         element_type: IntegerElementType,
@@ -299,11 +301,19 @@ impl WgpuProvider {
         usage: BufferUsageClass,
         len: usize,
         label: &str,
-    ) -> Result<(Arc<wgpu::Buffer>, bool)> {
+    ) -> Result<(runmat_accelerate_api::WgpuBufferOwner, bool)> {
+        let size_bytes = BufferResidency::requested_bytes(len, self.element_size)
+            .ok_or_else(|| anyhow!("{label}: allocation byte extent overflow"))?;
+        if size_bytes > self.adapter_limits.max_buffer_size {
+            return Err(super::backend_shared::gpu_per_buffer_limit_error(
+                label,
+                size_bytes,
+                self.adapter_limits.max_buffer_size,
+            ));
+        }
         emission.ensure_device(&self.access)?;
-        Ok(self
-            .allocations
-            .acquire(emission, usage, len, self.element_size, label))
+        self.allocations
+            .acquire(emission, usage, len, self.element_size, label)
     }
 
     pub(super) fn create_storage_buffer(
@@ -311,7 +321,7 @@ impl WgpuProvider {
         emission: &WgpuEmission<'_>,
         len: usize,
         label: &str,
-    ) -> Result<Arc<wgpu::Buffer>> {
+    ) -> Result<runmat_accelerate_api::WgpuBufferOwner> {
         Ok(self
             .create_storage_buffer_for_usage(emission, BufferUsageClass::Generic, len, label)?
             .0)
@@ -324,23 +334,23 @@ impl WgpuProvider {
         emission: &WgpuEmission<'_>,
         words: usize,
         label: &str,
-    ) -> Result<Arc<wgpu::Buffer>> {
+    ) -> Result<runmat_accelerate_api::WgpuBufferOwner> {
         let bytes = crate::backend::wgpu_storage::raw_word_requested_bytes(words as u64)
             .ok_or_else(|| anyhow!("{label}: integer buffer size overflow"))?;
         if bytes > self.adapter_limits.max_buffer_size {
             return Err(anyhow!("{label}: integer buffer exceeds GPU limits"));
         }
         emission.ensure_device(&self.access)?;
-        Ok(Arc::new(emission.device().create_buffer(
-            &wgpu::BufferDescriptor {
+        Ok(runmat_accelerate_api::WgpuBufferOwner::new(
+            emission.device().create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
                 size: bytes,
                 usage: wgpu::BufferUsages::STORAGE
                     | wgpu::BufferUsages::COPY_SRC
                     | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
-            },
-        )))
+            }),
+        ))
     }
 
     pub(super) fn uniform_buffer<T: Pod>(

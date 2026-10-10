@@ -16,6 +16,13 @@ struct DeferredProbe {
     deferrals: Cell<usize>,
 }
 impl RuntimePlacementService for DeferredProbe {
+    fn plan_with_observation_permit(
+        &self,
+        request: PlacementPlanRequest,
+    ) -> Result<runmat_runtime::context::RuntimeGraphPlacementSelection, RuntimeError> {
+        self.decisions.plan_with_observation_permit(request)
+    }
+
     fn plan(
         &self,
         request: PlacementPlanRequest,

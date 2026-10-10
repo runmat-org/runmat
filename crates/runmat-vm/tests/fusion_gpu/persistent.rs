@@ -5,7 +5,7 @@ fn compiled_persistent_elementwise_executes_ordered_provider_store_numeric_resid
     gc_test_context(|| {
         let _guard = accel_test_lock();
         ensure_provider_registered();
-        let provider = PROVIDER.get().expect("selected fixture provider");
+        let provider = registered_provider().expect("selected fixture provider");
         let source = "function y = fusedPersistent()\npersistent p\nt = p .* 2;\np = p + t + 1;\ny = p;\nend\n";
         let ast = runmat_parser::parse(source).expect("parse persistent function");
         let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty())

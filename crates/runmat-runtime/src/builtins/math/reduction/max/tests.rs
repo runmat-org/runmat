@@ -3,7 +3,7 @@ use futures::executor::block_on;
 use runmat_value::{ObjectInstance, Tensor, Value};
 
 fn max_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(super::max_builtin(value, rest))
+    block_on(super::max_builtin(None, value, rest))
 }
 
 fn nanmax_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

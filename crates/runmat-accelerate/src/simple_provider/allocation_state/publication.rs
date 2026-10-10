@@ -7,14 +7,14 @@ use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, NumericElementTyp
 /// Publishing transfers cleanup to the ordinary allocation lease; failure or
 /// unwind detaches this pending payload before its destructor runs.
 pub(in crate::simple_provider) struct PendingAllocation {
-    owner: Arc<NumericAllocationState>,
+    owner: NumericOwner,
     identity: AllocationIdentity,
     view: Option<GpuTensorView>,
 }
 
 impl NumericAllocationState {
     pub(in crate::simple_provider) fn stage(
-        self: &Arc<Self>,
+        self: &NumericOwner,
         identity: AllocationIdentity,
         payload: InProcessNumericData,
         shape: Vec<usize>,

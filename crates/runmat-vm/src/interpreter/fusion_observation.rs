@@ -1,7 +1,8 @@
 //! Region observations live across bytecode dispatch, not just fusion selection.
-use runmat_accelerate::fusion_exec::FusionCpuObservation;
+use runmat_accelerate::fusion_exec::{FusionCpuObservation, FusionProviderCompletion};
 use runmat_accelerate::placement::{PlacementTraceContext, PlacementVariant};
 use runmat_accelerate::InstrSpan;
+use runmat_runtime::context::{VmFusionHostInstruction, VmFusionHostRoute};
 use runmat_time::{duration_ns_saturating, Instant};
 
 #[derive(Default)]
@@ -10,8 +11,12 @@ pub(super) struct FusionRegionObservations(Vec<RegionObservation>);
 struct RegionObservation {
     span: InstrSpan,
     ticket: Option<FusionCpuObservation>,
+    provider_completion: Option<FusionProviderCompletion>,
     trace: Option<PlacementTraceContext>,
     started: Instant,
+    host_route: Option<VmFusionHostRoute>,
+    publication_pc: Option<usize>,
+    awaiting_publication: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -32,41 +37,158 @@ fn region_exit(span: &InstrSpan, executed_pc: usize, next_pc: usize) -> RegionEx
 }
 
 impl FusionRegionObservations {
+    #[cfg(all(test, not(target_arch = "wasm32"), feature = "wgpu"))]
+    pub(super) fn checked_publication_store_pending(
+        &self,
+        pc: usize,
+        route: &crate::interpreter::state::VmFusionPublicationFaultRoute,
+    ) -> bool {
+        self.0.iter().any(|observation| {
+            observation.awaiting_publication
+                && observation.publication_pc == Some(pc)
+                && match route {
+                    crate::interpreter::state::VmFusionPublicationFaultRoute::AnySelected => true,
+                    crate::interpreter::state::VmFusionPublicationFaultRoute::SharedRuntime => {
+                        observation.host_route.is_some()
+                    }
+                }
+        })
+    }
+
     pub(super) fn contains_start(&self, pc: usize) -> bool {
         self.0
             .iter()
             .any(|observation| observation.span.start == pc)
     }
 
+    pub(super) fn is_terminal(&self, pc: usize) -> bool {
+        self.0
+            .iter()
+            .rev()
+            .find(|observation| observation.span.start <= pc && pc <= observation.span.end)
+            .is_some_and(|observation| {
+                observation.host_route.is_some() && observation.span.end == pc
+            })
+    }
+
+    #[cfg(test)]
     pub(super) fn begin(
         &mut self,
         span: InstrSpan,
         ticket: Option<FusionCpuObservation>,
         trace: PlacementTraceContext,
     ) {
+        self.begin_at(span, ticket, trace, Instant::now(), None);
+    }
+
+    pub(super) fn begin_at(
+        &mut self,
+        span: InstrSpan,
+        ticket: Option<FusionCpuObservation>,
+        trace: PlacementTraceContext,
+        started: Instant,
+        publication_pc: Option<usize>,
+    ) {
+        let host_route = ticket
+            .as_ref()
+            .and_then(FusionCpuObservation::vm_host_route);
         self.0.push(RegionObservation {
             span,
             ticket,
+            provider_completion: None,
             trace: Some(trace),
-            started: Instant::now(),
+            started,
+            host_route,
+            publication_pc,
+            awaiting_publication: false,
         });
+    }
+
+    pub(super) fn begin_provider_publication(
+        &mut self,
+        span: InstrSpan,
+        completion: FusionProviderCompletion,
+        started: Instant,
+        publication_pc: Option<usize>,
+    ) {
+        self.0.push(RegionObservation {
+            span,
+            ticket: None,
+            provider_completion: Some(completion),
+            trace: None,
+            started,
+            host_route: None,
+            publication_pc,
+            awaiting_publication: false,
+        });
+    }
+
+    pub(super) fn instruction_route(
+        &self,
+        pc: usize,
+        instruction: VmFusionHostInstruction,
+    ) -> Option<VmFusionHostRoute> {
+        let route = self
+            .0
+            .iter()
+            .rev()
+            .find(|observation| observation.span.start <= pc && pc <= observation.span.end)
+            .and_then(|observation| observation.host_route.clone())?;
+        route.begin_instruction(pc, instruction);
+        Some(route)
     }
 
     pub(super) fn instruction_exit(&mut self, executed_pc: usize, next_pc: usize) {
         let mut index = 0;
         while index < self.0.len() {
-            match region_exit(&self.0[index].span, executed_pc, next_pc) {
-                RegionExit::Running => index += 1,
-                RegionExit::Completed => {
-                    let mut observation = self.0.remove(index);
+            if self.0[index].awaiting_publication {
+                let published = self.0[index].publication_pc == Some(executed_pc)
+                    && executed_pc.checked_add(1) == Some(next_pc);
+                let mut observation = self.0.remove(index);
+                if published {
                     if let Some(ticket) = observation.ticket.take() {
-                        ticket.complete();
+                        ticket.complete_vm(observation.started);
+                    }
+                    if let Some(completion) = observation.provider_completion.take() {
+                        completion.complete(observation.started);
                     }
                     if let Some(trace) = observation.trace.take() {
                         trace.complete(
                             Some(PlacementVariant::SharedRuntime),
                             Some(duration_ns_saturating(observation.started.elapsed())),
                         );
+                    }
+                }
+                continue;
+            }
+            if let Some(route) = &self.0[index].host_route {
+                if route.contains_pc(executed_pc) {
+                    route.instruction_exit(executed_pc);
+                }
+            }
+            match region_exit(&self.0[index].span, executed_pc, next_pc) {
+                RegionExit::Running => index += 1,
+                RegionExit::Completed => {
+                    let mut observation = self.0.remove(index);
+                    if observation.publication_pc == executed_pc.checked_add(1)
+                        && (observation.host_route.is_some()
+                            || observation.provider_completion.is_some())
+                    {
+                        observation.awaiting_publication = true;
+                        self.0.insert(index, observation);
+                        index += 1;
+                    } else if observation.host_route.is_none()
+                        && observation.provider_completion.is_none()
+                    {
+                        if let Some(ticket) = observation.ticket.take() {
+                            ticket.complete();
+                        }
+                        if let Some(trace) = observation.trace.take() {
+                            trace.complete(
+                                Some(PlacementVariant::SharedRuntime),
+                                Some(duration_ns_saturating(observation.started.elapsed())),
+                            );
+                        }
                     }
                 }
                 RegionExit::Aborted => {
@@ -81,8 +203,9 @@ impl FusionRegionObservations {
     }
 }
 
-// Dropping the scope (error, cancellation, early return, or dropped future)
-// drops unfinished tickets as failures and unfinished traces as fallbacks.
+// Dropping on error, cancellation, early return, or an unpolled future retires
+// VM-bound tickets without positive feedback. Legacy observations retain their
+// existing failure reporting; unfinished traces record fallback only.
 
 #[cfg(test)]
 mod tests {

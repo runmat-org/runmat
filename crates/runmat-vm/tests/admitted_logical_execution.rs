@@ -1,22 +1,43 @@
 #![cfg(feature = "native-accel")]
 
-#[path = "support/mod.rs"]
-mod support;
 #[path = "support/admitted_logarithms.rs"]
 mod admitted_logarithms;
+#[path = "support/mod.rs"]
+mod support;
 
 use futures::executor::block_on;
 use runmat_accelerate::placement::{PlacementEventKind, PlacementVariant};
 use runmat_execution::{
-    ExecutionCandidateKind, PlacementDecision, PlacementFeedback, PlacementPlanRequest,
+    Digest, ExecutionCandidateKind, PlacementDecision, PlacementFeedback, PlacementPlanRequest,
     SelectedExecutionCandidate,
 };
 use runmat_runtime::{
-    context::{RuntimeContext, RuntimePlacementService, RuntimeServicePorts},
+    context::{
+        RuntimeContext, RuntimeGraphObservationPermit, RuntimeGraphPlacementSelection,
+        RuntimePlacementService, RuntimeServicePorts,
+    },
     RuntimeError,
 };
 use runmat_value::Value;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
+
+#[derive(Debug)]
+struct SelectedLogicalPermit {
+    signature: Digest,
+    candidate: String,
+    kind: ExecutionCandidateKind,
+}
+
+impl RuntimeGraphObservationPermit for SelectedLogicalPermit {
+    fn authorizes(
+        &self,
+        signature: &runmat_execution::PlacementSignature,
+        candidate: &str,
+        kind: ExecutionCandidateKind,
+    ) -> bool {
+        self.signature == signature.cache_key() && self.candidate == candidate && self.kind == kind
+    }
+}
 
 struct Selection {
     operation: &'static str,
@@ -26,6 +47,23 @@ struct Selection {
 }
 
 impl RuntimePlacementService for Selection {
+    fn plan_with_observation_permit(
+        &self,
+        request: PlacementPlanRequest,
+    ) -> Result<RuntimeGraphPlacementSelection, RuntimeError> {
+        let decision = self.plan(request)?;
+        let chosen = &decision.selections[0];
+        let observation_permit = Some(Arc::new(SelectedLogicalPermit {
+            signature: decision.signature.cache_key(),
+            candidate: chosen.candidate.clone(),
+            kind: chosen.kind,
+        }) as Arc<dyn RuntimeGraphObservationPermit>);
+        Ok(RuntimeGraphPlacementSelection {
+            decision,
+            observation_permit,
+        })
+    }
+
     fn plan(&self, request: PlacementPlanRequest) -> Result<PlacementDecision, RuntimeError> {
         let kind = if request.signature.operation == self.operation {
             self.kind

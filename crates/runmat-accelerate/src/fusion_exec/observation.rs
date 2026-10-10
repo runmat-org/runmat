@@ -1,5 +1,47 @@
 use crate::placement::LocalPlacementFeedback;
+use runmat_accelerate_api::observation::ProviderOperationReceipt;
+use runmat_runtime::context::{RuntimeContext, VmFusionCompletionRight, VmFusionHostRoute};
 use runmat_time::{duration_ns_saturating, Instant};
+
+/// Linear selected-provider receipt held until the VM has published all
+/// ordered stores, adopted the result, and advanced beyond the fused span.
+/// Dropping it on catch/deopt/cancellation never reports success or a fake
+/// zero-duration failure.
+pub struct FusionProviderCompletion {
+    receipt: ProviderOperationReceipt,
+    feedback: LocalPlacementFeedback,
+    right: VmFusionCompletionRight,
+}
+
+impl FusionProviderCompletion {
+    pub(super) fn new(
+        receipt: ProviderOperationReceipt,
+        feedback: LocalPlacementFeedback,
+        right: VmFusionCompletionRight,
+    ) -> Option<Self> {
+        (feedback.is_current() && right.placement_revision() == Some(&feedback.signature.revision))
+            .then_some(Self {
+                receipt,
+                feedback,
+                right,
+            })
+    }
+
+    pub fn complete(self, outer_started: Instant) {
+        let Some(lease) = self.right.completion_lease(&self.feedback.runtime) else {
+            return;
+        };
+        let Some(prelude) = self.receipt.default_clock_prelude_since(outer_started) else {
+            return;
+        };
+        crate::placement::publish_provider_feedback_vm_full_call(
+            self.receipt,
+            self.feedback,
+            prelude,
+            lease,
+        );
+    }
+}
 
 /// A placement choice is not an execution failure. The caller runs the shared
 /// bytecode path and retains this observation until that region actually exits.
@@ -16,6 +58,15 @@ pub enum FusionExecutionOutcome<T> {
 pub struct FusionCpuObservation {
     feedback: Option<Box<LocalPlacementFeedback>>,
     started: Instant,
+    vm_completion: Option<Box<VmCpuCompletion>>,
+}
+
+/// The installed VM right is deliberately linear and relatively large. Only
+/// an actual VM-bound host selection allocates this state; ordinary shared
+/// bytecode outcomes keep the small observation envelope inline.
+struct VmCpuCompletion {
+    right: VmFusionCompletionRight,
+    host_route: Option<VmFusionHostRoute>,
 }
 
 impl FusionCpuObservation {
@@ -23,12 +74,65 @@ impl FusionCpuObservation {
         Self {
             feedback,
             started: Instant::now(),
+            vm_completion: None,
         }
+    }
+
+    /// Only the selected VM reduction can attach its one-shot installation
+    /// right. Missing route proof suppresses feedback but not bytecode.
+    pub fn with_vm_host_route(
+        mut self,
+        right: VmFusionCompletionRight,
+        runtime: Option<&RuntimeContext>,
+        bindings: Option<&[runmat_builtins::BuiltinBindingIdentity]>,
+    ) -> Self {
+        let host_route = self
+            .feedback
+            .as_ref()
+            .filter(|feedback| feedback.is_current())
+            .and(runtime)
+            .and_then(|runtime| {
+                bindings.and_then(|bindings| right.host_route(runtime, bindings.to_vec()))
+            });
+        self.vm_completion = Some(Box::new(VmCpuCompletion { right, host_route }));
+        self
+    }
+
+    pub fn vm_host_route(&self) -> Option<VmFusionHostRoute> {
+        self.vm_completion
+            .as_ref()
+            .and_then(|vm| vm.host_route.clone())
+    }
+
+    /// VM-owned FullCall host completion begins before placement planning and
+    /// follows only exact normal bytecode publication.
+    pub fn complete_vm(mut self, outer_started: Instant) {
+        let Some(vm) = self.vm_completion.take() else {
+            self.complete();
+            return;
+        };
+        let VmCpuCompletion { right, host_route } = *vm;
+        let (Some(route), Some(feedback)) = (host_route, self.feedback.take()) else {
+            return;
+        };
+        if !route.complete() || !feedback.is_current() || feedback.runtime.is_cancelled() {
+            return;
+        }
+        let Some(_lease) = right.completion_lease(&feedback.runtime) else {
+            return;
+        };
+        feedback.observe(duration_ns_saturating(outer_started.elapsed()), true);
     }
 
     /// Only the owner of the complete bytecode region may report success.
     /// Success means host bytecode exited, not that nested GPU queues drained.
     pub fn complete(mut self) {
+        if self.vm_completion.is_some() {
+            // The VM-bound route requires its exact instruction and
+            // publication proof; the legacy completion API cannot issue it.
+            self.feedback = None;
+            return;
+        }
         let succeeded = self
             .feedback
             .as_ref()
@@ -40,21 +144,17 @@ impl FusionCpuObservation {
         let Some(feedback) = self.feedback.take() else {
             return;
         };
-        if let Some(service) = feedback.runtime.service_ports().placement() {
-            let _ = service.observe(runmat_execution::PlacementFeedback {
-                signature: feedback.signature,
-                candidate: feedback.candidate,
-                kind: feedback.kind,
-                total_elapsed_ns: duration_ns_saturating(self.started.elapsed()),
-                succeeded,
-            });
-        }
+        feedback.observe(duration_ns_saturating(self.started.elapsed()), succeeded);
     }
 }
 
 impl Drop for FusionCpuObservation {
     fn drop(&mut self) {
-        self.observe(false);
+        if self.vm_completion.is_some() {
+            self.feedback = None;
+        } else {
+            self.observe(false);
+        }
     }
 }
 
@@ -67,6 +167,20 @@ mod tests {
     use runmat_runtime::context::{RuntimeContext, RuntimeServicePorts};
     use std::rc::Rc;
 
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn cpu_observation_envelope_does_not_inline_the_vm_right() {
+        assert!(
+            std::mem::size_of::<FusionCpuObservation>()
+                < std::mem::size_of::<VmFusionCompletionRight>()
+        );
+        assert!(
+            std::mem::size_of::<FusionExecutionOutcome<()>>()
+                < std::mem::size_of::<VmFusionCompletionRight>()
+        );
+        assert!(FusionCpuObservation::new(None).vm_completion.is_none());
+    }
+
     fn ticket(
         candidate: &str,
         kind: runmat_execution::ExecutionCandidateKind,
@@ -77,23 +191,29 @@ mod tests {
         ))
         .with_service_ports(RuntimeServicePorts::default().with_placement(session.clone()));
         let digest = || Digest::sha256(b"fusion-observation-test");
+        let signature = PlacementSignature {
+            region: None,
+            operation: "fusion.observation.test".into(),
+            runtime_facts: digest(),
+            provider_provenance: None,
+            graph_output_authority: None,
+            revision: PlacementRevision {
+                program: None,
+                catalog: digest(),
+                compiler: digest(),
+                authority: runmat_execution::PlacementExecutionAuthorityRevision::Provider(digest()),
+                policy: digest(),
+            },
+        };
         (
             LocalPlacementFeedback {
                 runtime,
-                signature: PlacementSignature {
-                    region: None,
-                    operation: "fusion.observation.test".into(),
-                    runtime_facts: digest(),
-                    revision: PlacementRevision {
-                        program: None,
-                        catalog: digest(),
-                        compiler: digest(),
-                        authority: runmat_execution::PlacementExecutionAuthorityRevision::Provider(
-                            digest(),
-                        ),
-                        policy: digest(),
-                    },
-                },
+                permit: Some(session.test_graph_observation_permit(
+                    signature.clone(),
+                    candidate,
+                    kind,
+                )),
+                signature,
                 candidate: candidate.into(),
                 kind,
             },
@@ -114,6 +234,22 @@ mod tests {
         assert_eq!(snapshot.feedback.len(), 1);
         assert_eq!(snapshot.feedback[0].samples, 1);
         assert_eq!(snapshot.feedback[0].failures, 0);
+    }
+
+    #[test]
+    fn revoked_cpu_selection_exits_without_learning_a_failure_or_success() {
+        let (feedback, session) = ticket(
+            "cpu.shared.revoked",
+            runmat_execution::ExecutionCandidateKind::SharedRuntime,
+        );
+        let authority = match feedback.signature.revision.authority {
+            runmat_execution::PlacementExecutionAuthorityRevision::Provider(digest) => digest,
+            _ => unreachable!("fixture provider authority"),
+        };
+        let observation = FusionCpuObservation::new(Some(Box::new(feedback)));
+        session.invalidate(runmat_execution::PlacementInvalidation::Provider { digest: authority });
+        observation.complete();
+        assert!(session.profile_snapshot().feedback.is_empty());
     }
 
     #[test]

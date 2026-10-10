@@ -338,7 +338,7 @@ async fn fully_connected_forward_with_weights_gpu(
     let output = provider
         .elem_add(&product, &bias_handle)
         .await
-        .map_err(|err| provider_failure(function, "fully connected bias add", err.into()))?;
+        .map_err(|err| provider_failure(function, "fully connected bias add", err))?;
     let output = validate_binary_forward_result(
         output,
         &product,

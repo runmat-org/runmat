@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use super::moments_cache::{CacheBudget, ReductionReuseCache};
+use super::owner_shared::OwnerShared;
 use super::{
     canonical_vendor_name, install_device_error_handlers, parse_two_pass_mode,
     ImageNormalizeTuning, NumericPrecision, ReductionTwoPassMode, WgpuProvider,
@@ -17,9 +18,25 @@ use crate::backend::wgpu::cache::bind_group::BindGroupCache;
 use crate::backend::wgpu::config::{
     self, DEFAULT_REDUCTION_WG, DEFAULT_TWO_PASS_THRESHOLD, MATMUL_TILE, WORKGROUP_SIZE,
 };
-use crate::backend::wgpu::pipelines::{ImageNormalizeBootstrap, WgpuPipelines};
+use crate::backend::wgpu::pipelines::{FrozenLinearLaunch, ImageNormalizeBootstrap, WgpuPipelines};
 use crate::backend::wgpu::resources::KernelResourceRegistry;
 use crate::telemetry::AccelTelemetry;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn native_required_features(
+    precision: NumericPrecision,
+    adapter_features: wgpu::Features,
+) -> wgpu::Features {
+    let mut features = match precision {
+        NumericPrecision::F32 => wgpu::Features::empty(),
+        NumericPrecision::F64 => wgpu::Features::SHADER_F64,
+    };
+    if precision == NumericPrecision::F64 && adapter_features.contains(wgpu::Features::SHADER_INT64)
+    {
+        features |= wgpu::Features::SHADER_INT64;
+    }
+    features
+}
 
 impl WgpuProvider {
     /// Provider-local reuse ceiling, independent of the adapter residency
@@ -139,16 +156,16 @@ impl WgpuProvider {
         let mut instance_desc = wgpu::InstanceDescriptor::default();
         #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
         {
-            instance_desc.dx12_shader_compiler = wgpu::util::dx12_shader_compiler_from_env()
-                .unwrap_or(wgpu::Dx12Compiler::Dxc {
-                    dxil_path: None,
-                    dxc_path: None,
+            instance_desc.backend_options.dx12.shader_compiler = wgpu::Dx12Compiler::from_env()
+                .unwrap_or(wgpu::Dx12Compiler::DynamicDxc {
+                    dxil_path: "dxil.dll".into(),
+                    dxc_path: "dxcompiler.dll".into(),
                 });
         }
         #[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
         {
-            if let Some(compiler) = wgpu::util::dx12_shader_compiler_from_env() {
-                instance_desc.dx12_shader_compiler = compiler;
+            if let Some(compiler) = wgpu::Dx12Compiler::from_env() {
+                instance_desc.backend_options.dx12.shader_compiler = compiler;
             }
         }
         #[cfg(target_arch = "wasm32")]
@@ -231,10 +248,10 @@ impl WgpuProvider {
             _ => ReductionTwoPassMode::Auto,
         };
 
-        let required_features = match precision {
-            NumericPrecision::F64 => wgpu::Features::SHADER_F64,
-            NumericPrecision::F32 => wgpu::Features::empty(),
-        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let required_features = native_required_features(precision, adapter_features);
+        #[cfg(target_arch = "wasm32")]
+        let required_features = wgpu::Features::empty();
         let limits = adapter.limits();
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -265,6 +282,7 @@ impl WgpuProvider {
         access.with_shared(|emission| install_device_error_handlers(emission.device()))?;
         let adapter = Arc::new(adapter);
         let satisfied_limits = access.with_shared(|emission| emission.device().limits())?;
+        let enabled_features = access.with_shared(|emission| emission.device().features())?;
 
         let workgroup_config = WorkgroupConfig::new(
             &satisfied_limits,
@@ -393,31 +411,52 @@ impl WgpuProvider {
             lane_count: sanitized_bootstrap.lane_count,
             spatial_tile: sanitized_bootstrap.spatial_tile,
         };
+        let linear_launch = FrozenLinearLaunch::new(
+            workgroup_config.scalar,
+            satisfied_limits.max_compute_workgroups_per_dimension,
+        )
+        .ok_or_else(|| anyhow!("enabled WGPU linear launch limits are invalid"))?;
+        let global_reduce_launch =
+            crate::backend::wgpu::pipelines::FrozenGlobalReductionLaunch::new(
+                workgroup_config.reduction_default,
+                precision,
+                &satisfied_limits,
+            )
+            .ok_or_else(|| anyhow!("enabled WGPU global reduction launch limits are invalid"))?;
         let pipelines = WgpuPipelines::new(
             &access,
             precision,
             image_norm_bootstrap,
-            workgroup_config.scalar,
+            linear_launch,
+            global_reduce_launch,
             workgroup_config.matmul_tile,
         );
+        let f32_real_elementwise = (precision == NumericPrecision::F64).then(|| {
+            crate::backend::wgpu::pipelines::F32RealElementwisePipelines::new(
+                &access,
+                linear_launch,
+            )
+        });
+        let ordered_real_mean = (precision == NumericPrecision::F64)
+            .then(|| crate::backend::wgpu::pipelines::OrderedRealMeanPipelines::new(&access));
 
         let buffer_pool_limit = Self::buffer_residency_pool_limit();
         let max_poolable_bytes =
             Self::buffer_residency_max_poolable_bytes(satisfied_limits.max_buffer_size);
 
         let bind_group_cache = Arc::new(BindGroupCache::default());
-        let reduction_reuse = Arc::new(Mutex::new(ReductionReuseCache::new(
+        let reduction_reuse = OwnerShared::new(Mutex::new(ReductionReuseCache::new(
             Self::reduction_reuse_budget(),
         )));
-        let kernel_resources = Arc::new(KernelResourceRegistry::default());
-        let allocations = Arc::new(super::allocation_state::AllocationState::new(
+        let kernel_resources = OwnerShared::new(KernelResourceRegistry::default());
+        let allocations = OwnerShared::new(super::allocation_state::AllocationState::new(
             runtime_device_id,
             buffer_pool_limit,
             max_poolable_bytes,
             bind_group_cache.clone(),
-            Arc::downgrade(&kernel_resources),
+            OwnerShared::downgrade(&kernel_resources),
         ));
-        allocations.set_reduction_reuse(Arc::downgrade(&reduction_reuse))?;
+        allocations.set_reduction_reuse(OwnerShared::downgrade(&reduction_reuse))?;
         #[cfg(not(target_arch = "wasm32"))]
         let observation_stopped = access.with_shared(|emission| {
             install_device_error_handlers(emission.device(), &allocations)
@@ -437,9 +476,14 @@ impl WgpuProvider {
             adapter,
             adapter_info,
             adapter_limits: satisfied_limits,
+            enabled_features,
             workgroup_config,
+            linear_launch,
+            global_reduce_launch,
             allocations,
             pipelines,
+            f32_real_elementwise,
+            ordered_real_mean,
             runtime_device_id,
             #[cfg(not(target_arch = "wasm32"))]
             observation_progress,
@@ -453,12 +497,17 @@ impl WgpuProvider {
             precision,
             element_size,
             fused_pipeline_cache: Mutex::new(HashMap::new()),
+            validated_fusion_cache: Mutex::new(HashMap::new()),
             bind_group_layout_cache: Mutex::new(HashMap::new()),
             bind_group_layout_tags: Mutex::new(HashMap::new()),
             bind_group_cache,
             kernel_resources,
             metrics: crate::backend::wgpu::metrics::WgpuMetrics::default(),
             telemetry: AccelTelemetry::default(),
+            #[cfg(test)]
+            numeric_upload_post_buffer_fault: Mutex::new(None),
+            #[cfg(test)]
+            numeric_upload_post_buffer_count: std::sync::atomic::AtomicUsize::new(0),
             reduction_two_pass_mode,
             reduction_two_pass_threshold: two_pass_threshold,
             reduction_workgroup_size_default: reduction_wg_default,
@@ -484,5 +533,25 @@ impl WgpuProvider {
             "RunMat Accelerate: synchronous WGPU initialization is unavailable on wasm targets. Use new_async instead (opts: {:?}).",
             opts
         ))
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod ieee_feature_tests {
+    use super::*;
+
+    #[test]
+    fn absent_integer_words_does_not_disable_plain_f64_provider() {
+        let basic = native_required_features(NumericPrecision::F64, wgpu::Features::SHADER_F64);
+        assert_eq!(basic, wgpu::Features::SHADER_F64);
+        let capable = native_required_features(
+            NumericPrecision::F64,
+            wgpu::Features::SHADER_F64 | wgpu::Features::SHADER_INT64,
+        );
+        assert!(capable.contains(wgpu::Features::SHADER_INT64));
+        assert_eq!(
+            native_required_features(NumericPrecision::F32, wgpu::Features::SHADER_INT64),
+            wgpu::Features::empty()
+        );
     }
 }

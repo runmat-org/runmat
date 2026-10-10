@@ -14,6 +14,8 @@ pub struct RuntimeBuiltinInvocation<'a> {
     pub args: &'a [Value],
     pub context: Option<RuntimeContext>,
     pub requested_outputs: Option<usize>,
+    pub(crate) call_observation:
+        Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
 }
 
 impl<'a> RuntimeBuiltinInvocation<'a> {
@@ -26,7 +28,16 @@ impl<'a> RuntimeBuiltinInvocation<'a> {
             args,
             context,
             requested_outputs,
+            call_observation: None,
         }
+    }
+
+    pub(crate) fn with_call_observation(
+        mut self,
+        observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
+    ) -> Self {
+        self.call_observation = observation;
+        self
     }
 }
 

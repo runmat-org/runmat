@@ -126,9 +126,11 @@ const OUTPUT_PROTOTYPE_CONTEXT: OutputPrototypeContext = OutputPrototypeContext 
     invalid_input: &LDIVIDE_ERROR_INVALID_INPUT,
 };
 
-use super::division::DivisionContext;
+use super::division::{DivisionContext, PublicOperandOrder};
 
-const DIVISION_CONTEXT: DivisionContext = DivisionContext {
+pub(super) const DIVISION_CONTEXT: DivisionContext = DivisionContext {
+    entry: &LDIVIDE_CATALOG_ENTRY,
+    public_order: PublicOperandOrder::Reversed,
     identity: LDIVIDE_CATALOG_ENTRY.identity,
     invalid_input: &LDIVIDE_ERROR_INVALID_INPUT,
     size_mismatch: &LDIVIDE_ERROR_SIZE_MISMATCH,

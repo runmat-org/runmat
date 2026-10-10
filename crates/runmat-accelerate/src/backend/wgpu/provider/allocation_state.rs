@@ -1,6 +1,7 @@
 //! Existing WGPU allocation table and physical retirement dependencies.
 //! Physical records hold weak leases; tensor views retain the captured owner.
 use super::backend_types::BufferEntry;
+use super::owner_shared::OwnerWeak;
 use crate::backend::wgpu::cache::bind_group::BindGroupCache;
 use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};
 use crate::backend::wgpu::resources::KernelResourceRegistry;
@@ -10,7 +11,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::OnceLock;
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 #[path = "allocation_state/lifecycle.rs"]
 mod lifecycle;
@@ -32,8 +33,8 @@ pub(super) struct AllocationState {
     bind_groups: Arc<BindGroupCache>,
     // Provenance contains tensor handles. It must not form a strong path from
     // allocation state back through future handle leases to this same state.
-    kernel_resources: Weak<KernelResourceRegistry>,
-    reduction_reuse: OnceLock<Weak<Mutex<super::moments_cache::ReductionReuseCache>>>,
+    kernel_resources: OwnerWeak<KernelResourceRegistry>,
+    reduction_reuse: OnceLock<OwnerWeak<Mutex<super::moments_cache::ReductionReuseCache>>>,
 }
 
 impl AllocationState {
@@ -42,7 +43,7 @@ impl AllocationState {
         pool_limit: usize,
         max_poolable_bytes: u64,
         bind_groups: Arc<BindGroupCache>,
-        kernel_resources: Weak<KernelResourceRegistry>,
+        kernel_resources: OwnerWeak<KernelResourceRegistry>,
     ) -> Self {
         Self {
             device_id,
@@ -59,7 +60,7 @@ impl AllocationState {
 
     pub(super) fn set_reduction_reuse(
         &self,
-        cache: Weak<Mutex<super::moments_cache::ReductionReuseCache>>,
+        cache: OwnerWeak<Mutex<super::moments_cache::ReductionReuseCache>>,
     ) -> Result<()> {
         self.reduction_reuse
             .set(cache)
@@ -119,6 +120,33 @@ impl AllocationState {
         Ok(())
     }
 
+    /// Associate an issued receipt's byte ticket with this exact live tensor
+    /// allocation. The existing lease owner, not an ambient callback context,
+    /// determines when those requested bytes leave the operation ledger.
+    pub(super) fn attach_probe_resource_ticket(
+        &self,
+        handle: &GpuTensorHandle,
+        ticket: runmat_accelerate_api::observation::ProviderResourceTicket,
+    ) -> Result<()> {
+        let entry = self.entry_for_handle(handle)?;
+        anyhow::ensure!(
+            ticket.requested_bytes() == entry.buffer.size(),
+            "probe resource ticket extent differs from physical allocation"
+        );
+        let mut records = self.lock_records()?;
+        let record = records
+            .get_mut(&handle.buffer_id())
+            .ok_or(AllocationStateError::Missing)?;
+        anyhow::ensure!(
+            record.phase == Phase::Live
+                && record.resource_ticket.is_none()
+                && record.physical == *handle.physical(),
+            "probe resource ticket has no unique live allocation"
+        );
+        record.resource_ticket = Some(ticket);
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(super) fn record_count(&self) -> Result<usize> {
         Ok(self.lock_records()?.len())
@@ -131,7 +159,7 @@ impl AllocationState {
         len: usize,
         element_size: usize,
         label: &str,
-    ) -> (Arc<wgpu::Buffer>, bool) {
+    ) -> Result<(runmat_accelerate_api::WgpuBufferOwner, bool)> {
         self.pool.acquire(emission, usage, len, element_size, label)
     }
 

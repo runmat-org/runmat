@@ -77,9 +77,8 @@ fn logical_transposed_diag_and_functional_scatter_preserve_producer_and_source()
             shape: &[3, 1],
         })
         .unwrap();
-    let replaced = provider
-        .scatter_column_exec(&transposed, 0, &column)
-        .unwrap();
+    let replaced =
+        futures::executor::block_on(provider.scatter_column_exec(&transposed, 0, &column)).unwrap();
     assert!(replaced.view().is_logical());
     assert!(!replaced.shares_allocation_with(&source));
     assert_eq!(values(&provider, &replaced), vec![1., 1., 1., 1., 1., 0.]);
@@ -89,7 +88,8 @@ fn logical_transposed_diag_and_functional_scatter_preserve_producer_and_source()
             shape: &[1, 2],
         })
         .unwrap();
-    let replaced = provider.scatter_row_exec(&transposed, 1, &row).unwrap();
+    let replaced =
+        futures::executor::block_on(provider.scatter_row_exec(&transposed, 1, &row)).unwrap();
     assert!(replaced.view().is_logical());
     assert_eq!(values(&provider, &replaced), vec![0., 1., 0., 1., 0., 0.]);
     assert_eq!(values(&provider, &source), vec![0., 1., 0., 1., 0., 0.]);

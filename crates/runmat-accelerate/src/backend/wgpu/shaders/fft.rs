@@ -34,8 +34,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let p = tmp % params.target_len;
     let outer = tmp / params.target_len;
 
-    var re = 0.0;
-    var im = 0.0;
+    var re: f64 = 0.0;
+    var im: f64 = 0.0;
     if p < params.copy_len {
         let src = outer * params.current_len * params.inner_stride + inner + p * params.inner_stride;
         if params.input_complex != 0u {
@@ -109,8 +109,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let br = Input.data[high_base];
     let bi = Input.data[high_base + 1u];
 
-    var out_re = 0.0;
-    var out_im = 0.0;
+    var out_re: f64 = 0.0;
+    var out_im: f64 = 0.0;
     if within < params.stage_half {
         out_re = ar + br;
         out_im = ai + bi;
@@ -427,11 +427,6 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> Output: Tensor;
 @group(0) @binding(2) var<uniform> params: Params;
 
-fn load_complex(data: ptr<storage, array<f64>, read>, index: u32) -> vec2<f64> {
-    let base = index * 2u;
-    return vec2<f64>((*data)[base], (*data)[base + 1u]);
-}
-
 @compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let local_index = gid.x;
@@ -448,16 +443,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let k = tmp % params.target_len;
     let outer = tmp / params.target_len;
 
-    var sum_re = 0.0;
-    var sum_im = 0.0;
+    var sum_re: f64 = 0.0;
+    var sum_im: f64 = 0.0;
     var n = 0u;
     loop {
         if n >= params.copy_len {
             break;
         }
         let src = outer * params.current_len * params.inner_stride + inner + n * params.inner_stride;
-        var xr = 0.0;
-        var xi = 0.0;
+        var xr: f64 = 0.0;
+        var xi: f64 = 0.0;
         if params.input_complex != 0u {
             let base = src * 2u;
             xr = Input.data[base];
@@ -683,9 +678,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let cr = Input.data[c_base];
   let ci = Input.data[c_base + 1u];
 
-  let sqrt3_over_2 = 0.86602540378443864676;
-  var w1i = -sqrt3_over_2;
-  var w2i = sqrt3_over_2;
+  let sqrt3_over_2: f64 = 0.86602540378443864676lf;
+  var w1i: f64 = -sqrt3_over_2;
+  var w2i: f64 = sqrt3_over_2;
   if params.inverse != 0u {
     w1i = sqrt3_over_2;
     w2i = -sqrt3_over_2;
@@ -954,17 +949,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let x3r = Input.data[x3b]; let x3i = Input.data[x3b + 1u];
   let x4r = Input.data[x4b]; let x4i = Input.data[x4b + 1u];
 
-  let c1 = 0.30901699437494745;
-  let s1 = 0.9510565162951535;
-  let c2 = -0.8090169943749473;
-  let s2 = 0.5877852522924732;
-  let sign = select(-1.0, 1.0, params.inverse != 0u);
+  let c1: f64 = 0.30901699437494745lf;
+  let s1: f64 = 0.9510565162951535lf;
+  let c2: f64 = f64(-0.8090169943749473);
+  let s2: f64 = 0.5877852522924732lf;
+  let sign: f64 = select(f64(-1.0), 1.0lf, params.inverse != 0u);
   let r = region;
 
-  var w1r = 1.0; var w1i = 0.0;
-  var w2r = 1.0; var w2i = 0.0;
-  var w3r = 1.0; var w3i = 0.0;
-  var w4r = 1.0; var w4i = 0.0;
+  var w1r: f64 = 1.0; var w1i: f64 = 0.0;
+  var w2r: f64 = 1.0; var w2i: f64 = 0.0;
+  var w3r: f64 = 1.0; var w3i: f64 = 0.0;
+  var w4r: f64 = 1.0; var w4i: f64 = 0.0;
   if r == 1u {
     w1r = c1; w1i = sign * s1;
     w2r = c2; w2i = sign * s2;
@@ -1327,7 +1322,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let tmp = idx / params.inner_stride;
   let p = tmp % params.target_len;
   let outer = tmp / params.target_len;
-  var xr = 0.0; var xi = 0.0;
+  var xr: f64 = 0.0; var xi: f64 = 0.0;
   if p < params.copy_len {
     let src = outer * params.current_len * params.inner_stride + inner + p * params.inner_stride;
     if params.input_complex != 0u {
@@ -1389,7 +1384,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if i >= params.len { return; }
   let idx = params.offset + i;
   if idx >= params.total { return; }
-  var re = 0.0; var im = 0.0;
+  var re: f64 = 0.0; var im: f64 = 0.0;
   if idx < params.target_len {
     let b = idx * 2u;
     re = Chirp.data[b];

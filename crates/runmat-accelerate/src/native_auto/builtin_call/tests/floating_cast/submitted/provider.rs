@@ -44,7 +44,10 @@ impl AccelProvider for SubmittedCast {
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         self.inner.download(handle)
     }
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView<'_>) -> Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView<'_>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::Relaxed);
         assert!(
             matches!(host.data, HostNumericDataView::F64(_)),
@@ -119,7 +122,7 @@ impl AccelProvider for SubmittedCast {
     fn unary_single<'a>(
         &'a self,
         handle: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         self.casts.fetch_add(1, Ordering::Relaxed);
         assert_eq!(
             handle.descriptor().element_type,

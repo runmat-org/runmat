@@ -3,7 +3,6 @@ use crate::core::scene::GpuVertexBuffer;
 use crate::gpu::axis::{axis_storage_buffer, AxisData};
 use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 /// Inputs required to pack contour vertices directly on the GPU.
@@ -84,32 +83,34 @@ pub fn pack_contour_vertices(
     let x_buffer = axis_storage_buffer(emission, "contour-x-axis", &inputs.x_axis, inputs.scalar)?;
     let y_buffer = axis_storage_buffer(emission, "contour-y-axis", &inputs.y_axis, inputs.scalar)?;
 
-    let color_buffer = Arc::new(
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let color_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+        &wgpu::util::BufferInitDescriptor {
             label: Some("contour-color-table"),
             contents: bytemuck::cast_slice(inputs.color_table),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        }),
-    );
+        },
+    ));
 
-    let level_buffer = Arc::new(
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let level_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+        &wgpu::util::BufferInitDescriptor {
             label: Some("contour-level-values"),
             contents: bytemuck::cast_slice(inputs.level_values),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        }),
-    );
+        },
+    ));
 
     let output_size = (vertex_count as u64) * std::mem::size_of::<Vertex>() as u64;
-    let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("contour-gpu-vertices"),
-        size: output_size,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("contour-gpu-vertices"),
+            size: output_size,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
 
     let uniforms = ContourUniforms {
         min_z: params.min_z,

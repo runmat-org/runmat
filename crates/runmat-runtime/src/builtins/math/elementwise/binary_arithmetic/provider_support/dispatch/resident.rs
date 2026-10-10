@@ -5,7 +5,16 @@ use crate::builtins::common::gpu_helpers;
 use crate::BuiltinResult;
 
 use super::super::{host_real_scalar, ArithmeticProviderOperation};
-use super::common::{accept_output, float_handle_supported, provider_error};
+use super::common::{
+    accept_output, float_handle_supported, provider_error, provider_error_after_effect,
+};
+
+#[path = "resident/mixed_add.rs"]
+mod mixed_add;
+
+#[cfg(all(test, feature = "wgpu", not(target_arch = "wasm32")))]
+#[path = "resident/scalar_precision_tests.rs"]
+mod scalar_precision_tests;
 
 pub(in crate::builtins::math::elementwise::binary_arithmetic) async fn try_host_right(
     operation: ArithmeticProviderOperation,
@@ -32,6 +41,23 @@ async fn try_host_scalar(
     let Some(provider) = gpu_helpers::exact_provider_for_handle(resident) else {
         return Ok(None);
     };
+    // Original floating class precedes the legacy f64 scalar ABI. A mixed
+    // Add decline goes directly to host execution, never a wrong-class scalar hook.
+    if matches!(operation, ArithmeticProviderOperation::Add)
+        && resident.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real
+        && !resident.view().is_logical()
+    {
+        if let Some(control) = super::super::scalar::host_floating_scalar_literal(host) {
+            use runmat_accelerate_api::{scalar_program::ScalarLiteral, NumericElementType};
+            if matches!(
+                (resident.physical().element_type(), control),
+                (NumericElementType::F32, ScalarLiteral::F64Bits(_))
+                    | (NumericElementType::F64, ScalarLiteral::F32Bits(_))
+            ) {
+                return mixed_add::try_add(provider, resident, host, control).await;
+            }
+        }
+    }
     let Some(scalar) = host_real_scalar(host) else {
         return Ok(None);
     };
@@ -61,8 +87,7 @@ async fn try_host_scalar(
                 provider,
                 resident.shape(),
             ),
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
-            Err(error) => Err(provider_error(operation, error)),
+            Err(error) => Err(provider_error_after_effect(operation, error)),
         };
         if accepted.as_ref().is_ok_and(Option::is_some) {
             return accepted;

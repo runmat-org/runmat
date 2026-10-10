@@ -107,6 +107,8 @@ pub(crate) async fn try_gpu_ordering_comparison(
     }
     let temporary_lhs;
     let temporary_rhs;
+    let lhs_projected =
+        runmat_accelerate_api::handle_storage(lhs) == GpuTensorStorage::ComplexInterleaved;
     let lhs_real =
         if runmat_accelerate_api::handle_storage(lhs) == GpuTensorStorage::ComplexInterleaved {
             match provider.unary_real(lhs).await {
@@ -139,7 +141,17 @@ pub(crate) async fn try_gpu_ordering_comparison(
                 Ok(handle) => {
                     return Some(Err(rejected(handle, operation)));
                 }
-                Err(error) => return provider_failure(error, operation),
+                Err(error) => {
+                    let typed = runmat_accelerate_api::ProviderExecutionError::from(error);
+                    return provider_failure(
+                        if lhs_projected {
+                            typed.after_effect()
+                        } else {
+                            typed
+                        },
+                        operation,
+                    );
+                }
             }
         } else {
             rhs
@@ -147,6 +159,17 @@ pub(crate) async fn try_gpu_ordering_comparison(
     if runmat_accelerate_api::handle_precision(lhs_real)
         != runmat_accelerate_api::handle_precision(rhs_real)
     {
+        if lhs_projected
+            || runmat_accelerate_api::handle_storage(rhs) == GpuTensorStorage::ComplexInterleaved
+        {
+            return provider_failure(
+                runmat_accelerate_api::ProviderExecutionError::from(anyhow::anyhow!(
+                    "comparison projection precision changed after provider output"
+                ))
+                .after_effect(),
+                operation,
+            );
+        }
         return None;
     }
     let result = match operation {
@@ -164,7 +187,17 @@ pub(crate) async fn try_gpu_ordering_comparison(
                 .and_then(|()| gpu_helpers::logical_gpu_value(handle)),
         ),
         Ok(handle) => Some(Err(rejected(handle, operation))),
-        Err(error) => provider_failure(error, operation),
+        Err(error) => provider_failure(
+            if lhs_projected
+                || runmat_accelerate_api::handle_storage(rhs)
+                    == GpuTensorStorage::ComplexInterleaved
+            {
+                error.after_effect()
+            } else {
+                error
+            },
+            operation,
+        ),
     }
 }
 
@@ -256,17 +289,19 @@ fn rejected(handle: GpuTensorHandle, operation: IntegerComparisonOp) -> crate::R
 }
 
 fn provider_failure(
-    error: anyhow::Error,
+    error: impl Into<runmat_accelerate_api::ProviderExecutionError>,
     operation: IntegerComparisonOp,
 ) -> Option<crate::BuiltinResult<Value>> {
-    if gpu_helpers::provider_hook_is_unsupported(&error) {
+    let error = error.into();
+    if runmat_accelerate_api::is_unsupported_provider_error(&error) {
         return None;
     }
-    let mut contextual =
+    let contextual =
         crate::build_runtime_error(format!("comparison: provider execution failed: {error}"))
             .with_builtin(operation.builtin_name())
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
             .build();
-    contextual.source = Some(error.into_boxed_dyn_error());
-    Some(Err(contextual))
+    Some(Err(crate::runtime_error::with_provider_execution_source(
+        contextual, error,
+    )))
 }

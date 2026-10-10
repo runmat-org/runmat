@@ -50,7 +50,8 @@ fn geometry(plan: &FusionGroupPlan, inputs: Vec<Value>) -> Result<ReductionGeome
     )
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn unsupported_complex_geometry_deopts_before_effects_and_restores_stack() {
     let plan = plan();
     let operand = Value::ComplexTensor(
@@ -59,7 +60,7 @@ fn unsupported_complex_geometry_deopts_before_effects_and_restores_stack() {
     let original = vec![Value::Num(17.0), operand.clone()];
     let mut stack = original.clone();
     let guard = super::super::StackSliceGuard::new(&mut stack, 1);
-    let result = super::super::execute_fusion_reduction(
+    let result = futures::executor::block_on(super::super::execute_fusion_reduction(
         &plan,
         FusionExecutionRequest {
             plan: &plan,
@@ -68,7 +69,8 @@ fn unsupported_complex_geometry_deopts_before_effects_and_restores_stack() {
             runtime: None,
         },
         guard,
-    );
+        None,
+    ));
     assert!(matches!(
         result,
         Err(super::super::FusionAttemptError::Deopt(_))
@@ -76,7 +78,8 @@ fn unsupported_complex_geometry_deopts_before_effects_and_restores_stack() {
     assert_eq!(stack, original);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn actual_shape_overrides_cached_shape_and_binds_default_row_axis_without_mutation() {
     let plan = plan();
     let geom = geometry(&plan, vec![input(&[1, 3])]).unwrap();
@@ -97,7 +100,8 @@ fn actual_shape_overrides_cached_shape_and_binds_default_row_axis_without_mutati
     assert_eq!(specialized.const_values[&dim], Value::Num(2.));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn exact_data_identity_and_expression_broadcast_are_required() {
     let mut plan = plan();
     plan.inputs = vec![9, 7];
@@ -117,15 +121,48 @@ fn exact_data_identity_and_expression_broadcast_are_required() {
     assert!(geometry(&plan, vec![input(&[2, 3]), input(&[2, 3])]).is_err());
 }
 
-#[test]
-fn empty_overflow_rank_and_axis_never_become_invented_singletons() {
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn empty_overflow_and_axis_never_become_invented_singletons() {
     assert_eq!(cardinality(&[usize::MAX, usize::MAX, 0]), Some(0));
     assert_eq!(cardinality(&[usize::MAX, 2]), None);
     assert_eq!(cardinality(&[]), Some(1));
     let mut plan = plan();
-    for shape in [vec![0, 3], vec![3, 0], vec![2, 2, 2]] {
+    for shape in [vec![0, 3], vec![3, 0]] {
         assert!(geometry(&plan, vec![input(&shape)]).is_err());
     }
+    plan.reduction_axes = Some(ReductionAxes::Explicit(vec![2]));
+    assert_eq!(
+        geometry(&plan, vec![input(&[])]).unwrap(),
+        ReductionGeometry {
+            axis: 1,
+            reduce_len: 1,
+            num_slices: 1,
+            output_shape: vec![1, 1],
+        }
+    );
+    assert_eq!(
+        geometry(&plan, vec![input(&[4])]).unwrap(),
+        ReductionGeometry {
+            axis: 1,
+            reduce_len: 1,
+            num_slices: 4,
+            output_shape: vec![4, 1],
+        }
+    );
+    plan.reduction_axes = Some(ReductionAxes::Explicit(vec![3]));
+    assert!(geometry(&plan, vec![input(&[])]).is_err());
+    assert!(geometry(&plan, vec![input(&[4])]).is_err());
+    let rank_three = geometry(&plan, vec![input(&[2, 3, 4])]).unwrap();
+    assert_eq!(
+        rank_three,
+        ReductionGeometry {
+            axis: 2,
+            reduce_len: 4,
+            num_slices: 6,
+            output_shape: vec![2, 3, 1],
+        }
+    );
     plan.reduction_axes = Some(ReductionAxes::All);
     let geom = geometry(&plan, vec![input(&[2, 2, 2])]).unwrap();
     assert_eq!(
@@ -139,7 +176,8 @@ fn empty_overflow_rank_and_axis_never_become_invented_singletons() {
     assert_eq!(axis_from_value(&Value::Num(2.)).unwrap(), 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn cycles_duplicate_producers_and_conflicting_axis_fail_closed() {
     let mut plan = plan();
     plan.operations.push(FusionOp::Primitive {
@@ -163,3 +201,7 @@ fn cycles_duplicate_producers_and_conflicting_axis_fail_closed() {
     plan.reduction_axes = Some(ReductionAxes::Explicit(vec![1]));
     assert!(geometry(&plan, vec![input(&[2, 3])]).is_err());
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/direct_execution/mod.rs"]
+mod direct_execution;

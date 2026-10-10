@@ -39,6 +39,18 @@ pub(crate) fn presentation_failed(_error: &crate::RuntimeError) -> bool {
     false
 }
 
+/// A graphics receiver is authoritative only while the plot registry owns its
+/// exact lease. Without plot-core there is no registry that can own one.
+#[cfg(feature = "plot-core")]
+pub(crate) fn graphics_receiver_valid(receiver: &runmat_value::GraphicsReceiverRef) -> bool {
+    crate::builtins::plotting::state::graphics_receiver_valid(receiver)
+}
+
+#[cfg(not(feature = "plot-core"))]
+pub(crate) fn graphics_receiver_valid(_receiver: &runmat_value::GraphicsReceiverRef) -> bool {
+    false
+}
+
 /// Preserve the owning builtin's public error while retaining the original
 /// cause, span, and retry disposition.
 pub(crate) fn with_render_cause(
@@ -104,5 +116,22 @@ mod unavailable_tests {
             .and_then(|source| source.downcast_ref::<PlottingUnavailable>())
             .is_some());
         assert!(!presentation_failed(&error));
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn issued_graphics_receivers_have_no_authority_without_plot_core() {
+        use runmat_value::{GraphicsReceiverKind, GraphicsReceiverRef};
+
+        for kind in [
+            GraphicsReceiverKind::Figure { figure: 7 },
+            GraphicsReceiverKind::Axes {
+                figure: 7,
+                index: 0,
+            },
+        ] {
+            let receiver = GraphicsReceiverRef::issued(kind, 1);
+            assert!(!graphics_receiver_valid(&receiver));
+        }
     }
 }

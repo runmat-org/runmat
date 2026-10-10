@@ -25,7 +25,10 @@ impl AccelProvider for FallbackProvider {
     fn upload(&self, view: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.inner.upload(view)
     }
-    fn upload_numeric_raw(&self, view: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        view: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.inner.upload_numeric_raw(view)
     }
     fn download<'a>(&'a self, input: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {

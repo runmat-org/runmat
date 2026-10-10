@@ -1,5 +1,7 @@
 use super::*;
-use crate::fusion::{FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind};
+use crate::fusion::{
+    FusionGroup, FusionGroupPlan, FusionKernelSpec, FusionKind, ImageNormalizePattern,
+};
 use crate::fusion_exec::*;
 use crate::graph::{InstrSpan, ShapeInfo};
 use runmat_runtime::{
@@ -8,19 +10,133 @@ use runmat_runtime::{
 };
 use std::{collections::HashMap, rc::Rc};
 
-#[test]
-fn reduction_provider_hook_failure_cannot_replay_typed_unsupported() {
-    let typed = runmat_accelerate_api::unsupported_provider_operation(
-        "injected unsupported fused reduction",
-    );
-    assert!(runmat_accelerate_api::ProviderExecutionError::from(
-        runmat_accelerate_api::unsupported_provider_operation("pre-effect unsupported")
-    )
-    .is_unsupported());
-    assert!(!after_reduction_provider_effect(typed).is_unsupported());
+struct RejectingProvider;
+
+struct ShaderFeatureProvider {
+    available: bool,
 }
 
-struct RejectingProvider;
+impl runmat_accelerate_api::AccelProvider for ShaderFeatureProvider {
+    fn upload(
+        &self,
+        _: &runmat_accelerate_api::HostTensorView<'_>,
+    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+        panic!("shader feature selection must not upload")
+    }
+
+    fn download<'a>(
+        &'a self,
+        _: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+        panic!("shader feature selection must not download")
+    }
+
+    fn precision(&self) -> runmat_accelerate_api::ProviderPrecision {
+        runmat_accelerate_api::ProviderPrecision::F64
+    }
+
+    fn device_info(&self) -> String {
+        "shader-feature-selection-fixture".into()
+    }
+
+    fn supports_shader_requirements(
+        &self,
+        requirements: runmat_accelerate_api::ProviderShaderRequirements,
+    ) -> bool {
+        requirements == runmat_accelerate_api::ProviderShaderRequirements::Basic || self.available
+    }
+
+    fn query_feasibility(
+        &self,
+        _: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::ProviderFeasibility {
+        runmat_accelerate_api::ProviderFeasibility::supported(
+            runmat_accelerate_api::ProviderResourceEstimate {
+                output_bytes: Some(8),
+                transient_bytes: Some(0),
+                dispatches: Some(1),
+            },
+        )
+    }
+}
+
+struct NoTouchImageProvider;
+
+impl runmat_accelerate_api::AccelProvider for NoTouchImageProvider {
+    fn upload(
+        &self,
+        _: &runmat_accelerate_api::HostTensorView<'_>,
+    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+        panic!("wrong-rank image must not upload")
+    }
+
+    fn download<'a>(
+        &'a self,
+        _: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+        panic!("wrong-rank image must not download")
+    }
+
+    fn precision(&self) -> runmat_accelerate_api::ProviderPrecision {
+        runmat_accelerate_api::ProviderPrecision::F32
+    }
+
+    fn device_info(&self) -> String {
+        "no-touch-image-fixture".into()
+    }
+
+    fn query_feasibility(
+        &self,
+        _: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::ProviderFeasibility {
+        panic!("wrong-rank image must not enter provider placement")
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn image_wrong_rank_resumes_runtime_before_placement_or_upload() {
+    runmat_gc::gc_test_context(|| {
+        static PROVIDER: NoTouchImageProvider = NoTouchImageProvider;
+        let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
+        let pattern = FusionPattern::ImageNormalize(ImageNormalizePattern {
+            input: 0,
+            epsilon: ImageScalar::Constant(0.0),
+            gain: None,
+            bias: None,
+            gamma: None,
+            clamp_zero: false,
+            requires_single_input: true,
+            reduction_routes: None,
+        });
+        let mut plan = make_plan(Vec::new());
+        plan.group.kind = FusionKind::ImageNormalize;
+        plan.group.pattern = Some(pattern.clone());
+        plan.group.shape = ShapeInfo::Unknown;
+        plan.inputs = vec![0];
+        plan.stack_pattern = vec![0];
+        plan.kernel.kind = FusionKind::ImageNormalize;
+        plan.pattern = Some(pattern);
+        let runtime = context(Vec::new());
+
+        for shape in [vec![2], vec![2, 2], vec![1, 2, 2, 1]] {
+            let elements: usize = shape.iter().product();
+            let request = FusionExecutionRequest {
+                plan: &plan,
+                inputs: vec![Value::Tensor(
+                    runmat_value::Tensor::from_f32(vec![1.0_f32; elements], shape).unwrap(),
+                )],
+                placement: Some(crate::placement::PlacementCorrelationId(91)),
+                runtime: Some(runtime.clone()),
+            };
+            assert!(AdmittedBindings::new(&request).is_some());
+            assert!(matches!(
+                futures::executor::block_on(execute_image_normalize_placed(request)).unwrap(),
+                FusionExecutionOutcome::SharedRuntime(_)
+            ));
+        }
+    });
+}
 
 impl runmat_accelerate_api::AccelProvider for RejectingProvider {
     fn upload(
@@ -76,8 +192,14 @@ fn rejected_fusion(
     let mut invocation = request(&plan, &runtime);
     invocation.placement = Some(crate::placement::PlacementCorrelationId(71));
     let admitted = AdmittedBindings::new(&invocation).expect("canonical selected binding");
-    let outcome = select_fusion_provider(&invocation, &admitted, &RejectingProvider, &[vec![1, 1]])
-        .expect("correlated rejected provider resumes shared bytecode");
+    let outcome = select_fusion_provider(
+        &invocation,
+        &admitted,
+        &RejectingProvider,
+        &[vec![1, 1]],
+        None,
+    )
+    .expect("correlated rejected provider resumes shared bytecode");
     let FusionExecutionOutcome::SharedRuntime(ticket) = outcome else {
         panic!("rejected provider must select the shared runtime")
     };
@@ -98,6 +220,65 @@ fn provider_rejection_cpu_region_reports_only_completed_work() {
         );
         assert_eq!(feedback[0].samples, 1);
         assert_eq!(feedback[0].failures, 0);
+    });
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn selected_shader_requirement_rejection_retains_shared_runtime_feedback() {
+    runmat_gc::gc_test_context(|| {
+        let session = Rc::new(crate::placement::PlacementSession::default());
+        let runtime = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_builtin(Rc::new(Selected(
+                    runmat_runtime::builtin::runtime_builtin_bindings_by_name("sin"),
+                )))
+                .with_placement(session.clone()),
+        );
+        let plan = make_plan(vec![named("sin", FusionCallOrigin::named("sin"))]);
+        let mut invocation = request(&plan, &runtime);
+        invocation.placement = Some(crate::placement::PlacementCorrelationId(72));
+        let admitted = AdmittedBindings::new(&invocation).expect("selected binding");
+        let provider = ShaderFeatureProvider { available: false };
+        let outcome = select_fusion_provider(
+            &invocation,
+            &admitted,
+            &provider,
+            &[vec![1, 1]],
+            Some(runmat_accelerate_api::ProviderShaderRequirements::F64IeeeWords),
+        )
+        .expect("missing shader feature must select shared runtime");
+        let FusionExecutionOutcome::SharedRuntime(ticket) = outcome else {
+            panic!("missing shader feature must not select provider")
+        };
+        assert!(session.profile_snapshot().feedback.is_empty());
+        ticket.complete();
+        let feedback = session.profile_snapshot().feedback;
+        assert_eq!(feedback.len(), 1);
+        assert_eq!(
+            feedback[0].kind,
+            runmat_execution::ExecutionCandidateKind::SharedRuntime
+        );
+        assert_eq!(feedback[0].samples, 1);
+
+        // A capable provider remains eligible for the exact same typed source.
+        let provider = ShaderFeatureProvider { available: true };
+        let direct = request(&plan, &runtime);
+        let admitted = AdmittedBindings::new(&direct).expect("selected binding");
+        assert!(matches!(
+            select_fusion_provider(
+                &direct,
+                &admitted,
+                &provider,
+                &[vec![1, 1]],
+                Some(runmat_accelerate_api::ProviderShaderRequirements::F64IeeeWords),
+            )
+            .expect("capable provider retains direct route"),
+            FusionExecutionOutcome::Executed(_)
+        ));
     });
 }
 
@@ -148,12 +329,31 @@ fn direct_provider_fusion_rejection_keeps_caller_intent() {
         let plan = make_plan(vec![named("sin", FusionCallOrigin::named("sin"))]);
         let invocation = request(&plan, &runtime);
         let admitted = AdmittedBindings::new(&invocation).expect("canonical selected binding");
-        assert!(
-            select_fusion_provider(&invocation, &admitted, &RejectingProvider, &[vec![1, 1]])
-                .is_err()
-        );
+        assert!(select_fusion_provider(
+            &invocation,
+            &admitted,
+            &RejectingProvider,
+            &[vec![1, 1]],
+            None
+        )
+        .is_err());
         assert!(session.profile_snapshot().feedback.is_empty());
     });
+}
+
+#[test]
+fn private_named_plus_binding_cannot_claim_canonical_mixed_add() {
+    let plan = make_plan(vec![named("plus", FusionCallOrigin::named("plus"))]);
+    let canonical = context(runmat_runtime::builtin::runtime_builtin_bindings_by_name(
+        "plus",
+    ));
+    assert!(AdmittedBindings::new(&request(&plan, &canonical)).is_some());
+
+    let mut overridden = runmat_runtime::builtin::runtime_builtin_bindings_by_name("plus");
+    assert_eq!(overridden.len(), 1);
+    overridden[0].implementation = replacement;
+    let private = context(overridden);
+    assert!(AdmittedBindings::new(&request(&plan, &private)).is_none());
 }
 
 struct Selected(Vec<RuntimeBuiltinBinding>);
@@ -216,6 +416,85 @@ fn make_plan(operations: Vec<FusionOp>) -> FusionGroupPlan {
         pattern: None,
     }
 }
+
+#[test]
+fn only_unbound_constants_are_independent_preflight_leaves() {
+    let mut plan = make_plan(vec![named("sin", FusionCallOrigin::named("sin"))]);
+    plan.const_values
+        .insert(0, Value::Int(runmat_value::IntValue::I64(-9)));
+    plan.constants.insert(1, Value::Num(-8.0));
+    assert_eq!(unbound_constant_values(&plan).count(), 0);
+    let actual = [Value::Num(2.0), Value::Num(3.0)];
+    assert!(reject_native_integer_fusion_values(
+        &actual,
+        &unbound_constant_values(&plan).collect::<Vec<_>>()
+    )
+    .is_ok());
+    plan.const_values.insert(3, Value::Num(7.0));
+    plan.constants
+        .insert(1000, Value::Int(runmat_value::IntValue::I64(6)));
+    assert_eq!(unbound_constant_values(&plan).count(), 2);
+    assert!(reject_native_integer_fusion_values(
+        &actual,
+        &unbound_constant_values(&plan).collect::<Vec<_>>()
+    )
+    .is_err());
+}
+
+#[test]
+fn selected_binding_closed_value_precheck_uses_the_invocation_leaf() {
+    let mut plan = make_plan(Vec::new());
+    plan.const_values.insert(
+        0,
+        Value::Object(runmat_value::ObjectInstance::new("StaleSourceObject")),
+    );
+    {
+        let request = FusionExecutionRequest {
+            plan: &plan,
+            inputs: vec![Value::Num(2.0), Value::Num(3.0)],
+            placement: None,
+            runtime: None,
+        };
+        // This tests only the selected-binding precheck. The opaque structural
+        // constant still fails the independent exact source-digest admission.
+        assert!(AdmittedBindings::new(&request).is_some());
+    }
+    plan.const_values.insert(
+        3,
+        Value::Object(runmat_value::ObjectInstance::new("UnboundObject")),
+    );
+    let request = FusionExecutionRequest {
+        plan: &plan,
+        inputs: vec![Value::Num(2.0), Value::Num(3.0)],
+        placement: None,
+        runtime: None,
+    };
+    assert!(AdmittedBindings::new(&request).is_none());
+}
+
+#[test]
+fn image_scalar_control_uses_invocation_input_before_shadow_constant() {
+    let mut plan = make_plan(Vec::new());
+    plan.inputs = vec![0];
+    plan.const_values.insert(0, Value::Num(-9.0));
+    let request = FusionExecutionRequest {
+        plan: &plan,
+        inputs: vec![Value::Num(3.0)],
+        placement: None,
+        runtime: None,
+    };
+    assert_eq!(
+        resolve_image_scalar_value(
+            &ImageScalar::Value(0),
+            &plan,
+            &request,
+            FusionPlacementObserver::new(None),
+        )
+        .unwrap(),
+        3.0
+    );
+}
+
 fn request<'a>(plan: &'a FusionGroupPlan, runtime: &RuntimeContext) -> FusionExecutionRequest<'a> {
     FusionExecutionRequest {
         plan,
@@ -268,10 +547,20 @@ fn missing_provider_is_pre_effect_shared_runtime_only_for_host_requests() {
         let mut indexed_plan = make_plan(vec![named("sin", FusionCallOrigin::named("sin"))]);
         indexed_plan.constants.insert(
             0,
-            Value::Cell(runmat_value::CellArray::new(vec![resident], 1, 1).unwrap()),
+            Value::Cell(runmat_value::CellArray::new(vec![resident.clone()], 1, 1).unwrap()),
         );
         let indexed = request(&indexed_plan, &runtime);
-        assert!(admit_provider_availability(&indexed, None).is_err());
+        assert!(matches!(
+            admit_provider_availability(&indexed, None).unwrap(),
+            FusionExecutionOutcome::SharedRuntime(_)
+        ));
+        drop(indexed);
+        indexed_plan.constants.insert(
+            9,
+            Value::Cell(runmat_value::CellArray::new(vec![resident], 1, 1).unwrap()),
+        );
+        let unbound = request(&indexed_plan, &runtime);
+        assert!(admit_provider_availability(&unbound, None).is_err());
         assert_eq!(allocation.probe.retirements(), 0);
     });
 }

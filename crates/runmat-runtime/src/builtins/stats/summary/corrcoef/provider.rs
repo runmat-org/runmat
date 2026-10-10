@@ -135,31 +135,38 @@ pub(super) async fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Optio
 
     match provider.corrcoef(&matrix_handle, &options).await {
         Ok(result) => {
-            let Some(mut result) = precision
+            let result = precision
                 .align_provider(
                     provider,
                     result,
-                    &[output_width, output_width],
-                    &protected,
+                    CovarianceAlignmentContract {
+                        expected_shape: &[output_width, output_width],
+                        protected: &protected,
+                        builtin: NAME,
+                    },
                     |reason| corrcoef_internal_error(format!("corrcoef: {reason}")),
                     corrcoef_provider_error,
                 )
-                .await?
-            else {
-                return Ok(None);
-            };
-            gpu_helpers::propagate_output_provenance(&mut result, borrowed).map_err(|error| {
-                corrcoef_provider_error(runmat_accelerate_api::ProviderExecutionError::from_source(
-                    error,
-                ))
-            })?;
-            gpu_helpers::resident_gpu_value(result)
-                .map(Some)
-                .map_err(|error| {
-                    corrcoef_provider_error(
-                        runmat_accelerate_api::ProviderExecutionError::from_source(error),
-                    )
-                })
+                .await?;
+            match result {
+                AlignedCovarianceOutput::Resident(mut result) => {
+                    gpu_helpers::propagate_output_provenance(&mut result, borrowed).map_err(
+                        |error| {
+                            corrcoef_provider_error(
+                                runmat_accelerate_api::ProviderExecutionError::from_source(error),
+                            )
+                        },
+                    )?;
+                    gpu_helpers::resident_gpu_value(result)
+                        .map(Some)
+                        .map_err(|error| {
+                            corrcoef_provider_error(
+                                runmat_accelerate_api::ProviderExecutionError::from_source(error),
+                            )
+                        })
+                }
+                AlignedCovarianceOutput::Materialized(value) => Ok(Some(value)),
+            }
         }
         Err(error) => {
             if error.is_unsupported() {

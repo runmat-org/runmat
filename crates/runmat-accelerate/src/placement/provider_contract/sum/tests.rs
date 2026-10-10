@@ -1,6 +1,7 @@
 use super::*;
 use runmat_accelerate_api::{
-    AccelDownloadFuture, GpuTensorHandle, HostTensorView, ProviderSumGeometry, ProviderWorkload,
+    AccelDownloadFuture, GpuTensorHandle, HostTensorView, ProviderShaderRequirements,
+    ProviderSumGeometry, ProviderWorkload,
 };
 
 struct GeometryProvider {
@@ -22,6 +23,13 @@ impl AccelProvider for GeometryProvider {
 
     fn precision(&self) -> ProviderPrecision {
         self.precision
+    }
+
+    fn supports_shader_requirements(&self, required: ProviderShaderRequirements) -> bool {
+        match required {
+            ProviderShaderRequirements::Basic => true,
+            ProviderShaderRequirements::F64IeeeWords => self.precision == ProviderPrecision::F64,
+        }
     }
 
     fn sum_geometry(&self) -> Option<ProviderSumGeometry> {

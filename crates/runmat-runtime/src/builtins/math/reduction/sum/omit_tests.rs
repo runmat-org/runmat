@@ -3,8 +3,7 @@ use super::*;
 use futures::executor::block_on;
 use runmat_accelerate_api::{
     test_support::{RetirementProbe, TestAllocationOwner},
-    AccelDownloadFuture, AccelProviderFuture, GpuTensorStorage, HostTensorView, NumericElementType,
-    ThreadProviderGuard,
+    AccelDownloadFuture, GpuTensorStorage, HostTensorView, NumericElementType, ThreadProviderGuard,
 };
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -81,7 +80,7 @@ impl AccelProvider for OmitProvider {
     fn unary_double<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let output = self.output(
                 input.shape().to_vec(),
@@ -100,7 +99,10 @@ impl AccelProvider for OmitProvider {
         })
     }
 
-    fn map_nan_to_zero(&self, input: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+    fn map_nan_to_zero(
+        &self,
+        input: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         assert_eq!(input.physical().element_type(), NumericElementType::F64);
         if self.malformed_map {
             return Ok(self.source.lock().unwrap().as_ref().unwrap().clone());
@@ -128,7 +130,7 @@ impl AccelProvider for OmitProvider {
     fn unary_single<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             Ok(self.output(
                 input.shape().to_vec(),

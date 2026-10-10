@@ -116,6 +116,14 @@ async fn validate_force_cell_output_extensions(rest: Vec<Value>) -> BuiltinResul
     }
     let value = &rest[1];
     validate_force_cell_output_shape(value)?;
+    // Resident controls have their own extension, including integer-typed
+    // handles. Check it before host-control class gates or any gather.
+    if crate::dispatcher::value_contains_gpu(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STRFIND_RESIDENT_FORCE_CELL_OUTPUT_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     if is_typed_integer_value(value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &STRFIND_TYPED_FORCE_CELL_OUTPUT_EXTENSION,
@@ -125,12 +133,6 @@ async fn validate_force_cell_output_extensions(rest: Vec<Value>) -> BuiltinResul
     if is_nonbinary_numeric_value(value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &STRFIND_NONBINARY_FORCE_CELL_OUTPUT_EXTENSION,
-            BUILTIN_NAME,
-        )?;
-    }
-    if crate::dispatcher::value_contains_gpu(value) {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &STRFIND_RESIDENT_FORCE_CELL_OUTPUT_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
@@ -657,6 +659,106 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn strfind_typed_and_nonbinary_controls_have_distinct_matlab_gates() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for (control, expected) in [
+            (
+                Value::Int(runmat_value::IntValue::U8(1)),
+                "RunMat:compatibility:StrfindTypedForceCellOutputExtension",
+            ),
+            (
+                Value::Num(2.0),
+                "RunMat:compatibility:StrfindNonbinaryForceCellOutputExtension",
+            ),
+        ] {
+            let err = run_strfind(
+                Value::String("mission".into()),
+                Value::String("s".into()),
+                vec![Value::String("ForceCellOutput".into()), control],
+            )
+            .unwrap_err();
+            assert_eq!(err.identifier(), Some(expected));
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn strfind_nonbinary_control_is_admitted_in_runmat_mode() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let result = run_strfind(
+            Value::String("mission".into()),
+            Value::String("s".into()),
+            vec![Value::String("ForceCellOutput".into()), Value::Num(2.0)],
+        )
+        .expect("RunMat nonbinary ForceCellOutput");
+        let Value::Cell(cell) = result else {
+            panic!("nonbinary true control must force cell output");
+        };
+        assert_eq!((cell.rows, cell.cols), (1, 1));
+        match cell.get(0, 0).unwrap() {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape(), &[1, 2]);
+                assert_eq!(tensor.materialize_f64(), vec![3.0, 4.0]);
+            }
+            other => panic!("expected row indices in cell, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn strfind_resident_control_and_text_reject_before_provider_access() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for element_type in [
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::NumericElementType::U64,
+        ] {
+            let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    element_type,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("borrowed resident control");
+            allocation
+                .handle
+                .allocation_lease()
+                .validate_live()
+                .unwrap();
+            let err = run_strfind(
+                Value::String("mission".into()),
+                Value::String("s".into()),
+                vec![
+                    Value::String("ForceCellOutput".into()),
+                    Value::GpuTensor(allocation.handle.clone()),
+                ],
+            )
+            .unwrap_err();
+            assert_eq!(
+                err.identifier(),
+                Some("RunMat:compatibility:StrfindResidentForceCellOutputExtension")
+            );
+            allocation
+                .handle
+                .allocation_lease()
+                .validate_live()
+                .unwrap();
+            let err = run_strfind(
+                Value::GpuTensor(allocation.handle.clone()),
+                Value::String("s".into()),
+                Vec::new(),
+            )
+            .unwrap_err();
+            assert_eq!(err.identifier(), Some("RunMat:strfind:InvalidInput"));
+            allocation
+                .handle
+                .allocation_lease()
+                .validate_live()
+                .unwrap();
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn strfind_force_cell_output_off_string() {
         let result = run_strfind(
             Value::String("mission".into()),
@@ -694,6 +796,7 @@ pub(crate) mod tests {
             err.to_string().contains("scalar"),
             "unexpected error message for non-scalar option: {err}"
         );
+        assert_eq!(err.identifier(), Some("RunMat:strfind:InvalidOption"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -709,6 +812,7 @@ pub(crate) mod tests {
             err.to_string().contains("name-value pairs"),
             "unexpected error message: {err}"
         );
+        assert_eq!(err.identifier(), Some("RunMat:strfind:InvalidOption"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -840,5 +944,38 @@ pub(crate) mod tests {
             err.to_string().contains("unknown option"),
             "unexpected error message: {err}"
         );
+        assert_eq!(err.identifier(), Some("RunMat:strfind:InvalidOption"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn strfind_invalid_text_shape_and_option_report_catalog_identifiers() {
+        for (text, pattern) in [
+            (Value::Num(1.0), Value::String("a".into())),
+            (Value::String("abc".into()), Value::Num(1.0)),
+        ] {
+            let err = run_strfind(text, pattern, Vec::new()).unwrap_err();
+            assert_eq!(err.identifier(), Some("RunMat:strfind:InvalidInput"));
+        }
+        let text = StringArray::new(vec!["a".into(), "b".into()], vec![2, 1]).unwrap();
+        let pattern =
+            StringArray::new(vec!["a".into(), "b".into(), "c".into()], vec![3, 1]).unwrap();
+        let err = run_strfind(
+            Value::StringArray(text),
+            Value::StringArray(pattern),
+            Vec::new(),
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:strfind:ShapeMismatch"));
+        let err = run_strfind(
+            Value::String("abc".into()),
+            Value::String("a".into()),
+            vec![
+                Value::String("ForceCellOutput".into()),
+                Value::String("maybe".into()),
+            ],
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:strfind:InvalidOption"));
     }
 }

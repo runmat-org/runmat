@@ -1,8 +1,6 @@
 //! MATLAB-compatible `sub2ind` builtin with GPU-aware semantics for RunMat.
 
-#[cfg(not(target_arch = "wasm32"))]
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -29,11 +27,14 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::shape_rules::element_count_if_known;
 
+#[path = "sub2ind/resident_owner.rs"]
+mod resident_owner;
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::indexing::sub2ind")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sub2ind",
     op_kind: GpuOpKind::Custom("indexing"),
-    supported_precisions: &[ScalarType::F32, ScalarType::F64],
+    supported_precisions: &[ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
     provider_hooks: &[ProviderHook::Custom("sub2ind")],
     constant_strategy: ConstantStrategy::InlineLiteral,
@@ -230,7 +231,15 @@ fn sub2ind_internal_error(message: impl Into<String>) -> RuntimeError {
     builtin_path = "crate::builtins::array::indexing::sub2ind"
 )]
 async fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let (dims_value, dims_was_gpu) = materialize_value(dims_val, "sub2ind").await?;
+    let resident_source = resident_owner::source(&dims_val, &rest);
+    let resident_inputs: Vec<GpuTensorHandle> = std::iter::once(&dims_val)
+        .chain(rest.iter())
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        })
+        .collect();
+    let (dims_value, _) = materialize_value(dims_val, "sub2ind").await?;
     let dims = parse_dims(&dims_value, "sub2ind").await?;
     if dims.is_empty() {
         return Err(sub2ind_error("Size vector must have at least one element."));
@@ -242,136 +251,122 @@ async fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinRes
         ));
     }
 
-    if let Some(value) = try_gpu_sub2ind(&dims, &rest)? {
+    if let Some(value) = try_gpu_sub2ind(&dims, &rest, resident_source.as_ref()).await? {
         return Ok(value);
     }
 
-    let mut saw_gpu = dims_was_gpu;
     let mut subscripts: Vec<Tensor> = Vec::with_capacity(rest.len());
     for value in rest {
-        let (materialised, was_gpu) = materialize_value(value, "sub2ind").await?;
-        saw_gpu |= was_gpu;
+        let (materialised, _) = materialize_value(value, "sub2ind").await?;
         let tensor = tensor::value_into_tensor_for("sub2ind", materialised)
             .map_err(|message| sub2ind_error(message))?;
         subscripts.push(tensor);
     }
 
     let (result_data, result_shape) = compute_indices(&dims, &subscripts)?;
-    let want_gpu_output = saw_gpu && runmat_accelerate_api::provider().is_some();
-
-    if want_gpu_output {
-        #[cfg(all(test, feature = "wgpu"))]
-        {
-            if runmat_accelerate_api::provider().is_none() {
-                let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                    runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-                );
-            }
-        }
-        let shape = result_shape.clone().unwrap_or_else(|| vec![1, 1]);
-        if let Some(provider) = runmat_accelerate_api::provider() {
-            let view = HostTensorView {
-                data: &result_data,
-                shape: &shape,
-            };
-            if let Ok(handle) = provider.upload(&view) {
-                return Ok(Value::GpuTensor(handle));
-            }
-        }
-    }
-
-    build_host_value(result_data, result_shape)
+    let host = build_host_value(result_data, result_shape)?;
+    let protected: Vec<_> = resident_inputs.iter().collect();
+    resident_owner::restore_host(resident_source.as_ref(), host, &protected)
 }
 
-fn try_gpu_sub2ind(dims: &[usize], subs: &[Value]) -> crate::BuiltinResult<Option<Value>> {
-    #[cfg(target_arch = "wasm32")]
+async fn try_gpu_sub2ind(
+    dims: &[usize],
+    subs: &[Value],
+    source: Option<&GpuTensorHandle>,
+) -> crate::BuiltinResult<Option<Value>> {
+    let Some(source) = source else {
+        return Ok(None);
+    };
+    if !subs
+        .iter()
+        .all(|value| matches!(value, Value::GpuTensor(_)))
     {
-        let _ = (dims, subs);
-        Ok(None)
+        return Ok(None);
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let provider = match runmat_accelerate_api::provider() {
-            Some(p) => p,
-            None => return Ok(None),
-        };
-        if !subs
-            .iter()
-            .all(|value| matches!(value, Value::GpuTensor(_)))
-        {
-            return Ok(None);
-        }
-        if subs.iter().any(
+    if subs.iter().any(
             |value| matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some()),
         ) {
             return Ok(None);
         }
-        if dims.is_empty() {
-            return Ok(None);
-        }
+    if dims.is_empty() {
+        return Ok(None);
+    }
 
-        let mut handles: Vec<&GpuTensorHandle> = Vec::with_capacity(subs.len());
-        for value in subs {
-            if let Value::GpuTensor(handle) = value {
-                handles.push(handle);
-            }
+    let mut handles: Vec<&GpuTensorHandle> = Vec::with_capacity(subs.len());
+    for value in subs {
+        if let Value::GpuTensor(handle) = value {
+            handles.push(handle);
         }
+    }
 
-        if handles.len() != dims.len() {
-            return Err(sub2ind_error(
+    let Some(provider) = resident_owner::direct_owner(source, &handles) else {
+        return Ok(None);
+    };
+
+    if handles.len() != dims.len() {
+        return Err(sub2ind_error(
             "The number of subscripts supplied must equal the number of dimensions in the size vector.",
         ));
-        }
+    }
 
-        let mut scalar_mask: Vec<bool> = Vec::with_capacity(handles.len());
-        let mut target_shape: Option<Vec<usize>> = None;
-        let mut result_len: usize = 1;
-        let mut saw_non_scalar = false;
+    let mut scalar_mask: Vec<bool> = Vec::with_capacity(handles.len());
+    let mut target_shape: Option<Vec<usize>> = None;
+    let mut result_len: usize = 1;
+    let mut saw_non_scalar = false;
 
-        for handle in &handles {
-            let len = tensor::element_count(handle.shape());
-            let is_scalar = len == 1;
-            scalar_mask.push(is_scalar);
-            if !is_scalar {
-                saw_non_scalar = true;
-                if let Some(existing) = &target_shape {
-                    if existing != handle.shape() {
-                        return Err(sub2ind_error("Subscript inputs must have the same size."));
-                    }
-                } else {
-                    target_shape = Some(handle.shape().to_vec());
-                    result_len = len;
+    for handle in &handles {
+        let len = tensor::element_count(handle.shape());
+        let is_scalar = len == 1;
+        scalar_mask.push(is_scalar);
+        if !is_scalar {
+            saw_non_scalar = true;
+            if let Some(existing) = &target_shape {
+                if existing != handle.shape() {
+                    return Err(sub2ind_error("Subscript inputs must have the same size."));
                 }
+            } else {
+                target_shape = Some(handle.shape().to_vec());
+                result_len = len;
             }
         }
+    }
 
-        if !saw_non_scalar {
-            target_shape = Some(vec![1, 1]);
-            result_len = 1;
-        } else if let Some(shape) = &target_shape {
-            result_len = tensor::element_count(shape);
-        }
+    if !saw_non_scalar {
+        target_shape = Some(vec![1, 1]);
+        result_len = 1;
+    } else if let Some(shape) = &target_shape {
+        result_len = tensor::element_count(shape);
+    }
 
-        let strides = build_strides(dims, "sub2ind")?;
-        if dims.iter().any(|&d| d > u32::MAX as usize)
-            || strides.iter().any(|&s| s > u32::MAX as usize)
-            || result_len > u32::MAX as usize
-        {
-            return Ok(None);
-        }
+    let strides = build_strides(dims, "sub2ind")?;
+    if dims.iter().any(|&d| d > u32::MAX as usize)
+        || strides.iter().any(|&s| s > u32::MAX as usize)
+        || result_len > u32::MAX as usize
+    {
+        return Ok(None);
+    }
 
-        let output_shape = target_shape.clone().unwrap_or_else(|| vec![1, 1]);
-        match provider.sub2ind(
+    let output_shape = target_shape.clone().unwrap_or_else(|| vec![1, 1]);
+    match provider
+        .sub2ind(
             dims,
             &strides,
             &handles,
             &scalar_mask,
             result_len,
             &output_shape,
-        ) {
-            Ok(handle) => Ok(Some(Value::GpuTensor(handle))),
-            Err(err) => Err(sub2ind_provider_error(err.to_string())),
+        )
+        .await
+    {
+        Ok(handle) => {
+            resident_owner::publish_direct(handle, &output_shape, source, &handles, provider)
+                .map(Some)
         }
+        Err(err) if err.is_unsupported() => Ok(None),
+        Err(err) => Err(crate::runtime_error::with_provider_execution_source(
+            sub2ind_provider_error(err.to_string()),
+            err,
+        )),
     }
 }
 
@@ -546,6 +541,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::Type;
     use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 

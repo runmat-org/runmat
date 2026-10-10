@@ -1,8 +1,8 @@
 use super::*;
 use runmat_types::{
-    CallInference, CallRequest, CertaintyFact, DynamicReason, LiteralContext, LiteralValue,
-    NumericClass, NumericDomain, NumericFact, OutputSelection, RequestedOutputCount, ResidencyFact,
-    ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    CallInference, CallRequest, CertaintyFact, LiteralContext, LiteralValue, NumericClass,
+    NumericDomain, NumericFact, OutputSelection, RequestedOutputCount, ResidencyFact, ShapeFact,
+    StorageFact, ValueFact, ValueKindFact,
 };
 
 fn numeric(class: NumericClass, shape: ShapeFact) -> ValueFact {
@@ -36,7 +36,8 @@ fn call(input: ValueFact, controls: Vec<LiteralValue>, outputs: usize) -> CallIn
     )
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn descriptor_preserves_public_forms_defaults_errors_and_integer_policy() {
     let labels: Vec<_> = STD_DESCRIPTOR
         .signatures
@@ -84,7 +85,8 @@ fn descriptor_preserves_public_forms_defaults_errors_and_integer_policy() {
     assert_eq!(STD_EXTENSIONS.len(), 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn proven_double_shape_and_invalid_controls_remain_conservative() {
     let shape = ShapeFact::from(vec![Some(3), Some(4)]);
     let second = call(
@@ -124,7 +126,8 @@ fn proven_double_shape_and_invalid_controls_remain_conservative() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn repeated_axes_in_one_vector_reduce_the_axis_once() {
     let result = call(
         numeric(
@@ -144,31 +147,58 @@ fn repeated_axes_in_one_vector_reduce_the_axis_once() {
     assert_eq!(result.outputs[0].certainty, CertaintyFact::Proven);
 }
 
-#[test]
-fn single_output_class_and_resident_placement_are_not_overclaimed() {
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn single_output_class_is_proven_without_claiming_residency() {
     let shape = ShapeFact::from(vec![Some(3), Some(2)]);
     let single = call(numeric(NumericClass::Single, shape.clone()), vec![], 1);
     assert_eq!(
         single.outputs[0].shape,
         ShapeFact::from(vec![Some(1), Some(2)])
     );
-    assert!(matches!(
-        single.outputs[0].certainty,
-        CertaintyFact::Dynamic(DynamicReason::RuntimeValue)
-    ));
+    assert_eq!(single.outputs[0].certainty, CertaintyFact::Proven);
+    assert_eq!(
+        single.outputs[0].numeric().unwrap().class,
+        NumericClass::Single
+    );
+    let singleton = call(numeric(NumericClass::Single, ShapeFact::Scalar), vec![], 1);
+    assert_eq!(
+        singleton.outputs[0].shape,
+        ShapeFact::from(vec![Some(1), Some(1)])
+    );
+    assert_eq!(singleton.outputs[0].storage, StorageFact::Dense);
+    let all = call(
+        numeric(
+            NumericClass::Single,
+            ShapeFact::from(vec![Some(3), Some(2)]),
+        ),
+        vec![LiteralValue::String("all".into())],
+        1,
+    );
+    assert_eq!(all.outputs[0].shape, ShapeFact::Scalar);
+    assert_eq!(
+        all.outputs[0].numeric().unwrap().class,
+        NumericClass::Single
+    );
+    assert_eq!(all.outputs[0].storage, StorageFact::Dense);
 
-    let mut resident = numeric(NumericClass::Double, shape);
+    let mut resident = numeric(NumericClass::Single, shape);
     resident.residency = ResidencyFact::Device { provider: None };
     let result = call(resident, vec![], 2);
     assert_eq!(result.outputs[0].residency, ResidencyFact::Unknown);
     assert_eq!(result.outputs[0].storage, StorageFact::Unknown);
+    assert_eq!(
+        result.outputs[0].numeric().unwrap().class,
+        NumericClass::Single
+    );
     assert!(result
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-TYPE-CALL-ARITY"));
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn normalization_literal_keeps_single_rounding_and_all_spelling() {
     let shape = ShapeFact::from(vec![Some(3), Some(4)]);
     let axis_without_flag = call(
@@ -218,7 +248,8 @@ fn normalization_literal_keeps_single_rounding_and_all_spelling() {
     assert_eq!(all.outputs[0].shape, ShapeFact::Scalar);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn platform_dimension_and_duplicate_vector_follow_owner_admission() {
     let shape = ShapeFact::from(vec![Some(3), Some(4)]);
     let duplicate = call(
@@ -251,7 +282,8 @@ fn platform_dimension_and_duplicate_vector_follow_owner_admission() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn integer_and_complex_inputs_report_owning_diagnostics() {
     let integer = call(numeric(NumericClass::UInt64, ShapeFact::Scalar), vec![], 1);
     assert!(integer

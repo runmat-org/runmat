@@ -4,7 +4,6 @@ use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use rustfft::FftPlanner;
-use std::sync::Arc;
 
 use crate::backend::wgpu::resources::UniformBufferKey;
 use crate::backend::wgpu::types::NumericPrecision;

@@ -181,7 +181,10 @@ async fn detect_gpu_requires_complex(
         provider,
         handle,
         super::inverse_helpers::resident_range::RealDomain::ClosedUnitInterval,
-        BUILTIN_NAME,
+        gpu_helpers::RealProbeDiagnostic {
+            builtin: runmat_builtins::ACOS_CATALOG_ENTRY.identity,
+            internal_error: &ACOS_ERROR_INTERNAL,
+        },
     )
     .await
 }

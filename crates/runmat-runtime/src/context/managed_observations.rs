@@ -177,6 +177,7 @@ mod tests {
             signature: digest,
             program: None,
             authority: PlacementExecutionAuthorityRevision::HostService(digest),
+            provider_provenance: None,
             policy: digest,
         }
     }
@@ -227,6 +228,29 @@ mod tests {
         let next = pool.acquire(identity(), identity().signature).unwrap();
         assert!(next.is_current());
         assert_ne!(next.generation, first_generation);
+    }
+
+    #[test]
+    fn provider_provenance_invalidates_matching_managed_lease_only() {
+        let bytes = 2 * std::mem::size_of::<Slot>() as u64;
+        let pool = ManagedObservationPool::new(&ManagedHostEffectLedger::new(bytes), 2).unwrap();
+        let provider_a = Digest::sha256(b"provider A");
+        let provider_b = Digest::sha256(b"provider B");
+        let mut first_identity = identity();
+        first_identity.authority =
+            PlacementExecutionAuthorityRevision::RuntimeBindingSession(Digest::sha256(b"VM"));
+        first_identity.provider_provenance = Some(provider_a);
+        let mut second_identity = first_identity;
+        second_identity.provider_provenance = Some(provider_b);
+        let first = pool
+            .acquire(first_identity, first_identity.signature)
+            .unwrap();
+        let second = pool
+            .acquire(second_identity, second_identity.signature)
+            .unwrap();
+        pool.invalidate(&PlacementInvalidation::Provider { digest: provider_a });
+        assert!(!first.is_current());
+        assert!(second.is_current());
     }
 
     #[test]

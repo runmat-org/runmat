@@ -159,6 +159,14 @@ fn work_with_geometry(
         return None;
     }
     let precision = provider.precision();
+    if wgpu
+        && precision == ProviderPrecision::F64
+        && !provider.supports_shader_requirements(
+            runmat_accelerate_api::ProviderShaderRequirements::F64IeeeWords,
+        )
+    {
+        return None;
+    }
     let width = match precision {
         ProviderPrecision::F32 => 4u64,
         ProviderPrecision::F64 => 8u64,

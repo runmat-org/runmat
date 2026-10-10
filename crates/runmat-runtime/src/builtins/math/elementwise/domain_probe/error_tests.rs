@@ -1,7 +1,7 @@
 use super::*;
 use runmat_accelerate_api::{
-    test_support::TestAllocationOwner, AccelDownloadFuture, AccelProviderFuture, HostTensorView,
-    NumericElementType, ThreadProviderGuard,
+    test_support::TestAllocationOwner, AccelDownloadFuture, HostTensorView, NumericElementType,
+    ThreadProviderGuard,
 };
 
 struct Provider {
@@ -25,12 +25,13 @@ impl AccelProvider for Provider {
     fn reduce_min<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             if self.unsupported {
-                Err(runmat_accelerate_api::unsupported_provider_operation(
-                    "reduction unavailable",
-                ))
+                Err(
+                    runmat_accelerate_api::unsupported_provider_operation("reduction unavailable")
+                        .into(),
+                )
             } else {
                 // Text containing unsupported must not classify an execution
                 // failure as the typed capability rejection.
@@ -44,7 +45,8 @@ impl AccelProvider for Provider {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn all_lower_bound_consumers_preserve_operational_source_and_disable_retry() {
     let provider = Box::leak(Box::new(Provider {
         owner: TestAllocationOwner::new(),
@@ -78,7 +80,11 @@ fn all_lower_bound_consumers_preserve_operational_source_and_disable_retry() {
             panic!("provider reduction source expected");
         };
         assert_eq!(
-            source.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::error::Error::source(source)
+                .unwrap()
+                .downcast_ref::<std::io::Error>()
+                .unwrap()
+                .kind(),
             std::io::ErrorKind::BrokenPipe,
             "{name}"
         );
@@ -87,7 +93,8 @@ fn all_lower_bound_consumers_preserve_operational_source_and_disable_retry() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn only_typed_unsupported_probe_is_unknown() {
     let provider = Box::leak(Box::new(Provider {
         owner: TestAllocationOwner::new(),

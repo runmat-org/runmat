@@ -107,6 +107,52 @@ fn unsupported_classes_layouts_and_declared_outputs_are_not_advertised() {
 }
 
 #[test]
+fn complex_cast_physical_evidence_counts_both_components_for_each_exact_route() {
+    use super::super::fusion_elementwise::fixture::GeometryProvider;
+
+    let provider = GeometryProvider(256);
+    let mut request = query(
+        SINGLE_CATALOG_ENTRY.identity.name,
+        ProviderElementType::ComplexF64,
+        &[2, 3],
+    );
+    request.inputs[0].storage = ProviderStorage::DenseComplexInterleaved;
+    request.workload.preparation_route = Some(
+        runmat_accelerate_api::ProviderPreparationRoute::FloatingCast {
+            target: ProviderPrecision::F32,
+        },
+    );
+    let work = work::build(&provider, &request, ProviderElementType::F32).unwrap();
+    assert_eq!(work.scalar_visits, 12);
+    assert_eq!(work.estimate.dispatches, Some(1));
+    assert_eq!(work.estimate.output_bytes, Some(48));
+    assert_eq!(work.estimate.transient_bytes, Some(96 + 48 + 16));
+    #[cfg(feature = "wgpu")]
+    assert_eq!(
+        work::physical_work(&provider, &request)
+            .expect("typed complex Double to Single route")
+            .scalar_visits,
+        12
+    );
+    let portable = in_process_physical_work(&InProcessProvider::new(), &request)
+        .expect("interleaved in-process cast has an exact output recipe");
+    assert_eq!(portable.dispatches, Some(0));
+    assert_eq!(portable.output_bytes, Some(48));
+    assert!(validate(&InProcessProvider::new(), false, &request)
+        .unwrap()
+        .is_supported());
+
+    request.outputs = vec![ProviderRepresentation {
+        element_type: ProviderElementType::F32,
+        storage: ProviderStorage::DenseReal,
+        layout: ProviderLayout::ColumnMajorContiguous,
+        shape: vec![2, 3],
+        residency: ProviderResidency::Device,
+    }];
+    assert!(!validate(&provider, true, &request).unwrap().is_supported());
+}
+
+#[test]
 fn cast_physical_work_tracks_frozen_geometry_and_requested_storage() {
     use super::super::fusion_elementwise::fixture::GeometryProvider;
     for lanes in [64, 256, 512] {

@@ -1,8 +1,6 @@
 use super::*;
 use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocationOwner};
-use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProviderFuture, GpuHandleProvenance, HostTensorView,
-};
+use runmat_accelerate_api::{AccelDownloadFuture, GpuHandleProvenance, HostTensorView};
 use std::sync::atomic::AtomicUsize;
 use std::sync::Mutex;
 
@@ -48,7 +46,7 @@ impl AccelProvider for ComplexProvider {
         &'a self,
         left: &'a GpuTensorHandle,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             self.calls.fetch_add(1, Ordering::SeqCst);
             if matches!(self.mode, ResultMode::Pending) {
@@ -57,10 +55,11 @@ impl AccelProvider for ComplexProvider {
             if matches!(self.mode, ResultMode::Unsupported) {
                 return Err(runmat_accelerate_api::unsupported_provider_operation(
                     "complex addition unsupported",
-                ));
+                )
+                .into());
             }
             if matches!(self.mode, ResultMode::Failed) {
-                anyhow::bail!("complex addition device lost");
+                return Err(anyhow::anyhow!("complex addition device lost").into());
             }
             if matches!(self.mode, ResultMode::BorrowedAlias) {
                 return Ok(left.clone());

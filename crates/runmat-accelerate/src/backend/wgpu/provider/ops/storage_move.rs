@@ -22,7 +22,7 @@ impl WgpuProvider {
 
     pub(super) fn register_storage_move_buffer(
         &self,
-        buffer: Arc<wgpu::Buffer>,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
         source: &BufferEntry,
         shape: Vec<usize>,
         len: usize,

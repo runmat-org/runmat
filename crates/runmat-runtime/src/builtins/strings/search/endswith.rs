@@ -117,6 +117,14 @@ async fn validate_endswith_options(rest: Vec<Value>) -> BuiltinResult<bool> {
             BUILTIN_NAME,
         )?;
     }
+    // A resident control has its own declared extension. Check it before
+    // generic numeric classification and before gathering the borrowed handle.
+    if has_resident {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &ENDSWITH_RESIDENT_IGNORE_CASE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let value = option_value(&rest);
     if value.is_some_and(is_numeric_ignore_case_value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -130,13 +138,6 @@ async fn validate_endswith_options(rest: Vec<Value>) -> BuiltinResult<bool> {
             BUILTIN_NAME,
         )?;
     }
-    if has_resident {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &ENDSWITH_RESIDENT_IGNORE_CASE_EXTENSION,
-            BUILTIN_NAME,
-        )?;
-    }
-
     if let Some(ignore_case) = parsed_host {
         return Ok(ignore_case);
     }
@@ -669,6 +670,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_integer_ignore_case_all_classes_are_exact_runmat_extensions() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
@@ -694,6 +696,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_integer_and_positional_flags_are_gated_in_matlab_mode() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -722,6 +725,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_rejects_nested_resident_numeric_text_before_provider_access() {
         let resident = Value::GpuTensor(
@@ -744,31 +748,43 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_resident_control_rejects_before_provider_access_in_matlab_mode() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let resident = Value::GpuTensor(
-            runmat_accelerate_api::test_support::TestAllocationOwner::new()
-                .allocate_zeroed(
-                    vec![1, 1],
-                    runmat_accelerate_api::NumericElementType::F64,
-                    runmat_accelerate_api::GpuTensorStorage::Real,
-                )
-                .expect("admit unregistered resident fixture")
-                .handle,
-        );
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("borrowed resident control");
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
         let err = run_endswith(
             Value::String("RunMat".into()),
             Value::String("mat".into()),
-            vec![Value::String("IgnoreCase".into()), resident],
+            vec![
+                Value::String("IgnoreCase".into()),
+                Value::GpuTensor(allocation.handle.clone()),
+            ],
         )
         .unwrap_err();
         assert_eq!(
             err.identifier(),
-            Some("RunMat:compatibility:EndsWithNumericIgnoreCaseExtension")
+            Some("RunMat:compatibility:EndsWithResidentIgnoreCaseExtension")
         );
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_dispatch_preserves_residency_until_builtin_preflight() {
         assert_eq!(GPU_SPEC.residency, ResidencyPolicy::NewHandle);
@@ -848,6 +864,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_accepts_pattern_object() {
         let pattern = crate::builtins::strings::core::compat::pattern_object(r"\d+");

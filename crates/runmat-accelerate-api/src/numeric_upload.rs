@@ -1,19 +1,39 @@
 //! Shared numeric upload validation and rejection ownership.
-use crate::{AccelProvider, GpuTensorHandle, HostNumericTensorView};
+use crate::{AccelProvider, GpuTensorHandle, HostNumericTensorView, ProviderExecutionError};
+
+mod query;
+pub use query::class_preserving_upload_query;
 
 /// A validated upload may own a thread-affine failed-retirement authority.
 /// Keep this typed carrier through local error propagation; converting only its
 /// diagnostic to `anyhow` on WASM would discard the sole custom owner.
 #[derive(Debug)]
 pub enum NumericUploadError {
-    Provider(anyhow::Error),
+    Provider(ProviderExecutionError),
     Invalid(InvalidNumericUploadResult),
     Completion(NumericUploadCompletionError),
 }
 pub type NumericUploadResult<T> = Result<T, NumericUploadError>;
 
+impl NumericUploadError {
+    /// Keep the provider's certified effect disposition and original cause.
+    /// Rejected results and failed cleanup follow a returned upload result.
+    pub fn into_execution_error(self) -> ProviderExecutionError {
+        match self {
+            Self::Provider(error) => error,
+            Self::Invalid(error) => ProviderExecutionError::from_source(error).after_effect(),
+            Self::Completion(error) => ProviderExecutionError::from_source(error).after_effect(),
+        }
+    }
+}
+
 impl From<anyhow::Error> for NumericUploadError {
     fn from(error: anyhow::Error) -> Self {
+        Self::Provider(error.into())
+    }
+}
+impl From<ProviderExecutionError> for NumericUploadError {
+    fn from(error: ProviderExecutionError) -> Self {
         Self::Provider(error)
     }
 }
@@ -29,7 +49,7 @@ impl std::fmt::Display for NumericUploadError {
 impl std::error::Error for NumericUploadError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(match self {
-            Self::Provider(error) => error.as_ref(),
+            Self::Provider(error) => error,
             Self::Invalid(error) => error,
             Self::Completion(error) => error,
         })

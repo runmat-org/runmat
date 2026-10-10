@@ -28,6 +28,7 @@ pub struct AdmittedBuiltinPreparation {
     operands: Vec<Value>,
     numerical_domain: runmat_accelerate_api::NumericalDomainEvidence,
     sum_reduction: Option<AdmittedSumReduction>,
+    prepared_completion: Option<super::PreparedCompletionRight>,
 }
 
 /// Already-resolved numerical controls, not a second public option grammar.
@@ -45,6 +46,23 @@ pub struct AdmittedSumReduction {
 }
 
 impl AdmittedBuiltinPreparation {
+    /// Opt in only after the domain has parsed and certified its complete
+    /// prepared route. The selected binding and output mode are compared to
+    /// the dispatcher's non-clone right; absence remains ordinary execution.
+    pub(crate) fn with_prepared_call_observation(
+        mut self,
+        observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
+    ) -> Self {
+        self.prepared_completion = observation.and_then(|observation| {
+            observation.prepared_right(self.admission.binding, self.admission.requested_outputs)
+        });
+        self
+    }
+
+    pub fn take_prepared_completion_right(&mut self) -> Option<super::PreparedCompletionRight> {
+        self.prepared_completion.take()
+    }
+
     pub fn with_sum_reduction(
         mut self,
         controls: AdmittedSumReduction,
@@ -225,6 +243,7 @@ impl AdmittedBuiltinPreparation {
             operands,
             numerical_domain: Default::default(),
             sum_reduction: None,
+            prepared_completion: None,
         })
     }
 

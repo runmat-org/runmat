@@ -177,7 +177,10 @@ fn unsupported_restoration_uses_original_owner_and_preserves_explicit_intent() {
                                 panic!("typed provider upload failure")
                             };
                             assert_eq!(
-                                cause.downcast_ref::<std::io::Error>().unwrap().kind(),
+                                std::error::Error::source(cause)
+                                    .and_then(|source| source.downcast_ref::<std::io::Error>())
+                                    .unwrap()
+                                    .kind(),
                                 std::io::ErrorKind::BrokenPipe
                             );
                         }

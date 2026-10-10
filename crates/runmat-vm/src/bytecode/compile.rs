@@ -19,6 +19,11 @@ mod fusion_admission_tests;
 #[cfg(feature = "native-accel")]
 #[path = "compile/function_fusion.rs"]
 mod function_fusion;
+#[cfg(feature = "native-accel")]
+#[path = "compile/semantic_fusion_candidates.rs"]
+mod semantic_fusion_candidates;
+#[cfg(feature = "native-accel")]
+use semantic_fusion_candidates::derive_semantic_fusion_candidate_groups;
 
 #[cfg(test)]
 #[path = "compile/statement_outputs_tests.rs"]
@@ -27,6 +32,10 @@ mod statement_outputs_tests;
 #[cfg(test)]
 #[path = "compile/statement_pc_tests.rs"]
 mod statement_pc_tests;
+
+#[cfg(all(test, not(feature = "native-accel")))]
+#[path = "compile/no_acceleration_tests.rs"]
+mod no_acceleration_tests;
 
 pub fn compile(
     hir: &HirAssembly,
@@ -93,13 +102,17 @@ fn compile_with_bound_analysis(
         .map(|candidate| candidate.target);
     #[cfg(feature = "native-accel")]
     let mut fusion_metadata = derive_semantic_fusion_metadata(mir, entrypoint_target);
+    #[cfg(feature = "native-accel")]
     let instruction_windows = derive_semantic_fusion_instruction_windows(
         &c.instructions,
         &c.instr_spans,
         &fusion_metadata.mir_fusion_candidate_groups,
     );
-    fusion_metadata.instruction_window_count = instruction_windows.len();
-    fusion_metadata.instruction_windows = instruction_windows.clone();
+    #[cfg(feature = "native-accel")]
+    {
+        fusion_metadata.instruction_window_count = instruction_windows.len();
+        fusion_metadata.instruction_windows = instruction_windows.clone();
+    }
     #[cfg(feature = "native-accel")]
     let (accel_graph, fusion_groups) = if fusion_metadata.mir_fusion_candidate_group_count == 0
         || instruction_windows.is_empty()
@@ -156,6 +169,8 @@ fn compile_with_bound_analysis(
                     crate::bytecode::FusionStageProjection::project(
                         body,
                         selected,
+                        crate::bytecode::FusionStageSelectionOrigin::EntrypointStream,
+                        c.layout.as_ref()?.functions.get(&body.function)?,
                         crate::bytecode::fusion_stage::FusionStageStream {
                             instructions: &c.instructions,
                             catch_scopes: &c.catch_scopes,
@@ -186,6 +201,8 @@ fn compile_with_bound_analysis(
         var_names,
         initially_unassigned_slots,
         layout: c.layout,
+        #[cfg(feature = "native-accel")]
+        function_private_layout: None,
         async_metadata,
         regions: Vec::new(),
         parfor_regions: Vec::new(),
@@ -270,90 +287,6 @@ fn derive_semantic_fusion_metadata(
         instruction_windows: Vec::new(),
         stage_projection: None,
     }
-}
-
-#[cfg(feature = "native-accel")]
-fn derive_semantic_fusion_candidate_groups(
-    mir: &MirAssembly,
-    entrypoint_target: Option<FunctionId>,
-) -> (usize, Vec<crate::bytecode::FusionCandidateGroup>) {
-    let mut signal_count = 0usize;
-    let mut groups = Vec::new();
-    let mut function_ids: Vec<_> = if let Some(function) = entrypoint_target {
-        vec![function]
-    } else {
-        mir.bodies.keys().copied().collect()
-    };
-    function_ids.sort_by_key(|id| id.0);
-    for function_id in function_ids {
-        let Some(body) = mir.bodies.get(&function_id) else {
-            continue;
-        };
-        for block in &body.blocks {
-            let mut run_len = 0usize;
-            for (stmt_index, stmt) in block.statements.iter().enumerate() {
-                let value = match &stmt.kind {
-                    MirStmtKind::Assign { value, .. }
-                    | MirStmtKind::MultiAssign { value, .. }
-                    | MirStmtKind::SequenceAssign { value, .. }
-                    | MirStmtKind::Expr(value) => value,
-                    MirStmtKind::PlaceMutation(_)
-                    | MirStmtKind::CaptureSequence { .. }
-                    | MirStmtKind::WorkspaceEffect { .. }
-                    | MirStmtKind::EnvironmentEffect(_) => {
-                        if run_len >= 2 {
-                            let stmt_start = stmt_index - run_len;
-                            let stmt_end = stmt_index;
-                            groups.push(crate::bytecode::FusionCandidateGroup {
-                                id: groups.len(),
-                                signal_count: run_len,
-                                function: body.function,
-                                block: block.id,
-                                stmt_start,
-                                stmt_end,
-                                source_span: merge_stmt_run_span(block, stmt_start, stmt_end),
-                            });
-                        }
-                        run_len = 0;
-                        continue;
-                    }
-                };
-                if rvalue_has_fusion_signal(value) {
-                    signal_count += 1;
-                    run_len += 1;
-                } else {
-                    if run_len >= 2 {
-                        let stmt_start = stmt_index - run_len;
-                        let stmt_end = stmt_index;
-                        groups.push(crate::bytecode::FusionCandidateGroup {
-                            id: groups.len(),
-                            signal_count: run_len,
-                            function: body.function,
-                            block: block.id,
-                            stmt_start,
-                            stmt_end,
-                            source_span: merge_stmt_run_span(block, stmt_start, stmt_end),
-                        });
-                    }
-                    run_len = 0;
-                }
-            }
-            if run_len >= 2 {
-                let stmt_start = block.statements.len() - run_len;
-                let stmt_end = block.statements.len();
-                groups.push(crate::bytecode::FusionCandidateGroup {
-                    id: groups.len(),
-                    signal_count: run_len,
-                    function: body.function,
-                    block: block.id,
-                    stmt_start,
-                    stmt_end,
-                    source_span: merge_stmt_run_span(block, stmt_start, stmt_end),
-                });
-            }
-        }
-    }
-    (signal_count, groups)
 }
 
 #[cfg(feature = "native-accel")]
@@ -889,6 +822,8 @@ fn compile_semantic_functions(
                     crate::bytecode::FusionStageProjection::project(
                         body,
                         selected,
+                        crate::bytecode::FusionStageSelectionOrigin::FunctionBody,
+                        function_layout,
                         crate::bytecode::fusion_stage::FusionStageStream {
                             instructions: &compiler.instructions,
                             catch_scopes: &compiler.catch_scopes,
@@ -901,10 +836,13 @@ fn compile_semantic_functions(
             })
             .map(std::sync::Arc::new);
         #[cfg(feature = "native-accel")]
-        let fusion_scaffold = fusion_stage_projection.as_ref().and_then(|_| {
+        let fusion_scaffold = fusion_stage_projection.as_ref().and_then(|projection| {
             function_fusion::derive_function_scaffold(
                 mir,
                 function.id,
+                function_layout,
+                &resume_points,
+                projection,
                 &compiler.instructions,
                 &compiler.instr_spans,
             )

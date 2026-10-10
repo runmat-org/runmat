@@ -1,7 +1,7 @@
 use super::*;
 use runmat_accelerate_api::{
-    test_support::TestAllocationOwner, AccelDownloadFuture, AccelProvider, AccelProviderFuture,
-    HostTensorView, NumericElementType, ThreadProviderGuard,
+    test_support::TestAllocationOwner, AccelDownloadFuture, AccelProvider, HostTensorView,
+    NumericElementType, ThreadProviderGuard,
 };
 
 struct Provider(TestAllocationOwner, bool);
@@ -21,12 +21,13 @@ impl AccelProvider for Provider {
     fn reduce_min<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             if self.1 {
                 return Err(runmat_accelerate_api::unsupported_provider_operation(
                     "fixture reduction unavailable",
-                ));
+                )
+                .into());
             }
             Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "probe failed").into())
         })

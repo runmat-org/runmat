@@ -99,7 +99,7 @@ pub(super) async fn axis_bounds_protecting(
     let minimum = minimum.map_err(|error| {
         crate::runtime_error::with_provider_execution_source(
             plotting_error(context, format!("{context}: reduce_min failed: {error}")),
-            error.into(),
+            error,
         )
     })?;
     let minimum = owned.admit(minimum, &expected, context)?;
@@ -110,7 +110,7 @@ pub(super) async fn axis_bounds_protecting(
     let maximum = maximum.map_err(|error| {
         crate::runtime_error::with_provider_execution_source(
             plotting_error(context, format!("{context}: reduce_max failed: {error}")),
-            error.into(),
+            error.after_effect(),
         )
     })?;
     let maximum = owned.admit(maximum, &expected, context)?;

@@ -165,7 +165,7 @@ impl AccelProvider for Provider {
         &'a self,
         left: &'a GpuTensorHandle,
         right: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let fault = self.step();
             self.before(fault).await?;

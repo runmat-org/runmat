@@ -47,17 +47,31 @@ pub(super) fn may_execute(
         family: ProviderOperationFamily::Elementwise,
         inputs: vec![representation(lhs)?, representation(rhs)?],
         outputs: Vec::new(),
-        workload: ProviderWorkload::default(),
+        workload: ProviderWorkload {
+            real_power_mode: match handle_precision(lhs) {
+                Some(ProviderPrecision::F32) => Some(RealPowerArithmeticMode::NativeSingle),
+                Some(ProviderPrecision::F64) => Some(RealPowerArithmeticMode::NativeDouble),
+                None => None,
+            },
+            ..ProviderWorkload::default()
+        },
     };
+    Ok(any_domain_supported(provider, &mut query))
+}
+
+fn any_domain_supported(
+    provider: &dyn AccelProvider,
+    query: &mut ProviderFeasibilityQuery,
+) -> bool {
     // Hypothetical outcomes are capability queries, not evidence about values.
     // If either outcome executes, classification remains necessary.
     for domain in [PowerResultDomain::Real, PowerResultDomain::Complex] {
         query.workload.numerical_domain = NumericalDomainEvidence::RealPower(domain);
-        if provider.query_feasibility(&query).is_supported() {
-            return Ok(true);
+        if provider.query_feasibility(query).is_supported() {
+            return true;
         }
     }
-    Ok(false)
+    false
 }
 
 #[cfg(test)]

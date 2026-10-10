@@ -21,6 +21,13 @@ use runmat_accelerate_api::{
 #[path = "signal/spectral_preflight_tests.rs"]
 mod spectral_preflight_tests;
 
+#[cfg(test)]
+#[path = "signal/specialized_moving_window_validation_tests.rs"]
+mod specialized_moving_window_validation_tests;
+#[cfg(test)]
+#[path = "signal/required_geometry_tests.rs"]
+mod required_geometry_tests;
+
 #[derive(Clone, Copy)]
 enum GradientSpacingInput<'a> {
     Scalar(f64),
@@ -62,6 +69,30 @@ fn moving_window_endpoint_code(endpoint: ProviderMovingWindowEndpoints) -> (u32,
     }
 }
 
+fn specialized_moving_window_fill_helper(precision: NumericPrecision, value: f64) -> String {
+    match precision {
+        NumericPrecision::F32 => format!(
+            "fn moving_window_fill_value() -> f32 {{ var bits: u32 = 0x{:08x}u; return bitcast<f32>(bits); }}",
+            (value as f32).to_bits()
+        ),
+        NumericPrecision::F64 => {
+            let bits = value.to_bits();
+            format!(
+                "fn moving_window_fill_value() -> f64 {{ var low: u32 = 0x{:08x}u; var high: u32 = 0x{:08x}u; return runmat_f64_from_words(low, high); }}",
+                bits as u32,
+                (bits >> 32) as u32
+            )
+        }
+    }
+}
+
+fn finish_specialized_moving_window_shader(precision: NumericPrecision, source: String) -> String {
+    match precision {
+        NumericPrecision::F64 => crate::backend::wgpu::shaders::ieee_words::inject(&source),
+        NumericPrecision::F32 => source,
+    }
+}
+
 const WGPU_MOVING_MEDIAN_MAX_WINDOW: usize = 256;
 const WGPU_MOVING_WINDOW_I32_LIMIT: usize = i32::MAX as usize;
 
@@ -86,11 +117,12 @@ fn build_specialized_moving_window_shader(spec: &MovingWindowShaderSpec) -> Stri
         NumericPrecision::F64 => {
             r#"
 fn is_nan(value: f64) -> bool {
-  let bits = bitcast<u64>(value);
-  return (bits & 0x7ff0000000000000u) == 0x7ff0000000000000u &&
-    (bits & 0x000fffffffffffffu) != 0u;
+  let high = runmat_f64_high(value);
+  let low = runmat_f64_low(value);
+  return (high & 0x7ff00000u) == 0x7ff00000u &&
+    ((high & 0x000fffffu) != 0u || low != 0u);
 }
-fn nan_value() -> f64 { return bitcast<f64>(0x7ff8000000000000u); }
+fn nan_value() -> f64 { return runmat_f64_from_words(0u, 0x7ff80000u); }
 "#
         }
         NumericPrecision::F32 => {
@@ -99,14 +131,15 @@ fn is_nan(value: f32) -> bool {
   let bits = bitcast<u32>(value);
   return (bits & 0x7f800000u) == 0x7f800000u && (bits & 0x007fffffu) != 0u;
 }
-fn nan_value() -> f32 { return bitcast<f32>(0x7fc00000u); }
+fn nan_value() -> f32 {
+  let nan_bits: u32 = 0x7fc00000u;
+  return bitcast<f32>(nan_bits);
+}
 "#
         }
     };
-    let fill = match spec.precision {
-        NumericPrecision::F64 => format!("f64({:?})", spec.fill_value),
-        NumericPrecision::F32 => format!("f32({:?})", spec.fill_value as f32),
-    };
+    let fill_helper = specialized_moving_window_fill_helper(spec.precision, spec.fill_value);
+    let fill = "moving_window_fill_value()";
     let endpoint = moving_window_endpoint_code(spec.endpoints).0;
     let omit_nan = matches!(spec.nan_mode, ProviderNanMode::Omit);
     let workgroup = crate::backend::wgpu::config::WORKGROUP_SIZE;
@@ -116,6 +149,7 @@ struct Tensor {{ data: array<{ty}>, }};
 @group(0) @binding(0) var<storage, read> Input: Tensor;
 @group(0) @binding(1) var<storage, read_write> Output: Tensor;
 {nan_helpers}
+{fill_helper}
 "#
     );
     let main_prefix = format!(
@@ -199,7 +233,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
             stride_before = spec.stride_before,
             axis_len = spec.axis_len,
         );
-        return common + &main_prefix + &median_body;
+        return finish_specialized_moving_window_shader(
+            spec.precision,
+            common + &main_prefix + &median_body,
+        );
     }
 
     let empty_value = match spec.op {
@@ -281,7 +318,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         stride_before = spec.stride_before,
         axis_len = spec.axis_len,
     );
-    common + &main_prefix + &body
+    finish_specialized_moving_window_shader(spec.precision, common + &main_prefix + &body)
 }
 
 impl WgpuProvider {
@@ -1350,10 +1387,10 @@ impl WgpuProvider {
                         ],
                     });
 
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    channel_count as u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
+                let workgroups = self
+                    .pipelines
+                    .filter
+                    .linear_dispatch_groups(channel_count)?;
                 crate::backend::wgpu::dispatch::filter::run(
                     emission,
                     pending,
@@ -1407,7 +1444,6 @@ impl WgpuProvider {
             entry.precision == self.precision,
             "moving_window: mixed precision tensors are not supported"
         );
-
         let mut input_shape = entry.shape.clone();
         if request.dim >= input_shape.len() {
             input_shape.extend(std::iter::repeat_n(1, request.dim + 1 - input_shape.len()));
@@ -1484,6 +1520,9 @@ impl WgpuProvider {
             );
         }
 
+        if output_len != 0 {
+            self.require_ieee_words(entry.precision)?;
+        }
         let out_shape = request.output_shape.to_vec();
         let out_buffer = self.with_emission(|emission, _| {
             self.create_storage_buffer_checked(emission, output_len, "runmat-moving-window-out")
@@ -1765,10 +1804,7 @@ impl WgpuProvider {
                     ],
                 });
 
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                out_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
+            let workgroups = self.pipelines.diff.linear_dispatch_groups(out_len)?;
             crate::backend::wgpu::dispatch::diff::run(
                 emission,
                 pending,
@@ -2040,10 +2076,13 @@ impl WgpuProvider {
                 )
             };
 
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                entry.len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
+            let workgroups = if coordinate_entry.is_some() {
+                self.pipelines
+                    .gradient_coordinates
+                    .linear_dispatch_groups(entry.len)?
+            } else {
+                self.pipelines.gradient.linear_dispatch_groups(entry.len)?
+            };
             crate::backend::wgpu::dispatch::gradient::run(
                 emission,
                 pending,
@@ -2073,6 +2112,10 @@ impl WgpuProvider {
         direction: ProviderScanDirection,
         nan_mode: ProviderNanMode,
     ) -> Result<GpuTensorHandle> {
+        let selected = self.get_entry(handle)?;
+        if selected.len != 0 {
+            self.require_ieee_words(selected.precision)?;
+        }
         // For reverse scans, compute as flip → forward-scan → flip to preserve exact semantics
         if matches!(direction, ProviderScanDirection::Reverse) {
             let flipped_in = self.flip_exec(handle, &[dim])?;
@@ -2197,10 +2240,7 @@ impl WgpuProvider {
                         },
                     ],
                 });
-            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                segments as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
+            let groups = self.pipelines.cumsum.linear_dispatch_groups(segments)?;
             crate::backend::wgpu::dispatch::scan::run(
                 emission,
                 pending,
@@ -2442,10 +2482,7 @@ impl WgpuProvider {
                         },
                     ],
                 });
-            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                segments as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
+            let groups = self.pipelines.trapezoid.linear_dispatch_groups(segments)?;
             crate::backend::wgpu::dispatch::scan::run(
                 emission,
                 pending,
@@ -2471,6 +2508,10 @@ impl WgpuProvider {
         direction: ProviderScanDirection,
         nan_mode: ProviderNanMode,
     ) -> Result<GpuTensorHandle> {
+        let selected = self.get_entry(handle)?;
+        if selected.len != 0 {
+            self.require_ieee_words(selected.precision)?;
+        }
         // For reverse scans, compute as flip → forward-scan → flip to preserve exact semantics
         if matches!(direction, ProviderScanDirection::Reverse) {
             let flipped_in = self.flip_exec(handle, &[dim])?;
@@ -2595,10 +2636,7 @@ impl WgpuProvider {
                         },
                     ],
                 });
-            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                segments as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
+            let groups = self.pipelines.cumprod.linear_dispatch_groups(segments)?;
             crate::backend::wgpu::dispatch::scan::run(
                 emission,
                 pending,
@@ -2634,6 +2672,8 @@ impl WgpuProvider {
                 self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len)?;
             return Ok(ProviderCumminResult { values, indices });
         }
+
+        self.require_ieee_words(entry.precision)?;
 
         let work_shape = if entry.shape.is_empty() {
             vec![entry.len]
@@ -2762,10 +2802,7 @@ impl WgpuProvider {
                     ],
                 });
 
-            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                segments as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
+            let groups = self.pipelines.cummin.linear_dispatch_groups(segments)?;
             crate::backend::wgpu::dispatch::scan::run(
                 emission,
                 pending,
@@ -2806,6 +2843,8 @@ impl WgpuProvider {
                 self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len)?;
             return Ok(ProviderCummaxResult { values, indices });
         }
+
+        self.require_ieee_words(entry.precision)?;
 
         let work_shape = if entry.shape.is_empty() {
             vec![entry.len]
@@ -2934,10 +2973,7 @@ impl WgpuProvider {
                     ],
                 });
 
-            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                segments as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
+            let groups = self.pipelines.cummax.linear_dispatch_groups(segments)?;
             crate::backend::wgpu::dispatch::scan::run(
                 emission,
                 pending,
@@ -3737,18 +3773,6 @@ mod tests {
     #[test]
     fn iir_filter_nonleading_axis_uses_order_first_state_geometry() {
         let Some(()) = with_wgpu_provider(|provider| {
-            let b = provider
-                .upload(&HostTensorView {
-                    data: &[1.0, 0.0],
-                    shape: &[1, 2],
-                })
-                .expect("numerator");
-            let a = provider
-                .upload(&HostTensorView {
-                    data: &[1.0, 0.0],
-                    shape: &[1, 2],
-                })
-                .expect("denominator");
             let x = provider
                 .upload(&HostTensorView {
                     data: &[
@@ -3763,19 +3787,24 @@ mod tests {
                     shape: &[1, 3],
                 })
                 .expect("order-first initial state");
+            let prepared = ProviderPreparedIirCoefficients::upload(
+                provider,
+                &[1.0, 0.0],
+                &[1.0, 0.0],
+                provider.precision(),
+                &[&x, &zi],
+            )
+            .expect("prepare normalized coefficients before observation");
             provider.reset_telemetry();
             let result = pollster::block_on(provider.iir_filter(
-                runmat_accelerate_api::ProviderIirCoefficientSource::Resident {
-                    numerator: &b,
-                    denominator: &a,
-                },
+                runmat_accelerate_api::ProviderIirCoefficientSource::Prepared(&prepared),
                 &x,
                 ProviderIirFilterOptions {
                     dim: 1,
                     zi: Some(zi.clone()),
                 },
             ))
-            .expect("resident nonleading filter");
+            .expect("prepared nonleading filter");
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
             let final_state = result.final_state.expect("final state");
             assert_eq!(final_state.shape(), &[1, 3]);
@@ -3796,8 +3825,6 @@ mod tests {
             final_state.release().unwrap();
             zi.release().unwrap();
             x.release().unwrap();
-            a.release().unwrap();
-            b.release().unwrap();
         }) else {
             eprintln!("WGPU adapter unavailable: nonleading IIR hardware witness not executed");
             return;
@@ -3807,18 +3834,6 @@ mod tests {
     #[test]
     fn iir_filter_third_axis_uses_order_first_state_geometry() {
         let Some(()) = with_wgpu_provider(|provider| {
-            let b = provider
-                .upload(&HostTensorView {
-                    data: &[1.0, 0.0],
-                    shape: &[1, 2],
-                })
-                .expect("numerator");
-            let a = provider
-                .upload(&HostTensorView {
-                    data: &[1.0, 0.0],
-                    shape: &[1, 2],
-                })
-                .expect("denominator");
             let x = provider
                 .upload(&HostTensorView {
                     data: &[
@@ -3834,19 +3849,24 @@ mod tests {
                     shape: &[1, 2, 3],
                 })
                 .expect("third-axis initial state");
+            let prepared = ProviderPreparedIirCoefficients::upload(
+                provider,
+                &[1.0, 0.0],
+                &[1.0, 0.0],
+                provider.precision(),
+                &[&x, &zi],
+            )
+            .expect("prepare normalized coefficients before observation");
             provider.reset_telemetry();
             let result = pollster::block_on(provider.iir_filter(
-                runmat_accelerate_api::ProviderIirCoefficientSource::Resident {
-                    numerator: &b,
-                    denominator: &a,
-                },
+                runmat_accelerate_api::ProviderIirCoefficientSource::Prepared(&prepared),
                 &x,
                 ProviderIirFilterOptions {
                     dim: 2,
                     zi: Some(zi.clone()),
                 },
             ))
-            .expect("resident third-axis filter");
+            .expect("prepared third-axis filter");
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
             let final_state = result.final_state.expect("final state");
             assert_eq!(final_state.shape(), &[1, 2, 3]);
@@ -3870,10 +3890,113 @@ mod tests {
             final_state.release().unwrap();
             zi.release().unwrap();
             x.release().unwrap();
+        }) else {
+            eprintln!("WGPU adapter unavailable: third-axis IIR hardware witness not executed");
+            return;
+        };
+    }
+
+    #[test]
+    fn iir_filter_resident_coefficients_read_back_and_normalize_nonunit_denominator() {
+        let Some(()) = with_wgpu_provider(|provider| {
+            let b = provider
+                .upload(&HostTensorView {
+                    data: &[2.0, 0.0],
+                    shape: &[1, 2],
+                })
+                .expect("resident numerator");
+            let a = provider
+                .upload(&HostTensorView {
+                    data: &[2.0, 1.0],
+                    shape: &[1, 2],
+                })
+                .expect("nonunit resident denominator");
+            let x = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0, 3.0],
+                    shape: &[1, 3],
+                })
+                .expect("resident signal");
+            provider.reset_telemetry();
+            let result = pollster::block_on(provider.iir_filter(
+                runmat_accelerate_api::ProviderIirCoefficientSource::Resident {
+                    numerator: &b,
+                    denominator: &a,
+                },
+                &x,
+                ProviderIirFilterOptions { dim: 1, zi: None },
+            ))
+            .expect("resident coefficients normalize by a0");
+            let expected_readback = match provider.precision() {
+                runmat_accelerate_api::ProviderPrecision::F32 => 16,
+                runmat_accelerate_api::ProviderPrecision::F64 => 32,
+            };
+            assert_eq!(
+                provider.telemetry_snapshot().download_bytes,
+                expected_readback
+            );
+            let output = pollster::block_on(provider.download(&result.output)).expect("output");
+            assert_eq!(output.shape, vec![1, 3]);
+            for (actual, expected) in output.data.iter().zip([1.0, 1.5, 2.25]) {
+                assert!((*actual - expected).abs() < 1.0e-5);
+            }
+            result.output.release().unwrap();
+            result.final_state.expect("final state").release().unwrap();
+            x.release().unwrap();
             a.release().unwrap();
             b.release().unwrap();
         }) else {
-            eprintln!("WGPU adapter unavailable: third-axis IIR hardware witness not executed");
+            eprintln!("WGPU adapter unavailable: resident IIR normalization not executed");
+            return;
+        };
+    }
+
+    #[test]
+    fn iir_filter_resident_zero_leading_denominator_rejects_after_accounted_readback() {
+        let Some(()) = with_wgpu_provider(|provider| {
+            let b = provider
+                .upload(&HostTensorView {
+                    data: &[2.0, 0.0],
+                    shape: &[1, 2],
+                })
+                .expect("resident numerator");
+            let a = provider
+                .upload(&HostTensorView {
+                    data: &[0.0, 1.0],
+                    shape: &[1, 2],
+                })
+                .expect("invalid resident denominator");
+            let x = provider
+                .upload(&HostTensorView {
+                    data: &[1.0, 2.0, 3.0],
+                    shape: &[1, 3],
+                })
+                .expect("resident signal");
+            provider.reset_telemetry();
+            let error = pollster::block_on(provider.iir_filter(
+                runmat_accelerate_api::ProviderIirCoefficientSource::Resident {
+                    numerator: &b,
+                    denominator: &a,
+                },
+                &x,
+                ProviderIirFilterOptions { dim: 1, zi: None },
+            ))
+            .expect_err("zero leading denominator must reject");
+            assert!(error.to_string().contains("a(1) must be non-zero"));
+            let expected_readback = match provider.precision() {
+                runmat_accelerate_api::ProviderPrecision::F32 => 16,
+                runmat_accelerate_api::ProviderPrecision::F64 => 32,
+            };
+            assert_eq!(
+                provider.telemetry_snapshot().download_bytes,
+                expected_readback
+            );
+            assert!(x.allocation_lease().validate_live().is_ok());
+            x.release().unwrap();
+            a.release().unwrap();
+            b.release().unwrap();
+        }) else {
+            eprintln!("WGPU adapter unavailable: resident IIR rejection not executed");
             return;
         };
     }

@@ -214,6 +214,12 @@ impl ManagedFeedbackPool {
             let signature: PlacementSignature =
                 serde_json::from_slice(&state.signatures[start..start + slot.signature_len])
                     .expect("selected canonical signature remains valid in managed backing");
+            if matches!(
+                signature.revision.authority,
+                runmat_execution::PlacementExecutionAuthorityRevision::RuntimeBindingSession(_)
+            ) {
+                continue;
+            }
             result.push(PlacementFeedbackSeries {
                 signature,
                 candidate: key.candidate.to_string(),
@@ -270,6 +276,8 @@ mod tests {
             region: None,
             operation: "readmatrix".into(),
             runtime_facts: digest,
+            provider_provenance: None,
+            graph_output_authority: None,
             revision: PlacementRevision {
                 program: None,
                 catalog: digest,
@@ -315,6 +323,80 @@ mod tests {
         drop(pool);
         drop(observations);
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn managed_runtime_binding_samples_stay_local_and_never_export() {
+        let mut signature = signature();
+        signature.revision.authority =
+            PlacementExecutionAuthorityRevision::RuntimeBindingSession(Digest::sha256(b"session"));
+        let ledger = ManagedHostEffectLedger::new(16 * 1024);
+        let encoded = serde_json::to_vec(&signature).unwrap();
+        let pool = ManagedFeedbackPool::new(&ledger, 1, encoded.len()).unwrap();
+        let observations = ManagedObservationPool::new(&ledger, 1).unwrap();
+        let candidate = Digest::sha256(b"selected-host-route");
+        let kind = ExecutionCandidateKind::SharedRuntime;
+        let key = pool
+            .ensure((&signature).into(), candidate, kind, None, &observations)
+            .unwrap();
+        let lease = observations.acquire(key.permit, candidate).unwrap();
+        assert!(lease.is_current());
+        pool.record(key, 17, true, 1).unwrap();
+        pool.record(key, 19, true, 2).unwrap();
+        assert!(pool.observed(key.signature, candidate, kind, 2).is_some());
+        assert!(pool.profile_snapshot().is_empty());
+        let invalidation = PlacementInvalidation::RuntimeBindingSession {
+            digest: match signature.revision.authority {
+                PlacementExecutionAuthorityRevision::RuntimeBindingSession(digest) => digest,
+                _ => unreachable!("session-local fixture"),
+            },
+        };
+        observations.invalidate(&invalidation);
+        assert!(!lease.is_current());
+        pool.invalidate(&invalidation);
+        assert!(pool.observed(key.signature, candidate, kind, 3).is_none());
+    }
+
+    #[test]
+    fn provider_invalidation_clears_matching_session_bound_managed_series() {
+        let provider = Digest::sha256(b"managed provider capability A");
+        let other_provider = Digest::sha256(b"managed provider capability B");
+        let mut signature = signature();
+        signature.provider_provenance = Some(provider);
+        signature.revision.authority =
+            PlacementExecutionAuthorityRevision::RuntimeBindingSession(Digest::sha256(b"VM"));
+        let mut other_signature = signature.clone();
+        other_signature.provider_provenance = Some(other_provider);
+        let encoded = serde_json::to_vec(&signature).unwrap();
+        let ledger = ManagedHostEffectLedger::new(16 * 1024);
+        let pool = ManagedFeedbackPool::new(&ledger, 2, encoded.len()).unwrap();
+        let observations = ManagedObservationPool::new(&ledger, 2).unwrap();
+        let candidate = Digest::sha256(b"route");
+        let kind = ExecutionCandidateKind::SharedRuntime;
+        let key = pool
+            .ensure((&signature).into(), candidate, kind, None, &observations)
+            .unwrap();
+        let other_key = pool
+            .ensure(
+                (&other_signature).into(),
+                candidate,
+                kind,
+                None,
+                &observations,
+            )
+            .unwrap();
+        pool.record(key, 17, true, 1).unwrap();
+        pool.record(other_key, 19, true, 1).unwrap();
+        assert!(pool.observed(key.signature, candidate, kind, 1).is_some());
+        assert!(pool
+            .observed(other_key.signature, candidate, kind, 1)
+            .is_some());
+        pool.invalidate(&PlacementInvalidation::Provider { digest: provider });
+        assert!(pool.observed(key.signature, candidate, kind, 2).is_none());
+        assert!(pool
+            .observed(other_key.signature, candidate, kind, 2)
+            .is_some());
     }
 
     #[test]

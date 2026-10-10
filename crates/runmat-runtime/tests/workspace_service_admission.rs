@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use futures::executor::block_on;
+#[cfg(not(target_arch = "wasm32"))]
 use runmat_mex::MexHostServices;
 use runmat_runtime::context::{RuntimeContext, RuntimeServicePorts};
 use runmat_runtime::execution::RuntimeExecutionService;
@@ -63,6 +64,7 @@ fn introspection_builtins_preserve_closed_workspace_diagnostics() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn mex_base_callbacks_preserve_closed_workspace_diagnostics_and_global_isolation() {
     let (runtime, owner) = runtime_with_workspace();
     let services = runmat_runtime::foreign::RuntimeMexHostServices::new(runtime);
@@ -91,10 +93,11 @@ fn mat_workspace_admission_precedes_file_effects_and_load_publication() {
     let (closed_runtime, closed_owner) = runtime_with_workspace();
     closed_owner.close().unwrap();
 
-    let error = block_on(call(
+    let error = block_on(call_outputs(
         &closed_runtime,
         "save",
         &[Value::from(rejected_path.to_string_lossy().as_ref())],
+        0,
     ))
     .unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:Workspace:Closed"));
@@ -105,10 +108,11 @@ fn mat_workspace_admission_precedes_file_effects_and_load_publication() {
     let mut delta = WorkspaceDelta::new();
     delta.assign("answer", Value::Num(42.0)).unwrap();
     source_owner.apply(delta).unwrap();
-    block_on(call(
+    block_on(call_outputs(
         &source_runtime,
         "save",
         &[Value::from(source_path.to_string_lossy().as_ref())],
+        0,
     ))
     .unwrap();
 

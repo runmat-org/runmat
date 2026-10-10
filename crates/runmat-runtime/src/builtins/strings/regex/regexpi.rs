@@ -41,8 +41,7 @@ pub async fn evaluate(
     pattern: Value,
     rest: &[Value],
 ) -> BuiltinResult<RegexpEvaluation> {
-    let options = build_options(rest);
-    regexp::evaluate_with(BUILTIN_NAME, subject, pattern, &options).await
+    regexp::evaluate_with_default(BUILTIN_NAME, subject, pattern, rest, true).await
 }
 
 #[runtime_builtin(
@@ -81,39 +80,12 @@ async fn regexpi_builtin(
     }
 }
 
-fn build_options(rest: &[Value]) -> Vec<Value> {
-    let mut options: Vec<Value> = rest.to_vec();
-    if !has_case_directive(rest) {
-        options.push(Value::String("ignorecase".into()));
-    }
-    options
-}
-
-fn has_case_directive(values: &[Value]) -> bool {
-    values.iter().any(|value| {
-        matches!(
-            option_name(value).as_deref(),
-            Some("ignorecase") | Some("matchcase")
-        )
-    })
-}
-
-fn option_name(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].to_ascii_lowercase()),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            Some(ca.data.iter().collect::<String>().to_ascii_lowercase())
-        }
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use runmat_value::{CellArray, StringArray};
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexpi_descriptor_signatures_cover_core_forms() {
         let labels: Vec<&str> = REGEXPI_DESCRIPTOR
@@ -428,5 +400,30 @@ pub(crate) mod tests {
             message.contains("cell array elements"),
             "unexpected error message: {message}"
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn regexpi_case_default_uses_effective_consumed_options() {
+        let call = |rest: Vec<Value>| {
+            futures::executor::block_on(regexpi_builtin(
+                Value::String("A".into()),
+                Value::String("a".into()),
+                rest,
+            ))
+            .expect("registered regexpi")
+        };
+        for rest in [
+            vec![],
+            vec![Value::String("warnings".into())],
+            vec![
+                Value::String("warnings".into()),
+                Value::String("matchcase".into()),
+            ],
+        ] {
+            assert_eq!(call(rest), Value::Num(1.0));
+        }
+        let sensitive = call(vec![Value::String("matchcase".into())]);
+        assert_ne!(sensitive, Value::Num(1.0));
     }
 }

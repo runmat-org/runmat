@@ -59,6 +59,18 @@ impl ProviderOperationIdentity {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderWorkload {
+    /// One exact selected checked fused-reduction route. Absence leaves its
+    /// physical execution inventory unknown, never a zero-cost default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub typed_reduction: Option<super::ProviderTypedReductionWorkload>,
+    /// Explicit real-power arithmetic mode. None retains the native legacy
+    /// route; a mixed route is never inferred from the final result class.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub real_power_mode: Option<crate::RealPowerArithmeticMode>,
+    /// Source-qualified staged image program. Its presence alone cannot
+    /// establish physical provider work or numerical equivalence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_stages: Option<super::ProviderImageStageWorkload>,
     /// Exact admitted physical route; None leaves adaptation work unresolved.
     #[serde(default)]
     pub preparation_route: Option<super::ProviderPreparationRoute>,
@@ -68,6 +80,10 @@ pub struct ProviderWorkload {
     /// Resolved ordinary-sum route; absent for every other reduction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sum: Option<super::ProviderSumWorkload>,
+    /// Resolved ordinary dimensional min/max route. The physical provider
+    /// still produces values and indices for a values-only language call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extrema: Option<super::ProviderExtremaWorkload>,
     /// Physical convolution hook and public shape mode admitted by its owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub convolution: Option<super::ProviderConvolutionWorkload>,
@@ -136,6 +152,21 @@ pub struct ProviderNumericUploadPhysicalEvidence {
     pub output_requested_bytes: u64,
     pub provider_scratch_bytes: runmat_execution::ResourceByteBound,
     pub completion_queue_slots: u32,
+}
+
+/// A native numeric result produced by a selected provider operation may be
+/// read back only after it exists. This is side-effect-free physical evidence
+/// for the *future* contiguous output representation, not proof that a later
+/// handle belongs to this provider. The caller must authenticate that handle
+/// against the same representation before performing the transfer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderProducedNumericReadbackEvidence {
+    pub source_requested_bytes: u64,
+    pub transfer_bytes: u64,
+    pub host_workspace_bytes: runmat_execution::ResourceByteBound,
+    pub provider_scratch_bytes: runmat_execution::ResourceByteBound,
+    pub queue_slots: u32,
 }
 
 /// Physical one-result class-preserving host publication, including native

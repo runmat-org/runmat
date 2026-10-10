@@ -3,10 +3,10 @@ mod publication;
 mod tensor;
 mod native_export;
 
+use super::shared::Shared;
 use super::*;
 use owner::{Entry, TestOwner};
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
 #[cfg(all(target_arch = "wasm32", not(feature = "wgpu")))]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
@@ -17,7 +17,7 @@ const ID: AllocationIdentity = AllocationIdentity::new(17, 41, 2);
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn clones_retain_captured_owner_and_retire_exactly_once() {
     let owner = TestOwner::new(ID, AllocationRetirementOutcome::Retired);
-    let owner_weak = Arc::downgrade(&owner);
+    let owner_weak = Shared::downgrade(&owner);
     let lease = AllocationLease::register(ID, owner.clone()).unwrap();
     let second = lease.clone();
     let weak = lease.downgrade();
@@ -116,7 +116,8 @@ fn retirement_outcomes_remain_in_the_existing_owner_without_automatic_retry() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn typed_upload_failure_keeps_the_last_custom_owner_until_error_drop() {
     let owner = TestOwner::new(
         ID,
@@ -124,7 +125,7 @@ fn typed_upload_failure_keeps_the_last_custom_owner_until_error_drop() {
             detail: "bookkeeping rejected retirement".into(),
         },
     );
-    let weak_owner = Arc::downgrade(&owner);
+    let weak_owner = Shared::downgrade(&owner);
     let lease = AllocationLease::register(ID, owner.clone()).unwrap();
     let handle =
         GpuTensorHandle::from_allocation(lease, GpuTensorView::contiguous(vec![1])).unwrap();
@@ -158,8 +159,7 @@ fn typed_upload_failure_keeps_the_last_custom_owner_until_error_drop() {
 fn native_upload_error_preserves_thread_safe_error_transport() {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<crate::NumericUploadError>();
-    let error: anyhow::Error =
-        crate::NumericUploadError::Provider(anyhow::anyhow!("transport")).into();
+    let error: anyhow::Error = crate::NumericUploadError::from(anyhow::anyhow!("transport")).into();
     assert_eq!(error.to_string(), "transport");
 }
 
@@ -168,7 +168,7 @@ fn retirement_callback_can_reenter_owner_and_cannot_resurrect_lease() {
     let owner = TestOwner::new(ID, AllocationRetirementOutcome::Retired);
     let lease = AllocationLease::register(ID, owner.clone()).unwrap();
     let weak = lease.downgrade();
-    let owner_weak = Arc::downgrade(&owner);
+    let owner_weak = Shared::downgrade(&owner);
     owner.set_callback(move || {
         let owner = owner_weak.upgrade().unwrap();
         let entries = owner

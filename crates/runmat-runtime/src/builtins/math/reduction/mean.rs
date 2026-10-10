@@ -82,6 +82,8 @@ fn mean_internal_error(detail: impl AsRef<str>) -> RuntimeError {
 
 #[path = "mean/fusion_contract.rs"]
 mod fusion_contract;
+#[path = "mean/fusion_sign.rs"]
+mod fusion_sign;
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::mean", reduction = fusion_contract::DECLARATION)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -1429,10 +1431,11 @@ async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinRes
         return gpu_helpers::resident_gpu_value(uploaded);
     }
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
-        if let Some(mut device_result) =
+        if let Some(device_result) =
             provider_execution::execute(provider, &handle, &args.axes, args.nan_mode, &args.output)
                 .await?
         {
+            let mut device_result = publish_mean_gpu_shape(device_result)?;
             gpu_helpers::propagate_output_provenance(&mut device_result, [&handle])?;
             return gpu_helpers::resident_gpu_value(device_result);
         }
@@ -1449,6 +1452,41 @@ async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinRes
             "mean: provider returned an unsupported gathered numeric value",
         )),
     }
+}
+
+/// One mean call publishes scalar geometry only after all of its source axes
+/// have executed. Internal vecdim scratch retains its original tensor rank.
+fn mean_public_shape(shape: &[usize], count: usize) -> Vec<usize> {
+    if count == 1 {
+        vec![1, 1]
+    } else {
+        shape.to_vec()
+    }
+}
+
+fn publish_mean_gpu_shape(output: GpuTensorHandle) -> BuiltinResult<GpuTensorHandle> {
+    let count = output
+        .shape()
+        .iter()
+        .try_fold(1usize, |total, &extent| total.checked_mul(extent))
+        .ok_or_else(|| {
+            let mut error =
+                mean_internal_error("mean: provider output shape overflows at publication");
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error
+        })?;
+    let public_shape = mean_public_shape(output.shape(), count);
+    if public_shape == output.shape() {
+        return Ok(output);
+    }
+    output
+        .with_view(output.view().clone().with_shape(public_shape))
+        .map_err(|source| {
+            let mut error = mean_internal_error("mean: cannot publish scalar reduction view");
+            error.source = Some(Box::new(source));
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error
+        })
 }
 
 #[path = "mean/provider_execution.rs"]

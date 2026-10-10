@@ -27,6 +27,7 @@ mod strings;
 mod strlength;
 mod strncmp;
 mod strncmpi;
+mod support;
 mod text_boundary;
 mod wildcard_pattern;
 

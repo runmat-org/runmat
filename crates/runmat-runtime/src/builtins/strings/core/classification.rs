@@ -118,15 +118,34 @@ pub(crate) fn parse_force_cell_output(rest: &[Value]) -> BuiltinResult<bool> {
             format!("isstrprop: unsupported option '{option}'"),
         ));
     }
-    match &rest[1] {
-        Value::Bool(value) => Ok(*value),
-        Value::Num(value) if *value == 0.0 => Ok(false),
-        Value::Num(value) if *value == 1.0 => Ok(true),
-        Value::LogicalArray(value) if value.data.len() == 1 => Ok(value.data[0] != 0),
-        _ => Err(compat_error(
+    let flag = match &rest[1] {
+        Value::Bool(value) => Some(*value),
+        Value::Num(value) => double_binary_flag(*value),
+        // A dense Double with one stored element has the same scalar flag
+        // meaning as Value::Num. Borrow its native F64 storage: Single and
+        // integer buffers must not enter through a converting read.
+        Value::Tensor(tensor) if tensor.len() == 1 => tensor
+            .as_f64_slice()
+            .and_then(|values| values.first().copied())
+            .and_then(double_binary_flag),
+        Value::LogicalArray(value) if value.data.len() == 1 => Some(value.data[0] != 0),
+        _ => None,
+    };
+    flag.ok_or_else(|| {
+        compat_error(
             "isstrprop",
-            "isstrprop: ForceCellOutput must be a logical scalar or numeric 0 or 1",
-        )),
+            "isstrprop: ForceCellOutput must be a logical scalar or real Double 0 or 1",
+        )
+    })
+}
+
+fn double_binary_flag(value: f64) -> Option<bool> {
+    if value == 0.0 {
+        Some(false)
+    } else if value == 1.0 {
+        Some(true)
+    } else {
+        None
     }
 }
 

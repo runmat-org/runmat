@@ -4,7 +4,7 @@ use super::super::host_presentation::HostPresentationReceipt;
 use runmat_accelerate_api::observation::{ProviderObservationFailure, ProviderOperationRecorder};
 use runmat_accelerate_api::{
     provider_for_handle, same_provider_instance, AccelProvider, GpuTensorHandle,
-    ProviderFeasibilityQuery,
+    ProviderFeasibilityQuery, ProviderProducedNumericReadbackEvidence, ProviderRepresentation,
 };
 use runmat_execution::{Digest, ProviderInputStageDemands, ResourceByteBound};
 
@@ -22,6 +22,22 @@ pub(crate) struct ExactProviderReadback<'a> {
 pub(crate) enum ExactProviderReadbackPhase {
     Preparation,
     Conditional,
+}
+
+/// A provider-created output, not an original input, is read back after the
+/// hook. The public host result and conversion workspace are distinct from
+/// the provider's native physical result and mapped staging.
+#[derive(Clone, Copy)]
+pub(crate) struct ExactProducedProviderReadback {
+    pub(crate) output_index: usize,
+    pub(crate) public_host_bytes: ResourceByteBound,
+    pub(crate) conversion_host_workspace: ResourceByteBound,
+}
+
+pub(super) struct PreparedProducedReadback {
+    pub(super) output: ProviderRepresentation,
+    pub(super) evidence: ProviderProducedNumericReadbackEvidence,
+    pub(super) public_host_bytes: ResourceByteBound,
 }
 
 /// Physical continuation admitted only for an Unsupported provider hook that
@@ -55,6 +71,7 @@ pub(crate) struct ExactProviderOperation<'a> {
     /// in the provider's live-allocation resource snapshot.
     pub(crate) already_live_bytes: u64,
     pub(crate) readbacks: &'a [ExactProviderReadback<'a>],
+    pub(crate) produced_readback: Option<ExactProducedProviderReadback>,
     /// Provider-owned internal stages not represented by original readbacks
     /// (for example a second readback of an adapted, newly uploaded kernel).
     /// The typed provider operation contract must prove these stage peaks.
@@ -76,6 +93,7 @@ pub(crate) struct SelectedProviderOperation {
     pub(super) receipt: HostPresentationReceipt,
     pub(super) direct_output: DirectProviderPublication,
     pub(super) conditional_upload: ConditionalUploadPublication,
+    pub(super) produced_readback: Option<PreparedProducedReadback>,
 }
 
 pub(super) enum DirectProviderPublication {
@@ -199,6 +217,38 @@ fn conditional_output_owner_valid(
 }
 
 impl SelectedProviderOperation {
+    pub(crate) fn validate_direct_provider_outputs(
+        &mut self,
+        outputs: &[&GpuTensorHandle],
+    ) -> bool {
+        self.direct_output.validate(self.provider, outputs)
+    }
+
+    pub(crate) fn admits_produced_readback(&self, output: &GpuTensorHandle) -> bool {
+        let Some(planned) = self.produced_readback.as_ref() else {
+            return false;
+        };
+        if !conditional_output_owner_valid(self.provider, output)
+            || output.physical().requested_bytes() != planned.evidence.source_requested_bytes
+        {
+            return false;
+        }
+        let Some(actual) = ProviderFeasibilityQuery::exact_numeric_download(output) else {
+            return false;
+        };
+        actual.inputs.first() == Some(&planned.output)
+            && self
+                .provider
+                .query_numeric_download_feasibility(output, &actual)
+                .is_supported()
+            && self.provider.download_numeric_host_workspace_bound(output)
+                == planned.evidence.host_workspace_bytes
+            && self
+                .provider
+                .download_numeric_provider_scratch_bound(output)
+                == planned.evidence.provider_scratch_bytes
+            && self.provider.download_numeric_queue_slots(output) == planned.evidence.queue_slots
+    }
     pub(crate) fn validate_direct_provider_output(&mut self, output: &GpuTensorHandle) -> bool {
         self.direct_output.validate(self.provider, &[output])
     }

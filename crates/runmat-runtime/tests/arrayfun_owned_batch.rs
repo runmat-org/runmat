@@ -6,7 +6,9 @@ use runmat_accelerate_api::{
 };
 use runmat_runtime::{builtins::common::gpu_helpers, call_builtin_async_with_outputs};
 use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, NumericDType, Tensor, Value};
-use std::sync::OnceLock;
+
+#[path = "support/retained_provider.rs"]
+mod retained_provider;
 
 #[path = "arrayfun_owned_batch/lifecycle.rs"]
 mod lifecycle;
@@ -14,8 +16,7 @@ mod lifecycle;
 mod division_fallback;
 
 fn provider() -> &'static InProcessProvider {
-    static PROVIDER: OnceLock<InProcessProvider> = OnceLock::new();
-    PROVIDER.get_or_init(InProcessProvider::new)
+    retained_provider::retained_test_provider!(PROVIDER: InProcessProvider = InProcessProvider::new())
 }
 
 fn upload(value: &Value) -> GpuTensorHandle {

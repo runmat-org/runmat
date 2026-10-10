@@ -10,9 +10,8 @@ use runmat_accelerate_api::observation::{
     ProviderObservationCapability, ProviderObservationSupport,
 };
 use runmat_accelerate_api::{
-    provider_for_handle, GpuTensorHandle, ProviderFeasibility, ProviderFeasibilityQuery,
-    ProviderOperationFamily, ProviderOperationIdentity, ProviderRepresentation, ProviderResidency,
-    ProviderWorkload,
+    class_preserving_upload_query, provider_for_handle, GpuTensorHandle, ProviderFeasibility,
+    ProviderRepresentation, ProviderResidency,
 };
 use runmat_execution::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,
@@ -92,25 +91,9 @@ pub(crate) fn select_exact_host_upload_with_readbacks(
     }) else {
         return Ok(None);
     };
-    let requested_outputs = u32::try_from(request.outputs.len()).ok();
     let admitted_outputs = request.outputs.clone();
-    let upload = ProviderFeasibilityQuery {
-        operation: ProviderOperationIdentity::new("transfer.upload"),
-        family: ProviderOperationFamily::Upload,
-        inputs: request
-            .outputs
-            .iter()
-            .cloned()
-            .map(|mut input| {
-                input.residency = ProviderResidency::Host;
-                input
-            })
-            .collect(),
-        outputs: request.outputs,
-        workload: ProviderWorkload {
-            requested_outputs,
-            ..ProviderWorkload::default()
-        },
+    let Some(upload) = class_preserving_upload_query(request.outputs) else {
+        return Ok(None);
     };
     let ProviderFeasibility::Supported { estimate } = provider.query_feasibility(&upload) else {
         return Ok(None);
@@ -232,6 +215,8 @@ pub(crate) fn select_exact_host_upload_with_readbacks(
             ))
             .expect("typed upload route serializes"),
         ),
+        provider_provenance: None,
+        graph_output_authority: None,
         revision,
     };
     let candidate = upload_candidate(

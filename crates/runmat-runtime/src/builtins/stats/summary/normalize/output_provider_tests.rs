@@ -35,7 +35,10 @@ impl AccelProvider for SiblingAliasProvider {
         Box::pin(async { panic!("output restoration must not download") })
     }
 
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let upload = self.uploads.fetch_add(1, Ordering::SeqCst);
         let mut retained = self.retained.lock().unwrap();
         if upload == self.alias_at {

@@ -3,14 +3,14 @@ use crate::*;
 const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
         "Case-insensitive matching is the default; include `'matchcase'` when you need case-sensitive behaviour.",
-        "With one output, `regexpi` returns a numeric row vector of 1-based match start indices.",
+        "With one output and no output selector, `regexpi` returns a numeric row vector of 1-based match start indices.",
         "Without output keywords, successive outputs are match starts, match ends, token extents, matched substrings, capture tokens, named tokens, and split text.",
         "When the input is a string array or cell array of character vectors, outputs are cell arrays whose shape matches the input container.",
         "`'forceCellOutput'` forces cell outputs even for scalar inputs, matching MATLAB semantics.",
         "`'once'` limits each element to its first match, influencing every requested output.",
         "Zero-length matches are omitted by default; `'emptymatch'` includes them and `'noemptymatch'` restores the default. RunMat also accepts its older two-argument allow/remove form.",
         "Dot (`.`) matches newlines by default. Pass `'dotexceptnewline'` to exclude them. The Rust regex engine does not support MATLAB lookaround, backreferences, atomic groups, or dynamic expressions.",
-        "Named tokens (using `(?<name>...)`) return scalar struct values per match when `'names'` is requested. Unmatched names resolve to empty strings for MATLAB compatibility.",
+        "Named tokens (using `(?<name>...)`) produce a cell of scalar structs for scalar text when `'names'` is requested, or one struct with `'once'`. Array subjects add an outer cell matching the input shape. Unmatched names resolve to empty strings for MATLAB compatibility.",
         "Integer semantics: numeric match locations are outputs only. Numeric, logical, symbolic, and provider-resident inputs or options are rejected by the shared regular-expression admission boundary before gather or provider access.",
     ] },
     BuiltinDocumentationSection { heading: "Placement and effects", paragraphs: &[
@@ -38,7 +38,7 @@ const EXAMPLES: &[BuiltinExample] = &[
     },
     BuiltinExample {
         id: "example-3", title: "Extracting capture tokens case-insensitively",
-        program: "tokens = regexpi('ID:AB12', '(?<prefix>[a-z]+)(?<digits>\\d+)', 'tokens');\nfirst = tokens{1}{1};\nsecond = tokens{1}{2}", display_output: Some("first =\n    'AB'\nsecond =\n    '12'"),
+        program: "tokens = regexpi('ID:AB12', '(?<prefix>[a-z]+)(?<digits>\\d+)', 'tokens');\nfirst = tokens{1}{1}\nsecond = tokens{1}{2}", display_output: Some("first =\n    'AB'\nsecond =\n    '12'"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
@@ -82,7 +82,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "How do zero-length matches behave?", answer: "Zero-length matches are omitted by default. Use `'emptymatch'` to include them or `'noemptymatch'` to restore the default. The older two-argument allow/remove form also works in RunMat." },
         BuiltinDocumentationFaq { question: "Does `regexpi` run on the GPU?", answer: "Text matching runs on the host and has no GPU text kernel. Numeric or resident values in text roles are rejected before provider access; supported scalar controls are handled separately." },
         BuiltinDocumentationFaq { question: "Are named tokens supported?", answer: "Yes. Use the `(?<name>...)` syntax and request the `'names'` output flag. Each match produces a scalar struct with fields for every named group." },
-        BuiltinDocumentationFaq { question: "What happens with `'once'`?", answer: "`'once'` restricts each input element to the first match. All requested outputs honour that limit, returning scalars instead of per-match cells." },
+        BuiltinDocumentationFaq { question: "What happens with `'once'`?", answer: "`'once'` restricts each input element to the first match. For scalar text with a match, start/end indices, matched text, and named tokens become scalar values; capture tokens and splits remain cells, while token extents remain a matrix." },
         BuiltinDocumentationFaq { question: "Can I keep scalar outputs in cells?", answer: "Yes. Pass `'forceCellOutput'` to wrap even scalar results in cells, which is useful when writing code that must treat scalar and array inputs uniformly." }],
     links: &[BuiltinDocumentationLink { label: "regexp", target: BuiltinDocumentationLinkTarget::Builtin("regexp") },
         BuiltinDocumentationLink { label: "regexprep", target: BuiltinDocumentationLinkTarget::Builtin("regexprep") },

@@ -10,6 +10,9 @@ use crate::{NumericClass, OperatorKind};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ScalarOperation {
     Operator(OperatorKind),
+    /// Real Single+Double addition evaluates in Double, then rounds the sum
+    /// once to Single. Operand order is retained by the Apply node.
+    MixedRealAddToSingle,
     Cast(NumericClass),
 }
 
@@ -25,6 +28,7 @@ impl ScalarOperation {
                 | OperatorKind::ElementwiseLeftDivide => Some(2),
                 _ => None,
             },
+            Self::MixedRealAddToSingle => Some(2),
             Self::Cast(NumericClass::Single | NumericClass::Double) => Some(1),
             Self::Cast(_) => None,
         }

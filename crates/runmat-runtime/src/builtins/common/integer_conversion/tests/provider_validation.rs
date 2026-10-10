@@ -11,7 +11,8 @@ use runmat_types::IntegerClass;
 use runmat_value::Value;
 use std::sync::atomic::Ordering;
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn abandoning_pending_cast_restores_borrowed_metadata_and_allocation() {
     use futures::{task::noop_waker, FutureExt};
     use std::task::{Context, Poll};
@@ -43,7 +44,8 @@ fn abandoning_pending_cast_restores_borrowed_metadata_and_allocation() {
     assert!(physical.acquire().is_none());
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn malformed_fresh_outputs_are_freed_without_touching_borrowed_input() {
     let _lock = test_support::accel_test_lock();
     for mode in [
@@ -73,7 +75,8 @@ fn malformed_fresh_outputs_are_freed_without_touching_borrowed_input() {
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn unavailable_input_owner_is_rejected_before_hook_or_download() {
     let _lock = test_support::accel_test_lock();
     let provider = provider(ResultMode::Failure);
@@ -95,7 +98,8 @@ fn unavailable_input_owner_is_rejected_before_hook_or_download() {
     assert!(block_on(foreign.download(&input)).is_ok());
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn only_typed_unsupported_permits_owner_download_fallback() {
     let _lock = test_support::accel_test_lock();
     for mode in [ResultMode::Failure, ResultMode::Unsupported] {
@@ -131,7 +135,8 @@ fn only_typed_unsupported_permits_owner_download_fallback() {
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn unsupported_singleton_cast_retains_exact_class_shape_owner_and_intent() {
     let _lock = test_support::accel_test_lock();
     let provider = provider(ResultMode::Unsupported);
@@ -175,7 +180,8 @@ fn unsupported_singleton_cast_retains_exact_class_shape_owner_and_intent() {
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn same_integer_class_cast_may_return_the_owned_input_alias() {
     let _lock = test_support::accel_test_lock();
     let provider = provider(ResultMode::Alias);

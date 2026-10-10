@@ -61,6 +61,7 @@ pub async fn execute_matmul_epilogue_placed(
             scalar_work_units: None,
             matmul: Some(contract),
             preparation_program: None,
+            shader_requirements: None,
         },
     )? {
         FusionExecutionOutcome::Executed(selection) => selection,
@@ -91,6 +92,9 @@ pub async fn execute_matmul_epilogue_placed(
         handles.insert(id, handle);
     }
     let epilogue = admitted.descriptor(&handles);
+    let uploaded_inputs = admitted
+        .data_inputs()
+        .any(|id| matches!(admitted.value(&request, id), Some(Value::Tensor(_))));
     let output = {
         let _metadata: Vec<_> = handles
             .values()
@@ -103,7 +107,14 @@ pub async fn execute_matmul_epilogue_placed(
                 &handles[&admitted.right],
                 &epilogue,
             )
-            .await?;
+            .await
+            .map_err(|error| {
+                if uploaded_inputs {
+                    error.with_unproven_effects()
+                } else {
+                    error
+                }
+            })?;
         selection.observer.kernel_unmeasured();
         output
     };

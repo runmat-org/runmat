@@ -17,8 +17,8 @@ use candidate::admitted_candidate;
 use readbacks::prepare_readbacks;
 use types::{ConditionalUploadPublication, DirectProviderPublication};
 pub(crate) use types::{
-    ExactConditionalProviderUpload, ExactProviderOperation, ExactProviderReadback,
-    ExactProviderReadbackPhase, SelectedProviderOperation,
+    ExactConditionalProviderUpload, ExactProducedProviderReadback, ExactProviderOperation,
+    ExactProviderReadback, ExactProviderReadbackPhase, SelectedProviderOperation,
 };
 
 pub(crate) fn select_exact_provider_operation(
@@ -89,7 +89,12 @@ pub(crate) fn select_exact_provider_operation(
         .parallel()
         .map(|port| port.placement_resources())
         .unwrap_or_default();
-    let Some(mut prepared) = prepare_readbacks(&request, parallel.memory_available_bytes)? else {
+    let Some(mut prepared) = prepare_readbacks(
+        &request,
+        estimate.output_bytes,
+        parallel.memory_available_bytes,
+    )?
+    else {
         return Ok(None);
     };
     let provider_digest = Digest::sha256(
@@ -156,5 +161,6 @@ pub(crate) fn select_exact_provider_operation(
                 .conditional_provider_upload
                 .map(|upload| upload.provider_output_requested_bytes),
         ),
+        produced_readback: prepared.produced_readback,
     }))
 }

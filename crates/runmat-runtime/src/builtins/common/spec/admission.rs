@@ -4,13 +4,92 @@ use runmat_types::{ValueFact, ValueKindFact};
 use runmat_value::Value;
 use std::{future::Future, pin::Pin};
 
+mod sign;
+pub use sign::{scan_represented_sign, FusionSignEvidence};
+
+#[path = "admission/arithmetic.rs"]
+mod arithmetic;
+pub use arithmetic::{
+    FusionArithmeticEvidence, FusionArithmeticKind, FusionPowerArithmeticReceipt,
+    FusionScalarControl,
+};
+
 /// Exact values are available only for graph inputs/constants. An unevaluated
 /// intermediate never borrows the value of an ancestor as a semantic witness.
 pub struct FusionAdmissionContext<'a> {
     pub operands: &'a [Option<&'a Value>],
     pub facts: &'a [ValueFact],
+    operand_ids: &'a [u32],
+    /// Request-local evidence aligned to the exact source operand ValueIds.
+    operand_evidence: &'a [Option<FusionOperandDomainEvidence>],
+    pub output_fact: Option<&'a ValueFact>,
     /// Record before executing work so cancellation and failure are observable.
     pub work: &'a mut FusionAdmissionWork,
+}
+
+impl<'a> FusionAdmissionContext<'a> {
+    /// Bind every evidence slot to the selected operation's actual operand
+    /// ValueId before invoking an operation owner. A correctly positioned but
+    /// differently owned receipt is invalid, not evidence for that slot.
+    pub fn new(
+        operand_ids: &'a [u32],
+        operands: &'a [Option<&'a Value>],
+        facts: &'a [ValueFact],
+        operand_evidence: &'a [Option<FusionOperandDomainEvidence>],
+        work: &'a mut FusionAdmissionWork,
+    ) -> Option<Self> {
+        if operand_ids.len() != operands.len()
+            || operand_ids.len() != facts.len()
+            || operand_ids.len() != operand_evidence.len()
+            || operand_evidence
+                .iter()
+                .zip(operand_ids.iter().zip(facts))
+                .any(|(evidence, (id, fact))| {
+                    evidence.as_ref().is_some_and(|evidence| {
+                        evidence.value_id != *id
+                            || evidence.sign.is_some_and(|sign| {
+                                fact.numeric().is_none_or(|numeric| {
+                                    numeric.domain != runmat_types::NumericDomain::Real
+                                        || numeric.class != sign.class()
+                                })
+                            })
+                    })
+                })
+        {
+            return None;
+        }
+        Some(Self {
+            operands,
+            facts,
+            operand_ids,
+            operand_evidence,
+            output_fact: None,
+            work,
+        })
+    }
+
+    pub fn with_output_fact(mut self, output_fact: &'a ValueFact) -> Self {
+        self.output_fact = Some(output_fact);
+        self
+    }
+
+    pub fn evidence_at(&self, index: usize) -> Option<FusionOperandDomainEvidence> {
+        self.operand_evidence
+            .get(index)
+            .and_then(|evidence| *evidence)
+            .filter(|evidence| self.operand_ids.get(index) == Some(&evidence.value_id))
+    }
+
+    pub fn operand_id(&self, index: usize) -> Option<u32> {
+        self.operand_ids.get(index).copied()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FusionOperandDomainEvidence {
+    pub value_id: u32,
+    pub numerical_domain: runmat_accelerate_api::NumericalDomainEvidence,
+    pub sign: Option<FusionSignEvidence>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
@@ -27,16 +106,68 @@ pub enum FusionAdmissionWork {
         provider_precision: runmat_accelerate_api::ProviderPrecision,
         inputs: Vec<runmat_accelerate_api::ProviderRepresentation>,
     },
+    /// One request-local proof may inspect several host and resident leaves.
+    /// Stages are appended before work starts, including failed or abandoned
+    /// provider hooks; one observation measures the complete proof wall time.
+    DomainProof {
+        binding: BuiltinBindingIdentity,
+        provider_precision: runmat_accelerate_api::ProviderPrecision,
+        stages: Vec<FusionProofStage>,
+    },
+    SignProof {
+        operation: runmat_types::OperatorKind,
+        host_elements: u64,
+        propagated_operands: u64,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub enum FusionProofStage {
+    GraphIndex {
+        operations: u64,
+        leaves: u64,
+    },
+    GraphWalk {
+        examined: u64,
+    },
+    RangePropagation {
+        operands: u64,
+    },
+    ControlMaterialization {
+        values: u64,
+        shape_dimensions: u64,
+        string_bytes: u64,
+        char_elements: u64,
+    },
+    HostScan {
+        elements: u64,
+    },
+    Provider {
+        operation: runmat_accelerate_api::ProviderOperationIdentity,
+        input: runmat_accelerate_api::ProviderRepresentation,
+    },
+    ScalarReadback {
+        elements: u64,
+    },
 }
 
 pub struct FusionAdmissionEvidence {
     pub output_kind: ValueKindFact,
+    /// Optional operation-owned ordinary publication carrier, independent of
+    /// sign. Absence preserves conservative inferred storage.
+    pub output_storage: Option<runmat_types::StorageFact>,
     pub numerical_domain: runmat_accelerate_api::NumericalDomainEvidence,
+    pub arithmetic: Option<FusionArithmeticEvidence>,
+    pub sign: Option<FusionSignEvidence>,
 }
 
 pub type FusionAdmissionFuture<'a> =
     Pin<Box<dyn Future<Output = anyhow::Result<Option<FusionAdmissionEvidence>>> + 'a>>;
 pub type FusionAdmission = for<'a> fn(FusionAdmissionContext<'a>) -> FusionAdmissionFuture<'a>;
+pub type FusionStaticAdmission =
+    for<'a> fn(
+        &FusionAdmissionContext<'a>,
+    ) -> anyhow::Result<Option<(FusionAdmissionEvidence, FusionAdmissionWork)>>;
 
 /// A typed helper requirement, not an operation-name dispatch or independent
 /// numerical implementation. Backends and fusion share the helper's source.
@@ -69,6 +200,16 @@ pub struct FusionSemanticDeclaration {
     pub binding: BuiltinBindingIdentity,
     pub revision: u32,
     pub admit: Option<FusionAdmission>,
+    /// Pure, non-suspending subset of the same operation-owned admission.
+    pub admit_static: Option<FusionStaticAdmission>,
+    /// A selected operation-owned real-domain requirement and its catalog
+    /// diagnostic. The resolver proves this exact predicate before shader
+    /// generation; probe failures use the declared descriptor identifier.
+    pub required_real_unary: Option<(
+        runmat_types::RealUnaryPredicate,
+        &'static runmat_builtins::BuiltinErrorDescriptor,
+    )>,
+    pub required_arithmetic: Option<FusionArithmeticKind>,
     pub helpers: &'static [FusionMathHelper],
     /// Optional closed scalar operation selected by this exact binding.
     /// WGSL-only declarations remain on their established route until their

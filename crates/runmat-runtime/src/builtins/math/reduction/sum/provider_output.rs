@@ -112,7 +112,7 @@ pub(super) async fn cast_public_single(
             }
             Ok(Some(output))
         }
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
+        Err(error) if error.is_unsupported() => Ok(None),
         Err(error) => Err(sum_provider_error(error)),
     }
 }

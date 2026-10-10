@@ -73,12 +73,12 @@ impl AccelProvider for Provider {
     fn upload_numeric_raw(
         &self,
         host: &HostNumericTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::SeqCst);
         match self.mode {
-            Mode::UploadUnsupported => Err(unsupported_provider_operation(
-                "transpose restoration unsupported",
-            )),
+            Mode::UploadUnsupported => {
+                Err(unsupported_provider_operation("transpose restoration unsupported").into())
+            }
             Mode::UploadFailure => {
                 Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "restore failure").into())
             }
@@ -125,12 +125,12 @@ impl AccelProvider for Provider {
                 .inner
                 .transpose(input)?
                 .with_view(GpuTensorView::contiguous(vec![6, 1]))?,
-            Mode::Class => self.inner.upload_numeric_raw(&HostNumericTensorView {
+            Mode::Class => self.inner.upload_numeric_host(&HostNumericTensorView {
                 data: HostNumericDataView::F32(&[0.; 6]),
                 shape: &[3, 2],
                 storage: GpuTensorStorage::Real,
             })?,
-            Mode::Complex => self.inner.upload_numeric_raw(&HostNumericTensorView {
+            Mode::Complex => self.inner.upload_numeric_host(&HostNumericTensorView {
                 data: HostNumericDataView::F64(&[0.; 12]),
                 shape: &[3, 2],
                 storage: GpuTensorStorage::ComplexInterleaved,

@@ -39,7 +39,9 @@ pub use bytecode::{
 #[cfg(feature = "native-accel")]
 pub use bytecode::{
     FusionCandidateGroup, FusionInstructionKind, FusionInstructionWindow, FusionMetadata,
-    ProspectiveMultiStoreRegion, ProspectiveSemanticMultiStoreRegion, ProspectiveStore,
+    ImageCheckpoint, ImageLiveOut, ImageLiveOutSource, ImageNormalizePublicationJoin,
+    ImageRegionStore, ImageStoreDestination, ImageStoreOrdinal, ProspectiveMultiStoreRegion,
+    ProspectiveSemanticMultiStoreRegion, ProspectiveStore,
 };
 pub use call::builtins::{
     evaluate_session_source_in_context, push_dynamic_eval_options, set_dynamic_eval_options,

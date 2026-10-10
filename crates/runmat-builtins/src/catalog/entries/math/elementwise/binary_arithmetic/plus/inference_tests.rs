@@ -93,6 +93,29 @@ fn tracks_broadcast_class_domain_and_residency() {
 }
 
 #[test]
+fn mixed_real_single_array_and_double_scalar_share_operator_class_rule() {
+    let single = numeric(
+        NumericClass::Single,
+        NumericDomain::Real,
+        &[Some(2), Some(1)],
+    );
+    let double = numeric(
+        NumericClass::Double,
+        NumericDomain::Real,
+        &[Some(1), Some(1)],
+    );
+    let catalog = infer_catalog_call(
+        &PLUS_CATALOG_ENTRY,
+        &request(vec![single.clone(), double.clone()]),
+    );
+    let operator = runmat_types::infer_binary(runmat_types::OperatorKind::Add, &single, &double);
+    assert!(catalog.diagnostics.is_empty());
+    assert!(operator.diagnostics.is_empty());
+    assert_eq!(catalog.outputs[0].kind, operator.fact.kind);
+    assert_eq!(catalog.outputs[0].shape, operator.fact.shape);
+}
+
+#[test]
 fn preserves_integer_and_applies_typed_like_placement() {
     let integer = numeric(
         NumericClass::UInt64,

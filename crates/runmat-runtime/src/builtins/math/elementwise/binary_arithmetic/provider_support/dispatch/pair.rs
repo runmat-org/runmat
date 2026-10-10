@@ -9,16 +9,18 @@ mod complex;
 use complex::try_complex_pair;
 
 #[cfg(test)]
-mod owned_tests;
-#[cfg(test)]
 mod complex_tests;
+#[cfg(test)]
+mod owned_tests;
 
 use super::super::operation::ArithmeticPairRoute;
+use super::super::scalar::is_scalar_shape;
 use super::super::{
     broadcast_repetitions, device_real_scalar, ArithmeticProviderOperation, ExpandedPair,
 };
 use super::common::{
     accept_output, common_owner, float_handle_supported, provider_contract_error, provider_error,
+    provider_error_after_effect,
 };
 
 pub(in crate::builtins::math::elementwise::binary_arithmetic) async fn try_pair(
@@ -41,7 +43,7 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) async fn try_pair(
             Ok(output) => {
                 return accept_output(operation, output, left, Some(right), provider, left.shape())
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(error) if error.is_unsupported() => {}
             Err(error) => return Err(provider_error(operation, error)),
         }
     }
@@ -101,8 +103,7 @@ async fn try_broadcast(
             provider,
             &output_shape,
         ),
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
-        Err(error) => Err(provider_error(operation, error)),
+        Err(error) => Err(provider_error_after_effect(operation, error)),
     };
     result
 }
@@ -119,12 +120,12 @@ async fn try_device_scalar(
     if !float_handle_supported(left) || !float_handle_supported(right) {
         return Ok(None);
     }
-    let (result, class_source, other_source) = if left.shape().iter().product::<usize>() <= 1 {
+    let (result, class_source, other_source) = if is_scalar_shape(left.shape()) {
         let Some(scalar) = device_real_scalar(identity, left).await? else {
             return Ok(None);
         };
         (operation.scalar_left(provider, right, scalar), right, left)
-    } else if right.shape().iter().product::<usize>() <= 1 {
+    } else if is_scalar_shape(right.shape()) {
         let Some(scalar) = device_real_scalar(identity, right).await? else {
             return Ok(None);
         };
@@ -141,10 +142,13 @@ async fn try_device_scalar(
             provider,
             class_source.shape(),
         ),
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
-        Err(error) => Err(provider_error(operation, error)),
+        Err(error) => Err(provider_error_after_effect(operation, error)),
     }
 }
+
+#[cfg(test)]
+#[path = "pair/scalar_dispatch_shape_tests.rs"]
+mod scalar_dispatch_shape_tests;
 
 fn expand_pair<'a>(
     operation: ArithmeticProviderOperation,
@@ -176,8 +180,20 @@ fn expand_pair<'a>(
     if right_repetitions.iter().any(|&count| count != 1) {
         expanded.right = match provider.repmat(right, right_repetitions) {
             Ok(output) => output,
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
-            Err(error) => return Err(provider_error(operation, error)),
+            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+                return if expanded.expanded_left {
+                    Err(provider_error_after_effect(operation, error))
+                } else {
+                    Ok(None)
+                };
+            }
+            Err(error) => {
+                return Err(if expanded.expanded_left {
+                    provider_error_after_effect(operation, error)
+                } else {
+                    provider_error(operation, error)
+                });
+            }
         };
         expanded.expanded_right = true;
     }

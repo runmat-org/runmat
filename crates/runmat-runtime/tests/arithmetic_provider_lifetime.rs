@@ -47,7 +47,7 @@ impl AccelProvider for Provider {
     fn upload_numeric_raw(
         &self,
         view: &HostNumericTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.inner
             .upload_numeric_raw(view)
             .map(|output| self.observe(output))
@@ -83,21 +83,21 @@ impl AccelProvider for Provider {
         &'a self,
         _left: &'a GpuTensorHandle,
         _right: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(futures::future::pending())
     }
     fn elem_div<'a>(
         &'a self,
         left: &'a GpuTensorHandle,
         right: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         self.elem_add(left, right)
     }
     fn elem_pow<'a>(
         &'a self,
         left: &'a GpuTensorHandle,
         right: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         self.elem_add(left, right)
     }
     fn classify_real_power<'a>(
@@ -113,11 +113,11 @@ impl AccelProvider for Provider {
     }
     fn real_power_in_domain<'a>(
         &'a self,
-        left: &'a GpuTensorHandle,
-        right: &'a GpuTensorHandle,
+        _left: &'a GpuTensorHandle,
+        _right: &'a GpuTensorHandle,
         _: runmat_accelerate_api::PowerResultDomain,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        self.elem_add(left, right)
+        Box::pin(futures::future::pending())
     }
 }
 

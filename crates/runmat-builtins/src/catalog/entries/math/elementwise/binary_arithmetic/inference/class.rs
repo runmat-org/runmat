@@ -59,6 +59,9 @@ fn output_class(
     left_fact: &ValueFact,
     right_fact: &ValueFact,
 ) -> Result<NumericClass, DynamicReason> {
+    if let Some(class) = runmat_types::floating_binary_result_class(left, right) {
+        return Ok(class);
+    }
     match (left.integer_class(), right.integer_class()) {
         (Some(left_integer), Some(right_integer)) if left_integer == right_integer => Ok(left),
         (Some(_), Some(_)) => Err(DynamicReason::UnsupportedRepresentation),
@@ -75,10 +78,7 @@ fn output_class(
             Err(DynamicReason::RuntimeValue)
         }
         (Some(_), None) | (None, Some(_)) => Err(DynamicReason::UnsupportedRepresentation),
-        (None, None) if left == NumericClass::Single || right == NumericClass::Single => {
-            Ok(NumericClass::Single)
-        }
-        (None, None) => Ok(NumericClass::Double),
+        (None, None) => Err(DynamicReason::UnsupportedRepresentation),
     }
 }
 

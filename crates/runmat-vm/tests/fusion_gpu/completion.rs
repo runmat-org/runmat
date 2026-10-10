@@ -6,7 +6,7 @@ fn semantic_projection_releases_temporaries_on_success_and_output_error() {
     gc_test_context(|| {
         let _lock = accel_test_lock();
         ensure_provider_registered();
-        let provider = PROVIDER.get().unwrap();
+        let provider = registered_provider().unwrap();
         for fails in [false, true] {
             let source = if fails {
                 "function varargout = projected(x)\ndiscarded = sin(x);\nvarargout = 3;\nend"

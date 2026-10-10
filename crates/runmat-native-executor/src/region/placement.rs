@@ -105,6 +105,7 @@ pub(crate) fn choose_region(
                             // not read the omitted dimension as zero.
                             ..CandidateResourceDemand::default()
                         },
+                        output_facts: None,
                         transactional_results: true,
                     },
                     PlacementGraphCandidate {
@@ -118,6 +119,7 @@ pub(crate) fn choose_region(
                             queue_slots: 0,
                             peak_live: None,
                         },
+                        output_facts: None,
                         transactional_results: true,
                     },
                 ],
@@ -227,6 +229,8 @@ fn signature(
         runtime_facts: Digest::sha256(
             serde_json::to_vec(&facts).expect("portable runtime facts must serialize"),
         ),
+        provider_provenance: None,
+        graph_output_authority: None,
         revision: PlacementRevision {
             program: runtime.program_revision().cloned(),
             catalog: Digest::sha256(b"runmat-placement-catalog-v1"),
@@ -240,6 +244,6 @@ fn signature(
 }
 
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 pub(crate) mod test_support;
+#[cfg(test)]
+mod tests;

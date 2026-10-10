@@ -9,10 +9,8 @@ use std::sync::Arc;
 use super::backend_shared::gpu_per_buffer_limit_error;
 use super::backend_types::{ImageNormalizeKey, ImageNormalizeTuning, WgpuProvider};
 use crate::backend::wgpu::cache::{key as cache_key, persist as cache_persist};
-use crate::backend::wgpu::residency::BufferUsageClass;
-use crate::backend::wgpu::shaders::image_normalize::{
-    IMAGE_NORMALIZE_SHADER_F32, IMAGE_NORMALIZE_SHADER_F64,
-};
+use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};
+use crate::backend::wgpu::shaders::image_normalize::{self, ImageNormalizeShaderGeometry};
 use crate::backend::wgpu::types::NumericPrecision;
 
 impl WgpuProvider {
@@ -55,7 +53,7 @@ impl WgpuProvider {
         len: usize,
         label: &str,
         usage: BufferUsageClass,
-    ) -> Result<Arc<wgpu::Buffer>> {
+    ) -> Result<runmat_accelerate_api::WgpuBufferOwner> {
         self.create_storage_buffer_checked_with_element_size(
             emission,
             len,
@@ -74,10 +72,9 @@ impl WgpuProvider {
         label: &str,
         usage: BufferUsageClass,
         element_size: usize,
-    ) -> Result<Arc<wgpu::Buffer>> {
+    ) -> Result<runmat_accelerate_api::WgpuBufferOwner> {
         // Centralised guard + warning for oversized allocations
-        let size_bytes = u64::try_from(len)?
-            .checked_mul(u64::try_from(element_size)?)
+        let size_bytes = BufferResidency::requested_bytes(len, element_size)
             .ok_or_else(|| anyhow::anyhow!("{label}: allocation byte extent overflow"))?;
         if size_bytes > self.adapter_limits.max_buffer_size {
             return Err(gpu_per_buffer_limit_error(
@@ -87,9 +84,9 @@ impl WgpuProvider {
             ));
         }
         emission.ensure_device(&self.access)?;
-        let (buffer, reused) = self
-            .allocations
-            .acquire(emission, usage, len, element_size, label);
+        let (buffer, reused) =
+            self.allocations
+                .acquire(emission, usage, len, element_size, label)?;
         if reused && std::env::var("RUNMAT_DEBUG_RESIDENCY").is_ok() {
             log::debug!(
                 "[residency_debug] reused buffer label={} usage={:?} len={} ptr={:p}",
@@ -115,20 +112,13 @@ impl WgpuProvider {
         emission: &WgpuEmission<'_>,
         len: usize,
         label: &str,
-    ) -> Result<Arc<wgpu::Buffer>> {
+    ) -> Result<runmat_accelerate_api::WgpuBufferOwner> {
         self.create_storage_buffer_checked_with_usage(
             emission,
             len,
             label,
             BufferUsageClass::Generic,
         )
-    }
-
-    pub(super) fn image_normalize_vector_width(&self) -> u32 {
-        match self.precision {
-            NumericPrecision::F64 => 2,
-            NumericPrecision::F32 => 4,
-        }
     }
 
     pub(super) fn round_up_to_multiple(value: u32, mult: u32) -> u32 {
@@ -291,16 +281,15 @@ impl WgpuProvider {
             "Compiling image_normalize pipeline tuning: batch_tile={} values/thread={} lane={} spatial={}",
             tuning.batch_tile, tuning.values_per_thread, tuning.lane_count, tuning.spatial_tile
         );
-        let template = match self.precision {
-            NumericPrecision::F64 => IMAGE_NORMALIZE_SHADER_F64,
-            NumericPrecision::F32 => IMAGE_NORMALIZE_SHADER_F32,
-        };
-        let shader_src = template
-            .replace("@BT@", &tuning.batch_tile.to_string())
-            .replace("@VP@", &tuning.values_per_thread.to_string())
-            .replace("@WG@", &tuning.lane_count.to_string())
-            .replace("@ST@", &tuning.spatial_tile.to_string())
-            .replace("@BV@", &self.image_normalize_vector_width().to_string());
+        let shader_src = image_normalize::materialize(
+            self.precision,
+            ImageNormalizeShaderGeometry {
+                batch_tile: tuning.batch_tile,
+                values_per_thread: tuning.values_per_thread,
+                lane_count: tuning.lane_count,
+                spatial_tile: tuning.spatial_tile,
+            },
+        );
         let module = emission
             .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -337,6 +326,13 @@ impl WgpuProvider {
 
     pub(super) fn warmup_from_disk(&self) {
         if std::env::var("RUNMAT_DISABLE_PIPELINE_WARMUP").is_ok() {
+            return;
+        }
+        // The legacy disk records contain WGSL but no typed shader-feature
+        // requirement. Do not compile an unidentified F64 record when IEEE
+        // word shaders are unavailable. Selected reduction caches carry their
+        // own typed requirement and remain independently available.
+        if !self.ieee_words_available(self.precision) {
             return;
         }
         crate::backend::wgpu::warmup::warmup_from_disk(
@@ -471,6 +467,63 @@ impl WgpuProvider {
             desc.epsilon >= 0.0,
             "image_normalize: epsilon must be non-negative"
         );
+
+        if input.physical().element_type() == runmat_accelerate_api::NumericElementType::F32 {
+            use runmat_accelerate_api::{
+                GpuTensorStorage, HostNumericDataOwned, HostNumericDataView, HostNumericTensorView,
+            };
+            let host = <Self as AccelProvider>::download_numeric(self, input).await?;
+            ensure!(
+                host.shape == [desc.batch, desc.height, desc.width],
+                "image_normalize: descriptor dimensions do not match native single input"
+            );
+            let HostNumericDataOwned::F32(data) = host.data else {
+                return Err(anyhow::anyhow!(
+                    "image_normalize: provider lost native single input precision"
+                ));
+            };
+            let batch = desc.batch;
+            let plane = desc.height * desc.width;
+            let mut output = vec![0.0f32; data.len()];
+            if plane != 0 {
+                for b in 0..batch {
+                    let mut sum = 0.0f32;
+                    for index in 0..plane {
+                        sum += data[b + batch * index];
+                    }
+                    let mean = sum / plane as f32;
+                    let mut squared_sum = 0.0f32;
+                    for index in 0..plane {
+                        let diff = data[b + batch * index] - mean;
+                        squared_sum += diff * diff;
+                    }
+                    let sigma = (squared_sum / plane as f32 + desc.epsilon as f32).sqrt();
+                    let inverse_sigma = if sigma > 0.0 { 1.0 / sigma } else { 0.0 };
+                    for index in 0..plane {
+                        let offset = b + batch * index;
+                        let mut value = (data[offset] - mean) * inverse_sigma;
+                        if let Some(gain) = desc.gain {
+                            value *= gain as f32;
+                        }
+                        if let Some(bias) = desc.bias {
+                            value += bias as f32;
+                        }
+                        if desc.clamp_zero {
+                            value = value.max(0.0);
+                        }
+                        if let Some(gamma) = desc.gamma {
+                            value = value.powf(gamma as f32);
+                        }
+                        output[offset] = value;
+                    }
+                }
+            }
+            return self.upload_numeric_exec(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&output),
+                shape: &host.shape,
+                storage: GpuTensorStorage::Real,
+            });
+        }
 
         let mut host = <Self as AccelProvider>::download(self, input).await?;
         ensure!(

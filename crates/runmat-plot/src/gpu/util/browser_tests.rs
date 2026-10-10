@@ -1,10 +1,87 @@
 use super::*;
+use runmat_accelerate_api::{
+    test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType, WgpuAccessError,
+    WgpuBufferOwner, WgpuBufferRef,
+};
 use std::future::Future;
 use std::task::{Context, Poll};
 use wasm_bindgen_test::wasm_bindgen_test;
 use wgpu::util::DeviceExt;
 
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+#[wasm_bindgen_test(async)]
+async fn exported_buffer_keeps_same_browser_backing_and_exact_live_device_authority() {
+    async fn access() -> WgpuDeviceAccess {
+        let instance = crate::wgpu_compat::instance_new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::BROWSER_WEBGPU,
+            ..Default::default()
+        });
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions::default())
+            .await
+            .expect("browser WebGPU adapter required");
+        let (device, queue) = adapter
+            .request_device(&crate::wgpu_compat::default_device_descriptor(), None)
+            .await
+            .expect("browser WebGPU device required");
+        WgpuDeviceAccess::new(device, queue)
+    }
+
+    let selected = access().await;
+    let other = access().await;
+    let allocation = TestAllocationOwner::default()
+        .allocate_zeroed(vec![0, 0], NumericElementType::F32, GpuTensorStorage::Real)
+        .expect("typed zero-length owned allocation");
+    let backing = selected
+        .with_shared(|permit| {
+            WgpuBufferOwner::new(permit.device().create_buffer(&wgpu::BufferDescriptor {
+                label: Some("plot-browser-export-owner"),
+                size: 4,
+                usage: wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }))
+        })
+        .expect("same-device buffer creation");
+    let export = WgpuBufferRef::from_owned_buffer(
+        backing.clone(),
+        allocation.handle.clone(),
+        selected.clone(),
+    )
+    .expect("authenticated export");
+    let input = crate::gpu::GpuInputBuffer::Exported(export);
+    let renderer_input: crate::gpu::GpuInputBuffer = backing.clone().into();
+    selected
+        .with_shared(|permit| {
+            assert!(std::ptr::eq(
+                input.buffer(permit).unwrap(),
+                backing.as_ref()
+            ));
+            assert!(std::ptr::eq(
+                renderer_input.buffer(permit).unwrap(),
+                backing.as_ref()
+            ));
+        })
+        .unwrap();
+    other
+        .with_shared(|permit| {
+            assert!(matches!(
+                input.buffer(permit),
+                Err(WgpuAccessError::WrongDevice)
+            ));
+        })
+        .unwrap();
+    allocation.probe.mark_unavailable();
+    selected
+        .with_shared(|permit| {
+            assert!(matches!(
+                input.buffer(permit),
+                Err(WgpuAccessError::Allocation(_))
+            ));
+        })
+        .unwrap();
+    assert_eq!(allocation.probe.retirements(), 0);
+}
 
 #[wasm_bindgen_test(async)]
 async fn pending_production_readback_cancellation_unmaps_for_reuse() {

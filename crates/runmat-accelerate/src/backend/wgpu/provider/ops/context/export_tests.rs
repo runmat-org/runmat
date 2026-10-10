@@ -3,6 +3,45 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorStorage, HostNumericDataView, HostNumericTensorView,
 };
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen_test::wasm_bindgen_test(async)]
+async fn browser_logical_export_materializes_its_own_buffer_without_host_transfer() {
+    let provider = WgpuProvider::new_async(Default::default())
+        .await
+        .expect("actual browser WebGPU device required");
+    let input = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1.25, -0.0, 3.5, 4.25, 5.75, 6.125]),
+            shape: &[2, 3],
+            storage: GpuTensorStorage::Real,
+        })
+        .expect("selected provider upload");
+    let transposed = provider.transpose_exec(&input).expect("lazy transpose");
+    let before = provider.telemetry_snapshot();
+    let source = provider
+        .export_wgpu_buffer_exec(&input)
+        .expect("source export");
+    let materialized = provider
+        .export_wgpu_buffer_exec(&transposed)
+        .expect("materialized export");
+    assert_eq!(materialized.shape, vec![3, 2]);
+    assert_eq!(materialized.len, 6);
+    assert!(!same_buffer(&source, &materialized));
+    assert!(provider
+        .access
+        .with_shared(|permit| std::ptr::eq(
+            source.buffer(permit).unwrap(),
+            provider.get_entry_raw(&input).unwrap().buffer.as_ref()
+        ))
+        .unwrap());
+    let after = provider.telemetry_snapshot();
+    assert_eq!(after.upload_bytes, before.upload_bytes);
+    assert_eq!(after.download_bytes, before.download_bytes);
+    assert!(!materialized
+        .owning_handle()
+        .shares_allocation_with(&transposed));
+}
+
 fn buffer_size(exported: &WgpuBufferRef) -> u64 {
     exported
         .access()

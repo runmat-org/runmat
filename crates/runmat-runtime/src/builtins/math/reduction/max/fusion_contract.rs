@@ -10,6 +10,7 @@ use runmat_types::NumericClass;
 
 pub(super) const DECLARATION: FusionReductionDeclaration = FusionReductionDeclaration {
     revision: 2,
+    operation: FusionReductionOperation::Maximum,
     prepare,
 };
 fn prepare(controls: FusionReductionControls<'_>) -> FusionReductionPrepareFuture<'_> {
@@ -99,7 +100,7 @@ mod tests {
         assert_eq!(contract.output_class, NumericClass::Single);
         assert_eq!(contract.ties, FusionReductionTies::FirstWithPositiveZero);
         let Value::Tensor(result) =
-            futures::executor::block_on(max_builtin(input.clone(), vec![])).unwrap()
+            futures::executor::block_on(max_builtin(None, input.clone(), vec![])).unwrap()
         else {
             panic!("Single maximum");
         };
@@ -112,7 +113,7 @@ mod tests {
             FusionReductionEmpty::NaN
         );
         let Value::Tensor(result) =
-            futures::executor::block_on(max_builtin(nan, options.to_vec())).unwrap()
+            futures::executor::block_on(max_builtin(None, nan, options.to_vec())).unwrap()
         else {
             panic!("Single maximum");
         };

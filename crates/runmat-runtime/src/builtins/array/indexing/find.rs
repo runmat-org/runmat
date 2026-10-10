@@ -1219,8 +1219,7 @@ impl FindResult {
                             return gpu_helpers::logical_gpu_value(handle);
                         }
                         Err(runmat_accelerate_api::NumericUploadError::Provider(error))
-                            if runmat_accelerate_api::is_unsupported_provider_operation(&error) => {
-                        }
+                            if error.is_unsupported() => {}
                         Err(error) => {
                             return Err(crate::build_runtime_error(format!(
                                 "find: logical output upload failed: {error}"

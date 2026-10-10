@@ -9,6 +9,12 @@ pub(super) enum OmitNanStageAlias<'a> {
     SingletonIdentity(&'a GpuTensorHandle),
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum ClassAdaptationStage {
+    BeforeReduction,
+    AfterReduction,
+}
+
 impl<'a> OmitNanStageAlias<'a> {
     pub(super) fn for_reduction(current: &'a GpuTensorHandle, dim: usize) -> Self {
         if current.shape()[dim] == 1
@@ -46,6 +52,7 @@ pub(super) async fn adapt_output_class(
     input: &GpuTensorHandle,
     output: GpuTensorHandle,
     output_class: &OutputTemplate,
+    stage: ClassAdaptationStage,
 ) -> Result<GpuTensorHandle, MeanProviderFailure> {
     let Some(target) = desired_precision(input, output_class) else {
         return Ok(output);
@@ -57,7 +64,13 @@ pub(super) async fn adapt_output_class(
         ProviderPrecision::F32 => provider.unary_single(&output).await,
         ProviderPrecision::F64 => provider.unary_double(&output).await,
     }
-    .map_err(mean_provider_error)?;
+    .map_err(|source| {
+        let source = match stage {
+            ClassAdaptationStage::BeforeReduction => source,
+            ClassAdaptationStage::AfterReduction => source.after_effect(),
+        };
+        mean_provider_error(source)
+    })?;
     let contract = UnaryGpuOutputContract {
         storage: runmat_accelerate_api::handle_storage(input),
         precision: Some(target),

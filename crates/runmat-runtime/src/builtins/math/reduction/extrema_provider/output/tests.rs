@@ -19,7 +19,8 @@ impl AccelProvider for Provider {
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn output_admission_checks_resolved_class_storage_owner_shape_and_live_lease() {
     let provider = Box::leak(Box::new(Provider(TestAllocationOwner::new())));
     let _selected = ThreadProviderGuard::set(Some(provider));
@@ -95,7 +96,8 @@ fn output_admission_checks_resolved_class_storage_owner_shape_and_live_lease() {
     assert_eq!(input.probe.retirements(), 1);
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn pair_class_resolution_matches_native_floating_and_integer_rules() {
     let owner = TestAllocationOwner::new();
     for (left, right, right_shape, expected) in [

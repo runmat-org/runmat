@@ -53,7 +53,7 @@ impl AccelProvider for Provider {
     fn upload_numeric_raw(
         &self,
         host: &HostNumericTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         match self.intercept("numeric-upload")? {
             Some(alias) => Ok(alias),
             None => self.inner.upload_numeric_raw(host),
@@ -99,7 +99,10 @@ pub fn assert_upload_failure(error: &runmat_runtime::RuntimeError, alias: bool) 
             panic!("provider cause")
         };
         assert_eq!(
-            cause.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::error::Error::source(cause)
+                .and_then(|source| source.downcast_ref::<std::io::Error>())
+                .unwrap()
+                .kind(),
             std::io::ErrorKind::BrokenPipe
         );
     }

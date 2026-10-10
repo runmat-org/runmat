@@ -1,13 +1,15 @@
 use std::fmt;
 
-mod canonical;
 mod admission;
-mod structural;
+mod canonical;
 mod epilogue;
 mod reduction;
+mod reduction_sign;
+mod structural;
 pub use reduction::*;
-mod selected;
+pub use reduction_sign::FusionReductionSignProjection;
 mod registration_index;
+mod selected;
 pub use admission::*;
 pub use canonical::{
     canonical_fusion_declaration, canonical_fusion_spec, CanonicalFusionDeclaration,

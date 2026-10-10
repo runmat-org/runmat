@@ -9,6 +9,20 @@ use runmat_execution::{
 
 use super::local::transfer_prior_ns;
 
+fn typed_input_stage_allocations(
+    stage: &runmat_accelerate_api::reduction::ProviderReductionInputStage,
+) -> u32 {
+    use runmat_accelerate_api::reduction::ProviderReductionInputStage;
+    match stage {
+        ProviderReductionInputStage::BorrowResident { .. } => 0,
+        ProviderReductionInputStage::ResidentCast { physical, .. } => {
+            1_u32.saturating_add(physical.uniform_allocations)
+        }
+        ProviderReductionInputStage::UploadExact { .. }
+        | ProviderReductionInputStage::HostCastThenUpload { .. } => 1,
+    }
+}
+
 #[cfg(test)]
 #[path = "provider_cost/floating_cast_tests.rs"]
 mod floating_cast_tests;
@@ -19,9 +33,10 @@ mod digit_tests;
 #[cfg(test)]
 mod fusion_work_tests;
 
-pub(crate) fn wgpu_cost_estimate(
+pub(crate) fn wgpu_cost_estimate_with_geometry(
     provider: &dyn AccelProvider,
     query: &ProviderCostQuery,
+    linear_launch: crate::backend::wgpu::pipelines::FrozenLinearLaunch,
 ) -> ProviderCostEstimate {
     let matrix_work = super::provider_contract::matmul::physical_work(provider, &query.operation);
     let cast_work =
@@ -31,6 +46,16 @@ pub(crate) fn wgpu_cost_estimate(
     let sum_work = super::provider_contract::sum::physical_work(provider, &query.operation);
     let fusion_work =
         super::provider_contract::fusion_elementwise::physical_work(provider, &query.operation);
+    let typed_reduction = {
+        #[cfg(feature = "wgpu")]
+        {
+            super::typed_reduction_physical_work(&query.operation)
+        }
+        #[cfg(not(feature = "wgpu"))]
+        {
+            None::<runmat_accelerate_api::ProviderResourceEstimate>
+        }
+    };
     let fusion_empty = fusion_work
         .as_ref()
         .is_some_and(|work| work.estimate.dispatches == Some(0));
@@ -47,7 +72,11 @@ pub(crate) fn wgpu_cost_estimate(
     let digit_work = {
         #[cfg(feature = "wgpu")]
         {
-            super::provider_contract::rounding::wgpu_work(provider.precision(), &query.operation)
+            super::provider_contract::rounding::wgpu_work(
+                provider.precision(),
+                &query.operation,
+                linear_launch,
+            )
         }
         #[cfg(not(feature = "wgpu"))]
         {
@@ -57,7 +86,11 @@ pub(crate) fn wgpu_cost_estimate(
     let power_work = {
         #[cfg(feature = "wgpu")]
         {
-            super::provider_contract::power::wgpu_work(provider.precision(), &query.operation)
+            super::provider_contract::power::wgpu_work(
+                provider.precision(),
+                provider,
+                &query.operation,
+            )
         }
         #[cfg(not(feature = "wgpu"))]
         {
@@ -96,6 +129,10 @@ pub(crate) fn wgpu_cost_estimate(
         .as_ref()
         .and_then(|work| work.estimate.dispatches)
         .unwrap_or(dispatches);
+    dispatches = typed_reduction
+        .as_ref()
+        .and_then(|work| work.dispatches)
+        .unwrap_or(dispatches);
     let coordinate_work = {
         #[cfg(feature = "wgpu")]
         {
@@ -113,6 +150,9 @@ pub(crate) fn wgpu_cost_estimate(
     let mut queue_submissions = fusion_work
         .as_ref()
         .map_or(dispatches, |work| work.queue_submissions);
+    if let Some(work) = &typed_reduction {
+        queue_submissions = work.dispatches.unwrap_or(queue_submissions);
+    }
     if let Some(work) = &unary_work {
         probe_elements = work.probe_elements;
         probe_bytes = work.temporary_bytes;
@@ -122,6 +162,43 @@ pub(crate) fn wgpu_cost_estimate(
         queue_submissions = work.queue_submissions;
     }
     let mut allocations = dispatches;
+    if let Some(work) = &typed_reduction {
+        allocations = u32::from(work.output_bytes.unwrap_or(0) > 0)
+            + u32::from(work.transient_bytes != work.output_bytes);
+    }
+    let typed_input_preparation = query
+        .operation
+        .workload
+        .typed_reduction
+        .as_ref()
+        .and_then(|typed| typed.input_preparation.as_ref());
+    let input_allocations = typed_input_preparation.map_or(0, |inventory| {
+        inventory.entries().iter().fold(0_u32, |count, entry| {
+            count.saturating_add(typed_input_stage_allocations(&entry.stage))
+        })
+    });
+    allocations = allocations.saturating_add(input_allocations);
+    let input_queue_submissions = typed_input_preparation.map_or(0, |inventory| {
+        inventory.entries().iter().fold(0_u32, |count, entry| {
+            count.saturating_add(match &entry.stage {
+                runmat_accelerate_api::reduction::ProviderReductionInputStage::BorrowResident {
+                    ..
+                } => 0,
+                runmat_accelerate_api::reduction::ProviderReductionInputStage::UploadExact {
+                    upload,
+                }
+                | runmat_accelerate_api::reduction::ProviderReductionInputStage::HostCastThenUpload {
+                    upload,
+                    ..
+                } => upload.completion_queue_slots,
+                runmat_accelerate_api::reduction::ProviderReductionInputStage::ResidentCast {
+                    physical,
+                    ..
+                } => physical.queue_submissions,
+            })
+        })
+    });
+    queue_submissions = queue_submissions.saturating_add(input_queue_submissions);
     let mut upload_bytes = query.required_upload_bytes;
     if let Some(work) = &coordinate_work {
         probe_bytes = work.scratch_bytes;
@@ -212,6 +289,21 @@ pub(crate) fn wgpu_cost_estimate(
             .filter(|_| query.operation.workload.scalar_work_units.is_some())
             .map_or(0, |work| work.adapter_element_visits.saturating_mul(2)),
     );
+    let input_conversion_units = typed_input_preparation.map_or(0, |inventory| {
+        inventory.entries().iter().fold(0_u64, |units, entry| {
+            units.saturating_add(match &entry.stage {
+                runmat_accelerate_api::reduction::ProviderReductionInputStage::HostCastThenUpload {
+                    conversion_elements,
+                    ..
+                } => *conversion_elements,
+                runmat_accelerate_api::reduction::ProviderReductionInputStage::ResidentCast {
+                    ..
+                } => entry.prepared.checked_element_count().unwrap_or(u64::MAX),
+                _ => 0,
+            })
+        })
+    });
+    let execution_ns = execution_ns.saturating_add(input_conversion_units.saturating_mul(2));
     let allocations = digit_work
         .as_ref()
         .map_or(allocations, |work| work.allocations);
@@ -221,6 +313,11 @@ pub(crate) fn wgpu_cost_estimate(
     let scratch_bytes = fusion_work
         .as_ref()
         .map_or(probe_bytes, |work| work.scratch_bytes);
+    let scratch_bytes = typed_reduction.as_ref().map_or(scratch_bytes, |work| {
+        work.transient_bytes
+            .unwrap_or(0)
+            .saturating_sub(work.output_bytes.unwrap_or(0))
+    });
     let scratch_bytes = digit_work
         .as_ref()
         .map_or(scratch_bytes, |work| work.scratch_bytes);
@@ -406,6 +503,19 @@ pub(crate) fn wgpu_cost_estimate(
     }
 }
 
+#[cfg(test)]
+pub(crate) fn wgpu_cost_estimate(
+    provider: &dyn AccelProvider,
+    query: &ProviderCostQuery,
+) -> ProviderCostEstimate {
+    let launch = crate::backend::wgpu::pipelines::FrozenLinearLaunch::new(
+        crate::backend::wgpu::config::WORKGROUP_SIZE,
+        crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS,
+    )
+    .expect("default linear launch");
+    wgpu_cost_estimate_with_geometry(provider, query, launch)
+}
+
 fn average_ns(stats: ProviderDispatchStats) -> Option<u64> {
     (stats.count > 0).then(|| stats.total_wall_time_ns / stats.count)
 }
@@ -436,6 +546,50 @@ mod tests {
     };
 
     use super::*;
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn typed_cast_allocation_prior_counts_selected_uniform_allocations() {
+        use runmat_accelerate_api::reduction::ProviderReductionInputStage;
+        use runmat_accelerate_api::{
+            ProviderRealElementwiseOutputRoute, ProviderRealElementwisePhysicalProposal,
+        };
+        let mut physical = ProviderRealElementwisePhysicalProposal {
+            output_route: ProviderRealElementwiseOutputRoute::FreshAllocation,
+            output_buffer_bytes: 8,
+            workgroup_size: 64,
+            chunk_capacity: 2,
+            uniform_allocations: 2,
+            uniform_buffer_bytes: 16,
+            dispatches: 2,
+            queue_submissions: 2,
+            pipeline_key: Some(1),
+        };
+        let recipe_identity = runmat_execution::Digest::sha256(b"cast");
+        assert_eq!(
+            typed_input_stage_allocations(&ProviderReductionInputStage::ResidentCast {
+                device_id: 7,
+                recipe_identity,
+                physical: physical.clone(),
+            }),
+            3
+        );
+        physical.uniform_allocations = 4;
+        assert_eq!(
+            typed_input_stage_allocations(&ProviderReductionInputStage::ResidentCast {
+                device_id: 7,
+                recipe_identity,
+                physical,
+            }),
+            5
+        );
+        assert_eq!(
+            typed_input_stage_allocations(&ProviderReductionInputStage::BorrowResident {
+                device_id: 7,
+            }),
+            0
+        );
+    }
 
     #[cfg(feature = "wgpu")]
     #[test]

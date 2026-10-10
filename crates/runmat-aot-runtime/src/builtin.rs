@@ -1,5 +1,7 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{collections::BTreeMap, rc::Rc};
 
+use runmat_execution::Digest;
 use runmat_native_codegen::aot::{AotProgramManifest, AotRuntimeBindingMode};
 use runmat_runtime::{builtin::RuntimeBuiltinBinding, context::RuntimeBuiltinService};
 
@@ -43,7 +45,11 @@ pub fn resolve(
 
 struct ClosedWorldBuiltins {
     by_name: BTreeMap<String, Vec<RuntimeBuiltinBinding>>,
+    /// Nonpersistable identity for this immutable resolved binding table.
+    instance: u64,
 }
+
+static NEXT_CLOSED_WORLD_INSTANCE: AtomicU64 = AtomicU64::new(1);
 
 impl ClosedWorldBuiltins {
     fn new(bindings: Vec<RuntimeBuiltinBinding>) -> Result<Self, String> {
@@ -63,7 +69,10 @@ impl ClosedWorldBuiltins {
             }
             variants.push(binding);
         }
-        Ok(Self { by_name })
+        let instance = NEXT_CLOSED_WORLD_INSTANCE
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .expect("closed-world builtin registration identity exhausted");
+        Ok(Self { by_name, instance })
     }
 }
 
@@ -73,6 +82,25 @@ impl RuntimeBuiltinService for ClosedWorldBuiltins {
             .get(&name.to_ascii_lowercase())
             .cloned()
             .unwrap_or_default()
+    }
+
+    fn binding_registration_revision(&self, binding: RuntimeBuiltinBinding) -> Option<Digest> {
+        let members = self
+            .by_name
+            .get(&binding.identity.builtin.name.to_ascii_lowercase())?;
+        members
+            .iter()
+            .any(|member| {
+                member.identity == binding.identity
+                    && std::ptr::fn_addr_eq(member.implementation, binding.implementation)
+            })
+            .then(|| {
+                Digest::sha256_serialized(&(
+                    "runmat.aot-closed-world-registration.v1",
+                    self.instance,
+                ))
+                .expect("typed immutable registration scope serializes")
+            })
     }
 }
 
@@ -85,5 +113,22 @@ mod tests {
     fn closed_world_service_never_falls_back_for_an_absent_name() {
         let service = ClosedWorldBuiltins::new(Vec::new()).expect("empty exact registry");
         assert!(service.bindings_by_name("abs").is_empty());
+    }
+
+    #[test]
+    fn immutable_instance_revision_certifies_only_its_exact_selected_binding() {
+        let binding = runmat_runtime::builtin::runtime_builtin_bindings_by_name("strcmp")[0];
+        let other = runmat_runtime::builtin::runtime_builtin_bindings_by_name("strcmpi")[0];
+        let first = ClosedWorldBuiltins::new(vec![binding]).expect("exact binding table");
+        let second = ClosedWorldBuiltins::new(vec![binding]).expect("distinct exact table");
+        assert!(first.binding_registration_revision(binding).is_some());
+        assert_ne!(
+            first.binding_registration_revision(binding),
+            second.binding_registration_revision(binding)
+        );
+        assert_eq!(first.binding_registration_revision(other), None);
+        let mut foreign_code = binding;
+        foreign_code.implementation = other.implementation;
+        assert_eq!(first.binding_registration_revision(foreign_code), None);
     }
 }

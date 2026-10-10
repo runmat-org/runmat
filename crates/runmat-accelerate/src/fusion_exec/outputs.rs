@@ -10,63 +10,30 @@ use runmat_runtime::builtins::common::gpu_helpers::{
 };
 use runmat_value::Value;
 
+mod upload;
+
 pub(super) struct FusionOutputAdmission {
     borrowed: Vec<GpuTensorHandle>,
     produced: Vec<WeakGpuTensorHandle>,
 }
 impl FusionOutputAdmission {
     pub fn new(inputs: &[Value]) -> Self {
-        Self {
-            borrowed: inputs
-                .iter()
-                .filter_map(|value| match value {
-                    Value::GpuTensor(handle) => Some(handle.clone()),
-                    _ => None,
-                })
-                .collect(),
-            produced: Vec::new(),
-        }
+        Self::with_borrowed_handles(inputs.iter().filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        }))
     }
 
-    pub fn upload(
-        &mut self,
-        provider: &'static dyn AccelProvider,
-        data: &[f64],
-        shape: &[usize],
-    ) -> Result<GpuTensorHandle> {
-        use runmat_accelerate_api::{
-            upload_numeric_protecting, HostNumericDataView, HostNumericTensorView,
-        };
-        // Temporary upgrades protect live intermediates during upload validation.
-        // Weak records neither prolong output lifetimes nor recreate allocations.
-        let mut live = Vec::new();
-        for handle in &self.produced {
-            match handle.acquire() {
-                Ok(handle) => live.push(handle),
-                Err(runmat_accelerate_api::allocation::AllocationAcquisitionError::NotLive) => {}
-                Err(error) => return Err(ProviderExecutionError::from_source(error)),
-            }
+    /// Construct admission from already-resolved resident leaves without
+    /// cloning unrelated Values. The cloned handles are request-scoped
+    /// allocation protection, just like the GPU leaves selected by `new`.
+    pub fn with_borrowed_handles<'h>(
+        inputs: impl IntoIterator<Item = &'h GpuTensorHandle>,
+    ) -> Self {
+        Self {
+            borrowed: inputs.into_iter().cloned().collect(),
+            produced: Vec::new(),
         }
-        let protected: Vec<_> = self.borrowed.iter().chain(live.iter()).collect();
-        let single;
-        let data = match provider.precision() {
-            ProviderPrecision::F64 => HostNumericDataView::F64(data),
-            ProviderPrecision::F32 => {
-                single = data.iter().map(|value| *value as f32).collect::<Vec<_>>();
-                HostNumericDataView::F32(&single)
-            }
-        };
-        let handle = upload_numeric_protecting(
-            provider,
-            &HostNumericTensorView {
-                data,
-                shape,
-                storage: GpuTensorStorage::Real,
-            },
-            &protected,
-        )
-        .map_err(ProviderExecutionError::from_source)?;
-        self.admit(handle, provider, shape, provider.precision())
     }
 
     fn valid(
@@ -86,7 +53,8 @@ impl FusionOutputAdmission {
             && handle.physical().element_type() == element
             && !runmat_accelerate_api::handle_is_logical(handle)
             && !runmat_accelerate_api::handle_is_transposed(handle)
-            && exact_provider_for_handle(handle).is_some_and(|owner| std::ptr::eq(owner, provider))
+            && exact_provider_for_handle(handle)
+                .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
             && gpu_class_metadata_matches(handle, Some(precision), None, false)
             && !self
                 .borrowed

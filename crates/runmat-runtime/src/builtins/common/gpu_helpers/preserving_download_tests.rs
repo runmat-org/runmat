@@ -77,7 +77,10 @@ impl AccelProvider for ReturningUploadProvider<'_> {
             .pop()
             .expect("one result per upload"))
     }
-    fn upload_numeric_raw(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        _: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         Ok(self
             .outputs
             .lock()
@@ -513,8 +516,11 @@ impl AccelProvider for FailingNumericUploadProvider {
     fn upload(&self, _: &runmat_accelerate_api::HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         unreachable!("only native numeric upload is expected")
     }
-    fn upload_numeric_raw(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
-        anyhow::bail!("device unavailable")
+    fn upload_numeric_raw(
+        &self,
+        _: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        Err(anyhow::anyhow!("device unavailable").into())
     }
     fn download<'a>(
         &'a self,

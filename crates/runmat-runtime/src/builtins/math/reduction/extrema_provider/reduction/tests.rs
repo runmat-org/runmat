@@ -66,14 +66,14 @@ impl AccelProvider for Provider {
         &'a self,
         input: &'a GpuTensorHandle,
         dimension: usize,
-    ) -> runmat_accelerate_api::AccelProviderFuture<'a, ReduceDimResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ReduceDimResult> {
         Box::pin(async move { Ok(self.reduce(input, dimension)) })
     }
     fn reduce_max_dim<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
         dimension: usize,
-    ) -> runmat_accelerate_api::AccelProviderFuture<'a, ReduceDimResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ReduceDimResult> {
         Box::pin(async move { Ok(self.reduce(input, dimension)) })
     }
     fn device_id(&self) -> u32 {
@@ -126,6 +126,34 @@ fn provider(pending: bool) -> &'static Provider {
         reductions: AtomicUsize::new(0),
         pending,
     }))
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn dimensional_values_and_hidden_index_cannot_share_one_allocation() {
+    let provider = provider(false);
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let input = provider.allocate(vec![2, 3], NumericElementType::F64, 0.0);
+    let value_and_index = provider.allocate(vec![1, 3], NumericElementType::F64, 1.0);
+    let hidden_index = value_and_index.handle.clone();
+    let error = futures::executor::block_on(ExtremaKind::Min.adopt_reduction_result(
+        provider,
+        &input.handle,
+        0,
+        ReduceDimResult {
+            values: value_and_index.handle,
+            indices: hidden_index,
+        },
+        ExtremaDemand::ValuesOnly,
+    ))
+    .expect_err("one allocation cannot represent values and one-based indices");
+    assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(value_and_index.probe.retirements(), 1);
+    assert_eq!(input.probe.retirements(), 0);
+    input.handle.allocation_lease().validate_live().unwrap();
+    drop(input.handle);
+    assert_eq!(input.probe.retirements(), 1);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -189,7 +217,8 @@ fn dimensional_publication_handles_rank_one_and_rejects_rank_zero_before_downloa
     assert_eq!(input.probe.retirements(), 1);
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn dimensional_publication_preserves_native_values_and_double_index_contract() {
     let provider = provider(false);
     let _selected = ThreadProviderGuard::set(Some(provider));
@@ -268,7 +297,8 @@ fn dimensional_publication_preserves_native_values_and_double_index_contract() {
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn dimensional_pending_index_download_owns_both_outputs_until_abandonment() {
     let provider = provider(true);
     let _selected = ThreadProviderGuard::set(Some(provider));
@@ -297,7 +327,8 @@ fn dimensional_pending_index_download_owns_both_outputs_until_abandonment() {
     assert_eq!(input.probe.retirements(), 1);
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn dimensional_malformed_borrowed_result_rejects_without_retiring_caller() {
     let provider = provider(false);
     let _selected = ThreadProviderGuard::set(Some(provider));
@@ -323,7 +354,8 @@ fn dimensional_malformed_borrowed_result_rejects_without_retiring_caller() {
     assert_eq!(input.probe.retirements(), 1);
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn dimensional_owned_output_contract_rejects_wrong_class_owner_and_indices() {
     let provider = provider(false);
     let _selected = ThreadProviderGuard::set(Some(provider));
@@ -378,7 +410,8 @@ fn dimensional_owned_output_contract_rejects_wrong_class_owner_and_indices() {
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn dimensional_publication_checks_axis_before_shape_access() {
     let provider = provider(false);
     let _selected = ThreadProviderGuard::set(Some(provider));
@@ -408,7 +441,8 @@ fn dimensional_publication_checks_axis_before_shape_access() {
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn builtin_dimensional_demand_skips_only_unrequested_index_adaptation() {
     for name in ["min", "max"] {
         let provider = provider(false);

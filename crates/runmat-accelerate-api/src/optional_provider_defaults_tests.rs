@@ -38,7 +38,8 @@ fn transpose_default_is_typed_unsupported_and_preserves_input_ownership() {
     assert_eq!(input.probe.retirements(), 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn extrema_composite_defaults_are_typed_unsupported_without_device_work() {
     let owner = TestAllocationOwner::new();
     let input = owner
@@ -50,12 +51,25 @@ fn extrema_composite_defaults_are_typed_unsupported_without_device_work() {
         Defaults.scalar_mul(&input.handle, -1.0),
         Defaults.scalar_add(&input.handle, 2.0),
         Defaults.repmat(&input.handle, &[2, 1]),
+    ] {
+        assert!(is_unsupported_provider_operation(&result.unwrap_err()));
+        input.handle.allocation_lease().validate_live().unwrap();
+        assert_eq!(input.probe.retirements(), 0);
+    }
+    for result in [
+        ready_default(Defaults.elem_add(&input.handle, &input.handle)),
+        ready_default(Defaults.elem_sub(&input.handle, &input.handle)),
+        ready_default(Defaults.elem_mul(&input.handle, &input.handle)),
+        ready_default(Defaults.elem_div(&input.handle, &input.handle)),
+        ready_default(Defaults.elem_pow(&input.handle, &input.handle)),
+        ready_default(Defaults.elem_rem(&input.handle, &input.handle)),
+        ready_default(Defaults.elem_mod(&input.handle, &input.handle)),
         ready_default(Defaults.elem_min(&input.handle, &input.handle)),
         ready_default(Defaults.elem_max(&input.handle, &input.handle)),
         ready_default(Defaults.elem_le(&input.handle, &input.handle)),
         ready_default(Defaults.elem_ge(&input.handle, &input.handle)),
     ] {
-        assert!(is_unsupported_provider_operation(&result.unwrap_err()));
+        assert!(result.unwrap_err().is_unsupported());
         input.handle.allocation_lease().validate_live().unwrap();
         assert_eq!(input.probe.retirements(), 0);
     }
@@ -75,6 +89,111 @@ fn ready_default<F: std::future::Future>(future: F) -> F::Output {
             panic!("an unsupported default must resolve without device work")
         }
     }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn four_extrema_defaults_are_pre_effect_unsupported() {
+    let owner = TestAllocationOwner::new();
+    let input = owner
+        .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let provider = Defaults;
+    let failures = [
+        ready_default(provider.reduce_min(&input.handle)).unwrap_err(),
+        ready_default(provider.reduce_max(&input.handle)).unwrap_err(),
+        ready_default(provider.reduce_min_dim(&input.handle, 0)).unwrap_err(),
+        ready_default(provider.reduce_max_dim(&input.handle, 0)).unwrap_err(),
+    ];
+    for failure in failures {
+        assert!(failure.is_unsupported());
+        assert!(!failure.is_after_effect());
+        input.handle.allocation_lease().validate_live().unwrap();
+        assert_eq!(input.probe.retirements(), 0);
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn std_defaults_are_pre_effect_unsupported_without_device_work() {
+    let owner = TestAllocationOwner::new();
+    let input = owner
+        .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let provider = Defaults;
+    for failure in [
+        ready_default(provider.reduce_std(
+            &input.handle,
+            ProviderStdNormalization::Sample,
+            ProviderNanMode::Include,
+        ))
+        .unwrap_err(),
+        ready_default(provider.reduce_std_dim(
+            &input.handle,
+            0,
+            ProviderStdNormalization::Population,
+            ProviderNanMode::Omit,
+        ))
+        .unwrap_err(),
+    ] {
+        assert!(failure.is_unsupported());
+        assert!(!failure.is_after_effect());
+        input.handle.allocation_lease().validate_live().unwrap();
+        assert_eq!(input.probe.retirements(), 0);
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn fused_defaults_are_lazy_typed_unsupported_and_preserve_borrowed_input() {
+    let owner = TestAllocationOwner::new();
+    let allocation = owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let provider = Defaults;
+    let inputs = [allocation.handle.clone()];
+    let shape = [1, 1];
+    let classes = [ProviderElementType::F64];
+    let single = provider.fused_elementwise(
+        "",
+        ProviderShaderRequirements::Basic,
+        &inputs,
+        &shape,
+        1,
+        ProviderElementType::F64,
+    );
+    let multi = provider.fused_elementwise_multi(
+        "",
+        ProviderShaderRequirements::Basic,
+        &inputs,
+        &shape,
+        1,
+        &classes,
+    );
+    allocation
+        .handle
+        .allocation_lease()
+        .validate_live()
+        .unwrap();
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop(single);
+    assert!(ready_default(multi).unwrap_err().is_unsupported());
+    allocation
+        .handle
+        .allocation_lease()
+        .validate_live()
+        .unwrap();
+    assert_eq!(allocation.probe.retirements(), 0);
+    assert!(ready_default(provider.fused_elementwise(
+        "",
+        ProviderShaderRequirements::Basic,
+        &inputs,
+        &shape,
+        1,
+        ProviderElementType::F64,
+    ))
+    .unwrap_err()
+    .is_unsupported());
 }
 
 #[test]
@@ -209,11 +328,14 @@ fn optional_reduction_and_calculus_defaults_are_typed_unsupported() {
         provider.gradient_dim(&input, 0, 1.0),
         provider.gradient_dim_with_coordinates(&input, 0, &input),
         provider.cumtrapz_dim(&input, 0, ProviderTrapezoidSpacing::Scalar(1.0)),
-        provider.map_nan_to_zero(&input),
         provider.not_nan_mask(&input),
         provider.permute(&input, &[1, 0]),
         Defaults.gather_linear(&input, &[0], &[1, 1]),
     ];
+    assert!(provider
+        .map_nan_to_zero(&input)
+        .unwrap_err()
+        .is_unsupported());
     assert!(is_unsupported_provider_operation(
         &Defaults.scatter_linear(&input, &[0], &input).unwrap_err()
     ));

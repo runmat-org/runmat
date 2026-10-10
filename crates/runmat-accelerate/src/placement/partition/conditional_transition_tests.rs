@@ -12,6 +12,7 @@ fn unresolved_conditional_output_charges_both_legal_publication_branches() {
     let mut edge = PlacementGraphEdge {
         from: 0,
         to: 1,
+        source_output: None,
         bytes: 8,
         host_to_provider_ns: 17,
         provider_to_host_ns: 23,

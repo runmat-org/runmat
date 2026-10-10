@@ -79,7 +79,8 @@ impl runmat_accelerate_api::AccelProvider for FreadOwnerProvider {
     fn upload_numeric_raw(
         &self,
         host: &runmat_accelerate_api::HostNumericTensorView,
-    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<runmat_accelerate_api::GpuTensorHandle>
+    {
         self.inner.upload_numeric_raw(host)
     }
 

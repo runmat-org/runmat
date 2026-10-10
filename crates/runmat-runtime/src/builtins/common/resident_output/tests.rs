@@ -29,7 +29,10 @@ impl AccelProvider for AliasProvider {
     fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.inner.upload(host)
     }
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::Relaxed);
         if let Some(handle) = self.alias.lock().unwrap().as_ref() {
             return Ok(handle.clone());

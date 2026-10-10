@@ -35,6 +35,7 @@ pub(super) async fn execute(
     parsed: ParsedArguments,
     input_meta: InputMeta,
     input_count: usize,
+    observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
 ) -> BuiltinResult<Value> {
     let controls = controls(&value, &parsed)?;
     let entry = runmat_builtins::sum_invocation_entry(parsed.invocation);
@@ -57,7 +58,8 @@ pub(super) async fn execute(
         },
         vec![value],
     )?
-    .with_sum_reduction(controls)?;
+    .with_sum_reduction(controls)?
+    .with_prepared_call_observation(observation);
     execute_current_request(request, |mut operands| async move {
         let value = operands.remove(0);
         if parsed.output == SumOutputClass::Native {

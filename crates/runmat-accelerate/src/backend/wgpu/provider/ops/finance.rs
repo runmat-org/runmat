@@ -1,5 +1,20 @@
 use super::*;
 
+#[derive(Clone, Copy)]
+struct BlackScholesShaderInputGeometry<'a> {
+    shape: &'a [usize],
+    strides: &'a [usize],
+}
+
+struct BlackScholesShaderGeometry<'a> {
+    output_shape: &'a [usize],
+    inputs: [BlackScholesShaderInputGeometry<'a>; 6],
+}
+
+#[cfg(test)]
+#[path = "finance/validation_tests.rs"]
+mod validation_tests;
+
 impl WgpuProvider {
     pub(crate) fn black_scholes_price_exec(
         &self,
@@ -28,6 +43,9 @@ impl WgpuProvider {
             total_len <= u32::MAX as usize,
             "black_scholes_price: tensor length exceeds GPU dispatch limits"
         );
+        if total_len != 0 {
+            self.require_ieee_words(self.precision)?;
+        }
 
         let entries = request
             .inputs
@@ -80,6 +98,13 @@ impl WgpuProvider {
             ));
         }
 
+        let geometry = BlackScholesShaderGeometry {
+            output_shape: request.output_shape,
+            inputs: std::array::from_fn(|index| BlackScholesShaderInputGeometry {
+                shape: request.inputs[index].shape,
+                strides: request.inputs[index].strides,
+            }),
+        };
         let (call_buffer, put_buffer) =
             self.with_emission(|emission, pending| -> Result<_> {
                 let call_buffer = self.create_storage_buffer_checked(
@@ -102,7 +127,7 @@ impl WgpuProvider {
                         let chunk_len = (total_len - offset).min(chunk_capacity);
                         let shader = black_scholes_price_shader(
                             self.precision,
-                            request,
+                            &geometry,
                             total_len as u32,
                             offset as u32,
                             chunk_len as u32,
@@ -228,18 +253,18 @@ fn black_scholes_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 8] {
 
 fn black_scholes_price_shader(
     precision: NumericPrecision,
-    request: &ProviderBlackScholesPriceRequest<'_>,
+    geometry: &BlackScholesShaderGeometry<'_>,
     total: u32,
     offset: u32,
     chunk: u32,
 ) -> String {
     let ty = precision.as_str();
-    let input_indices = request
+    let input_indices = geometry
         .inputs
         .iter()
         .map(|input| {
             wgsl_broadcast_index_expression(
-                request.output_shape,
+                geometry.output_shape,
                 input.shape,
                 input.strides,
                 "linear",
@@ -252,7 +277,7 @@ fn black_scholes_price_shader(
         NumericPrecision::F32 => "3.4028234663852886e38",
     };
 
-    format!(
+    let source = format!(
         r#"
 const MAX_FINITE_BLS: {ty} = {ty}({max_finite});
 
@@ -269,12 +294,16 @@ struct Tensor {{
 @group(0) @binding(6) var<storage, read_write> call_out: Tensor;
 @group(0) @binding(7) var<storage, read_write> put_out: Tensor;
 
-fn is_nan_bls(x: {ty}) -> bool {{
-  return x != x;
+fn is_nan_bls(value: {ty}) -> bool {{
+  @IEEE_NAN_PREDICATE@
+}}
+
+fn isFiniteBls(value: {ty}) -> bool {{
+  @IEEE_FINITE_PREDICATE@
 }}
 
 fn is_finite_bls(x: {ty}) -> bool {{
-  return (x == x) && (abs(x) < MAX_FINITE_BLS);
+  return isFiniteBls(x) && (abs(x) < MAX_FINITE_BLS);
 }}
 
 fn nan_bls() -> {ty} {{
@@ -366,6 +395,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         total = total,
         offset = offset,
         chunk = chunk,
+    );
+    crate::backend::wgpu::shaders::nan_predicate::inject_finite(
+        &crate::backend::wgpu::shaders::nan_predicate::inject(&source, precision),
+        precision,
     )
 }
 

@@ -1,0 +1,361 @@
+use super::*;
+use crate::context::{RuntimePlacementService, RuntimeServicePorts};
+use crate::execution::RuntimeExecutionService;
+use runmat_execution::cancellation::CancellationSource;
+use runmat_execution::{
+    CancellationReason, Digest, PlacementExecutionAuthorityRevision, PlacementRevision,
+    ProgramEnvironment,
+};
+use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+#[derive(Default)]
+struct SessionWitness {
+    registrations: Cell<usize>,
+    wrong_authority: Cell<bool>,
+    invalidations: RefCell<Vec<runmat_execution::PlacementInvalidation>>,
+    permits: RefCell<BTreeMap<u64, Arc<TestPermit>>>,
+}
+
+struct TestPermit(AtomicBool);
+
+impl RuntimeVmFusionGenerationPermit for TestPermit {
+    fn is_current(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+impl SessionWitness {
+    fn reset_epoch(&self) {
+        for permit in self.permits.borrow().values() {
+            permit.0.store(false, Ordering::Release);
+        }
+    }
+}
+
+impl RuntimePlacementService for SessionWitness {
+    fn plan(
+        &self,
+        _: runmat_execution::PlacementPlanRequest,
+    ) -> Result<runmat_execution::PlacementDecision, crate::RuntimeError> {
+        unreachable!("VM right fixture provides revision identity only")
+    }
+
+    fn observe(&self, _: runmat_execution::PlacementFeedback) -> Result<(), crate::RuntimeError> {
+        unreachable!("VM right fixture does not publish placement feedback")
+    }
+
+    fn invalidate(&self, invalidation: runmat_execution::PlacementInvalidation) {
+        // RuntimeContext::with_program_revision invalidates the previous
+        // program even for a revision-only placement service. Record that
+        // canonical notification without pretending this fixture owns a cache.
+        self.invalidations.borrow_mut().push(invalidation);
+    }
+
+    fn whole_work_vm_fusion_region_session_revision(
+        &self,
+        program: Option<ProgramRevision>,
+        region: VmFusionRegionRegistration,
+        liveness: Weak<()>,
+    ) -> Option<VmFusionSessionRegistration> {
+        liveness.upgrade()?;
+        self.registrations.set(self.registrations.get() + 1);
+        let authority = Digest::sha256_serialized(&(
+            "vm-right-test-semantic-v2",
+            region.semantic_identity().digest(),
+        ))
+        .unwrap();
+        let revision = PlacementRevision {
+            program,
+            catalog: Digest::sha256(b"vm-right-test-catalog"),
+            compiler: Digest::sha256(b"vm-right-test-compiler"),
+            authority: if self.wrong_authority.get() {
+                PlacementExecutionAuthorityRevision::Provider(authority)
+            } else {
+                PlacementExecutionAuthorityRevision::RuntimeBindingSession(authority)
+            },
+            policy: Digest::sha256(b"vm-right-test-policy"),
+        };
+        let mut permits = self.permits.borrow_mut();
+        let permit = permits
+            .entry(region.installation())
+            .or_insert_with(|| Arc::new(TestPermit(AtomicBool::new(true))));
+        if !permit.is_current() {
+            *permit = Arc::new(TestPermit(AtomicBool::new(true)));
+        }
+        Some(VmFusionSessionRegistration::new(revision, permit.clone()))
+    }
+}
+
+fn semantic(label: &[u8]) -> VmFusionSemanticIdentity {
+    VmFusionSemanticIdentity::from_validated_digest(Digest::sha256(label))
+}
+
+fn program(label: &[u8]) -> ProgramRevision {
+    ProgramRevision::new(
+        Digest::sha256(label),
+        Digest::sha256(b"vm-right-test-source"),
+        ProgramEnvironment::new(
+            2,
+            2,
+            Digest::sha256(b"vm-right-test-runtime"),
+            Digest::sha256(b"vm-right-test-builtins"),
+            "runmat",
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn context(
+    service: Option<Rc<SessionWitness>>,
+    program: Option<ProgramRevision>,
+) -> RuntimeContext {
+    let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+    let runtime = match service {
+        Some(service) => {
+            runtime.with_service_ports(RuntimeServicePorts::default().with_placement(service))
+        }
+        None => runtime,
+    };
+    runtime.with_program_revision(program)
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn installed_right_is_exact_to_context_program_region_and_cancellation_generation() {
+    let service = Rc::new(SessionWitness::default());
+    let selected = context(Some(service.clone()), Some(program(b"one")));
+    assert!(VmFusionInstalledRegion::install(&selected, semantic(b"same"), 7, 9, 8).is_none());
+    let installed =
+        VmFusionInstalledRegion::install(&selected, semantic(b"same"), 7, 8, 9).unwrap();
+    let other_installation =
+        VmFusionInstalledRegion::install(&selected, semantic(b"same"), 7, 8, 9).unwrap();
+    assert!(installed.matches_group(7, 8, 9));
+    assert!(!installed.matches_group(8, 8, 9));
+    assert!(!installed.matches_group(7, 8, 10));
+    assert!(installed.registration != other_installation.registration);
+    let right = installed.right(&selected).unwrap();
+    let second = other_installation.right(&selected).unwrap();
+    assert_eq!(right.placement_revision(), second.placement_revision());
+    assert_eq!(right.registration(), installed.registration);
+    assert!(right.planning_revision(&selected).is_some());
+    assert!(right.completion_lease(&selected).is_some());
+    assert!(second.completion_lease(&selected).is_some());
+
+    let foreign = context(Some(service.clone()), Some(program(b"one")));
+    assert_ne!(selected.local_identity(), foreign.local_identity());
+    assert!(installed.right(&foreign).is_none());
+    assert!(installed
+        .right(&selected)
+        .unwrap()
+        .completion_lease(&foreign)
+        .is_none());
+
+    let changed_program = selected
+        .clone()
+        .with_program_revision(Some(program(b"two")));
+    assert_eq!(
+        *service.invalidations.borrow(),
+        vec![runmat_execution::PlacementInvalidation::Program {
+            revision: program(b"one"),
+        }]
+    );
+    assert!(installed.right(&changed_program).is_none());
+    assert!(installed
+        .right(&selected)
+        .unwrap()
+        .completion_lease(&changed_program)
+        .is_none());
+
+    let next_cancellation = CancellationSource::new();
+    let changed_generation = selected
+        .clone()
+        .with_cancellation_token(next_cancellation.token());
+    assert!(installed.right(&changed_generation).is_none());
+    assert!(installed
+        .right(&selected)
+        .unwrap()
+        .completion_lease(&changed_generation)
+        .is_none());
+    assert!(service.registrations.get() >= 3);
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn deferred_lease_survives_owner_drop_without_minting_new_rights() {
+    let service = Rc::new(SessionWitness::default());
+    let selected = context(Some(service.clone()), Some(program(b"deferred")));
+    let installed =
+        VmFusionInstalledRegion::install(&selected, semantic(b"deferred"), 4, 20, 22).unwrap();
+    let first = installed.right(&selected).unwrap();
+    let second = installed.right(&selected).unwrap();
+    let third = installed.right(&selected).unwrap();
+    let deferred = first.completion_lease(&selected).unwrap();
+    drop(installed);
+    assert!(deferred.is_current());
+    assert!(second.placement_revision().is_none());
+    assert!(third.placement_revision().is_none());
+    assert!(second.planning_revision(&selected).is_none());
+    assert!(third.planning_revision(&selected).is_none());
+    assert!(second.completion_lease(&selected).is_none());
+    assert!(third.completion_lease(&selected).is_none());
+    drop(deferred);
+    assert_eq!(service.registrations.get(), 4);
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn missing_stale_or_wrong_session_revision_never_yields_completion_lease() {
+    let without_service = context(None, Some(program(b"missing")));
+    let installed =
+        VmFusionInstalledRegion::install(&without_service, semantic(b"missing"), 1, 0, 1).unwrap();
+    let right = installed.right(&without_service).unwrap();
+    assert!(right.placement_revision().is_none());
+    assert!(right.completion_lease(&without_service).is_none());
+
+    let service = Rc::new(SessionWitness::default());
+    let selected = context(Some(service.clone()), Some(program(b"revision")));
+    let installed =
+        VmFusionInstalledRegion::install(&selected, semantic(b"revision"), 1, 0, 1).unwrap();
+    service.wrong_authority.set(true);
+    let wrong = installed.right(&selected).unwrap();
+    assert!(wrong.placement_revision().is_none());
+    assert!(wrong.completion_lease(&selected).is_none());
+    service.wrong_authority.set(false);
+    let valid = installed.right(&selected).unwrap();
+    assert!(valid.placement_revision().is_some());
+    service.reset_epoch();
+    assert!(valid.completion_lease(&selected).is_none());
+    assert!(installed
+        .right(&selected)
+        .unwrap()
+        .placement_revision()
+        .is_some());
+
+    let cancelled = CancellationSource::new();
+    let cancellable =
+        context(Some(service.clone()), None).with_cancellation_token(cancelled.token());
+    let installation =
+        VmFusionInstalledRegion::install(&cancellable, semantic(b"cancel"), 2, 1, 2).unwrap();
+    let right = installation.right(&cancellable).unwrap();
+    cancelled.cancel(CancellationReason::User);
+    assert!(installation.right(&cancellable).is_none());
+    assert!(right.completion_lease(&cancellable).is_none());
+    assert!(VmFusionInstalledRegion::install(&cancellable, semantic(b"cancel"), 2, 1, 2).is_none());
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn host_route_requires_exact_selected_binding_and_one_instruction_exit() {
+    use crate::context::VmFusionHostInstruction;
+    use runmat_builtins::{BuiltinBindingIdentity, BuiltinCatalogIdentity};
+
+    let service = Rc::new(SessionWitness::default());
+    let selected = context(Some(service.clone()), Some(program(b"host-route")));
+    let installed =
+        VmFusionInstalledRegion::install(&selected, semantic(b"host-route"), 3, 10, 12).unwrap();
+    let exact = BuiltinBindingIdentity {
+        builtin: BuiltinCatalogIdentity { name: "plus" },
+        variant: "default",
+    };
+    let foreign = BuiltinBindingIdentity {
+        builtin: BuiltinCatalogIdentity { name: "plus" },
+        variant: "alternate",
+    };
+    let terminal = BuiltinBindingIdentity {
+        builtin: BuiltinCatalogIdentity { name: "min" },
+        variant: "default",
+    };
+    let right = installed.right(&selected).unwrap();
+    let route = right.host_route(&selected, vec![exact, terminal]).unwrap();
+    assert!(!route.complete(), "no instruction has executed");
+    assert!(!route.contains_pc(9));
+    assert!(route.contains_pc(10));
+    route.begin_instruction(10, VmFusionHostInstruction::Structural);
+    route.instruction_exit(10);
+    route.begin_instruction(11, VmFusionHostInstruction::ElementwiseBinary);
+    let scoped = selected
+        .clone()
+        .with_vm_fusion_host_route(Some(route.clone()));
+    assert!(route.allows_host_promotion(&scoped));
+    let foreign_placement = selected.clone().with_service_ports(
+        RuntimeServicePorts::default().with_placement(Rc::new(SessionWitness::default())),
+    );
+    assert!(!route.current_for(&foreign_placement));
+    let next_cancellation = CancellationSource::new();
+    let next_generation = selected
+        .clone()
+        .with_cancellation_token(next_cancellation.token());
+    assert!(!route.current_for(&next_generation));
+    let wrong = scoped
+        .clone()
+        .with_vm_fusion_selected_binding(Some(foreign));
+    assert!(!route.allows_host_preparation(&wrong, VmFusionHostInstruction::ElementwiseBinary));
+    let exact_context = scoped.clone().with_vm_fusion_selected_binding(Some(exact));
+    assert!(
+        route.allows_host_preparation(&exact_context, VmFusionHostInstruction::ElementwiseBinary)
+    );
+    let inner = exact_context
+        .clone()
+        .with_vm_fusion_selected_binding(Some(exact));
+    assert!(inner.vm_fusion_host_route().is_none());
+    route.confirm_host_branch(&exact_context, VmFusionHostInstruction::ElementwiseBinary);
+    route.instruction_exit(11);
+    assert!(!route.complete(), "terminal reduction has not executed");
+    route.begin_instruction(12, VmFusionHostInstruction::Reduction);
+    let terminal_context = scoped.with_vm_fusion_selected_binding(Some(terminal));
+    route.confirm_host_branch(&terminal_context, VmFusionHostInstruction::Reduction);
+    route.instruction_exit(12);
+    assert!(route.complete());
+    assert!(right.completion_lease(&selected).is_some());
+
+    let stale = installed.right(&selected).unwrap();
+    let stale_route = stale.host_route(&selected, vec![exact]).unwrap();
+    stale_route.begin_instruction(10, VmFusionHostInstruction::ElementwiseBinary);
+    stale_route.confirm_host_branch(&wrong, VmFusionHostInstruction::ElementwiseBinary);
+    stale_route.instruction_exit(10);
+    assert!(!stale_route.complete());
+    let missing = installed.right(&selected).unwrap();
+    let missing_route = missing.host_route(&selected, vec![exact]).unwrap();
+    missing_route.begin_instruction(10, VmFusionHostInstruction::ElementwiseBinary);
+    missing_route.instruction_exit(10);
+    assert!(!missing_route.complete());
+    assert!(missing.completion_lease(&selected).is_some());
+    let skipped = installed.right(&selected).unwrap();
+    let skipped_route = skipped.host_route(&selected, vec![exact]).unwrap();
+    skipped_route.begin_instruction(11, VmFusionHostInstruction::ElementwiseBinary);
+    skipped_route.confirm_host_branch(&exact_context, VmFusionHostInstruction::ElementwiseBinary);
+    skipped_route.instruction_exit(11);
+    assert!(
+        !skipped_route.complete(),
+        "a skipped PC cannot certify a region"
+    );
+    let no_terminal = installed.right(&selected).unwrap();
+    let no_terminal_route = no_terminal
+        .host_route(&selected, vec![exact, terminal])
+        .unwrap();
+    no_terminal_route.begin_instruction(10, VmFusionHostInstruction::Structural);
+    no_terminal_route.instruction_exit(10);
+    no_terminal_route.begin_instruction(11, VmFusionHostInstruction::ElementwiseBinary);
+    no_terminal_route
+        .confirm_host_branch(&exact_context, VmFusionHostInstruction::ElementwiseBinary);
+    no_terminal_route.instruction_exit(11);
+    no_terminal_route.begin_instruction(12, VmFusionHostInstruction::Reduction);
+    no_terminal_route.instruction_exit(12);
+    assert!(
+        !no_terminal_route.complete(),
+        "unconfirmed terminal cannot certify a region"
+    );
+    let unsupported = installed.right(&selected).unwrap();
+    let unsupported_route = unsupported.host_route(&selected, vec![exact]).unwrap();
+    unsupported_route.begin_instruction(10, VmFusionHostInstruction::Unproved);
+    unsupported_route.instruction_exit(10);
+    assert!(!unsupported_route.complete());
+    service.reset_epoch();
+    assert!(!route.complete());
+    assert!(!stale_route.complete());
+}

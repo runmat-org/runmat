@@ -8,6 +8,9 @@ use std::sync::{
     Mutex,
 };
 
+#[path = "support/retained_provider.rs"]
+mod retained_provider;
+
 #[derive(Clone, Copy, Debug)]
 enum ResultKind {
     Valid,
@@ -281,8 +284,7 @@ fn valid_covariance_output_adopts_explicit_intent_and_owns_only_its_result() {
 fn covariance_shape_admission_matches_host_vectors_matrices_and_empty_inputs() {
     use runmat_accelerate::simple_provider::InProcessProvider;
     use runmat_value::Tensor;
-    static PROVIDER: std::sync::OnceLock<InProcessProvider> = std::sync::OnceLock::new();
-    let provider = PROVIDER.get_or_init(InProcessProvider::default);
+    let provider = retained_provider::retained_test_provider!(PROVIDER: InProcessProvider = InProcessProvider::default());
     let _active = ThreadProviderGuard::set(Some(provider));
     for shape in [
         vec![],

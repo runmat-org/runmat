@@ -70,8 +70,8 @@ pub(super) fn cardinality(shape: &[usize]) -> Option<usize> {
 
 pub(super) fn validate_fused_reduction_domain(
     axes: Option<&ReductionAxes>,
-    runtime_shape: Option<&[usize]>,
-    reduce_all: bool,
+    _runtime_shape: Option<&[usize]>,
+    _reduce_all: bool,
 ) -> Result<(), RuntimeError> {
     if matches!(axes, Some(ReductionAxes::Explicit(dims)) if dims.len() != 1) {
         return Err(mex(
@@ -79,28 +79,28 @@ pub(super) fn validate_fused_reduction_domain(
             "fusion: multi-axis reduction requires the runtime N-D path",
         ));
     }
-    if !reduce_all && runtime_shape.is_some_and(|shape| shape.len() > 2) {
-        return Err(mex(
-            "FusionReductionRankUnsupported",
-            "fusion: N-D axis reduction requires the runtime N-D path",
-        ));
-    }
     Ok(())
 }
 
-pub(super) fn fused_reduction_output_shape(
+fn canonical_reduction_shape(
     runtime_shape: Option<Vec<usize>>,
     rows: usize,
     columns: usize,
+) -> Vec<usize> {
+    let mut shape = runtime_shape.unwrap_or_else(|| vec![rows, columns]);
+    if shape.len() < 2 {
+        shape.resize(2, 1);
+    }
+    shape
+}
+
+fn reduced_output_shape(
+    mut shape: Vec<usize>,
     axis: usize,
     reduce_all: bool,
 ) -> Result<Vec<usize>, RuntimeError> {
     if reduce_all {
         return Ok(vec![1, 1]);
-    }
-    let mut shape = runtime_shape.unwrap_or_else(|| vec![rows, columns]);
-    if shape.len() < 2 {
-        shape.resize(2, 1);
     }
     let dim = shape.get_mut(axis).ok_or_else(|| {
         mex(
@@ -110,6 +110,21 @@ pub(super) fn fused_reduction_output_shape(
     })?;
     *dim = 1;
     Ok(shape)
+}
+
+#[cfg(test)]
+pub(super) fn fused_reduction_output_shape(
+    runtime_shape: Option<Vec<usize>>,
+    rows: usize,
+    columns: usize,
+    axis: usize,
+    reduce_all: bool,
+) -> Result<Vec<usize>, RuntimeError> {
+    reduced_output_shape(
+        canonical_reduction_shape(runtime_shape, rows, columns),
+        axis,
+        reduce_all,
+    )
 }
 
 fn axis_from_value(value: &Value) -> Result<usize, RuntimeError> {
@@ -205,14 +220,24 @@ pub fn resolve_reduction_geometry(
             .or(explicit)
             .unwrap_or_else(|| shape.iter().position(|dim| *dim != 1).unwrap_or(0))
     };
-    let output_shape = fused_reduction_output_shape(Some(shape), rows, columns, axis, reduce_all)?;
-    let (reduce_len, num_slices) = if reduce_all {
-        (total, 1)
-    } else if axis == 0 {
-        (rows, columns)
+    let execution_shape = canonical_reduction_shape(Some(shape), rows, columns);
+    let reduce_len = if reduce_all {
+        total
     } else {
-        (columns, rows)
+        *execution_shape.get(axis).ok_or_else(|| {
+            mex(
+                "FusionReductionAxisUnsupported",
+                "fusion: reduction dimension exceeds supported runtime rank",
+            )
+        })?
     };
+    let output_shape = reduced_output_shape(execution_shape, axis, reduce_all)?;
+    let num_slices = total.checked_div(reduce_len).ok_or_else(|| {
+        mex(
+            "FusionReductionGeometryMismatch",
+            "fusion: reduction geometry does not cover actual data",
+        )
+    })?;
     if reduce_len.checked_mul(num_slices) != Some(total)
         || cardinality(&output_shape) != Some(num_slices)
     {

@@ -4,6 +4,8 @@
 mod short_circuit;
 #[path = "generic_execution/cancellation_resume.rs"]
 mod cancellation_resume;
+#[path = "generic_execution/search_native_pending.rs"]
+mod search_native_pending;
 
 use std::{
     collections::BTreeMap,
@@ -1021,7 +1023,7 @@ fn generic_operator_and_range_sites_use_canonical_runtime_builtins() {
     else {
         panic!("expected a tensor aggregate")
     };
-    assert_eq!(matrix.shape, vec![1, 2]);
+    assert_eq!(matrix.shape(), &[1, 2]);
     assert_eq!(matrix.materialize_f64(), vec![1.0, 2.0]);
 }
 
@@ -1454,6 +1456,7 @@ fn generic_interactive_workspace_uses_binding_identity_and_commits_a_snapshot() 
             workspace: Some(NativeWorkspaceInput {
                 values: BTreeMap::from([("counter".into(), Value::Num(41.0))]),
                 local_names: BTreeMap::from([(BindingId(0), "counter".into())]),
+                global_bindings: Vec::new(),
                 bindings: vec![NativeWorkspaceBinding {
                     binding: BindingId(0),
                     name: "counter".into(),

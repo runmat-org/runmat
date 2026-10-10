@@ -51,7 +51,7 @@ impl AdmittedBoundFunctions {
     pub(super) fn resolve(
         &self,
         binding: &BoundFunctionBinding,
-    ) -> Result<Option<ProgramFunctionId>, runmat_runtime::RuntimeError> {
+    ) -> Result<Option<ProgramFunctionId>, Box<runmat_runtime::RuntimeError>> {
         let BoundFunctionAuthority::Portable { origin } = &binding.authority else {
             return Ok(None);
         };
@@ -59,12 +59,14 @@ impl AdmittedBoundFunctions {
             return Ok(None);
         }
         let function = self.by_origin.get(origin).ok_or_else(|| {
-            unavailable("portable function origin is absent from the linked AOT program")
+            Box::new(unavailable(
+                "portable function origin is absent from the linked AOT program",
+            ))
         })?;
         if usize::try_from(function.0).ok() != Some(binding.function) {
-            return Err(unavailable(
+            return Err(Box::new(unavailable(
                 "portable function cache disagrees with its linked AOT origin",
-            ));
+            )));
         }
         Ok(Some(*function))
     }

@@ -3,7 +3,7 @@ use super::*;
 impl AllocationState {
     // Invoked only by the captured final physical lease, never a borrowed view.
     pub(super) fn retire_physical(&self, id: u64) -> Result<()> {
-        let mut entry = {
+        let (mut entry, resource_ticket) = {
             let mut records = self.lock_records()?;
             let Some(record) = records.get_mut(&id) else {
                 return Ok(());
@@ -12,7 +12,7 @@ impl AllocationState {
                 return Err(AllocationStateError::NotLive.into());
             }
             record.phase = Phase::Retiring(Stage::Cache);
-            record.entry.take()
+            (record.entry.take(), record.resource_ticket.clone())
         };
         let stage = std::cell::Cell::new(Stage::Cache);
         let failure = std::cell::Cell::new(Failure::Cache);
@@ -21,7 +21,7 @@ impl AllocationState {
         // accidentally destroy the payload before its failed phase is recorded.
         let result = catch_allocation_cleanup_unwind(|| -> Result<()> {
             let payload = entry.as_ref().ok_or(AllocationStateError::NotLive)?;
-            if let Some(cache) = self.reduction_reuse.get().and_then(Weak::upgrade) {
+            if let Some(cache) = self.reduction_reuse.get().and_then(OwnerWeak::upgrade) {
                 let identity = runmat_accelerate_api::allocation::AllocationIdentity::new(
                     self.device_id,
                     id,
@@ -43,7 +43,9 @@ impl AllocationState {
                 }
             }
             self.bind_groups
-                .invalidate_buffer(Arc::as_ptr(&payload.buffer) as usize)?;
+                .invalidate_buffer(
+                    runmat_accelerate_api::WgpuBufferOwner::as_ptr(&payload.buffer) as usize,
+                )?;
             failure.set(Failure::MapPoisoned);
             self.retirement_stage(id, Stage::Provenance)?;
             stage.set(Stage::Provenance);
@@ -60,7 +62,11 @@ impl AllocationState {
             disposition.set(Disposition::Uncertain);
             failure.set(Failure::Unwind);
             if let Some(payload) = entry.take() {
-                self.release_payload(payload);
+                if self.release_payload(payload) {
+                    if let Some(ticket) = &resource_ticket {
+                        ticket.mark_pooled_handoff();
+                    }
+                }
             }
             disposition.set(Disposition::Released);
             stage.set(Stage::Complete);
@@ -94,23 +100,28 @@ impl AllocationState {
         Ok(())
     }
 
-    fn release_payload(&self, entry: BufferEntry) {
+    pub(super) fn release_payload(&self, entry: BufferEntry) -> bool {
         let poolable = !self.is_lost()
             && entry.len > 0
             && self.max_poolable_bytes > 0
             && entry.allocated_bytes <= self.max_poolable_bytes
-            && Arc::strong_count(&entry.buffer) == 1;
+            && runmat_accelerate_api::WgpuBufferOwner::strong_count(&entry.buffer) == 1;
         if poolable {
             // A pool rejection returns this reference for ordinary destruction;
             // optional reuse failure is not device retirement failure.
-            if let Err(rejected) =
-                self.pool
-                    .release(entry.usage, entry.allocated_bytes, entry.buffer)
+            return match self
+                .pool
+                .release(entry.usage, entry.allocated_bytes, entry.buffer)
             {
-                drop(rejected.buffer);
-            }
+                Ok(()) => true,
+                Err(rejected) => {
+                    drop(rejected.buffer);
+                    false
+                }
+            };
         }
         // For non-poolable entries, ordinary field destruction releases the Arc.
+        false
     }
 }
 
@@ -139,7 +150,9 @@ impl Drop for AllocationState {
             };
             let cache = catch_allocation_cleanup_unwind(|| {
                 self.bind_groups
-                    .invalidate_buffer(Arc::as_ptr(&entry.buffer) as usize)
+                    .invalidate_buffer(
+                        runmat_accelerate_api::WgpuBufferOwner::as_ptr(&entry.buffer) as usize,
+                    )
             });
             let provenance = catch_allocation_cleanup_unwind(|| -> Result<()> {
                 if let Some(resources) = self.kernel_resources.upgrade() {

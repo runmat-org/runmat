@@ -202,13 +202,11 @@ async fn execute_staged(
     )?;
     let difference = provider
         .elem_sub(stages.get(edge), stages.get(neighbor))
-        .await
-        .map_err(ProviderExecutionError::from)?;
+        .await?;
     let difference = stages.admit(difference, shape, StageClass::Real)?;
     let reflected = provider
         .elem_add(stages.get(edge), stages.get(difference))
-        .await
-        .map_err(ProviderExecutionError::from)?;
+        .await?;
     let reflected = stages.admit(reflected, shape, StageClass::Real)?;
     check_cancel(request)?;
     let reflected_handle = stages.get(reflected).clone();
@@ -361,8 +359,7 @@ async fn scale_endpoint(
     )?;
     let scaled = provider
         .elem_mul(stages.get(state), stages.get(endpoint))
-        .await
-        .map_err(ProviderExecutionError::from)?;
+        .await?;
     let scaled = stages.admit(scaled, shape, StageClass::Real)?;
     check_cancel(request)?;
     Ok(Some(scaled))

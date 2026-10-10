@@ -31,7 +31,10 @@ impl AccelProvider for Provider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { anyhow::bail!("execution failure must not gather") })
     }
-    fn map_nan_to_zero(&self, input: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+    fn map_nan_to_zero(
+        &self,
+        input: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let result = self.owner.allocate_zeroed(
             input.shape().to_vec(),
             NumericElementType::F64,
@@ -153,10 +156,14 @@ impl AccelProvider for OutputProvider {
     fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         anyhow::bail!("unexpected legacy upload")
     }
-    fn upload_numeric_raw(&self, _: &HostNumericTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        _: &HostNumericTensorView<'_>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         Err(runmat_accelerate_api::unsupported_provider_operation(
             "F64 output is not supported by this F32 owner",
-        ))
+        )
+        .into())
     }
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { anyhow::bail!("unexpected legacy download") })
@@ -178,14 +185,21 @@ impl AccelProvider for OutputProvider {
             })
         })
     }
-    fn map_nan_to_zero(&self, input: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+    fn map_nan_to_zero(
+        &self,
+        input: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         Ok(self.output(
             input.shape().to_vec(),
             if self.malformed_map {
                 match input.physical().element_type() {
                     NumericElementType::F64 => NumericElementType::F32,
                     NumericElementType::F32 => NumericElementType::F64,
-                    other => anyhow::bail!("unexpected NaN-map element type: {other:?}"),
+                    other => {
+                        return Err(
+                            anyhow::anyhow!("unexpected NaN-map element type: {other:?}").into(),
+                        )
+                    }
                 }
             } else {
                 input.physical().element_type()

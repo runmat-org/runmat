@@ -76,7 +76,8 @@ fn facts(value: &Value) -> (NumericDType, bool) {
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn full_pair_class_matrix_matches_owning_host_evaluators() {
     let owner = TestAllocationOwner::new();
     let mut classes: Vec<_> = [
@@ -183,7 +184,8 @@ fn full_pair_class_matrix_matches_owning_host_evaluators() {
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn immediate_and_tensor_double_complex_scalar_complexity_is_value_dependent() {
     for kind in [ExtremaKind::Min, ExtremaKind::Max] {
         for imaginary in [0.0, 2.0] {

@@ -184,6 +184,17 @@ impl NativeAutoOffload {
         runtime: Option<&RuntimeContext>,
         operation: ArgumentOperation,
     ) -> ProviderExecutionResult<PreparedBuiltinCall> {
+        self.prepare_operation_with_completion(name, args, runtime, operation, None)
+    }
+
+    pub(super) fn prepare_operation_with_completion(
+        &self,
+        name: &str,
+        args: &[Value],
+        runtime: Option<&RuntimeContext>,
+        operation: ArgumentOperation,
+        completion: Option<runmat_runtime::context::preparation::PreparedCompletionRight>,
+    ) -> ProviderExecutionResult<PreparedBuiltinCall> {
         let Some((evaluation, family, workload)) = operation.evaluate(self, args) else {
             return Ok(PreparedBuiltinCall::unobserved(args.to_vec()));
         };
@@ -200,6 +211,7 @@ impl NativeAutoOffload {
             super::observation::BuiltinPlanningContext {
                 runtime,
                 preparation_program: operation.preparation_program(),
+                prepared_authority: completion.as_ref().map(|right| right.session_authority()),
             },
         );
         let trace = record_decision(decision_entry(
@@ -210,7 +222,8 @@ impl NativeAutoOffload {
         ));
         record_provider_rejection(&trace, rejection);
         let mut observation =
-            BuiltinCallObservation::new(plan.feedback, trace, evaluation.recommend_gpu, args);
+            BuiltinCallObservation::new(plan.feedback, trace, evaluation.recommend_gpu, args)
+                .with_completion(completion);
         observation.prepare_provider(
             self.provider,
             plan.provider_query
@@ -219,44 +232,54 @@ impl NativeAutoOffload {
         );
         let recorder = observation.recorder();
         runmat_accelerate_api::observation::with_provider_observation(recorder, || {
-            let mut processed = args.to_vec();
-            let mut uploads = None;
-            if evaluation.recommend_gpu {
-                for value in processed.iter_mut().take(operation.count()) {
-                    if !matches!(value, Value::Tensor(tensor) if !tensor.is_empty()) {
-                        continue;
+            let prepared: ProviderExecutionResult<_> = (|| {
+                let mut processed = args.to_vec();
+                let mut uploads = None;
+                if evaluation.recommend_gpu {
+                    for value in processed.iter_mut().take(operation.count()) {
+                        if !matches!(value, Value::Tensor(tensor) if !tensor.is_empty()) {
+                            continue;
+                        }
+                        if uploads.is_none() {
+                            uploads = Some(
+                                super::ownership::OwnedUploads::new(args)
+                                    .map_err(|error| ProviderExecutionError::from_source(*error))?,
+                            );
+                        }
+                        let uploads = uploads.as_mut().expect("initialized before upload");
+                        *value = self.promote_tensor_protecting(
+                            value,
+                            1,
+                            observation.trace.as_ref(),
+                            &uploads.protected(),
+                        )?;
+                        if let Value::GpuTensor(handle) = value {
+                            uploads.track(handle);
+                        }
                     }
-                    if uploads.is_none() {
-                        uploads = Some(
-                            super::ownership::OwnedUploads::new(args)
-                                .map_err(|error| ProviderExecutionError::from_source(*error))?,
-                        );
-                    }
-                    let uploads = uploads.as_mut().expect("initialized before upload");
-                    *value = self.promote_tensor_protecting(
-                        value,
-                        1,
-                        observation.trace.as_ref(),
-                        &uploads.protected(),
-                    )?;
-                    if let Value::GpuTensor(handle) = value {
-                        uploads.track(handle);
+                    if !processed
+                        .iter()
+                        .take(operation.count())
+                        .any(runmat_runtime::dispatcher::value_contains_gpu)
+                    {
+                        observation.preparation_fallback();
                     }
                 }
-                if !processed
-                    .iter()
-                    .take(operation.count())
-                    .any(runmat_runtime::dispatcher::value_contains_gpu)
-                {
-                    observation.preparation_fallback();
+                Ok((processed, uploads))
+            })();
+            match prepared {
+                Ok((processed, uploads)) => Ok(PreparedBuiltinCall {
+                    args: processed,
+                    observation: Some(observation),
+                    uploads,
+                }),
+                Err(error) => {
+                    // A completed preparation error is an operational failure;
+                    // abandoning a future later is not.
+                    observation.preparation_failed();
+                    Err(error)
                 }
             }
-            observation.execution_started();
-            Ok(PreparedBuiltinCall {
-                args: processed,
-                observation: Some(observation),
-                uploads,
-            })
         })
     }
 }

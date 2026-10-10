@@ -109,13 +109,14 @@ impl AccelProvider for StageProvider {
         &'a self,
         input: &'a GpuTensorHandle,
         _: usize,
-    ) -> runmat_accelerate_api::AccelProviderFuture<'a, ReduceDimResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ReduceDimResult> {
         Box::pin(async move {
             self.extrema_calls.fetch_add(1, Ordering::SeqCst);
             if self.unsupported_extrema {
                 return Err(runmat_accelerate_api::unsupported_provider_operation(
                     "extrema intentionally unsupported",
-                ));
+                )
+                .into());
             }
             let mut shape = input.shape().to_vec();
             shape[1] = 1;
@@ -129,7 +130,7 @@ impl AccelProvider for StageProvider {
         &'a self,
         input: &'a GpuTensorHandle,
         axis: usize,
-    ) -> runmat_accelerate_api::AccelProviderFuture<'a, ReduceDimResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ReduceDimResult> {
         self.reduce_max_dim(input, axis)
     }
 }

@@ -100,6 +100,18 @@ cargo test -p runmat-vm --test fusion_gpu
 
 The JIT and Core tiering tests check bounded warmup, publication and cache reuse, exact-profile specialization, loop feedback and OSR, transactional interactive execution, and steady-state compilation counts. Residency tests check that GPU values remain on device across representative operation chains.
 
+## Direct-call Overhead
+
+The direct-call microbenchmark compares scalar `strcmp` and scalar/array `numel` calls with and without a placement session:
+
+```bash
+cargo bench -p runmat-accelerate --bench direct_call_observation --no-default-features -- 10000 31
+```
+
+The arguments select repeated-call iterations and sample count. CSV output includes the workload, placement mode, first-call or repeated-call phase, sample number, iteration count, and nanoseconds per call. Inputs and contexts are constructed outside timing; each measured call includes dispatch, execution, result creation, and result release. Results are checked afterward.
+
+First-call samples use fresh sessions, not fresh processes. Repeated-call samples prime their session before timing and continue updating its feedback. The placement/no-placement contrast measures the whole placement-enabled call path, not allocation cost alone. To measure a change's overhead, run the same benchmark on both source revisions with matching compiler, features, settings, and machine conditions. These host-only measurements do not establish CPU/GPU speedups or end-to-end script performance.
+
 ## WGPU Profiling
 
 The acceleration crate includes a WGPU profiling binary for backend-level measurements:

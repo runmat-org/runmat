@@ -19,7 +19,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::stats::summary::covariance_precision::CovariancePrecision;
+use crate::builtins::stats::summary::covariance_precision::{
+    AlignedCovarianceOutput, CovarianceAlignmentContract, CovariancePrecision,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cov";

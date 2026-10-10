@@ -23,14 +23,19 @@ fn rm_matmul_min(a: {ty}, b: {ty}) -> {ty} {{
 }}
 "#
     );
-    format!(
+    let shader = format!(
         "{}\n{}\n{}",
         crate::kernel_math::power::functions(precision),
         clamps,
         source
             .replace("@REAL_POWER@", power)
             .replace("@MT@", &tile.to_string())
-    )
+    );
+    if precision == ProviderPrecision::F64 {
+        super::ieee_words::inject(&shader)
+    } else {
+        shader
+    }
 }
 
 pub const MATMUL_SHADER_F64: &str = r#"

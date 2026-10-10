@@ -156,11 +156,13 @@ impl runmat_accelerate_api::AccelProvider for F32TestProvider {
     fn upload_numeric_raw(
         &self,
         host: &runmat_accelerate_api::HostNumericTensorView,
-    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<runmat_accelerate_api::GpuTensorHandle>
+    {
         if host.data.element_type() == runmat_accelerate_api::NumericElementType::F64 {
             return Err(runmat_accelerate_api::unsupported_provider_operation(
                 "f32 test provider cannot store native double payloads",
-            ));
+            )
+            .into());
         }
         self.inner.upload_numeric_raw(host)
     }
@@ -185,7 +187,7 @@ impl runmat_accelerate_api::AccelProvider for F32TestProvider {
     ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
         let values: Vec<f32> = host.data.iter().map(|value| *value as f32).collect();
         self.inner
-            .upload_numeric_raw(&runmat_accelerate_api::HostNumericTensorView {
+            .upload_numeric_host(&runmat_accelerate_api::HostNumericTensorView {
                 data: runmat_accelerate_api::HostNumericDataView::F32(&values),
                 shape: host.shape,
                 storage: runmat_accelerate_api::GpuTensorStorage::Real,

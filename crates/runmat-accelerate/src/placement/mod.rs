@@ -1,23 +1,29 @@
 //! Executor-neutral placement observation and policy scaffolding.
 
-mod event;
 mod completion;
-pub(crate) use completion::publish_provider_feedback;
+mod event;
+pub(crate) use completion::publish_provider_feedback_vm_full_call;
+pub(crate) use completion::{publish_provider_feedback, publish_provider_feedback_full_call};
 mod fusion;
 mod local;
 mod partition;
 mod planner;
 mod provider_contract;
 #[cfg(feature = "wgpu")]
+pub(crate) use provider_contract::floating_conversion::build_for_input as floating_cast_work;
+#[cfg(feature = "wgpu")]
 mod provider_cost;
 mod recorder;
-mod revision;
 mod residency;
+mod revision;
 mod session;
+mod typed_reduction_inputs;
 pub(crate) use provider_contract::matmul::scalar_work_units as matmul_scalar_work_units;
 
 #[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::convolution::observation_capability as convolution_observation_capability;
+#[cfg(feature = "wgpu")]
+pub(crate) use provider_contract::extrema::observation_capability as extrema_observation_capability;
 #[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::floating_conversion::{
     observation_capability as floating_cast_observation_capability,
@@ -30,6 +36,11 @@ pub(crate) use provider_contract::fspecial::observation_capability as fspecial_o
 pub(crate) use provider_contract::fusion_elementwise::observation_capability as provider_observation_capability;
 #[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::fusion_elementwise::physical_work as fusion_physical_work;
+#[cfg(feature = "wgpu")]
+pub(crate) use provider_contract::fusion_reduction::{
+    observation_capability as typed_reduction_observation_capability,
+    physical_work as typed_reduction_physical_work,
+};
 #[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::imfilter::{
     observation_capability as imfilter_observation_capability,
@@ -46,12 +57,14 @@ pub(crate) use provider_contract::{
 #[cfg(feature = "wgpu")]
 pub(crate) use provider_contract::{wgpu_capability_snapshot, wgpu_feasibility};
 #[cfg(feature = "wgpu")]
-pub(crate) use provider_cost::wgpu_cost_estimate;
+pub(crate) use provider_cost::wgpu_cost_estimate_with_geometry;
 
 pub use fusion::fusion_operation_token;
-pub(crate) use fusion::FusionPlacementObserver;
+pub(crate) use fusion::{FusionLeafIndexWork, FusionPlacementObserver};
 pub(crate) use local::{
-    plan_local, LocalPlacementFeedback, LocalPlacementOutcome, LocalPlacementRequest,
+    plan_local, plan_local_multi, LocalMultiPlacementRequest, LocalPhysicalCandidate,
+    LocalPlacementFeedback, LocalPlacementOutcome, LocalPlacementRequest,
+    TotalCandidateObservationContract,
 };
 pub use session::{
     ExplorationMode, ManagedPlacementCapacity, PlacementFeedbackSeries, PlacementPlanError,
@@ -71,3 +84,6 @@ pub use recorder::{
 };
 pub(crate) use residency::summarize_values;
 pub use residency::{CoherencyRecord, CoherencyState};
+pub(crate) use typed_reduction_inputs::{
+    typed_reduction_input_resources, TypedReductionInputResources,
+};

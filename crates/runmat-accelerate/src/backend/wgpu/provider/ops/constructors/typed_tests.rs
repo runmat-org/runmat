@@ -3,6 +3,46 @@ use futures::executor::block_on;
 use runmat_accelerate_api::{AccelProvider, HostNumericDataOwned, HostNumericTensorView};
 
 #[test]
+fn actual_wgpu_fill_like_retains_negative_zero_sign() {
+    let provider = crate::backend::wgpu::provider::register_wgpu_provider(
+        crate::backend::wgpu::provider::WgpuProviderOptions::default(),
+    )
+    .expect("actual WGPU adapter required for signed-zero fill");
+    let prototype_data = match provider.precision() {
+        runmat_accelerate_api::ProviderPrecision::F32 => HostNumericDataOwned::F32(vec![1.0, 1.0]),
+        runmat_accelerate_api::ProviderPrecision::F64 => HostNumericDataOwned::F64(vec![1.0, 1.0]),
+    };
+    let prototype = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: prototype_data.as_view(),
+            shape: &[2],
+            storage: GpuTensorStorage::Real,
+        })
+        .expect("native prototype");
+    let filled = provider
+        .fill_like(&prototype, -0.0)
+        .expect("negative zero fill");
+    assert_eq!(filled.shape(), [2]);
+    assert!(!filled.shares_allocation_with(&prototype));
+    let gathered = block_on(provider.download_numeric(&filled)).unwrap();
+    match gathered.data {
+        HostNumericDataOwned::F32(values) => {
+            assert!(values
+                .iter()
+                .all(|value| value.to_bits() == (-0.0_f32).to_bits()));
+        }
+        HostNumericDataOwned::F64(values) => {
+            assert!(values
+                .iter()
+                .all(|value| value.to_bits() == (-0.0_f64).to_bits()));
+        }
+        other => panic!("unexpected native fill storage {other:?}"),
+    }
+    prototype.release().unwrap();
+    filled.release().unwrap();
+}
+
+#[test]
 fn actual_wgpu_typed_zeros_and_logical_fill_preserve_producer_facts() {
     let provider = crate::backend::wgpu::provider::register_wgpu_provider(
         crate::backend::wgpu::provider::WgpuProviderOptions::default(),

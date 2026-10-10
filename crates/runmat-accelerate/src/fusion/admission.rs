@@ -84,4 +84,60 @@ mod tests {
             .iter()
             .any(|event| event.kind == PlacementEventKind::Kernel));
     }
+
+    #[test]
+    fn cancelled_multistage_domain_proof_reports_all_started_work_once() {
+        use runmat_runtime::builtins::common::spec::FusionProofStage;
+        let trace = begin_trace("fusion.cancelled_real_domain", None);
+        let correlation = trace.correlation();
+        let mut observation = AdmissionObservation::new(Some(correlation));
+        observation.work = FusionAdmissionWork::DomainProof {
+            binding: runmat_builtins::BuiltinBindingIdentity {
+                builtin: runmat_builtins::ACOSH_CATALOG_ENTRY.identity,
+                variant: "default",
+            },
+            provider_precision: runmat_accelerate_api::ProviderPrecision::F64,
+            stages: vec![
+                FusionProofStage::HostScan { elements: 3 },
+                FusionProofStage::ScalarReadback { elements: 1 },
+            ],
+        };
+        let mut future = Box::pin(async move {
+            let observation = observation;
+            futures::future::pending::<()>().await;
+            observation.completed()
+        });
+        assert!(matches!(
+            future
+                .as_mut()
+                .poll(&mut Context::from_waker(futures::task::noop_waker_ref())),
+            Poll::Pending
+        ));
+        drop(future);
+        trace.complete(None, None);
+        let report = report();
+        let recorded = report
+            .traces
+            .iter()
+            .find(|trace| trace.correlation == correlation)
+            .expect("domain trace");
+        let prepares: Vec<_> = recorded
+            .events
+            .iter()
+            .filter(|event| event.kind == PlacementEventKind::Prepare)
+            .collect();
+        assert_eq!(prepares.len(), 1);
+        assert!(prepares[0]
+            .attributes
+            .iter()
+            .any(|attribute| { attribute.key == "proof_stages" && attribute.value == 2 }));
+        assert!(prepares[0]
+            .attributes
+            .iter()
+            .any(|attribute| { attribute.key == "completed" && attribute.value == 0 }));
+        assert!(!recorded
+            .events
+            .iter()
+            .any(|event| event.kind == PlacementEventKind::Kernel));
+    }
 }

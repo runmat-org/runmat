@@ -3,7 +3,7 @@ use crate::*;
 const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
         "`strncmp(A, B, N)` compares at most N leading Unicode scalar values from each corresponding text element, case-sensitively. It accepts string scalars and arrays, character vectors and matrices, and cell arrays of character vectors. Scalar text expands against compatible arrays; character-matrix rows are independent text elements.",
-        "N accepts real scalar double, single, logical, and all eight fixed-width integer classes. Native integer storage is read exactly. A negative N is treated as zero; zero makes every element comparison true, including missing strings. Unrepresentable host counts and nonintegral or nonfinite floating values reject.",
+        "N accepts real scalar double, single, logical, and all eight fixed-width integer classes. Native integer storage is read exactly. A negative integral N is treated as zero; zero makes every element comparison true, including missing strings. Unrepresentable host counts and nonintegral or nonfinite floating values reject; a floating count is not rounded to a nearby integer.",
         "For positive N, missing string elements compare false. If both text elements end before N and all compared characters matched, the result is true; an extra character on either side before N makes it false.",
         "Unsupported direct numeric or provider-resident operands in A or B return scalar logical false before N parsing or provider access. N may be a supported resident scalar and is gathered before exact validation; no string comparison runs on a GPU.",
     ] },
@@ -79,6 +79,19 @@ const EXAMPLES: &[BuiltinExample] = &[
             source: "assert(isequal(tf, true));",
         },
     },
+    BuiltinExample {
+        id: "exact-integer-count-runmat",
+        title: "Use an exact integer prefix count",
+        program: "tf = strncmp(\"RunMat\", \"Runway\", uint64(3))",
+        display_output: Some("tf = logical 1"),
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isequal(tf, true));",
+        },
+    },
 ];
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("strncmp"), slug: Some("strncmp"),
@@ -114,6 +127,6 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/strncmp.rs") }],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "prefix semantics", location: "builtins::strings::core::strncmp::tests" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "static inference", location: "crates/runmat-builtins/src/catalog/entries/strings/core/strncmp/inference.rs" }],
-        notes: &["The legacy sidecar cell example incorrectly expected red/rose to match at N=2; the assertion now records its actual false result and green/grey and blue/black true. The former blanket MATLAB Unicode-parity claim is narrowed to RunMat's observed Unicode-scalar comparison. Five examples, six FAQs, thirteen related links and the source link are otherwise retained. Integrated execution remains required."],
+        notes: &["The legacy sidecar cell example incorrectly expected red/rose to match at N=2; the assertion now records its actual false result and green/grey and blue/black true. The former blanket MATLAB Unicode-parity claim is narrowed to RunMat's observed Unicode-scalar comparison. Five prior examples, six FAQs, thirteen related links and the source link are retained; a RunMat exact-integer example was added. Integrated execution remains required."],
     }, introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };

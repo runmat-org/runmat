@@ -10,14 +10,8 @@ use crate::styling::{ModernDarkTheme, PlotThemeConfig, ThemeVariant};
 use egui::{Align2, Color32, Context, FontId, Pos2, Rect, Stroke};
 use glam::{Vec3, Vec4};
 
-#[cfg(target_arch = "wasm32")]
 fn transparent_frame() -> egui::Frame {
     egui::Frame::NONE
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn transparent_frame() -> egui::Frame {
-    egui::Frame::none()
 }
 
 /// GUI overlay manager for plot annotations and controls
@@ -1052,13 +1046,10 @@ impl PlotOverlay {
                                     },
                                 );
                             };
-                            #[cfg(target_arch = "wasm32")]
                             ui.allocate_new_ui(
                                 egui::UiBuilder::new().max_rect(padded),
                                 add_toolbar,
                             );
-                            #[cfg(not(target_arch = "wasm32"))]
-                            ui.allocate_ui_at_rect(padded, add_toolbar);
                         });
                 } else {
                     self.toolbar_rect = None;
@@ -1634,16 +1625,12 @@ impl PlotOverlay {
             } else {
                 Color32::WHITE
             };
-            #[cfg(target_arch = "wasm32")]
             ui.painter().rect_stroke(
                 bar_rect,
                 0.0,
                 Stroke::new(1.0_f32, border),
-                egui::StrokeKind::Inside,
+                super::OUTLINE_STROKE_KIND,
             );
-            #[cfg(not(target_arch = "wasm32"))]
-            ui.painter()
-                .rect_stroke(bar_rect, 0.0, Stroke::new(1.0_f32, border));
         }
 
         if config.show_cad_overlay {
@@ -2930,16 +2917,12 @@ impl PlotOverlay {
                 | crate::plots::figure::PlotType::Pie
                 | crate::plots::figure::PlotType::ContourFill => {
                     ui.painter().rect_filled(swatch_rect, 2.0, c);
-                    #[cfg(target_arch = "wasm32")]
                     ui.painter().rect_stroke(
                         swatch_rect,
                         2.0,
                         Stroke::new(1.0_f32, legend_stroke),
-                        egui::StrokeKind::Inside,
+                        super::OUTLINE_STROKE_KIND,
                     );
-                    #[cfg(not(target_arch = "wasm32"))]
-                    ui.painter()
-                        .rect_stroke(swatch_rect, 2.0, Stroke::new(1.0_f32, legend_stroke));
                 }
                 crate::plots::figure::PlotType::ErrorBar
                 | crate::plots::figure::PlotType::Stairs

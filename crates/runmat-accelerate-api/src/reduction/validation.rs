@@ -55,7 +55,8 @@ pub(super) fn recipe(
         "reduction partial geometry mismatch"
     );
     dispatch(g.single, g.slices, c.max_dispatch_dimension)?;
-    dispatch(g.pass1, g.partial_elements, c.max_dispatch_dimension)?;
+    // Validate exact representable alternate geometry, not its selection.
+    dispatch(g.pass1, g.partial_elements, u32::MAX)?;
     dispatch(g.pass2, g.slices, c.max_dispatch_dimension)?;
     let scalar = width(p.precision) as u32;
     ensure!(
@@ -81,9 +82,8 @@ pub(super) fn recipe(
         "invalid reduction partial bytes"
     );
     ensure!(
-        w.output_requested_bytes <= c.max_storage_binding_bytes
-            && w.partial_requested_bytes <= c.max_storage_binding_bytes,
-        "reduction storage binding limit"
+        w.output_requested_bytes <= c.max_storage_binding_bytes,
+        "reduction output storage binding limit"
     );
     ensure!(
         w.workgroup_bytes == 0

@@ -1,10 +1,17 @@
 use super::*;
 
-#[path = "deep_learning/admission.rs"]
-mod admission;
 #[path = "deep_learning/activation.rs"]
 mod activation;
+#[path = "deep_learning/admission.rs"]
+mod admission;
+#[path = "deep_learning/input_admission.rs"]
+mod input_admission;
+#[path = "deep_learning/softmax_validated.rs"]
+mod softmax_validated;
 pub(super) use activation::elu_shader;
+#[cfg(test)]
+#[path = "deep_learning/shader_validation_tests.rs"]
+mod shader_validation_tests;
 #[cfg(test)]
 #[path = "deep_learning/tests.rs"]
 mod tests;
@@ -75,129 +82,135 @@ impl WgpuProvider {
     /// Exact upper bound for the explicit softmax output and one immutable
     /// params buffer for every submitted row chunk.
     pub(crate) fn softmax_rows_buffer_demand(&self, elements: u64, rows: u64) -> Option<u64> {
-        let output = elements.max(1).checked_mul(self.element_size as u64)?;
-        if elements == 0 {
-            return Some(output);
-        }
-        let chunks = rows.div_ceil(u64::from(
-            crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS,
-        ));
-        output.checked_add(chunks.checked_mul(std::mem::size_of::<SoftmaxRowsParams>() as u64)?)
+        softmax_validated::softmax_rows_buffer_demand_for_limits(
+            &self.adapter_limits,
+            elements,
+            rows,
+            self.element_size,
+            self.workgroup_config.scalar,
+        )
     }
 
     /// Execute one stable softmax reduction per column-major matrix row. The
     /// output remains device-resident. Undefined nonfinite rows produce NaNs,
     /// matching host softmax. A finite nonempty row contains an exp(0) term,
     /// so its normalization sum is positive without a device readback.
-    pub(crate) fn softmax_rows_exec(&self, input: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        let entry = self.get_entry(input)?;
-        ensure!(
-            entry.storage == GpuTensorStorage::Real
-                && runmat_accelerate_api::handle_storage(input) == GpuTensorStorage::Real,
-            "activation_softmax_rows: complex inputs are not supported"
-        );
-        ensure!(
-            entry.shape.len() == 2,
-            "activation_softmax_rows: input must be a 2-D tensor"
-        );
-        let rows = entry.shape[0];
-        let cols = entry.shape[1];
-        ensure!(
-            rows <= u32::MAX as usize
-                && cols <= u32::MAX as usize
-                && entry.len <= u32::MAX as usize,
-            "activation_softmax_rows: tensor shape exceeds GPU dispatch limits"
-        );
-        let output = self.with_emission(|emission, _| {
-            self.create_storage_buffer_checked(emission, entry.len, "runmat-softmax-rows-out")
-        })??;
-        if entry.len == 0 {
-            return self.register_existing_buffer(output, entry.shape, 0);
-        }
-        self.with_emission(|emission, pending| -> Result<_> {
-            let shader = softmax_rows_shader(self.precision);
-            let layout_tag = "runmat-softmax-rows-layout";
-            let bind_layout = self.cached_bind_group_layout(emission, layout_tag, |emission| {
-                emission
-                    .device()
-                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        label: Some(layout_tag),
-                        entries: &softmax_rows_bind_layout_entries(),
-                    })
-            })?;
-            let pipeline_layout =
-                emission
-                    .device()
-                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                        label: Some("runmat-softmax-rows-pipeline-layout"),
-                        bind_group_layouts: &[bind_layout.as_ref()],
-                        push_constant_ranges: &[],
-                    });
-            let shader_module =
-                emission
-                    .device()
-                    .create_shader_module(wgpu::ShaderModuleDescriptor {
-                        label: Some("runmat-softmax-rows-shader"),
-                        source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader.clone())),
-                    });
-            let workgroup_size = crate::backend::wgpu::config::WORKGROUP_SIZE;
-            let pipeline_key = softmax_rows_pipeline_key(self.precision);
-            let pipeline = self.get_or_create_pipeline(
-                emission,
-                pipeline_key,
-                &pipeline_layout,
-                &shader_module,
-                "runmat-softmax-rows-pipeline",
-                Some(shader.as_bytes()),
-                Some(layout_tag),
-                Some(workgroup_size),
-            )?;
-            let chunk_rows = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize;
-            for row_offset in (0..rows).step_by(chunk_rows) {
-                let params = self.uniform_buffer(
-                    emission,
-                    &SoftmaxRowsParams {
-                        rows: rows as u32,
-                        cols: cols as u32,
-                        row_offset: row_offset as u32,
-                        _pad0: 0,
-                    },
-                    "runmat-softmax-rows-params",
-                )?;
-                let bind_group = emission
-                    .device()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-softmax-rows-bind"),
-                        layout: bind_layout.as_ref(),
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: entry.buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: output.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: params.as_entire_binding(),
-                            },
-                        ],
-                    });
-                let workgroups = (rows - row_offset).min(chunk_rows) as u32;
-                crate::backend::wgpu::dispatch::creation::run(
-                    emission,
-                    pending,
-                    pipeline.as_ref(),
-                    &bind_group,
-                    workgroups,
-                    "runmat-softmax-rows-encoder",
-                    "runmat-softmax-rows-pass",
-                )?;
+    pub(crate) async fn softmax_rows_exec(
+        &self,
+        input: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        use runmat_accelerate_api::ProviderExecutionError;
+        let (entry, logical_producer) = (|| -> Result<_> {
+            let entry = self.get_entry(input)?;
+            ensure!(
+                entry.storage == GpuTensorStorage::Real
+                    && runmat_accelerate_api::handle_storage(input) == GpuTensorStorage::Real,
+                "activation_softmax_rows: complex inputs are not supported"
+            );
+            ensure!(
+                entry.shape.len() == 2,
+                "activation_softmax_rows: input must be a 2-D tensor"
+            );
+            ensure!(
+                entry.element_type == input.physical().element_type(),
+                "activation_softmax_rows: input differs from physical descriptor"
+            );
+            let admission = input_admission::classify_native_real_input(self, input, &entry)?;
+            if !admission.is_ready() {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "activation_softmax_rows: a native real floating producer matching the selected shader ABI is required",
+                ));
             }
-            Ok(())
-        })??;
-        self.register_existing_buffer(output, entry.shape, entry.len)
+            let logical_producer = admission.logical_producer;
+            let rows = entry.shape[0];
+            let cols = entry.shape[1];
+            ensure!(
+                rows <= u32::MAX as usize
+                    && cols <= u32::MAX as usize
+                    && entry.len <= u32::MAX as usize,
+                "activation_softmax_rows: tensor shape exceeds GPU dispatch limits"
+            );
+            Ok((entry, logical_producer))
+        })()
+        .map_err(ProviderExecutionError::from)?;
+        if entry.len == 0 {
+            let output = self
+                .with_emission(|emission, _| {
+                    self.create_storage_buffer_checked(
+                        emission,
+                        entry.len,
+                        "runmat-softmax-rows-out",
+                    )
+                })
+                .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?
+                .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
+            return self
+                .register_existing_buffer(output, entry.shape, 0)
+                .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects());
+        }
+        let frame = softmax_validated::SoftmaxRowsFrame::plan(self, entry, logical_producer)?;
+        let validated = self
+            .prepare_validated_softmax_rows_pipeline(&frame.recipe)
+            .await?;
+        validated.require_softmax_rows(&frame.recipe)?;
+        frame.require_live_input(self, input)?;
+        let output = self
+            .with_emission(|emission, pending| -> Result<_> {
+                frame.require_live_input(self, input)?;
+                let output = self.create_storage_buffer_checked(
+                    emission,
+                    frame.entry.len,
+                    "runmat-softmax-rows-out",
+                )?;
+                for row_offset in (0..frame.rows).step_by(frame.chunk_rows) {
+                    let params = self.uniform_buffer(
+                        emission,
+                        &SoftmaxRowsParams {
+                            rows: frame.rows as u32,
+                            cols: frame.cols as u32,
+                            row_offset: row_offset as u32,
+                            _pad0: 0,
+                        },
+                        "runmat-softmax-rows-params",
+                    )?;
+                    let bind_group =
+                        emission
+                            .device()
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("runmat-softmax-rows-bind"),
+                                layout: validated.layout.as_ref(),
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: frame.entry.buffer.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: output.as_ref().as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: params.as_entire_binding(),
+                                    },
+                                ],
+                            });
+                    let workgroups = (frame.rows - row_offset).min(frame.chunk_rows) as u32;
+                    crate::backend::wgpu::dispatch::creation::run(
+                        emission,
+                        pending,
+                        validated.pipeline.as_ref(),
+                        &bind_group,
+                        workgroups,
+                        "runmat-softmax-rows-encoder",
+                        "runmat-softmax-rows-pass",
+                    )?;
+                }
+                Ok(output)
+            })
+            .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?
+            .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
+        self.register_existing_buffer(output, frame.entry.shape, frame.entry.len)
+            .map_err(|error| ProviderExecutionError::from(error).after_effect())
     }
 
     pub(crate) fn crossentropy_terms_exec(
@@ -246,6 +259,7 @@ impl WgpuProvider {
             predictions_entry.len <= u32::MAX as usize,
             "crossentropy_terms: tensor length exceeds GPU dispatch limits"
         );
+        self.require_ieee_words(predictions_entry.precision)?;
 
         let (out_losses, staging, error_size) =
             self.with_emission(|emission, pending| -> Result<_> {
@@ -528,6 +542,7 @@ impl WgpuProvider {
             parameters_entry.len <= u32::MAX as usize,
             "adam_update: tensor length exceeds GPU dispatch limits"
         );
+        self.require_ieee_words(parameters_entry.precision)?;
 
         let mut temporary_inputs = Vec::new();
         let average_grad = match request.average_grad {
@@ -939,7 +954,7 @@ fn crossentropy_validation_shader(
         NumericPrecision::F32 => ("3.4028234663852886e38", "1.0e-7", "0.9999999"),
     };
     let workgroup = crate::backend::wgpu::config::WORKGROUP_SIZE;
-    format!(
+    let source = format!(
         r#"
 const MAX_FINITE_CROSSENTROPY: {ty} = {ty}({max_finite});
 const EPS_CROSSENTROPY: {ty} = {ty}({eps});
@@ -972,7 +987,11 @@ struct ErrorState {{
 @group(0) @binding(6) var<storage, read_write> errors: ErrorState;
 
 fn is_finite_crossentropy(x: {ty}) -> bool {{
-  return (x == x) && (abs(x) < MAX_FINITE_CROSSENTROPY);
+  return isFiniteCrossentropy(x) && (abs(x) < MAX_FINITE_CROSSENTROPY);
+}}
+
+fn isFiniteCrossentropy(value: {ty}) -> bool {{
+  @IEEE_FINITE_PREDICATE@
 }}
 
 fn flag_error(code: u32) {{
@@ -990,20 +1009,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
   }}
 
   let prediction = predictions_in.data[idx];
-  let target = targets_in.data[idx];
-  if (!(is_finite_crossentropy(prediction) && is_finite_crossentropy(target))) {{
+  let target_value = targets_in.data[idx];
+  if (!(is_finite_crossentropy(prediction) && is_finite_crossentropy(target_value))) {{
     flag_error(1u);
     return;
   }}
-  if (target < {ty}(0.0) || target > {ty}(1.0)) {{
+  if (target_value < {ty}(0.0) || target_value > {ty}(1.0)) {{
     flag_error(2u);
     return;
   }}
 
   let clipped = clamp(prediction, EPS_CROSSENTROPY, ONE_MINUS_EPS_CROSSENTROPY);
-  var loss = -target * log(clipped);
+  var loss = -target_value * log(clipped);
   if ({multi_label}) {{
-    loss = loss - ({ty}(1.0) - target) * log({ty}(1.0) - clipped);
+    loss = loss - ({ty}(1.0) - target_value) * log({ty}(1.0) - clipped);
   }}
   if ({weights_enabled}) {{
     let weight = weights_in.data[idx];
@@ -1042,50 +1061,34 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         weights_enabled = params.weights_enabled != 0,
         mask_enabled = params.mask_enabled != 0,
         workgroup = workgroup,
-    )
+    );
+    crate::backend::wgpu::shaders::nan_predicate::inject_finite(&source, precision)
 }
 
-fn softmax_rows_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 3] {
-    std::array::from_fn(|binding| wgpu::BindGroupLayoutEntry {
-        binding: binding as u32,
-        visibility: wgpu::ShaderStages::COMPUTE,
-        ty: if binding == 2 {
-            wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            }
-        } else {
-            wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage {
-                    read_only: binding == 0,
-                },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            }
-        },
-        count: None,
-    })
+pub(super) fn softmax_rows_pipeline_key(precision: NumericPrecision, workgroup: u32) -> u64 {
+    softmax_rows_recipe(precision, workgroup).key()
 }
 
-pub(super) fn softmax_rows_pipeline_key(precision: NumericPrecision) -> u64 {
-    crate::backend::wgpu::cache::key::compute_pipeline_hash_bytes(
-        softmax_rows_shader(precision).as_bytes(),
-        "runmat-softmax-rows-layout",
-        Some(crate::backend::wgpu::config::WORKGROUP_SIZE),
-    )
+fn softmax_rows_recipe(
+    precision: NumericPrecision,
+    workgroup: u32,
+) -> super::pipeline_recipe::PipelineRecipe {
+    super::pipeline_recipe::PipelineRecipe {
+        shader: softmax_rows_shader(precision, workgroup),
+        layout: crate::backend::wgpu::bindings::SOFTMAX_ROWS_LAYOUT_TAG.into(),
+        workgroup,
+    }
 }
 
-fn softmax_rows_shader(precision: NumericPrecision) -> String {
+fn softmax_rows_shader(precision: NumericPrecision, workgroup: u32) -> String {
     let ty = precision.as_str();
     let max_finite = match precision {
         NumericPrecision::F64 => "1.7976931348623157e308",
         NumericPrecision::F32 => "3.4028234663852886e38",
     };
-    let workgroup = crate::backend::wgpu::config::WORKGROUP_SIZE;
     format!(
         r#"
-const MAX_FINITE_SOFTMAX: {ty} = {ty}({max_finite});
+const MIN_FINITE_SOFTMAX: {ty} = {ty}(-{max_finite});
 
 struct Tensor {{ data: array<{ty}> }};
 struct Params {{ rows: u32, cols: u32, row_offset: u32, pad0: u32 }};
@@ -1104,7 +1107,7 @@ fn main(
 ) {{
   let row = workgroup_id.x + params.row_offset;
   let lane = local_id.x;
-  var local_max = -MAX_FINITE_SOFTMAX;
+  var local_max = MIN_FINITE_SOFTMAX;
   var column = lane;
   loop {{
     if (column >= params.cols) {{ break; }}
@@ -1194,7 +1197,7 @@ fn adam_update_shader(precision: NumericPrecision) -> String {
         NumericPrecision::F32 => "3.4028234663852886e38",
     };
     let workgroup = crate::backend::wgpu::config::WORKGROUP_SIZE;
-    format!(
+    let source = format!(
         r#"
 const MAX_FINITE_ADAM: {ty} = {ty}({max_finite});
 
@@ -1229,7 +1232,11 @@ struct ErrorState {{
 @group(0) @binding(8) var<storage, read_write> errors: ErrorState;
 
 fn is_finite_adam(x: {ty}) -> bool {{
-  return (x == x) && (abs(x) < MAX_FINITE_ADAM);
+  return isFiniteAdam(x) && (abs(x) < MAX_FINITE_ADAM);
+}}
+
+fn isFiniteAdam(value: {ty}) -> bool {{
+  @IEEE_FINITE_PREDICATE@
 }}
 
 fn flag_error(code: u32) {{
@@ -1277,5 +1284,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         ty = ty,
         max_finite = max_finite,
         workgroup = workgroup,
-    )
+    );
+    crate::backend::wgpu::shaders::nan_predicate::inject_finite(&source, precision)
 }

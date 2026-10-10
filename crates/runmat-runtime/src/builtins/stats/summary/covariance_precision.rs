@@ -15,6 +15,21 @@ pub(super) enum CovariancePrecision {
     Double,
 }
 
+#[derive(Debug)]
+pub(super) enum AlignedCovarianceOutput {
+    Resident(GpuTensorHandle),
+    Materialized(Value),
+}
+
+/// The selected call's output geometry, borrowed allocations, and error owner.
+/// Keeping these together makes a class conversion use the same protection and
+/// public builtin identity as the producer whose result it adapts.
+pub(super) struct CovarianceAlignmentContract<'a, 'b> {
+    pub(super) expected_shape: &'a [usize],
+    pub(super) protected: &'a [&'b GpuTensorHandle],
+    pub(super) builtin: &'static str,
+}
+
 impl CovariancePrecision {
     pub(super) fn observations(first: &Value, second: Option<&Value>) -> Self {
         if Self::class_of(first) == Self::Single
@@ -95,17 +110,21 @@ impl CovariancePrecision {
     /// Validate a provider result before letting a cast hook read it. Both the
     /// raw result and any converted result must retain the expected geometry,
     /// real floating class, exact owner, live allocation, and distinct storage.
-    /// Typed unsupported casts admit the existing host boundary; execution
-    /// faults and malformed results never do.
+    /// The upstream provider result is already produced. Cast failures must
+    /// retain that effect and cannot replay the whole covariance operation.
     pub(super) async fn align_provider(
         self,
         provider: &'static dyn AccelProvider,
         result: GpuTensorHandle,
-        expected_shape: &[usize],
-        protected: &[&GpuTensorHandle],
+        contract: CovarianceAlignmentContract<'_, '_>,
         invalid_output: impl Fn(&str) -> RuntimeError,
         provider_error: impl Fn(ProviderExecutionError) -> RuntimeError,
-    ) -> BuiltinResult<Option<GpuTensorHandle>> {
+    ) -> BuiltinResult<AlignedCovarianceOutput> {
+        let CovarianceAlignmentContract {
+            expected_shape,
+            protected,
+            builtin,
+        } = contract;
         let validate = |output: &GpuTensorHandle, precision: ProviderPrecision| {
             protected.first().is_some_and(|first| {
                 gpu_helpers::unary_gpu_output_matches_shape(
@@ -145,7 +164,7 @@ impl CovariancePrecision {
             return Err(gpu_helpers::reject_gpu_output(result, error));
         }
         if runmat_accelerate_api::handle_precision(&result) == Some(self.provider_precision()) {
-            return Ok(Some(result));
+            return Ok(AlignedCovarianceOutput::Resident(result));
         }
         let cast = match self {
             Self::Single => provider.unary_single(&result).await,
@@ -165,11 +184,27 @@ impl CovariancePrecision {
                     error.gpu_gather_retry = GpuGatherRetry::Never;
                     return Err(gpu_helpers::reject_gpu_output(output, error));
                 }
-                Ok(Some(output))
+                Ok(AlignedCovarianceOutput::Resident(output))
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
+            Err(error) if error.is_unsupported() => {
+                // The covariance/correlation result is already computed. A
+                // pre-effect cast refusal may change only its representation;
+                // it must never restart the numerical operation on the input.
+                let downloaded =
+                    gpu_helpers::download_value_preserving_residency_async(provider, &result)
+                        .await
+                        .map_err(|mut failure| {
+                            failure.gpu_gather_retry = GpuGatherRetry::Never;
+                            failure
+                        })?;
+                let materialized = self.cast_host(downloaded, builtin).map_err(|mut failure| {
+                    failure.gpu_gather_retry = GpuGatherRetry::Never;
+                    failure
+                })?;
+                Ok(AlignedCovarianceOutput::Materialized(materialized))
+            }
             Err(error) => {
-                let mut failure = provider_error(error.into());
+                let mut failure = provider_error(error.after_effect());
                 failure.gpu_gather_retry = GpuGatherRetry::Never;
                 Err(failure)
             }
@@ -180,6 +215,104 @@ impl CovariancePrecision {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct CastRejectingProvider(
+        runmat_accelerate_api::test_support::TestAllocationOwner,
+        std::sync::atomic::AtomicUsize,
+    );
+
+    impl AccelProvider for CastRejectingProvider {
+        fn device_id(&self) -> u32 {
+            self.0.device_id()
+        }
+
+        fn device_info(&self) -> String {
+            "covariance cast rejection fixture".into()
+        }
+
+        fn upload(
+            &self,
+            _: &runmat_accelerate_api::HostTensorView<'_>,
+        ) -> anyhow::Result<GpuTensorHandle> {
+            anyhow::bail!("unexpected upload")
+        }
+
+        fn download<'a>(
+            &'a self,
+            _: &'a GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Box::pin(async { anyhow::bail!("unexpected download") })
+        }
+
+        fn unary_single<'a>(
+            &'a self,
+            _: &'a GpuTensorHandle,
+        ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+            Box::pin(async {
+                Err(ProviderExecutionError::from(
+                    runmat_accelerate_api::unsupported_provider_operation(
+                        "cast failed after provider work",
+                    ),
+                )
+                .after_effect())
+            })
+        }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn completed_covariance_output_cannot_replay_after_cast_unsupported() {
+        let provider: &'static CastRejectingProvider = Box::leak(Box::new(CastRejectingProvider(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new(),
+            std::sync::atomic::AtomicUsize::new(0),
+        )));
+        let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let input = provider
+            .0
+            .allocate_zeroed(
+                vec![2, 1],
+                runmat_accelerate_api::NumericElementType::F32,
+                GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let produced = provider
+            .0
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let result = futures::executor::block_on(CovariancePrecision::Single.align_provider(
+            provider,
+            produced.handle,
+            CovarianceAlignmentContract {
+                expected_shape: &[1, 1],
+                protected: &[&input.handle],
+                builtin: "cov",
+            },
+            |reason| build_runtime_error(reason).build(),
+            |source| {
+                crate::runtime_error::with_provider_execution_source(
+                    build_runtime_error("covariance provider failure").build(),
+                    source,
+                )
+            },
+        ));
+        let error = result.expect_err("completed covariance cannot replay");
+        assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
+        assert!(error.source.is_some());
+        assert_eq!(provider.1.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let mut cause: &(dyn std::error::Error + 'static) = &error;
+        while !cause.is::<runmat_accelerate_api::UnsupportedProviderOperation>() {
+            cause = cause
+                .source()
+                .expect("original typed cast rejection retained");
+        }
+        assert_eq!(produced.probe.retirements(), 1);
+        input.handle.allocation_lease().validate_live().unwrap();
+    }
 
     fn observations(dtype: NumericDType) -> Value {
         Value::Tensor(Tensor::new_with_dtype(vec![1.0, 2.0], vec![2, 1], dtype).unwrap())

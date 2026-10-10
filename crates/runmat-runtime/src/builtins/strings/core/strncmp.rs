@@ -12,6 +12,9 @@ use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, comp
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
+use crate::builtins::strings::core::comparison_observation::{
+    host_string_lengths, ComparisonMode, PrefixCarrier, PrefixFacts, ScalarComparisonWorkload,
+};
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -39,9 +42,17 @@ fn remap_strncmp_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "strncmp",
     binding_variant = "default",
-    builtin_path = "crate::builtins::strings::core::strncmp"
+    builtin_path = "crate::builtins::strings::core::strncmp",
+    requested_outputs = true,
+    call_observation = true
 )]
-async fn strncmp_builtin(a: Value, b: Value, n: Value) -> crate::BuiltinResult<Value> {
+async fn strncmp_builtin(
+    requested_outputs: Option<usize>,
+    observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
+    a: Value,
+    b: Value,
+    n: Value,
+) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &STRNCMP_DESCRIPTOR,
         &STRNCMP_ERROR_TOO_MANY_OUTPUTS,
@@ -50,6 +61,8 @@ async fn strncmp_builtin(a: Value, b: Value, n: Value) -> crate::BuiltinResult<V
     if contains_numeric_or_resident_text_input(&a) || contains_numeric_or_resident_text_input(&b) {
         return Ok(Value::Bool(false));
     }
+    let host_lengths = host_string_lengths(&a, &b);
+    let prefix_carrier = PrefixCarrier::immediate(&n);
     let a = gather_if_needed_async(&a)
         .await
         .map_err(remap_strncmp_flow)?;
@@ -65,17 +78,45 @@ async fn strncmp_builtin(a: Value, b: Value, n: Value) -> crate::BuiltinResult<V
         .map_err(|_| strncmp_error(&STRNCMP_ERROR_INVALID_INPUT))?;
     let right = TextCollection::from_argument(FN_NAME, b, "second argument")
         .map_err(|_| strncmp_error(&STRNCMP_ERROR_INVALID_INPUT))?;
-    evaluate_strncmp(&left, &right, limit)
+    evaluate_strncmp(
+        &left,
+        &right,
+        limit,
+        host_lengths,
+        prefix_carrier,
+        requested_outputs,
+        observation,
+    )
 }
 
 fn evaluate_strncmp(
     left: &TextCollection,
     right: &TextCollection,
     limit: usize,
+    host_lengths: Option<(usize, usize)>,
+    prefix_carrier: Option<PrefixCarrier>,
+    requested_outputs: Option<usize>,
+    observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
 ) -> BuiltinResult<Value> {
     let shape = broadcast_shapes(FN_NAME, &left.shape, &right.shape)
         .map_err(|_| strncmp_error(&STRNCMP_ERROR_SHAPE_MISMATCH))?;
     let total = tensor::element_count(&shape);
+    if total == 1 && left.shape == [1, 1] && right.shape == [1, 1] {
+        if let (Some((left_utf8_bytes, right_utf8_bytes)), Some(carrier), Some(observation)) =
+            (host_lengths, prefix_carrier, observation)
+        {
+            observation.admit(ScalarComparisonWorkload {
+                left_utf8_bytes,
+                right_utf8_bytes,
+                mode: ComparisonMode::PrefixSensitive,
+                prefix: Some(PrefixFacts {
+                    limit_chars: limit,
+                    carrier,
+                }),
+                requested_outputs,
+            });
+        }
+    }
     if total == 0 {
         return logical_result(FN_NAME, Vec::new(), shape)
             .map_err(|_| strncmp_error(&STRNCMP_ERROR_INTERNAL));
@@ -169,21 +210,21 @@ fn parse_prefix_length_from_integer(value: &IntValue) -> BuiltinResult<usize> {
 }
 
 fn parse_prefix_length_from_float(value: f64) -> BuiltinResult<usize> {
-    if !value.is_finite() {
+    if !value.is_finite() || value.fract() != 0.0 {
         return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
     }
     if value < 0.0 {
         return Ok(0);
     }
-    let rounded = value.round();
-    if (rounded - value).abs() > f64::EPSILON {
+    if value > usize::MAX as f64 || (usize::BITS == 64 && value == usize::MAX as f64) {
         return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
     }
-    if rounded > usize::MAX as f64 || (usize::BITS == 64 && rounded == usize::MAX as f64) {
-        return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
-    }
-    Ok(rounded as usize)
+    Ok(value as usize)
 }
+
+#[cfg(test)]
+#[path = "strncmp/integrality_tests.rs"]
+mod integrality_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -197,7 +238,7 @@ pub(crate) mod tests {
     };
 
     fn strncmp_builtin(a: Value, b: Value, n: Value) -> BuiltinResult<Value> {
-        futures::executor::block_on(super::strncmp_builtin(a, b, n))
+        futures::executor::block_on(super::strncmp_builtin(None, None, a, b, n))
     }
 
     fn error_message(err: crate::RuntimeError) -> String {

@@ -39,7 +39,10 @@ impl AccelProvider for Provider {
             .take()
             .expect("configured upload"))
     }
-    fn upload_numeric_raw(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        _: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         Ok(self
             .response
             .lock()

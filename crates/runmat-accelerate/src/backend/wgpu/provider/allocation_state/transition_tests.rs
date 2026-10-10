@@ -18,9 +18,55 @@ fn upload(provider: &WgpuProvider) -> GpuTensorHandle {
 
 #[test]
 #[ignore = "requires provisioned WGPU adapter; run with --ignored"]
+fn issued_probe_tensor_ticket_retires_only_with_canonical_last_lease() {
+    use runmat_accelerate_api::observation::{ProviderObservationStatus, ProviderOperationReceipt};
+    let provider = provider();
+    let borrowed = upload(&provider);
+    let mut receipt = ProviderOperationReceipt::new();
+    let scope = receipt
+        .recorder()
+        .begin_resource_scope(
+            runmat_accelerate_api::observation::ProviderResourcePhasePlan::new([1024; 4]).unwrap(),
+        )
+        .unwrap();
+    for _ in 0..4 {
+        scope.begin_next_phase().unwrap();
+    }
+    let probe_owned = upload(&provider);
+    let alias = provider.reshape_exec(&probe_owned, &[2, 1]).unwrap();
+    let ticket = scope
+        .issue_resource_ticket(probe_owned.physical().requested_bytes())
+        .unwrap();
+    provider
+        .allocations
+        .attach_probe_resource_ticket(&probe_owned, ticket)
+        .unwrap();
+    scope.finish().unwrap();
+    receipt.publish().unwrap();
+    assert_eq!(receipt.status(), ProviderObservationStatus::Pending);
+    drop(probe_owned);
+    assert_eq!(receipt.status(), ProviderObservationStatus::Pending);
+    drop(alias);
+    assert!(matches!(
+        receipt.status(),
+        ProviderObservationStatus::Completed { .. }
+    ));
+    let resources = receipt.take_completed().unwrap().resources.unwrap();
+    assert_eq!(resources.issued, 1);
+    assert_eq!(resources.retired, 1);
+    assert_eq!(resources.requested_live_bytes, 0);
+    assert_eq!(
+        resources.requested_peak_bytes,
+        borrowed.physical().requested_bytes()
+    );
+    borrowed.allocation_lease().validate_live().unwrap();
+}
+
+#[test]
+#[ignore = "requires provisioned WGPU adapter; run with --ignored"]
 fn views_and_exports_share_one_lease_and_facade_drop_does_not_invalidate_them() {
     let provider = provider();
-    let state = Arc::downgrade(&provider.allocations);
+    let state = super::super::owner_shared::OwnerShared::downgrade(&provider.allocations);
     let input = upload(&provider);
     let clone = input.clone();
     let alias = provider.reshape_exec(&input, &[2, 1]).unwrap();
@@ -112,7 +158,7 @@ fn failed_retirement_retains_physical_record_without_pooling_or_reacquisition() 
                 disposition: Disposition::Retained
             }
         );
-        assert!(Arc::ptr_eq(
+        assert!(runmat_accelerate_api::WgpuBufferOwner::ptr_eq(
             &original.buffer,
             &retained.entry.as_ref().unwrap().buffer
         ));
@@ -124,7 +170,7 @@ fn failed_retirement_retains_physical_record_without_pooling_or_reacquisition() 
     drop(error);
     drop(provider);
     assert_eq!(
-        Arc::strong_count(&original.buffer),
+        runmat_accelerate_api::WgpuBufferOwner::strong_count(&original.buffer),
         1,
         "terminal teardown disposed the retained payload reference"
     );
@@ -211,9 +257,9 @@ fn logical_allocation_invariant_survives_numeric_aliases_and_casts() {
         .with_view(logical.view().clone().with_logical(false))
         .unwrap();
     let numeric = upload(&provider);
-    let identity_cast = provider
-        .floating_cast_exec(&numeric, provider.precision)
-        .unwrap();
+    let identity_cast =
+        futures::executor::block_on(provider.floating_cast_exec(&numeric, provider.precision))
+            .unwrap();
     assert!(
         identity_cast.shares_allocation_with(&numeric),
         "ordinary identity cast stays zero-copy"
@@ -242,9 +288,9 @@ fn logical_allocation_invariant_survives_numeric_aliases_and_casts() {
             .data,
         vec![1.0, 0.0]
     );
-    let cast = provider
-        .floating_cast_exec(&numeric_view, provider.precision)
-        .unwrap();
+    let cast =
+        futures::executor::block_on(provider.floating_cast_exec(&numeric_view, provider.precision))
+            .unwrap();
     assert!(
         !cast.shares_allocation_with(&logical),
         "mutable numeric cast cannot invalidate logical aliases"

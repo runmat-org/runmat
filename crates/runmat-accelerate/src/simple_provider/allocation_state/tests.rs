@@ -8,7 +8,7 @@ fn identity(id: u64) -> AllocationIdentity {
 
 #[test]
 fn publication_moves_payload_without_copy_and_last_view_retires_same_record() {
-    let owner = Arc::new(NumericAllocationState::default());
+    let owner = NumericOwner::new(NumericAllocationState::default());
     let mut data = Vec::with_capacity(16);
     data.extend([-0.0f64, f64::MAX]);
     let pointer = data.as_ptr();
@@ -56,7 +56,7 @@ fn publication_moves_payload_without_copy_and_last_view_retires_same_record() {
 
 #[test]
 fn pending_drop_duplicate_and_invalid_shape_never_publish_or_replace_payloads() {
-    let owner = Arc::new(NumericAllocationState::default());
+    let owner = NumericOwner::new(NumericAllocationState::default());
     let id = identity(2);
     let pending = owner
         .stage(
@@ -92,7 +92,7 @@ fn pending_drop_duplicate_and_invalid_shape_never_publish_or_replace_payloads() 
 
 #[test]
 fn exact_integer_and_empty_shape_admission_preserve_storage() {
-    let owner = Arc::new(NumericAllocationState::default());
+    let owner = NumericOwner::new(NumericAllocationState::default());
     let handle = owner
         .stage(
             identity(4),
@@ -132,7 +132,7 @@ fn exact_integer_and_empty_shape_admission_preserve_storage() {
 
 #[test]
 fn wire_cannot_relabel_numeric_as_logical_or_invent_lazy_layout() {
-    let owner = Arc::new(NumericAllocationState::default());
+    let owner = NumericOwner::new(NumericAllocationState::default());
     let handle = owner
         .stage(
             identity(6),
@@ -169,7 +169,7 @@ fn wire_cannot_relabel_numeric_as_logical_or_invent_lazy_layout() {
 #[cfg(panic = "unwind")]
 #[test]
 fn pending_unwind_cleans_up_and_poisoned_live_access_fails_closed() {
-    let owner = Arc::new(NumericAllocationState::default());
+    let owner = NumericOwner::new(NumericAllocationState::default());
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _pending = owner
             .stage(

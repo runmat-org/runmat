@@ -157,7 +157,7 @@ pub const ATANH_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Optional,
         residency: BuiltinResidencyPolicy::PreserveInputs,
-        fusion: BuiltinFusionPolicy::Never,
+        fusion: BuiltinFusionPolicy::Candidate,
         distributed: BuiltinDistributedPolicy::MapUnary,
     },
     link: BuiltinLinkContract {

@@ -16,9 +16,12 @@ impl AccelProvider for PreflightProvider {
         self.effects.fetch_add(1, Ordering::SeqCst);
         anyhow::bail!("unexpected upload")
     }
-    fn upload_numeric_raw(&self, _: &HostNumericTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        _: &HostNumericTensorView<'_>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.effects.fetch_add(1, Ordering::SeqCst);
-        anyhow::bail!("unexpected native upload")
+        Err(anyhow::anyhow!("unexpected native upload").into())
     }
     fn reduce_median_dim<'a>(
         &'a self,
@@ -240,10 +243,13 @@ fn empty_single_restoration_preserves_explicit_intent_and_terminal_failures() {
                     NumericUploadError::Provider(source)
                         if matches!(mode, Mode::RestoreUnsupported) =>
                     {
-                        assert!(is_unsupported_provider_operation(source))
+                        assert!(source.is_unsupported())
                     }
                     NumericUploadError::Provider(source) => assert_eq!(
-                        source.downcast_ref::<std::io::Error>().unwrap().kind(),
+                        std::error::Error::source(source)
+                            .and_then(|source| source.downcast_ref::<std::io::Error>())
+                            .unwrap()
+                            .kind(),
                         std::io::ErrorKind::BrokenPipe
                     ),
                     other => panic!("unexpected failure carrier: {other:?}"),

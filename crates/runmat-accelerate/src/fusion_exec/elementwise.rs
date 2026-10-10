@@ -1,6 +1,8 @@
 //! Typed elementwise request execution and transactional publication.
 use super::*;
+use crate::precision::ensure_provider_supports_dtype;
 use runmat_accelerate_api::{ProviderElementType, ProviderExecutionResult as ExecutionResult};
+use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 
 #[path = "elementwise/effects.rs"]
 mod effects;
@@ -57,8 +59,9 @@ async fn execute_elementwise_outputs(
                         != Some(runmat_accelerate_api::GpuTensorStorage::Real)
                     || handle.descriptor().element_type != element
                     || !gpu_class_metadata_matches(handle, precision, None, false)
-                    || !exact_provider_for_handle(handle)
-                        .is_some_and(|owner| std::ptr::eq(owner, provider))
+                    || !exact_provider_for_handle(handle).is_some_and(|owner| {
+                        runmat_accelerate_api::same_provider_instance(owner, provider)
+                    })
                 {
                     return Err(anyhow!(
                         "fusion input has invalid floating metadata or provider ownership"
@@ -91,19 +94,24 @@ async fn execute_elementwise_outputs(
             .map(|id| program.floating_class(*id))
             .collect::<Result<Vec<_>>>()?;
         let started = Instant::now();
-        let shader = request
-            .plan
-            .generate_typed_wgsl(output_ids, &program, scalar_type)?;
+        let generated_shader =
+            request
+                .plan
+                .prepare_typed_shader(output_ids, &program, scalar_type)?;
         FusionPlacementObserver::new(request.placement).shader_source_generation(started);
-        Ok::<_, anyhow::Error>((program, classes, shader))
+        Ok::<_, crate::fusion::semantics::FusionResolveFailure>((
+            program,
+            classes,
+            generated_shader,
+        ))
     }
     .await;
-    let (program, output_classes, shader) = match typed {
+    let (program, output_classes, generated_shader) = match typed {
         Ok(typed) => typed,
         Err(error) => {
-            let error = match error.downcast::<crate::fusion::semantics::FusionAdmissionFailure>() {
-                Ok(failure) => return Err(failure.0.into()),
-                Err(unsupported) => unsupported,
+            let error = match error.into_execution_or_structural() {
+                Ok(error) => error,
+                Err(failure) => return Err(failure),
             };
             log::debug!("fusion retained shared runtime: {error}");
             FusionPlacementObserver::new(request.placement).selected(
@@ -116,6 +124,7 @@ async fn execute_elementwise_outputs(
             ));
         }
     };
+    let (shader, shader_requirements) = generated_shader.into_parts();
     // Determine output shape from the fusion plan; if unknown, derive from runtime inputs via broadcasting.
     // Determine output shape from the fusion plan and derive the element count from it.
     let runtime_shape = runtime_broadcast_shape(&request.inputs);
@@ -204,6 +213,7 @@ async fn execute_elementwise_outputs(
             preparation_program: Some(
                 runmat_accelerate_api::ProviderPreparationProgram::Elementwise { shader: &shader },
             ),
+            shader_requirements: Some(shader_requirements),
         },
     )?;
     let selection = match selection {
@@ -237,7 +247,7 @@ async fn execute_elementwise_outputs(
                         exact_provider_for_handle, ResidencyRestoreGuard,
                     };
                     if !exact_provider_for_handle(handle)
-                        .is_some_and(|owner| std::ptr::eq(owner, provider))
+                        .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
                     {
                         return Err(anyhow!("fusion input has no matching exact provider owner").into());
                     }
@@ -285,7 +295,9 @@ async fn execute_elementwise_outputs(
                     } else {
                         let metadata = ResidencyRestoreGuard::new(&contiguous);
                         let converted = match provider.precision() {
-                            ProviderPrecision::F64 => provider.unary_double(&contiguous).await,
+                            ProviderPrecision::F64 => provider
+                                .unary_double(&contiguous)
+                                .await,
                             ProviderPrecision::F32 => provider.unary_single(&contiguous).await,
                         };
                         drop(metadata);
@@ -361,7 +373,14 @@ async fn execute_elementwise_outputs(
             timer.mark("generate_wgsl");
             let started = Instant::now();
             let metadata = protect_kernel_inputs(&handles);
-            let output = provider.fused_elementwise(&shader, &handles, &output_shape, len, physical_output_class);
+            let output = provider.fused_elementwise(
+                &shader,
+                shader_requirements,
+                &handles,
+                &output_shape,
+                len,
+                physical_output_class,
+            ).await;
             drop(metadata);
             let output = output?;
             effects.succeeded();
@@ -376,13 +395,15 @@ async fn execute_elementwise_outputs(
             timer.mark("generate_wgsl");
             let started = Instant::now();
             let metadata = protect_kernel_inputs(&handles);
+            let physical_output_classes = vec![physical_output_class; output_ids.len()];
             let multi_result = provider.fused_elementwise_multi(
                 &shader,
+                shader_requirements,
                 &handles,
                 &output_shape,
                 len,
-                &vec![physical_output_class; output_ids.len()],
-            );
+                &physical_output_classes,
+            ).await;
             drop(metadata);
             observer.queue(started);
             match multi_result {
@@ -400,25 +421,32 @@ async fn execute_elementwise_outputs(
                         outputs.insert(output_id, Value::GpuTensor(handle));
                     }
                 }
-                Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => {
+                Err(error) if error.is_unsupported() => {
                     // Provider does not support multi-output dispatch; fall back to N single dispatches.
                     for output_id in output_ids.iter().copied() {
                         let started = Instant::now();
-                        let single_shader = request.plan.generate_typed_wgsl(
+                        let single_shader = request.plan.prepare_typed_shader(
                             &[output_id],
                             &program,
                             scalar_type,
                         )?;
                         observer.shader_source_generation(started);
+                        if !provider.supports_shader_requirements(single_shader.requirements()) {
+                            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                                "selected single-output shader requires unavailable features",
+                            )
+                            .into());
+                        }
                         let started = Instant::now();
                         let metadata = protect_kernel_inputs(&handles);
                         let output = provider.fused_elementwise(
-                            &single_shader,
+                            single_shader.source(),
+                            single_shader.requirements(),
                             &handles,
                             &output_shape,
                             len,
                             physical_output_class,
-                        );
+                        ).await;
                         drop(metadata);
                         let output = output?;
                         effects.succeeded();
@@ -433,7 +461,7 @@ async fn execute_elementwise_outputs(
                         outputs.insert(output_id, Value::GpuTensor(output));
                     }
                 }
-                Err(error) => return Err(error.into()),
+                Err(error) => return Err(error),
             }
         }
         timer.mark("dispatch");

@@ -361,12 +361,12 @@ impl ProviderPreparedIirCoefficients {
         protected: &[&GpuTensorHandle],
     ) -> NumericUploadResult<Self> {
         if numerator.is_empty() || numerator.len() != denominator.len() {
-            return Err(NumericUploadError::Provider(anyhow::anyhow!(
+            return Err(NumericUploadError::from(anyhow::anyhow!(
                 "iir_filter: prepared coefficient lengths are incompatible"
             )));
         }
         if denominator.first() != Some(&1.0) {
-            return Err(NumericUploadError::Provider(anyhow::anyhow!(
+            return Err(NumericUploadError::from(anyhow::anyhow!(
                 "iir_filter: prepared leading denominator must equal one"
             )));
         }
@@ -375,12 +375,12 @@ impl ProviderPreparedIirCoefficients {
             .chain(denominator)
             .any(|value| !value.is_finite())
         {
-            return Err(NumericUploadError::Provider(anyhow::anyhow!(
+            return Err(NumericUploadError::from(anyhow::anyhow!(
                 "iir_filter: prepared coefficients must be finite"
             )));
         }
         if provider.precision() != precision {
-            return Err(NumericUploadError::Provider(anyhow::anyhow!(
+            return Err(NumericUploadError::from(anyhow::anyhow!(
                 "iir_filter: admitted precision is unavailable on provider"
             )));
         }
@@ -388,20 +388,20 @@ impl ProviderPreparedIirCoefficients {
             handle
                 .allocation_lease()
                 .validate_live()
-                .map_err(|source| NumericUploadError::Provider(anyhow::Error::new(source)))?;
+                .map_err(|source| NumericUploadError::from(anyhow::Error::new(source)))?;
         }
         let shape = [numerator.len(), 1];
         let (numerator_single, denominator_single) = match precision {
             ProviderPrecision::F32 => {
                 let narrow = |values: &[f64]| -> NumericUploadResult<Vec<f32>> {
                     let mut result = Vec::new();
-                    result.try_reserve_exact(values.len()).map_err(|source| {
-                        NumericUploadError::Provider(anyhow::Error::new(source))
-                    })?;
+                    result
+                        .try_reserve_exact(values.len())
+                        .map_err(|source| NumericUploadError::from(anyhow::Error::new(source)))?;
                     for &value in values {
                         let converted = value as f32;
                         if !converted.is_finite() {
-                            return Err(NumericUploadError::Provider(anyhow::anyhow!(
+                            return Err(NumericUploadError::from(anyhow::anyhow!(
                                 "iir_filter: prepared coefficient exceeds single precision range"
                             )));
                         }
@@ -423,13 +423,13 @@ impl ProviderPreparedIirCoefficients {
         };
         let mut denominator_protected = Vec::new();
         let protected_len = protected.len().checked_add(1).ok_or_else(|| {
-            NumericUploadError::Provider(anyhow::anyhow!(
+            NumericUploadError::from(anyhow::anyhow!(
                 "iir_filter: borrowed coefficient count overflow"
             ))
         })?;
         denominator_protected
             .try_reserve_exact(protected_len)
-            .map_err(|source| NumericUploadError::Provider(anyhow::Error::new(source)))?;
+            .map_err(|source| NumericUploadError::from(anyhow::Error::new(source)))?;
         denominator_protected.extend_from_slice(protected);
         let numerator_handle = upload_numeric_protecting(
             provider,
@@ -528,15 +528,16 @@ mod tests {
         fn upload_numeric_raw(
             &self,
             host: &HostNumericTensorView,
-        ) -> anyhow::Result<GpuTensorHandle> {
+        ) -> crate::ProviderExecutionResult<GpuTensorHandle> {
             if let HostNumericDataView::F32(data) = host.data {
                 self.observed_single.lock().unwrap().push(data.to_vec());
             }
-            self.queued
+            Ok(self
+                .queued
                 .lock()
                 .unwrap()
                 .pop()
-                .ok_or_else(|| anyhow::anyhow!("missing queued handle"))
+                .ok_or_else(|| anyhow::anyhow!("missing queued handle"))?)
         }
         fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
             Box::pin(async { anyhow::bail!("unused download") })

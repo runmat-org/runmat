@@ -1,5 +1,5 @@
 use super::*;
-use runmat_accelerate_api::WgpuDeviceAccess;
+use runmat_accelerate_api::{WgpuBufferOwner, WgpuDeviceAccess};
 use runmat_plot::gpu::{
     line3::Line3GpuInputs, scatter2::Scatter2GpuInputs, GpuInputBuffer, ScalarType,
 };
@@ -11,9 +11,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use wgpu::util::DeviceExt;
 
-pub(super) async fn install_browser_source(
-    values: &[f32],
-) -> (Arc<wgpu::Buffer>, WgpuDeviceAccess) {
+pub(super) async fn install_browser_source(values: &[f32]) -> (WgpuBufferOwner, WgpuDeviceAccess) {
     let instance = Arc::new(wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends: wgpu::Backends::BROWSER_WEBGPU,
         ..Default::default()
@@ -41,12 +39,12 @@ pub(super) async fn install_browser_source(
     (source, access)
 }
 
-fn browser_buffer(access: &WgpuDeviceAccess, values: &[f32]) -> Arc<wgpu::Buffer> {
+fn browser_buffer(access: &WgpuDeviceAccess, values: &[f32]) -> WgpuBufferOwner {
     let bytes: Vec<u8> = values
         .iter()
         .flat_map(|value| value.to_le_bytes())
         .collect();
-    Arc::new(
+    WgpuBufferOwner::new(
         access
             .with_shared(|emission| {
                 let buffer =
@@ -169,7 +167,7 @@ async fn browser_scatter_resident_property_lifecycle() {
     let PlotChildHandleState::Scatter(state) = child else {
         panic!("expected scatter child");
     };
-    let vertices = Arc::new(
+    let vertices = WgpuBufferOwner::new(
         access
             .with_shared(|emission| {
                 emission.device().create_buffer(&wgpu::BufferDescriptor {

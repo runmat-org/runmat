@@ -14,11 +14,13 @@ use crate::builtins::common::cooperative_sort::{
 };
 
 #[cfg(any(feature = "plot-core", test))]
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub(crate) enum CooperativeSortError {
-    Resource(std::collections::TryReserveError),
+    #[error("sort allocation failed: {0}")]
+    Resource(#[source] std::collections::TryReserveError),
     #[cfg(any(feature = "plot-core", test))]
-    Service(ExecutionServiceError),
+    #[error("sort execution failed: {0}")]
+    Service(#[source] ExecutionServiceError),
 }
 
 /// Sort non-NaN values using the same stable partial order as before. NaN

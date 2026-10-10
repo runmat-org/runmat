@@ -3,7 +3,6 @@ use crate::core::scene::GpuVertexBuffer;
 use crate::gpu::axis::{axis_storage_buffer, AxisData};
 use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 /// Axis data source used by the GPU surface vertex packer.
@@ -67,15 +66,15 @@ pub fn pack_surface_vertices(
     let x_buffer = axis_storage_buffer(emission, "surface-x-axis", &inputs.x_axis, inputs.scalar)?;
     let y_buffer = axis_storage_buffer(emission, "surface-y-axis", &inputs.y_axis, inputs.scalar)?;
 
-    let color_buffer = Arc::new(
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let color_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+        &wgpu::util::BufferInitDescriptor {
             label: Some("surface-color-table"),
             contents: bytemuck::cast_slice(inputs.color_table),
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
-        }),
-    );
+        },
+    ));
 
     let lod_x_len = params.lod_x_len.max(1);
     let lod_y_len = params.lod_y_len.max(1);
@@ -83,15 +82,17 @@ pub fn pack_surface_vertices(
         .checked_mul(lod_y_len)
         .ok_or_else(|| "surf: grid dimensions overflowed vertex count".to_string())?;
     let output_size = vertex_count as u64 * std::mem::size_of::<Vertex>() as u64;
-    let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("surface-gpu-vertices"),
-        size: output_size,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("surface-gpu-vertices"),
+            size: output_size,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
 
     let min_z = if params.min_z.is_finite() {
         params.min_z
@@ -348,7 +349,7 @@ mod stress_tests {
             let y = (idx / x_len as usize) as f32 * 0.01;
             *value = (x.sin() + y.cos()) * 0.5;
         }
-        let z_buffer = Arc::new(
+        let z_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
             access
                 .with_shared(|emission| {
                     emission
@@ -408,7 +409,7 @@ mod stress_tests {
         let x_axis = [10.0f32, 20.0, 30.0];
         let y_axis = [1.0f32, 2.0];
         let z_data = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
-        let z_buffer = Arc::new(
+        let z_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
             access
                 .with_shared(|emission| {
                     emission

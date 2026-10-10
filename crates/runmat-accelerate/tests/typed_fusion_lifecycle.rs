@@ -2,6 +2,7 @@
 #[path = "support/typed_fusion_plan.rs"]
 mod fixture;
 use fixture::{cast, plan};
+use futures::FutureExt;
 use runmat_accelerate::fusion::FusionStoreMaterialization;
 use runmat_accelerate::fusion_exec::{execute_elementwise, FusionExecutionRequest};
 use runmat_accelerate::graph::{VarBinding, VarKind};
@@ -93,6 +94,16 @@ impl AccelProvider for Recorder {
     fn precision(&self) -> ProviderPrecision {
         ProviderPrecision::F64
     }
+    fn supports_shader_requirements(
+        &self,
+        requirements: runmat_accelerate_api::ProviderShaderRequirements,
+    ) -> bool {
+        matches!(
+            requirements,
+            runmat_accelerate_api::ProviderShaderRequirements::Basic
+                | runmat_accelerate_api::ProviderShaderRequirements::F64IeeeWords
+        )
+    }
     fn device_info(&self) -> String {
         "typed-fusion-lifecycle".into()
     }
@@ -127,73 +138,80 @@ impl AccelProvider for Recorder {
             .with_view(GpuTensorView::contiguous(shape.to_vec()))
             .expect("fixture materialization preserves the allocated extent"))
     }
-    fn fused_elementwise_multi(
-        &self,
-        _: &str,
-        inputs: &[GpuTensorHandle],
-        _: &[usize],
+    fn fused_elementwise_multi<'a>(
+        &'a self,
+        _: &'a str,
+        _: runmat_accelerate_api::ProviderShaderRequirements,
+        inputs: &'a [GpuTensorHandle],
+        _: &'a [usize],
         _: usize,
-        output_classes: &[ProviderElementType],
-    ) -> anyhow::Result<Vec<GpuTensorHandle>> {
-        validate_fused_output_classes(self.precision(), output_classes)?;
-        match self.mode.load(Ordering::SeqCst) {
-            3 => return Err(unsupported_provider_operation("multi unavailable")),
-            4 => anyhow::bail!("multi execution failed"),
-            7 => return Ok(vec![inputs[0].clone(), self.fresh(NumericElementType::F64)]),
-            _ => {}
-        }
-        let outputs: Vec<_> = output_classes
-            .iter()
-            .enumerate()
-            .map(|(index, class)| {
-                let output = if *class == ProviderElementType::Logical
-                    || (index == 0 && self.mode.load(Ordering::SeqCst) == 5)
-                {
-                    self.track(
-                        self.owner
-                            .allocate_logical_zeroed(vec![1, 2], self.precision())
-                            .unwrap(),
-                    )
-                } else {
-                    self.fresh(NumericElementType::F64)
-                };
-                if index == 0 && self.mode.load(Ordering::SeqCst) == 6 {
-                    transposed(output)
-                } else {
-                    output
-                }
-            })
-            .collect();
-        Ok(outputs)
+        output_classes: &'a [ProviderElementType],
+    ) -> ProviderExecutionFuture<'a, Vec<GpuTensorHandle>> {
+        Box::pin(async move {
+            validate_fused_output_classes(self.precision(), output_classes)?;
+            match self.mode.load(Ordering::SeqCst) {
+                3 => return Err(unsupported_provider_operation("multi unavailable").into()),
+                4 => return Err(anyhow::anyhow!("multi execution failed").into()),
+                7 => return Ok(vec![inputs[0].clone(), self.fresh(NumericElementType::F64)]),
+                _ => {}
+            }
+            let outputs: Vec<_> = output_classes
+                .iter()
+                .enumerate()
+                .map(|(index, class)| {
+                    let output = if *class == ProviderElementType::Logical
+                        || (index == 0 && self.mode.load(Ordering::SeqCst) == 5)
+                    {
+                        self.track(
+                            self.owner
+                                .allocate_logical_zeroed(vec![1, 2], self.precision())
+                                .unwrap(),
+                        )
+                    } else {
+                        self.fresh(NumericElementType::F64)
+                    };
+                    if index == 0 && self.mode.load(Ordering::SeqCst) == 6 {
+                        transposed(output)
+                    } else {
+                        output
+                    }
+                })
+                .collect();
+            Ok(outputs)
+        })
     }
-    fn fused_elementwise(
-        &self,
-        _: &str,
-        _: &[GpuTensorHandle],
-        _: &[usize],
+    fn fused_elementwise<'a>(
+        &'a self,
+        _: &'a str,
+        _: runmat_accelerate_api::ProviderShaderRequirements,
+        _: &'a [GpuTensorHandle],
+        _: &'a [usize],
         _: usize,
         output_class: ProviderElementType,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        validate_fused_output_classes(self.precision(), &[output_class])?;
-        Ok(if output_class == ProviderElementType::Logical {
-            self.track(
-                self.owner
-                    .allocate_logical_zeroed(vec![1, 2], self.precision())?,
-            )
-        } else {
-            self.fresh(NumericElementType::F64)
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            validate_fused_output_classes(self.precision(), &[output_class])?;
+            Ok(if output_class == ProviderElementType::Logical {
+                self.track(
+                    self.owner
+                        .allocate_logical_zeroed(vec![1, 2], self.precision())
+                        .map_err(runmat_accelerate_api::ProviderExecutionError::from)?,
+                )
+            } else {
+                self.fresh(NumericElementType::F64)
+            })
         })
     }
     fn unary_single<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let ordinal = self.casts.fetch_add(1, Ordering::SeqCst);
             if ordinal == 1 {
                 match self.mode.load(Ordering::SeqCst) {
                     0 => futures::future::pending::<()>().await,
-                    1 => anyhow::bail!("second output adapter failed"),
+                    1 => return Err(anyhow::anyhow!("second output adapter failed").into()),
                     _ => {}
                 }
             }
@@ -203,7 +221,7 @@ impl AccelProvider for Recorder {
     fn unary_double<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { Ok(self.fresh(NumericElementType::F64)) })
     }
 }
@@ -366,9 +384,18 @@ impl AccelProvider for DefaultMulti {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn provider_default_multi_declares_unsupported_not_execution_failure() {
     let error = DefaultMulti
-        .fused_elementwise_multi("", &[], &[1, 2], 2, &[ProviderElementType::F64; 2])
+        .fused_elementwise_multi(
+            "",
+            runmat_accelerate_api::ProviderShaderRequirements::Basic,
+            &[],
+            &[1, 2],
+            2,
+            &[ProviderElementType::F64; 2],
+        )
+        .now_or_never()
+        .expect("default future is ready")
         .unwrap_err();
-    assert!(is_unsupported_provider_operation(&error));
+    assert!(error.is_unsupported());
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]

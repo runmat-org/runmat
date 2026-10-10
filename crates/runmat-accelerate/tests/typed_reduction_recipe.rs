@@ -92,6 +92,24 @@ fn try_recipe(
     producer: Option<PrimitiveOp>,
     cfg: ReductionRecipeConfig,
 ) -> anyhow::Result<ReductionRecipe> {
+    try_recipe_with_precision(
+        name,
+        inputs,
+        controls,
+        producer,
+        cfg,
+        ProviderPrecision::F64,
+    )
+}
+
+fn try_recipe_with_precision(
+    name: &str,
+    inputs: Vec<Value>,
+    controls: Vec<Value>,
+    producer: Option<PrimitiveOp>,
+    cfg: ReductionRecipeConfig,
+    execution_precision: ProviderPrecision,
+) -> anyhow::Result<ReductionRecipe> {
     let count = inputs.len();
     let mut operations = Vec::new();
     let root = if let Some(op) = producer {
@@ -121,7 +139,7 @@ fn try_recipe(
         placement: None,
         runtime: None,
     };
-    let program = block_on(resolve_reduction_program(&request, ProviderPrecision::F64))
+    let program = block_on(resolve_reduction_program(&request, execution_precision))
         .unwrap()
         .expect("owner-proven reduction");
     build(&program, cfg)
@@ -385,6 +403,52 @@ fn every_pass_carries_nan_counts_validity_and_signed_zero_ties() {
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn every_nonidentity_stage_uses_ieee_word_nan_classification() {
+    let single = try_recipe_with_precision(
+        "min",
+        vec![array(true, &[25, 2])],
+        axes("min", Value::Num(1.0), false),
+        None,
+        config(),
+        ProviderPrecision::F32,
+    )
+    .expect("canonical Single minimum recipe");
+    let double = recipe(
+        "min",
+        vec![array(false, &[25, 2])],
+        axes("min", Value::Num(1.0), true),
+        None,
+        config(),
+    );
+    for source in [
+        single.single_source(),
+        single.pass1_source(),
+        single.pass2_source(),
+    ] {
+        assert!(source.contains("fn rr_is_nan(value: f32) -> bool"));
+        assert!(source.contains("let bits = bitcast<u32>(value)"));
+        assert!(source.contains("(bits & 0x7fffffffu) > 0x7f800000u"));
+        assert!(source.contains("if rr_is_nan(value)"));
+        assert!(!source.contains("value != value"));
+        assert!(!source.contains("@IEEE_NAN_PREDICATE@"));
+    }
+    for source in [
+        double.single_source(),
+        double.pass1_source(),
+        double.pass2_source(),
+    ] {
+        assert!(source.contains("fn rr_is_nan(value: f64) -> bool"));
+        assert!(source.contains("runmat_f64_low(value)"));
+        assert!(source.contains("runmat_f64_high(value)"));
+        assert!(source.contains("low != 0u"));
+        assert!(source.contains("if rr_is_nan(value)"));
+        assert!(!source.contains("value != value"));
+        assert!(!source.contains("@IEEE_NAN_PREDICATE@"));
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn f64_zero_sign_encoding_is_exact_without_narrowing_nonzero_comparisons() {
     // Independent IEEE bit-pattern oracle for the conversion used only after
     // the shader's zero guard. This is not a GPU execution claim; the Naga
@@ -409,7 +473,10 @@ fn f64_zero_sign_encoding_is_exact_without_narrowing_nonzero_comparisons() {
             assert!(source.contains(
                 "if value != f64(0.0) { return false; } return (bitcast<u32>(f32(value))"
             ));
-            assert!(source.contains("return f64(bitcast<f32>(0x7fc00000u))"));
+            assert!(source.contains(
+                "fn rr_nan() -> f64 { let nan_bits: u32 = 0x7fc00000u; return f64(bitcast<f32>(nan_bits)); }"
+            ));
+            assert!(!source.contains("bitcast<f32>(0x"));
             assert!(!source.contains("bitcast<vec2<u32>>"));
             assert!(!source.contains("bitcast<f64>"));
             // Infinity and every nonzero comparison still use native F64
@@ -457,6 +524,66 @@ fn provider_limits_and_invalid_geometry_are_rejected_without_execution() {
             "case {case}"
         );
     }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn unused_two_pass_limits_do_not_reject_checked_single_pass_recipe() {
+    use runmat_accelerate_api::reduction::{ReductionSelection, ReductionStrategy};
+
+    let mut cfg = config();
+    cfg.chunk_elements = 1;
+    cfg.max_storage_binding_bytes = 16;
+    let built = try_recipe_with_precision(
+        "min",
+        vec![array(true, &[4, 1])],
+        vec![],
+        None,
+        cfg,
+        ProviderPrecision::F32,
+    )
+    .expect("input 16 and output 4 bytes fit the selected binding limit");
+    validate_lowered_sources(built.physical()).unwrap();
+    assert_eq!(built.work().output_requested_bytes, 4);
+    assert_eq!(built.work().partial_requested_bytes, 48);
+    let single = ReductionSelection::new(built.physical(), ReductionStrategy::SinglePass)
+        .expect("unused partial cannot reject SinglePass");
+    assert_eq!(single.work().partial_requested_bytes, 0);
+    assert!(ReductionSelection::new(built.physical(), ReductionStrategy::TwoPass).is_err());
+
+    cfg.max_storage_binding_bytes = 64;
+    cfg.max_dispatch_dimension = 1;
+    let built = try_recipe_with_precision(
+        "min",
+        vec![array(true, &[4, 1])],
+        vec![],
+        None,
+        cfg,
+        ProviderPrecision::F32,
+    )
+    .expect("single dispatch fits while alternate first-stage grid does not");
+    validate_lowered_sources(built.physical()).unwrap();
+    assert_eq!(built.geometry().single.workgroups, [1, 1, 1]);
+    assert_eq!(built.geometry().pass1.logical_groups, 4);
+    assert!(ReductionSelection::new(built.physical(), ReductionStrategy::SinglePass).is_ok());
+    assert!(ReductionSelection::new(built.physical(), ReductionStrategy::TwoPass).is_err());
+
+    cfg.max_storage_binding_bytes = 128;
+    cfg.max_dispatch_dimension = 2;
+    let built = try_recipe_with_precision(
+        "min",
+        vec![array(true, &[8, 1])],
+        vec![],
+        None,
+        cfg,
+        ProviderPrecision::F32,
+    )
+    .expect("all eight partial groups fit the enabled three-dimensional grid");
+    validate_lowered_sources(built.physical()).unwrap();
+    assert_eq!(built.geometry().partial_elements, 8);
+    assert_eq!(built.geometry().pass1.logical_groups, 8);
+    assert_eq!(built.geometry().pass1.workgroups, [2, 2, 2]);
+    assert!(ReductionSelection::new(built.physical(), ReductionStrategy::TwoPass).is_ok());
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
@@ -563,7 +690,89 @@ fn real_recipe_projects_one_checked_physical_authority_for_both_strategies() {
 }
 
 #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
-use wgpu::naga;
+#[test]
+#[ignore = "requires actual WGPU adapter; unavailable is failure"]
+fn actual_f32_forced_reduction_strategies_folded_min_axes_preserve_inputs() {
+    use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
+    use runmat_accelerate_api::{
+        allocation::AllocationReleaseOutcome,
+        reduction::{ReductionSelection, ReductionStrategy, ReductionSubmission},
+        AccelProvider, GpuHandleProvenance, HostNumericDataOwned, HostNumericDataView,
+        HostNumericTensorView,
+    };
+    let provider = register_wgpu_provider(WgpuProviderOptions::default())
+        .expect("actual WGPU adapter required; unavailable is not a pass");
+    assert_eq!(provider.precision(), ProviderPrecision::F32);
+    let left = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+    let right = [10.0f32, 20.0, 30.0, 40.0, 50.0, 60.0];
+    let upload = |data: &[f32]| {
+        provider
+            .upload_numeric_raw(&HostNumericTensorView {
+                data: HostNumericDataView::F32(data),
+                shape: &[2, 3],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap()
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap()
+    };
+    let a = upload(&left);
+    let b = upload(&right);
+    let read = |handle: &runmat_accelerate_api::GpuTensorHandle| match block_on(
+        provider.download_numeric(handle),
+    )
+    .unwrap()
+    .data
+    {
+        HostNumericDataOwned::F32(values) => values,
+        other => panic!("expected native F32: {other:?}"),
+    };
+    for (axis, shape, expected) in [
+        (1.0, vec![1, 3], vec![11.0, 33.0, 55.0]),
+        (2.0, vec![2, 1], vec![11.0, 22.0]),
+    ] {
+        let mut cfg = config();
+        cfg.chunk_elements = 1; // Forces more than one partial per output slice.
+        let physical = try_recipe_with_precision(
+            "min",
+            vec![Value::GpuTensor(a.clone()), Value::GpuTensor(b.clone())],
+            axes("min", Value::Num(axis), false),
+            Some(PrimitiveOp::Add),
+            cfg,
+            ProviderPrecision::F32,
+        )
+        .expect("checked folded min recipe");
+        assert_eq!(physical.inputs().len(), 2);
+        assert_eq!(physical.partial_layout().precision, ProviderPrecision::F32);
+        assert_eq!(physical.partial_layout().stride, 12);
+        assert!(physical.physical().descriptor().geometry.chunks > 1);
+        for strategy in [ReductionStrategy::SinglePass, ReductionStrategy::TwoPass] {
+            let inputs = [a.clone(), b.clone()];
+            let selected = ReductionSelection::new(physical.physical(), strategy).unwrap();
+            let submission =
+                ReductionSubmission::new(selected, &inputs, provider.device_id()).unwrap();
+            let output = provider
+                .submit_reduction_recipe(&submission)
+                .expect("actual selected typed reduction, not Unsupported fallback");
+            assert_eq!(output.shape(), shape);
+            assert_eq!(output.physical().element_type(), NumericElementType::F32);
+            assert!(!output.shares_allocation_with(&a));
+            assert!(!output.shares_allocation_with(&b));
+            assert_eq!(read(&output), expected);
+            assert_eq!(read(&a), left);
+            assert_eq!(read(&b), right);
+            assert_eq!(output.release().unwrap(), AllocationReleaseOutcome::Retired);
+        }
+    }
+    assert_eq!(a.release().unwrap(), AllocationReleaseOutcome::Retired);
+    assert_eq!(b.release().unwrap(), AllocationReleaseOutcome::Retired);
+}
+
+#[cfg(feature = "wgpu")]
+#[path = "typed_reduction_recipe/shader_validation.rs"]
+mod shader_validation;
+#[cfg(feature = "wgpu")]
+use shader_validation::validate_shaders;
 
 #[cfg(feature = "wgpu")]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
@@ -621,35 +830,5 @@ fn naga_validates_all_three_real_shaders_at_both_precisions() {
         ),
     ] {
         validate_shaders(&extra);
-    }
-}
-
-#[cfg(feature = "wgpu")]
-fn validate_shaders(recipe: &ReductionRecipe) {
-    for source in [
-        recipe.single_source(),
-        recipe.pass1_source(),
-        recipe.pass2_source(),
-    ] {
-        let module = naga::front::wgsl::parse_str(source)
-            .unwrap_or_else(|error| panic!("{}", error.emit_to_string(source)));
-        naga::valid::Validator::new(
-            naga::valid::ValidationFlags::all(),
-            naga::valid::Capabilities::all(),
-        )
-        .validate(&module)
-        .unwrap_or_else(|error| panic!("{error:?}\n{source}"));
-        let partial = module
-            .types
-            .iter()
-            .find(|(_, ty)| ty.name.as_deref() == Some("RRPartial"))
-            .unwrap()
-            .1;
-        let naga::TypeInner::Struct { members, span } = &partial.inner else {
-            panic!("partial state struct");
-        };
-        assert_eq!(*span, recipe.partial_layout().stride);
-        assert_eq!(members[1].offset, recipe.partial_layout().count_offset);
-        assert_eq!(members[2].offset, recipe.partial_layout().flags_offset);
     }
 }

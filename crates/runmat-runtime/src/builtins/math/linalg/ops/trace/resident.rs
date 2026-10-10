@@ -33,7 +33,12 @@ pub(super) async fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 )?;
                 let reduced = match provider.reduce_sum(&diagonal).await {
                     Ok(result) => Some(result),
-                    Err(source) if source.is_unsupported() => None,
+                    Err(source) if source.is_unsupported() => {
+                        return Err(trace_provider_failure(
+                            runmat_accelerate_api::ProviderExecutionError::from(source)
+                                .after_effect(),
+                        ))
+                    }
                     Err(source) => return Err(trace_provider_failure(source)),
                 };
                 if let Some(result) = reduced {
@@ -64,8 +69,8 @@ pub(super) async fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     {
                         let cast = match provider.unary_single(&result).await {
                             Ok(cast) => Some(cast),
-                            Err(source) if gpu_helpers::provider_hook_is_unsupported(&source) => {
-                                None
+                            Err(source) if source.is_unsupported() => {
+                                return Err(trace_provider_failure(source.after_effect()))
                             }
                             Err(source) => return Err(trace_provider_failure(source)),
                         };

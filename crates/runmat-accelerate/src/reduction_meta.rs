@@ -25,7 +25,8 @@ pub struct ReductionSignature {
 
 /// Attempt to derive a generic reduction signature from a builtin reduction node without name checks.
 /// Heuristics:
-/// - Data input: the first input whose type is Tensor; otherwise fall back to the first input.
+/// - Data input: the first positional argument. Reduction controls can themselves be
+///   tensors (including `[]`), while a computed data producer can still be untyped.
 /// - Dim arg: the first input (after data) that is a scalar numeric or int constant (by ValueId; resolution is done by callers).
 /// - Behavior: inferred via a minimal registry keyed by builtin name for post-scale choices (mean -> MeanLike). This is centralized here.
 pub fn detect_reduction_signature(
@@ -45,16 +46,10 @@ pub fn detect_reduction_signature(
         return None;
     }
 
-    // 1) Pick data input: first tensor-typed input, else inputs[0]
-    let mut data_input = inputs[0];
-    for &vid in inputs {
-        if let Some(info) = graph.value(vid) {
-            if matches!(info.ty, Type::Tensor { .. }) {
-                data_input = vid;
-                break;
-            }
-        }
-    }
+    // The selected reduction call's first argument is its data operand.
+    // Type facts are not an argument-role authority: a later `[]` control is
+    // tensor-typed even when the producer of this operand is still Unknown.
+    let data_input = inputs[0];
 
     // 2) Pick dim argument if present: first scalar numeric/int constant input after data input
     let mut dim_arg: Option<ValueId> = None;
@@ -190,6 +185,79 @@ fn parse_tensor_dims(tensor: &Tensor) -> Option<Vec<usize>> {
 mod tests {
     use super::*;
     use runmat_value::IntegerStorage;
+
+    #[test]
+    fn reduction_data_role_is_positional_with_tensor_control_and_unknown_producer() {
+        use crate::graph::{
+            AccelNodeLabel, FusionCallOrigin, InstrSpan, ShapeInfo, ValueInfo, ValueOrigin, VarKind,
+        };
+        use std::collections::HashMap;
+
+        let mut graph = AccelGraph {
+            nodes: vec![AccelNode {
+                id: 0,
+                label: AccelNodeLabel::Builtin {
+                    name: "min".into(),
+                    origin: FusionCallOrigin::named("min"),
+                },
+                category: AccelOpCategory::Reduction,
+                inputs: vec![0, 1, 2],
+                outputs: vec![3],
+                span: InstrSpan { start: 0, end: 0 },
+                tags: Vec::new(),
+            }],
+            values: vec![
+                ValueInfo {
+                    id: 0,
+                    origin: ValueOrigin::Variable {
+                        kind: VarKind::Global,
+                        index: 0,
+                    },
+                    ty: Type::Unknown,
+                    shape: ShapeInfo::Unknown,
+                    constant: None,
+                },
+                ValueInfo {
+                    id: 1,
+                    origin: ValueOrigin::Constant,
+                    ty: Type::tensor(),
+                    shape: ShapeInfo::Unknown,
+                    constant: Some(Value::Tensor(
+                        Tensor::new(Vec::new(), vec![0, 0]).expect("[]"),
+                    )),
+                },
+                ValueInfo {
+                    id: 2,
+                    origin: ValueOrigin::Constant,
+                    ty: Type::Num,
+                    shape: ShapeInfo::Scalar,
+                    constant: Some(Value::Num(2.0)),
+                },
+                ValueInfo {
+                    id: 3,
+                    origin: ValueOrigin::NodeOutput { node: 0, output: 0 },
+                    ty: Type::Unknown,
+                    shape: ShapeInfo::Unknown,
+                    constant: None,
+                },
+            ],
+            var_bindings: HashMap::new(),
+            node_bindings: HashMap::new(),
+        };
+        let selected = detect_reduction_signature(&graph, &graph.nodes[0]).expect("min signature");
+        assert_eq!(selected.data_input, 0);
+        assert_eq!(selected.dim_arg, Some(2));
+        assert_eq!(selected.axes, ReductionAxes::Explicit(vec![2]));
+
+        graph.nodes[0].label = AccelNodeLabel::Builtin {
+            name: "sum".into(),
+            origin: FusionCallOrigin::named("sum"),
+        };
+        graph.nodes[0].inputs = vec![0, 2];
+        let selected = detect_reduction_signature(&graph, &graph.nodes[0]).expect("sum signature");
+        assert_eq!(selected.data_input, 0);
+        assert_eq!(selected.axes, ReductionAxes::Explicit(vec![2]));
+    }
 
     #[test]
     fn reduction_dimension_preserves_representable_uint64_values() {

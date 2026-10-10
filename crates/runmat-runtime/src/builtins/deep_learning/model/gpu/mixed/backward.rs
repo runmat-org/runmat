@@ -123,7 +123,10 @@ async fn checked_sum_reduction(
         == Some(runmat_accelerate_api::ProviderPrecision::F32)
     {
         let cast = provider_result(
-            provider.unary_single(&result).await,
+            provider
+                .unary_single(&result)
+                .await
+                .map_err(runmat_accelerate_api::ProviderExecutionError::after_effect),
             "resident adjoint sum class adaptation",
         )?;
         if cast.shares_allocation_with(&result) || cast.shares_allocation_with(input) {

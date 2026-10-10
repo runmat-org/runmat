@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum BufferUsageClass {
@@ -34,7 +34,7 @@ impl Hash for ResidencyKey {
 }
 
 pub struct BufferResidency {
-    pools: Mutex<HashMap<ResidencyKey, VecDeque<Arc<wgpu::Buffer>>>>,
+    pools: Mutex<HashMap<ResidencyKey, VecDeque<runmat_accelerate_api::WgpuBufferOwner>>>,
     max_per_key: usize,
 }
 
@@ -49,7 +49,7 @@ pub enum PoolRejectionReason {
 
 pub struct RejectedBuffer {
     pub reason: PoolRejectionReason,
-    pub buffer: Arc<wgpu::Buffer>,
+    pub buffer: runmat_accelerate_api::WgpuBufferOwner,
 }
 
 impl Drop for BufferResidency {
@@ -76,6 +76,21 @@ impl Drop for BufferResidency {
 }
 
 impl BufferResidency {
+    /// Exact buffer extent used by `acquire`, including its nonzero empty
+    /// binding. This is also the provider's symbolic FusionOut projection.
+    pub(crate) fn requested_bytes(len: usize, element_size: usize) -> Option<u64> {
+        if element_size == 0 {
+            return None;
+        }
+        if len == 0 {
+            u64::try_from(element_size.max(1)).ok()
+        } else {
+            u64::try_from(len)
+                .ok()?
+                .checked_mul(u64::try_from(element_size).ok()?)
+        }
+    }
+
     pub fn new(max_per_key: usize) -> Self {
         Self {
             pools: Mutex::new(HashMap::new()),
@@ -90,22 +105,25 @@ impl BufferResidency {
         len: usize,
         element_size: usize,
         label: &str,
-    ) -> (Arc<wgpu::Buffer>, bool) {
+    ) -> anyhow::Result<(runmat_accelerate_api::WgpuBufferOwner, bool)> {
+        let size_bytes = Self::requested_bytes(len, element_size)
+            .ok_or_else(|| anyhow::anyhow!("{label}: allocation byte extent overflow"))?;
         if len == 0 {
-            return (
-                Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
-                    label: Some(label),
-                    size: element_size.max(1) as u64,
-                    usage: wgpu::BufferUsages::STORAGE
-                        | wgpu::BufferUsages::COPY_SRC
-                        | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                })),
+            return Ok((
+                runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(
+                    &wgpu::BufferDescriptor {
+                        label: Some(label),
+                        size: size_bytes,
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_SRC
+                            | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    },
+                )),
                 false,
-            );
+            ));
         }
 
-        let size_bytes = (len as u64).max(1) * element_size as u64;
         let key = ResidencyKey::new(usage, size_bytes);
         let reused = self
             .pools
@@ -117,33 +135,35 @@ impl BufferResidency {
                 "buffer_residency: reuse {:?} len={} ptr={:p}",
                 usage,
                 len,
-                Arc::as_ptr(&buffer)
+                runmat_accelerate_api::WgpuBufferOwner::as_ptr(&buffer)
             );
-            return (buffer, true);
+            return Ok((buffer, true));
         }
 
-        let buffer = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: size_bytes,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }));
+        let buffer = runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(
+            &wgpu::BufferDescriptor {
+                label: Some(label),
+                size: size_bytes,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        ));
         log::trace!(
             "buffer_residency: new {:?} len={} ptr={:p}",
             usage,
             len,
-            Arc::as_ptr(&buffer)
+            runmat_accelerate_api::WgpuBufferOwner::as_ptr(&buffer)
         );
-        (buffer, false)
+        Ok((buffer, false))
     }
 
     pub fn release(
         &self,
         usage: BufferUsageClass,
         allocated_bytes: u64,
-        buffer: Arc<wgpu::Buffer>,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
     ) -> Result<(), RejectedBuffer> {
         release_into(
             &self.pools,

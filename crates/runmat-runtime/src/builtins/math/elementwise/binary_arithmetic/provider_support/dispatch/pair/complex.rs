@@ -33,7 +33,7 @@ pub(super) async fn try_complex_pair(
                 "provider returned invalid complex arithmetic output",
             ),
         )),
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
+        Err(error) if error.is_unsupported() => Ok(None),
         Err(error) => Err(provider_error(operation, error)),
     }
 }

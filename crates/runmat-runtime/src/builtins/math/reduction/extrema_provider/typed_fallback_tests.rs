@@ -1,8 +1,8 @@
 use runmat_accelerate_api::{
     test_support::{RetirementProbe, TestAllocation, TestAllocationOwner},
-    AccelDownloadFuture, AccelNumericDownloadFuture, AccelProvider, AccelProviderFuture,
-    GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned, HostNumericDataView,
-    HostNumericTensorOwned, HostTensorView, ReduceDimResult, ThreadProviderGuard,
+    AccelDownloadFuture, AccelNumericDownloadFuture, AccelProvider, GpuTensorHandle,
+    GpuTensorStorage, HostNumericDataOwned, HostNumericDataView, HostNumericTensorOwned,
+    HostTensorView, ReduceDimResult, ThreadProviderGuard,
 };
 use runmat_value::{ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
 use std::sync::Mutex;
@@ -85,14 +85,14 @@ impl AccelProvider for NativeProvider {
         &'a self,
         _: &'a GpuTensorHandle,
         _: usize,
-    ) -> AccelProviderFuture<'a, ReduceDimResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ReduceDimResult> {
         panic!("complex max must select host comparison before the real extrema hook")
     }
     fn reduce_min_dim<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
         _: usize,
-    ) -> AccelProviderFuture<'a, ReduceDimResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ReduceDimResult> {
         if input.physical().storage() == GpuTensorStorage::ComplexInterleaved {
             panic!("complex min must select host comparison before the real extrema hook");
         }
@@ -108,7 +108,7 @@ impl AccelProvider for NativeProvider {
         &'a self,
         left: &'a GpuTensorHandle,
         right: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         if left.physical().storage() == GpuTensorStorage::ComplexInterleaved
             || right.physical().storage() == GpuTensorStorage::ComplexInterleaved
         {
@@ -117,14 +117,15 @@ impl AccelProvider for NativeProvider {
         Box::pin(async {
             Err(runmat_accelerate_api::unsupported_provider_operation(
                 "resident real max is not implemented by this fixture",
-            ))
+            )
+            .into())
         })
     }
     fn elem_min<'a>(
         &'a self,
         left: &'a GpuTensorHandle,
         right: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         if left.physical().storage() == GpuTensorStorage::ComplexInterleaved
             || right.physical().storage() == GpuTensorStorage::ComplexInterleaved
         {
@@ -133,12 +134,14 @@ impl AccelProvider for NativeProvider {
         Box::pin(async {
             Err(runmat_accelerate_api::unsupported_provider_operation(
                 "resident real min is not implemented by this fixture",
-            ))
+            )
+            .into())
         })
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn complex_resident_min_gathers_before_real_extrema_hook_and_keeps_its_lease() {
     let provider = Box::leak(Box::new(NativeProvider {
         owner: TestAllocationOwner::new(),
@@ -165,7 +168,8 @@ fn complex_resident_min_gathers_before_real_extrema_hook_and_keeps_its_lease() {
     assert_eq!(allocation.probe.retirements(), 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn nonscalar_complex_pairwise_min_never_uses_real_elementwise_hook() {
     let provider = Box::leak(Box::new(NativeProvider {
         owner: TestAllocationOwner::new(),
@@ -206,7 +210,8 @@ fn nonscalar_complex_pairwise_min_never_uses_real_elementwise_hook() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn real_min_provider_error_retains_canonical_min_identity_and_source() {
     let provider = Box::leak(Box::new(NativeProvider {
         owner: TestAllocationOwner::new(),
@@ -242,7 +247,8 @@ fn real_min_provider_error_retains_canonical_min_identity_and_source() {
     assert_eq!(input.probe.retirements(), 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn complex_resident_max_gathers_before_real_extrema_hook_and_keeps_its_lease() {
     let provider = Box::leak(Box::new(NativeProvider {
         owner: TestAllocationOwner::new(),
@@ -269,7 +275,8 @@ fn complex_resident_max_gathers_before_real_extrema_hook_and_keeps_its_lease() {
     assert_eq!(allocation.probe.retirements(), 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn nonscalar_complex_pairwise_max_never_uses_real_elementwise_hook() {
     let provider = Box::leak(Box::new(NativeProvider {
         owner: TestAllocationOwner::new(),
@@ -310,7 +317,8 @@ fn nonscalar_complex_pairwise_max_never_uses_real_elementwise_hook() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn resident_extrema_fallback_preserves_single_complex_and_exact_integer_scalars() {
     let provider = Box::leak(Box::new(NativeProvider {
         owner: TestAllocationOwner::new(),
@@ -413,7 +421,8 @@ fn resident_extrema_fallback_preserves_single_complex_and_exact_integer_scalars(
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn resident_single_with_double_scalar_uses_resolved_double_class() {
     let provider = Box::leak(Box::new(NativeProvider {
         owner: TestAllocationOwner::new(),

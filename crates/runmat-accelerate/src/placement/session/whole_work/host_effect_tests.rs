@@ -25,6 +25,8 @@ fn request(
             region: None,
             operation: "unzip".into(),
             runtime_facts: Digest::sha256(b"specific-admitted-archive"),
+            provider_provenance: None,
+            graph_output_authority: None,
             revision,
         },
         constraint: WholeWorkConstraint::AnyLegal,
@@ -128,7 +130,10 @@ fn typed_invalidation_revokes_only_matching_whole_work_authority() {
         .unwrap();
     let host = match selected.decision.signature.revision.authority {
         PlacementExecutionAuthorityRevision::HostService(digest) => digest,
-        PlacementExecutionAuthorityRevision::Provider(_) => unreachable!("host fixture"),
+        PlacementExecutionAuthorityRevision::Provider(_)
+        | PlacementExecutionAuthorityRevision::RuntimeBindingSession(_) => {
+            unreachable!("host fixture")
+        }
     };
     session.invalidate(runmat_execution::PlacementInvalidation::Provider { digest: host });
     assert!(selected.observation_is_current());

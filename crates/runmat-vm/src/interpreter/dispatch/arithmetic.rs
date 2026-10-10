@@ -50,7 +50,7 @@ pub async fn dispatch_arithmetic(
                 call_right_operator_method_ordered,
                 |a, b| async move {
                     let (a_acc, b_acc) =
-                        accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
+                        accel_promote_binary(runtime, AutoBinaryOp::Elementwise, &a, &b).await?;
                     crate::call::call_builtin_async(runtime, "plus", &[a_acc, b_acc]).await
                 },
             )
@@ -64,7 +64,7 @@ pub async fn dispatch_arithmetic(
                 call_right_operator_method_ordered,
                 |a, b| async move {
                     let (a_acc, b_acc) =
-                        accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
+                        accel_promote_binary(runtime, AutoBinaryOp::Elementwise, &a, &b).await?;
                     crate::call::call_builtin_async(runtime, "minus", &[a_acc, b_acc]).await
                 },
             )
@@ -77,7 +77,8 @@ pub async fn dispatch_arithmetic(
                 call_operator_method,
                 call_right_operator_method_ordered,
                 |a, b| async move {
-                    let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::MatMul, &a, &b).await?;
+                    let (a_acc, b_acc) =
+                        accel_promote_binary(runtime, AutoBinaryOp::MatMul, &a, &b).await?;
                     runmat_runtime::value_matmul(&a_acc, &b_acc).await
                 },
             )
@@ -92,7 +93,7 @@ pub async fn dispatch_arithmetic(
                 call_right_operator_method_ordered,
                 |a, b| async move {
                     let (a_acc, b_acc) =
-                        accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
+                        accel_promote_binary(runtime, AutoBinaryOp::Elementwise, &a, &b).await?;
                     crate::call::call_builtin_async(runtime, "times", &[a_acc, b_acc]).await
                 },
             )
@@ -107,7 +108,7 @@ pub async fn dispatch_arithmetic(
                 call_right_operator_method_ordered,
                 |a, b| async move {
                     let (a_acc, b_acc) =
-                        accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
+                        accel_promote_binary(runtime, AutoBinaryOp::Elementwise, &a, &b).await?;
                     crate::call::call_builtin_async(runtime, "rdivide", &[a_acc, b_acc]).await
                 },
             )
@@ -123,7 +124,7 @@ pub async fn dispatch_arithmetic(
                 call_right_operator_method_ordered,
                 |a, b| async move {
                     let (a_acc, b_acc) =
-                        accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
+                        accel_promote_binary(runtime, AutoBinaryOp::Elementwise, &a, &b).await?;
                     crate::call::call_builtin_async(runtime, "power", &[a_acc, b_acc]).await
                 },
             )
@@ -138,7 +139,7 @@ pub async fn dispatch_arithmetic(
                 call_right_operator_method_ordered,
                 |a, b| async move {
                     let (b_acc, a_acc) =
-                        accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a).await?;
+                        accel_promote_binary(runtime, AutoBinaryOp::Elementwise, &b, &a).await?;
                     crate::call::call_builtin_async(runtime, "rdivide", &[b_acc, a_acc]).await
                 },
             )
@@ -154,7 +155,8 @@ pub async fn dispatch_arithmetic(
                     call_right_operator_method_ordered,
                     |lhs, rhs| async move {
                         let (lhs_acc, rhs_acc) =
-                            accel_promote_binary(AutoBinaryOp::Elementwise, &lhs, &rhs).await?;
+                            accel_promote_binary(runtime, AutoBinaryOp::Elementwise, &lhs, &rhs)
+                                .await?;
                         crate::call::call_builtin_async(runtime, "rdivide", &[lhs_acc, rhs_acc])
                             .await
                     },
@@ -176,7 +178,8 @@ pub async fn dispatch_arithmetic(
                     call_right_operator_method_ordered,
                     |lhs, rhs| async move {
                         let (rhs_acc, lhs_acc) =
-                            accel_promote_binary(AutoBinaryOp::Elementwise, &rhs, &lhs).await?;
+                            accel_promote_binary(runtime, AutoBinaryOp::Elementwise, &rhs, &lhs)
+                                .await?;
                         crate::call::call_builtin_async(runtime, "rdivide", &[rhs_acc, lhs_acc])
                             .await
                     },
@@ -218,7 +221,7 @@ pub async fn dispatch_arithmetic(
                         return crate::call::call_builtin_async(runtime, "power", &args).await;
                     }
                     let (a_acc, b_acc) =
-                        accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
+                        accel_promote_binary(runtime, AutoBinaryOp::Elementwise, &a, &b).await?;
                     runmat_runtime::power(&a_acc, &b_acc).map_err(RuntimeError::from)
                 },
             )

@@ -2,8 +2,8 @@
 use crate::BuiltinResult;
 use runmat_accelerate_api::{
     test_support::{TestAllocation, TestAllocationOwner},
-    AccelProvider, AccelProviderFuture, GpuTensorHandle, GpuTensorStorage, NumericElementType,
-    ProviderPrecision, ThreadProviderGuard,
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, NumericElementType, ProviderPrecision,
+    ThreadProviderGuard,
 };
 use runmat_value::Value;
 use std::sync::Mutex;
@@ -63,13 +63,13 @@ impl AccelProvider for Provider {
     fn unary_single<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { Ok(self.result(input)) })
     }
     fn unary_double<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { Ok(self.result(input)) })
     }
 }

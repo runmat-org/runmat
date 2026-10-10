@@ -146,6 +146,9 @@ pub enum AccelGraphTag {
     MatMul,
     Transpose,
     ArrayConstruct,
+    /// A VM matrix instruction folded from exact numeric literal operands.
+    /// Unlike ArrayConstruct, this is source-value provenance, not a shape hint.
+    FoldedLiteralArray,
     /// The graph builder computed this unary output from an exact scalar
     /// constant. Consumers must still read the represented output value.
     UnaryScalarFold,

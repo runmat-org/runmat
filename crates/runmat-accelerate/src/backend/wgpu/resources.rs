@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use runmat_accelerate_api::GpuTensorHandle;
 
@@ -21,14 +21,15 @@ pub enum UniformBufferKey {
 }
 
 pub struct KernelResourceRegistry {
-    uniform_buffers: Mutex<HashMap<UniformBufferKey, Arc<wgpu::Buffer>>>,
+    uniform_buffers: Mutex<HashMap<UniformBufferKey, runmat_accelerate_api::WgpuBufferOwner>>,
     matmul_sources: Mutex<
         HashMap<
             runmat_accelerate_api::allocation::TensorViewIdentity,
             (GpuTensorHandle, GpuTensorHandle),
         >,
     >,
-    scratch_buffers: Mutex<HashMap<ScratchBufferKind, (u64, Arc<wgpu::Buffer>)>>,
+    scratch_buffers:
+        Mutex<HashMap<ScratchBufferKind, (u64, runmat_accelerate_api::WgpuBufferOwner)>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,7 +72,7 @@ impl KernelResourceRegistry {
         key: UniformBufferKey,
         size: u64,
         label: &'static str,
-    ) -> anyhow::Result<Arc<wgpu::Buffer>> {
+    ) -> anyhow::Result<runmat_accelerate_api::WgpuBufferOwner> {
         let should_cache = !matches!(
             key,
             UniformBufferKey::MatmulParams
@@ -102,12 +103,14 @@ impl KernelResourceRegistry {
         } else {
             size.div_ceil(UNIFORM_ALIGN) * UNIFORM_ALIGN
         };
-        let buffer = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: alloc_size,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }));
+        let buffer = runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(
+            &wgpu::BufferDescriptor {
+                label: Some(label),
+                size: alloc_size,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        ));
 
         if should_cache {
             let mut guard = self
@@ -125,7 +128,7 @@ impl KernelResourceRegistry {
         kind: ScratchBufferKind,
         size: u64,
         label: &'static str,
-    ) -> anyhow::Result<Arc<wgpu::Buffer>> {
+    ) -> anyhow::Result<runmat_accelerate_api::WgpuBufferOwner> {
         let guard = self
             .scratch_buffers
             .lock()
@@ -138,14 +141,16 @@ impl KernelResourceRegistry {
         drop(guard);
         super::cache::scope::allow_creation(emission.mode())?;
         let alloc_size = size.max(1);
-        let buffer = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: alloc_size,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }));
+        let buffer = runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(
+            &wgpu::BufferDescriptor {
+                label: Some(label),
+                size: alloc_size,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        ));
         let mut guard = self
             .scratch_buffers
             .lock()

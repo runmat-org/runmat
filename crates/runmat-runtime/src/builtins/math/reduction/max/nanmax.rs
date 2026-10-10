@@ -23,7 +23,7 @@ pub(super) async fn nanmax_builtin(value: Value, rest: Vec<Value>) -> BuiltinRes
     }
     let adjusted = nanmax_rest(rest);
     reject_pairwise_multiple_outputs(&adjusted)?;
-    let eval = evaluate_for_demand(value, &adjusted, builtin_demand()).await?;
+    let eval = evaluate_for_demand(None, value, &adjusted, builtin_demand()).await?;
     evaluation_to_value(eval)
 }
 

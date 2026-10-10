@@ -1,4 +1,5 @@
 use super::*;
+use runmat_accelerate_api::observation::ProviderObservationFailure;
 use runmat_execution::{Digest, PlacementRevision, PlacementSignature};
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -40,6 +41,8 @@ fn source(ready: Arc<AtomicBool>, dropped: Arc<AtomicUsize>) -> Box<Source> {
             region: None,
             operation: "test".into(),
             runtime_facts: digest,
+            provider_provenance: None,
+            graph_output_authority: None,
             revision: PlacementRevision {
                 program: None,
                 authority: runmat_execution::PlacementExecutionAuthorityRevision::Provider(digest),
@@ -73,6 +76,25 @@ fn cancelled_or_abandoned_completion_retires_without_a_failure_sample() {
     assert!(queue.take_ready().is_empty());
     assert!(queue.sources.borrow().is_empty());
     assert_eq!(dropped.load(Ordering::Acquire), 1);
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn concrete_provider_receipt_cancellation_and_abandonment_retire_from_queue() {
+    for failure in [
+        ProviderObservationFailure::Cancelled,
+        ProviderObservationFailure::Abandoned,
+    ] {
+        let queue = PendingFeedback::default();
+        assert!(queue
+            .push(crate::placement::completion::failed_source_for_test(
+                failure
+            ))
+            .is_ok());
+        assert!(queue.has_sources());
+        assert!(queue.take_ready().is_empty());
+        assert!(!queue.has_sources());
+    }
 }
 
 #[test]
@@ -125,7 +147,10 @@ fn same_digest_invalidation_retires_only_matching_authority_receipts() {
     let mut host = source(ready.clone(), dropped.clone());
     let digest = match provider.signature.revision.authority {
         PlacementExecutionAuthorityRevision::Provider(digest) => digest,
-        PlacementExecutionAuthorityRevision::HostService(_) => unreachable!("provider fixture"),
+        PlacementExecutionAuthorityRevision::HostService(_)
+        | PlacementExecutionAuthorityRevision::RuntimeBindingSession(_) => {
+            unreachable!("provider fixture")
+        }
     };
     host.signature.revision.authority = PlacementExecutionAuthorityRevision::HostService(digest);
     assert!(queue.push(provider).is_ok());
@@ -144,4 +169,58 @@ fn same_digest_invalidation_retires_only_matching_authority_receipts() {
     queue.invalidate(&PlacementInvalidation::HostService { digest });
     assert!(queue.sources.borrow().is_empty());
     assert_eq!(dropped.load(Ordering::Acquire), 3);
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn provider_invalidation_retires_only_matching_session_bound_pending_source() {
+    use runmat_execution::PlacementExecutionAuthorityRevision;
+
+    let queue = PendingFeedback::default();
+    let ready = Arc::new(AtomicBool::new(false));
+    let dropped = Arc::new(AtomicUsize::new(0));
+    let provider_a = Digest::sha256(b"provider A");
+    let provider_b = Digest::sha256(b"provider B");
+    let session = Digest::sha256(b"same VM session");
+    let mut first = source(ready.clone(), dropped.clone());
+    first.signature.revision.authority =
+        PlacementExecutionAuthorityRevision::RuntimeBindingSession(session);
+    first.signature.provider_provenance = Some(provider_a);
+    let mut second = source(ready.clone(), dropped.clone());
+    second.signature.revision.authority =
+        PlacementExecutionAuthorityRevision::RuntimeBindingSession(session);
+    second.signature.provider_provenance = Some(provider_b);
+    assert!(queue.push(first).is_ok());
+    assert!(queue.push(second).is_ok());
+
+    queue.invalidate(&PlacementInvalidation::Provider { digest: provider_a });
+    assert_eq!(dropped.load(Ordering::Acquire), 1);
+    assert_eq!(queue.sources.borrow().len(), 1);
+    ready.store(true, Ordering::Release);
+    assert_eq!(queue.take_ready().len(), 1);
+    assert_eq!(dropped.load(Ordering::Acquire), 2);
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn runtime_binding_session_invalidation_retires_only_its_pending_receipt() {
+    use runmat_execution::PlacementExecutionAuthorityRevision;
+
+    let queue = PendingFeedback::default();
+    let ready = Arc::new(AtomicBool::new(false));
+    let dropped = Arc::new(AtomicUsize::new(0));
+    let digest = Digest::sha256(b"same-authority-digest");
+    let mut local = source(ready.clone(), dropped.clone());
+    local.signature.revision.authority =
+        PlacementExecutionAuthorityRevision::RuntimeBindingSession(digest);
+    let mut provider = source(ready.clone(), dropped.clone());
+    provider.signature.revision.authority = PlacementExecutionAuthorityRevision::Provider(digest);
+    assert!(queue.push(local).is_ok());
+    assert!(queue.push(provider).is_ok());
+    queue.invalidate(&PlacementInvalidation::RuntimeBindingSession { digest });
+    assert_eq!(dropped.load(Ordering::Acquire), 1);
+    assert_eq!(queue.sources.borrow().len(), 1);
+    ready.store(true, Ordering::Release);
+    assert_eq!(queue.take_ready().len(), 1);
+    assert_eq!(dropped.load(Ordering::Acquire), 2);
 }

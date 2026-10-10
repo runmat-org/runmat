@@ -144,6 +144,8 @@ pub(crate) fn select_pair(
             ))
             .expect("typed convolution query serializes"),
         ),
+        provider_provenance: None,
+        graph_output_authority: None,
         revision,
     };
     let device_id = provider.device_id();

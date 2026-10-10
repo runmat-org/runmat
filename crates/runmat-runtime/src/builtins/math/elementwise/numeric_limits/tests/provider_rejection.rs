@@ -29,10 +29,16 @@ impl AccelProvider for AliasProvider {
         let output = output.as_ref().unwrap();
         Ok(output.with_view(output.view().clone())?)
     }
-    fn upload_numeric_raw(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        _: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.upload(&HostTensorView {
             data: &[],
             shape: &[0, 0],
+        })
+        .map_err(|error| {
+            runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
         })
     }
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {

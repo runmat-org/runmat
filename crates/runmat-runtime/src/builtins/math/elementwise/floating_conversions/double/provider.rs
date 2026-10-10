@@ -73,11 +73,14 @@ pub(super) async fn double_from_gpu(
                     ),
                 ));
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(error) if error.is_unsupported() => {}
             Err(error) => {
-                return Err(double_error_with_detail(
-                    &DOUBLE_ERROR_INTERNAL,
-                    format!("provider unary_double failed: {error}"),
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    double_error_with_detail(
+                        &DOUBLE_ERROR_INTERNAL,
+                        format!("provider unary_double failed: {error}"),
+                    ),
+                    error,
                 ));
             }
         }

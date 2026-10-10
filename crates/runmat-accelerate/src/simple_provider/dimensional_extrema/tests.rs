@@ -90,7 +90,7 @@ fn result(
     input: &GpuTensorHandle,
     dim: usize,
     minimum: bool,
-) -> Result<runmat_accelerate_api::ReduceDimResult> {
+) -> runmat_accelerate_api::ProviderExecutionResult<runmat_accelerate_api::ReduceDimResult> {
     block_on(if minimum {
         provider.reduce_min_dim(input, dim)
     } else {
@@ -242,18 +242,25 @@ fn unsupported_shapes_are_not_foreign_owner_errors() {
             GpuTensorStorage::Real,
         )
         .unwrap();
-    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-        &result(&provider, &nd, 0, true).unwrap_err()
-    ));
-    assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
-        &result(&other, &nd, 0, true).unwrap_err()
-    ));
+    let unsupported_shape = result(&provider, &nd, 0, true).unwrap_err();
+    assert!(!unsupported_shape.is_unsupported());
+    assert!(!unsupported_shape.is_after_effect());
+    assert!(std::error::Error::source(&unsupported_shape)
+        .unwrap()
+        .is::<runmat_accelerate_api::UnsupportedProviderOperation>());
+    let foreign_owner = result(&other, &nd, 0, true).unwrap_err();
+    assert!(!std::error::Error::source(&foreign_owner)
+        .unwrap()
+        .is::<runmat_accelerate_api::UnsupportedProviderOperation>());
     let matrix = nd
         .with_view(runmat_accelerate_api::allocation::GpuTensorView::contiguous(vec![1, 2]))
         .unwrap();
-    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-        &result(&provider, &matrix, 2, false).unwrap_err()
-    ));
+    let unsupported_dimension = result(&provider, &matrix, 2, false).unwrap_err();
+    assert!(!unsupported_dimension.is_unsupported());
+    assert!(!unsupported_dimension.is_after_effect());
+    assert!(std::error::Error::source(&unsupported_dimension)
+        .unwrap()
+        .is::<runmat_accelerate_api::UnsupportedProviderOperation>());
     let pending = provider.reduce_min_dim(&matrix, 0);
     drop(pending);
     matrix.allocation_lease().validate_live().unwrap();

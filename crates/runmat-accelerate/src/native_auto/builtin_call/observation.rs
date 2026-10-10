@@ -10,6 +10,8 @@ pub(in crate::native_auto) struct BuiltinPlanningContext<'a> {
     pub(in crate::native_auto) runtime: Option<&'a RuntimeContext>,
     pub(in crate::native_auto) preparation_program:
         Option<runmat_accelerate_api::ProviderPreparationProgram<'a>>,
+    pub(in crate::native_auto) prepared_authority:
+        Option<runmat_runtime::context::preparation::PreparedBindingAuthority>,
 }
 
 #[derive(Default)]
@@ -27,6 +29,49 @@ pub struct BuiltinCallObservation {
     host_inputs: bool,
     started: Instant,
     receipt: Option<ProviderOperationReceipt>,
+    completion: Option<runmat_runtime::context::preparation::PreparedCompletionRight>,
+}
+
+struct BackendCompletedCall {
+    binding: runmat_builtins::BuiltinBindingIdentity,
+    feedback: Box<LocalPlacementFeedback>,
+    receipt: Option<ProviderOperationReceipt>,
+    status: runmat_runtime::context::preparation::PreparedCallStatus,
+}
+
+impl runmat_runtime::context::preparation::PreparedCallCompletion for BackendCompletedCall {
+    fn binding(&self) -> runmat_builtins::BuiltinBindingIdentity {
+        self.binding
+    }
+
+    fn status(&self) -> runmat_runtime::context::preparation::PreparedCallStatus {
+        self.status
+    }
+
+    fn publish(self: Box<Self>, outer_started: Instant, elapsed_ns: u64) {
+        use runmat_runtime::context::preparation::PreparedCallStatus;
+        let Self {
+            feedback,
+            receipt,
+            status,
+            ..
+        } = *self;
+        if feedback.runtime.is_cancelled() {
+            return;
+        }
+        if status == PreparedCallStatus::Succeeded {
+            if let Some(receipt) = receipt {
+                // Only receipts with an explicitly shared monotonic host clock
+                // can combine the pre-receipt call prefix with provider proof.
+                let Some(prelude) = receipt.default_clock_prelude_since(outer_started) else {
+                    return;
+                };
+                crate::placement::publish_provider_feedback_full_call(receipt, *feedback, prelude);
+                return;
+            }
+        }
+        feedback.observe(elapsed_ns, status == PreparedCallStatus::Succeeded);
+    }
 }
 
 impl BuiltinCallObservation {
@@ -45,7 +90,32 @@ impl BuiltinCallObservation {
                 .any(runmat_runtime::dispatcher::value_contains_gpu),
             started: Instant::now(),
             receipt: None,
+            completion: None,
         }
+    }
+
+    pub(super) fn with_completion(
+        mut self,
+        completion: Option<runmat_runtime::context::preparation::PreparedCompletionRight>,
+    ) -> Self {
+        self.completion = completion;
+        self
+    }
+
+    fn deposit_failure(&mut self) -> bool {
+        let Some(right) = self.completion.take() else {
+            return false;
+        };
+        if let Some(feedback) = self.feedback.take() {
+            let binding = right.binding();
+            right.deposit(Box::new(BackendCompletedCall {
+                binding,
+                feedback,
+                receipt: None,
+                status: runmat_runtime::context::preparation::PreparedCallStatus::CompletedFailure,
+            }));
+        }
+        true
     }
 
     pub(super) fn prepare_provider(
@@ -53,7 +123,12 @@ impl BuiltinCallObservation {
         provider: &dyn AccelProvider,
         query: Option<&runmat_accelerate_api::ProviderFeasibilityQuery>,
     ) {
-        if !self.provider_selected || self.feedback.is_none() {
+        if !self.provider_selected
+            || !self
+                .feedback
+                .as_ref()
+                .is_some_and(|feedback| feedback.is_current())
+        {
             return;
         }
         if let Some(query) = query {
@@ -72,17 +147,16 @@ impl BuiltinCallObservation {
             .map(ProviderOperationReceipt::recorder)
     }
 
-    pub(super) fn execution_started(&mut self) {
-        // The host candidate estimates builtin execution, not argument staging.
-        // Upload timing remains a separate trace event.
-        self.started = Instant::now();
-    }
-
     pub(super) fn preparation_fallback(&mut self) {
         if let Some(recorder) = self.recorder() {
             recorder.execution_disposition(ProviderExecutionDisposition::SharedRuntimeFallback);
         }
         self.receipt = None;
+        if self.completion.take().is_some() {
+            // Selected provider preparation did not become the promised route.
+            // Do not treat its host fallback as a completed v3 candidate.
+            self.feedback = None;
+        }
         self.report(false);
         self.provider_selected = false;
         if let Some(trace) = self.trace.as_ref() {
@@ -97,13 +171,35 @@ impl BuiltinCallObservation {
         }
     }
 
-    pub(super) fn cleanup_failed(&mut self) {
+    pub(super) fn preparation_failed(&mut self) {
+        let reason = if self.cancelled() {
+            runmat_accelerate_api::observation::ProviderObservationFailure::Cancelled
+        } else {
+            runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed
+        };
         if let Some(receipt) = self.receipt.as_mut() {
-            receipt.fail(
-                runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed,
-            );
+            receipt.fail(reason);
         }
-        self.report(false);
+        if !self.deposit_failure() {
+            self.report(false);
+        }
+        if let Some(trace) = self.trace.take() {
+            trace.fallback(None, "provider_preparation_failed", None);
+        }
+    }
+
+    pub(super) fn cleanup_failed(&mut self) {
+        let reason = if self.cancelled() {
+            runmat_accelerate_api::observation::ProviderObservationFailure::Cancelled
+        } else {
+            runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed
+        };
+        if let Some(receipt) = self.receipt.as_mut() {
+            receipt.fail(reason);
+        }
+        if !self.deposit_failure() {
+            self.report(false);
+        }
         if let Some(trace) = self.trace.take() {
             trace.fallback(None, "provider_cleanup_failed", None);
         }
@@ -117,14 +213,79 @@ impl BuiltinCallObservation {
     }
 
     pub fn finish(mut self, result: &Result<Value, RuntimeError>) {
-        let Ok(value) = result else { return };
-        if self
-            .feedback
-            .as_ref()
-            .is_some_and(|ticket| ticket.runtime.is_cancelled())
-        {
+        if self.cancelled() {
+            if let Some(receipt) = self.receipt.as_mut() {
+                receipt.fail(
+                    runmat_accelerate_api::observation::ProviderObservationFailure::Cancelled,
+                );
+            }
+            self.feedback = None;
             return;
         }
+        if let Some(right) = self.completion.take() {
+            let status = if result.is_ok() {
+                runmat_runtime::context::preparation::PreparedCallStatus::Succeeded
+            } else {
+                runmat_runtime::context::preparation::PreparedCallStatus::CompletedFailure
+            };
+            if status == runmat_runtime::context::preparation::PreparedCallStatus::CompletedFailure
+            {
+                if let Some(receipt) = self.receipt.as_mut() {
+                    receipt.fail(
+                        runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed,
+                    );
+                }
+            }
+            let attributable_success = result.as_ref().is_ok_and(|value| {
+                if self.provider_selected {
+                    self.receipt.is_some()
+                } else {
+                    self.host_inputs && !runmat_runtime::dispatcher::value_contains_gpu(value)
+                }
+            });
+            if (status
+                == runmat_runtime::context::preparation::PreparedCallStatus::CompletedFailure
+                || attributable_success)
+                && self.feedback.is_some()
+            {
+                let binding = right.binding();
+                right.deposit(Box::new(BackendCompletedCall {
+                    binding,
+                    feedback: self.feedback.take().expect("checked above"),
+                    receipt: if attributable_success && self.provider_selected {
+                        self.receipt.take()
+                    } else {
+                        None
+                    },
+                    status,
+                }));
+            }
+            // Traces are diagnostic and do not claim a provider completion.
+            if let Some(trace) = self.trace.take() {
+                match result {
+                    Err(_) => trace.fallback(None, "builtin_body_failed", None),
+                    Ok(value)
+                        if self.provider_selected
+                            && runmat_runtime::dispatcher::value_contains_gpu(value) =>
+                    {
+                        trace.submitted(PlacementVariant::ProviderOperation, None)
+                    }
+                    Ok(_) => trace.complete(Some(PlacementVariant::SharedRuntime), None),
+                }
+            }
+            return;
+        }
+        let Ok(value) = result else {
+            // The body completed with an error. Unlike dropping an unpolled or
+            // cancelled future, this is an observed operational failure.
+            if let Some(receipt) = self.receipt.as_mut() {
+                receipt.fail(
+                    runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed,
+                );
+            }
+            self.report(false);
+            return;
+        };
         let elapsed = duration_ns_saturating(self.started.elapsed()).max(1);
         if self.provider_selected {
             if let (Some(receipt), Some(feedback)) = (self.receipt.take(), self.feedback.take()) {
@@ -161,21 +322,19 @@ impl BuiltinCallObservation {
 
     fn report(&mut self, succeeded: bool) {
         if let Some(ticket) = self.feedback.take() {
-            if let Some(service) = ticket.runtime.service_ports().placement() {
-                let _ = service.observe(runmat_execution::PlacementFeedback {
-                    signature: ticket.signature,
-                    candidate: ticket.candidate,
-                    kind: ticket.kind,
-                    total_elapsed_ns: duration_ns_saturating(self.started.elapsed()).max(1),
-                    succeeded,
-                });
+            if ticket.runtime.is_cancelled() {
+                return;
             }
+            ticket.observe(
+                duration_ns_saturating(self.started.elapsed()).max(1),
+                succeeded,
+            );
         }
     }
-}
 
-impl Drop for BuiltinCallObservation {
-    fn drop(&mut self) {
-        self.report(false);
+    fn cancelled(&self) -> bool {
+        self.feedback
+            .as_ref()
+            .is_some_and(|ticket| ticket.runtime.is_cancelled())
     }
 }

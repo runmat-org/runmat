@@ -33,6 +33,10 @@ pub(crate) fn build_accel_graph_with_stores(
     GraphBuilder::new(instructions, var_types).build_with_stores()
 }
 
+#[cfg(test)]
+#[path = "graph/folded_scalar_tests.rs"]
+mod folded_scalar_tests;
+
 struct GraphBuilder<'a> {
     instructions: &'a [Instr],
     var_types: &'a [Type],
@@ -206,8 +210,10 @@ impl<'a> GraphBuilder<'a> {
                 }
                 // Pop total elements (column-major expectation). We'll reconstruct column-major data.
                 let mut elems: Vec<f64> = Vec::with_capacity(total);
+                let mut element_ids = Vec::with_capacity(total);
                 for _ in 0..total {
                     if let Some(id) = self.pop_value() {
+                        element_ids.push(id);
                         let info = &self.values[id as usize];
                         let val = match &info.constant {
                             Some(Value::Num(n)) => *n,
@@ -246,6 +252,7 @@ impl<'a> GraphBuilder<'a> {
                 // Column-major data: elements were popped last-in-first-out; reverse to original push order for row vector cases
                 let tensor_const = if elems.len() == total {
                     elems.reverse();
+                    element_ids.reverse();
                     // For generality, map from row-major order in elems to column-major storage expected
                     // Assuming elems are in left-to-right, top-to-bottom order, convert to column-major
                     let mut data_cm = vec![0.0f64; total];
@@ -260,6 +267,10 @@ impl<'a> GraphBuilder<'a> {
                 } else {
                     None
                 };
+                if tensor_const.is_some() {
+                    node.inputs = element_ids;
+                    node.tags.push(AccelGraphTag::FoldedLiteralArray);
+                }
                 let out_value = if let Some(t) = tensor_const {
                     self.new_value(
                         ValueOrigin::NodeOutput {
@@ -328,11 +339,14 @@ impl<'a> GraphBuilder<'a> {
                 }
 
                 let mut rows_data: Vec<Vec<f64>> = Vec::with_capacity(num_rows);
+                let mut rows_ids: Vec<Vec<ValueId>> = Vec::with_capacity(num_rows);
                 let mut all_numeric = true;
                 for &row_len in row_lengths.iter().rev() {
                     let mut row_values = Vec::with_capacity(row_len);
+                    let mut row_ids = Vec::with_capacity(row_len);
                     for _ in 0..row_len {
                         if let Some(id) = self.pop_value() {
+                            row_ids.push(id);
                             let info = &self.values[id as usize];
                             match &info.constant {
                                 Some(Value::Num(n)) => row_values.push(*n),
@@ -351,9 +365,12 @@ impl<'a> GraphBuilder<'a> {
                         }
                     }
                     row_values.reverse();
+                    row_ids.reverse();
                     rows_data.push(row_values);
+                    rows_ids.push(row_ids);
                 }
                 rows_data.reverse();
+                rows_ids.reverse();
 
                 let node_id = self.nodes.len() as NodeId;
                 let span = InstrSpan { start: pc, end: pc };
@@ -393,6 +410,10 @@ impl<'a> GraphBuilder<'a> {
                 } else {
                     None
                 };
+                if tensor_const.is_some() {
+                    node.inputs = rows_ids.into_iter().flatten().collect();
+                    node.tags.push(AccelGraphTag::FoldedLiteralArray);
+                }
 
                 let out_value = if let Some(t) = tensor_const {
                     self.new_value(
@@ -1138,15 +1159,18 @@ impl<'a> GraphBuilder<'a> {
         let Some(constant) = &input_info.constant else {
             return;
         };
-        let folded = match constant {
-            Value::Num(n) => Some(Value::Num((*n as f32) as f64)),
-            // Preserve the runtime conversion semantics for integer inputs;
-            // graph folding has no native f32 integer representation.
+        let rounded = match constant {
+            Value::Num(n) => Some(*n as f32),
+            // Integer conversion has class-specific exactness rules; leave it
+            // to the ordinary runtime rather than a binary64 mirror.
             Value::Int(_) => None,
-            Value::Bool(flag) => Some(Value::Num(if *flag { 1.0f32 } else { 0.0f32 } as f64)),
+            Value::Bool(flag) => Some(if *flag { 1.0f32 } else { 0.0f32 }),
             _ => None,
         };
-        let Some(value) = folded else {
+        let Some(rounded) = rounded else {
+            return;
+        };
+        let Ok(tensor) = runmat_value::Tensor::from_f32(vec![rounded], vec![1, 1]) else {
             return;
         };
         let Some(ValueOrigin::NodeOutput { node, output }) =
@@ -1164,8 +1188,11 @@ impl<'a> GraphBuilder<'a> {
             return;
         }
         if let Some(out_info) = self.values.get_mut(out_value as usize) {
-            out_info.update_type(&Type::Num);
-            out_info.constant = Some(value);
+            out_info.ty = Type::Tensor {
+                shape: Some(vec![Some(1), Some(1)]),
+            };
+            out_info.shape = ShapeInfo::Tensor(vec![Some(1), Some(1)]);
+            out_info.constant = Some(Value::Tensor(tensor));
         }
         self.nodes[node as usize]
             .tags
@@ -1399,10 +1426,26 @@ mod tests {
             let node = &graph.nodes[0];
             assert!(node.tags.contains(&AccelGraphTag::UnaryScalarFold));
             let output = graph.value(node.outputs[0]).expect("folded output");
-            assert!(matches!(
-                &output.constant,
-                Some(Value::Num(value)) if value.to_bits() == ((source as f32) as f64).to_bits()
-            ));
+            assert_eq!(output.shape, ShapeInfo::Tensor(vec![Some(1), Some(1)]));
+            assert_eq!(
+                output.ty,
+                Type::Tensor {
+                    shape: Some(vec![Some(1), Some(1)])
+                }
+            );
+            let Some(Value::Tensor(folded)) = &output.constant else {
+                panic!("folded single must retain native F32 tensor storage");
+            };
+            assert_eq!(folded.shape(), [1, 1]);
+            assert_eq!(
+                folded.as_f32_slice().unwrap()[0].to_bits(),
+                (source as f32).to_bits()
+            );
+            let ordinary = futures::executor::block_on(
+                runmat_runtime::dispatcher::call_builtin_async("single", &[Value::Num(source)]),
+            )
+            .expect("ordinary single binding");
+            assert_eq!(output.constant.as_ref(), Some(&ordinary));
         }
 
         for instructions in [

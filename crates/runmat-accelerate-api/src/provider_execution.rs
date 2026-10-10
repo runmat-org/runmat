@@ -15,14 +15,14 @@ type Source = Box<dyn Error + 'static>;
 #[derive(Debug)]
 pub struct ProviderExecutionError {
     source: ExecutionSource,
-    /// A failure after provider effects must not authorize host replay even
-    /// when its retained original cause was a typed Unsupported response.
+    /// Only a certified pre-effect Unsupported response authorizes host replay.
     disposition: FallbackDisposition,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FallbackDisposition {
     PreEffect,
+    Unproven,
     AfterEffect,
 }
 
@@ -128,6 +128,23 @@ impl ProviderExecutionError {
         self
     }
 
+    /// Whether provider effects are known to have preceded this failure.
+    /// Unlike a formatted diagnostic, this remains stable across platforms
+    /// and retains the original error source for inspection.
+    pub fn is_after_effect(&self) -> bool {
+        self.disposition == FallbackDisposition::AfterEffect
+    }
+
+    /// A legacy hook did not report whether provider effects occurred. Keep
+    /// its exact cause, but do not authorize numerical replay on that basis.
+    /// An already-proven post-effect failure cannot be weakened to unknown.
+    pub fn with_unproven_effects(mut self) -> Self {
+        if self.disposition == FallbackDisposition::PreEffect {
+            self.disposition = FallbackDisposition::Unproven;
+        }
+        self
+    }
+
     /// Only an explicit provider unsupported marker permits numerical fallback.
     pub fn is_unsupported(&self) -> bool {
         is_unsupported_provider_error(self)
@@ -135,13 +152,13 @@ impl ProviderExecutionError {
 }
 
 /// Shared fallback classification for platform-local, anyhow-wrapped, and
-/// RuntimeError-wrapped provider causes. An outer post-effect disposition
-/// dominates a retained nested Unsupported cause.
+/// RuntimeError-wrapped provider causes. Any outer disposition other than
+/// proven pre-effect dominates a retained nested Unsupported cause.
 pub fn is_unsupported_provider_error(mut error: &(dyn Error + 'static)) -> bool {
     loop {
         if error
             .downcast_ref::<ProviderExecutionError>()
-            .is_some_and(|nested| nested.disposition == FallbackDisposition::AfterEffect)
+            .is_some_and(|nested| nested.disposition != FallbackDisposition::PreEffect)
         {
             return false;
         }
@@ -161,6 +178,18 @@ impl From<anyhow::Error> for ProviderExecutionError {
             source: ExecutionSource::Shared(error),
             disposition: FallbackDisposition::PreEffect,
         }
+    }
+}
+
+impl From<crate::allocation::AllocationAcquisitionError> for ProviderExecutionError {
+    fn from(error: crate::allocation::AllocationAcquisitionError) -> Self {
+        Self::from_source(error)
+    }
+}
+
+impl From<std::io::Error> for ProviderExecutionError {
+    fn from(error: std::io::Error) -> Self {
+        Self::from_source(error)
     }
 }
 

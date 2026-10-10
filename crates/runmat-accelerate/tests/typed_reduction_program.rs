@@ -478,7 +478,7 @@ fn input_only_root_is_borrowed_and_buffer_contents_do_not_change_recipe_identity
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn captured_bindings_preserve_real_catalog_spelling_resolution() {
-    fixture::initialize_registry();
+    fixture::builder::initialize_registry();
     use runmat_runtime::builtins::common::spec::{selected_fusion_binding, SelectedFusionIdentity};
     let canonical = runmat_builtins::builtin_catalog_entry_by_name("sin").unwrap();
     let mut spellings = vec!["sin", "SiN"];

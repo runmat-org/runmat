@@ -71,6 +71,19 @@ floating_digits!(decimal_f32, significant_f32, scaled_f32, f32, 38, 45, 9);
 mod tests {
     use super::*;
 
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn zero_sign_distinguishes_decimal_and_significant_forms() {
+        for value in [0.0_f32, -0.0_f32] {
+            assert_eq!(decimal_f32(value, 1).to_bits(), value.to_bits());
+            assert_eq!(significant_f32(value, 2).to_bits(), 0.0_f32.to_bits());
+        }
+        for value in [0.0_f64, -0.0_f64] {
+            assert_eq!(decimal_f64(value, 1).to_bits(), value.to_bits());
+            assert_eq!(significant_f64(value, 2).to_bits(), 0.0_f64.to_bits());
+        }
+    }
+
     #[test]
     fn extreme_digits_do_not_overflow_control_arithmetic_or_finite_values() {
         assert_eq!(decimal_f64(23.75, 20).to_bits(), 23.75_f64.to_bits());

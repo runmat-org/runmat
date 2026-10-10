@@ -22,7 +22,6 @@ pub(super) enum Failure {
     Cache,
     Provenance,
     Unwind,
-    DeviceLost,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +43,9 @@ pub(super) struct Record {
     pub(super) retained_bytes: u64,
     pub(super) physical: runmat_accelerate_api::allocation::GpuPhysicalDescriptor,
     pub(super) lease: Option<runmat_accelerate_api::allocation::WeakAllocationLease>,
+    /// Issued operation identity follows this canonical physical record until
+    /// its actual retirement, even when the current task context changes.
+    pub(super) resource_ticket: Option<runmat_accelerate_api::observation::ProviderResourceTicket>,
     /// Set only by a logical-producing upload/kernel at physical registration.
     pub(super) logical_producer: bool,
 }

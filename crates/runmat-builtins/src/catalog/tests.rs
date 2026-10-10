@@ -2570,7 +2570,7 @@ fn inverse_hyperbolic_cosine_tracks_exact_domain_shape_and_residency() {
         entry.placement.residency,
         BuiltinResidencyPolicy::PreserveInputs
     );
-    assert_eq!(entry.placement.fusion, BuiltinFusionPolicy::Never);
+    assert_eq!(entry.placement.fusion, BuiltinFusionPolicy::Candidate);
 
     let input = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
         class: NumericClass::Double,
@@ -2786,7 +2786,7 @@ fn inverse_hyperbolic_tangent_tracks_the_exact_closed_unit_interval() {
         ))
     );
     assert_eq!(entry.documentation.examples.len(), 6);
-    assert_eq!(entry.placement.fusion, BuiltinFusionPolicy::Never);
+    assert_eq!(entry.placement.fusion, BuiltinFusionPolicy::Candidate);
 
     let input = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
         class: NumericClass::Double,

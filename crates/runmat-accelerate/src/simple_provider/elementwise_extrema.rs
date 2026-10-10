@@ -234,9 +234,9 @@ mod tests {
                 storage: GpuTensorStorage::Real,
             })
             .unwrap();
-        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-            &block_on(provider.elem_max(&own, &integer)).unwrap_err()
-        ));
+        assert!(block_on(provider.elem_max(&own, &integer))
+            .unwrap_err()
+            .is_unsupported());
         assert!(own.allocation_lease().validate_live().is_ok());
     }
 

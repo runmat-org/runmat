@@ -8,7 +8,7 @@ fn source() -> Digest {
 fn add(literal: ScalarLiteral) -> Result<ScalarProgram> {
     ScalarProgram::new(
         source(),
-        1,
+        SCALAR_PROGRAM_REVISION,
         vec![
             ScalarNode::Input {
                 id: 0,
@@ -116,7 +116,7 @@ fn topology_arity_class_and_purity_fail_closed_after_deserialization() {
 fn cast_is_explicit_and_must_publish_the_declared_class() {
     let rounded = ScalarProgram::new(
         source(),
-        1,
+        SCALAR_PROGRAM_REVISION,
         vec![
             ScalarNode::Literal {
                 id: 0,
@@ -147,4 +147,58 @@ fn cast_is_explicit_and_must_publish_the_declared_class() {
     };
     *class = NumericClass::Double;
     assert!(ScalarProgram::from_wire(wrong_class).is_err());
+}
+
+#[test]
+fn mixed_add_wire_requires_exact_classes_and_new_revision() {
+    let mixed = ScalarProgram::new(
+        source(),
+        SCALAR_PROGRAM_REVISION,
+        vec![
+            ScalarNode::Input {
+                id: 0,
+                class: NumericClass::Single,
+            },
+            ScalarNode::Literal {
+                id: 1,
+                value: ScalarLiteral::F64Bits((f64::from(f32::EPSILON) / 4.0).to_bits()),
+            },
+            ScalarNode::Apply {
+                id: 2,
+                source_index: 0,
+                class: NumericClass::Single,
+                operation: ScalarOperation::MixedRealAddToSingle,
+                operands: vec![0, 1],
+            },
+        ],
+        2,
+    )
+    .unwrap();
+    let encoded = serde_json::to_vec(mixed.wire()).unwrap();
+    let decoded: ScalarProgramWire = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(
+        ScalarProgram::from_wire(decoded).unwrap().identity(),
+        mixed.identity()
+    );
+    let mut old = mixed.wire().clone();
+    old.semantic_revision = 1;
+    assert!(ScalarProgram::from_wire(old).is_err());
+    let mut wrong_result = mixed.wire().clone();
+    let ScalarNode::Apply { class, .. } = &mut wrong_result.nodes[2] else {
+        unreachable!()
+    };
+    *class = NumericClass::Double;
+    assert!(ScalarProgram::from_wire(wrong_result).is_err());
+    let mut wrong_pair = mixed.wire().clone();
+    wrong_pair.nodes[1] = ScalarNode::Literal {
+        id: 1,
+        value: ScalarLiteral::F32Bits(0.0f32.to_bits()),
+    };
+    assert!(ScalarProgram::from_wire(wrong_pair).is_err());
+    let mut counterfeit = mixed.wire().clone();
+    let ScalarNode::Apply { operation, .. } = &mut counterfeit.nodes[2] else {
+        unreachable!()
+    };
+    *operation = ScalarOperation::Cast(NumericClass::Single);
+    assert!(ScalarProgram::from_wire(counterfeit).is_err());
 }

@@ -21,7 +21,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor::{self, value_to_string};
-use crate::builtins::stats::summary::covariance_precision::CovariancePrecision;
+use crate::builtins::stats::summary::covariance_precision::{
+    AlignedCovarianceOutput, CovarianceAlignmentContract, CovariancePrecision,
+};
 use crate::builtins::stats::summary::distribution_math::{
     standard_normal_inv, student_t_cdf_upper,
 };

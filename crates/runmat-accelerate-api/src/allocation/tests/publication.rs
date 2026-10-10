@@ -26,7 +26,7 @@ fn payload_pointer(owner: &TestOwner) -> *const u8 {
     payload.as_ptr()
 }
 
-fn retry_and_check(owner: &Arc<TestOwner>, pointer: *const u8) {
+fn retry_and_check(owner: &Shared<TestOwner>, pointer: *const u8) {
     assert_eq!(
         payload_pointer(owner),
         pointer,

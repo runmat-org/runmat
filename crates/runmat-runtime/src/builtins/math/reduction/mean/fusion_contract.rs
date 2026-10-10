@@ -8,7 +8,8 @@ use crate::builtins::common::spec::{
 use runmat_types::NumericClass;
 
 pub(super) const DECLARATION: FusionReductionDeclaration = FusionReductionDeclaration {
-    revision: 3,
+    revision: 5,
+    operation: FusionReductionOperation::Mean,
     prepare,
 };
 fn prepare(controls: FusionReductionControls<'_>) -> FusionReductionPrepareFuture<'_> {
@@ -28,6 +29,32 @@ fn prepare(controls: FusionReductionControls<'_>) -> FusionReductionPrepareFutur
 
 struct Prepared(ParsedArguments);
 impl PreparedFusionReduction for Prepared {
+    fn publication_storage(
+        &self,
+        input: &runmat_types::ValueFact,
+        output: &runmat_types::ValueFact,
+        stages: &[FusionReductionContract],
+    ) -> Option<runmat_types::StorageFact> {
+        // These checks use represented ordinary geometry/classes and the
+        // public carrier only; they do not assume nonnegative input payloads.
+        if !matches!(
+            input.storage,
+            runmat_types::StorageFact::Dense | runmat_types::StorageFact::Scalar
+        ) {
+            return None;
+        }
+        super::fusion_sign::ordinary_output_storage(input, output, stages)
+    }
+
+    fn nonnegative_output_storage(
+        &self,
+        input: &runmat_types::ValueFact,
+        output: &runmat_types::ValueFact,
+        stages: &[FusionReductionContract],
+    ) -> Option<runmat_types::StorageFact> {
+        super::fusion_sign::ordinary_output_storage(input, output, stages)
+    }
+
     fn resolve(
         &self,
         input: &runmat_types::ValueFact,
@@ -129,8 +156,8 @@ fn stage_contract(
     // regardless of its rank. Final Single publication then reconstructs
     // a [1,1] tensor from that scalar; a final Double result remains Num.
     // Intermediate stages retain their tensor geometry until the next axis.
-    if count == 1 && final_output_class.is_some() {
-        output_shape = vec![1, 1];
+    if final_output_class.is_some() {
+        output_shape = mean_public_shape(&output_shape, count);
     }
     Some(FusionReductionContract {
         operation: FusionReductionOperation::Mean,
@@ -177,6 +204,41 @@ mod tests {
     }
     fn single(values: Vec<f32>, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::from_f32(values, shape).unwrap())
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn publication_carrier_does_not_assume_positive_payload_or_certify_opaque_input() {
+        let value = single(vec![-3.0, -5.0, -7.0, -9.0], vec![2, 2, 1]);
+        let input = value_fact(&value);
+        let controls = [
+            Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap()),
+            Value::String("native".into()),
+        ];
+        let actual = futures::executor::block_on(mean_builtin(value, controls.to_vec())).unwrap();
+        let mut output = value_fact(&actual);
+        output.storage = runmat_types::StorageFact::Unknown;
+        let certify = |input: &runmat_types::ValueFact| {
+            futures::executor::block_on(DECLARATION.certify_publication_storage(
+                FusionReductionContext {
+                    input,
+                    controls: &controls,
+                    requested_outputs: 1,
+                },
+                &output,
+            ))
+            .unwrap()
+        };
+        assert_eq!(certify(&input), Some(runmat_types::StorageFact::Dense));
+        for storage in [
+            runmat_types::StorageFact::Unknown,
+            runmat_types::StorageFact::Sparse,
+            runmat_types::StorageFact::Opaque,
+        ] {
+            let mut wrong = input.clone();
+            wrong.storage = storage;
+            assert_eq!(certify(&wrong), None);
+        }
     }
 
     #[test]

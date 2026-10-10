@@ -25,17 +25,43 @@ pub(super) fn build(
     target: ProviderElementType,
 ) -> Option<FloatingCastWork> {
     let input = query.inputs.first()?;
+    build_for_input(provider, input, target)
+}
+
+/// Shared ordinary cast allocator/chunk work; semantic feasibility remains
+/// the caller's separate typed admission obligation.
+pub(crate) fn build_for_input(
+    provider: &(impl AccelProvider + ?Sized),
+    input: &ProviderRepresentation,
+    target: ProviderElementType,
+) -> Option<FloatingCastWork> {
     let elements = input.checked_element_count()?;
+    let scalar_width = if input.storage == ProviderStorage::DenseComplexInterleaved {
+        2u64
+    } else {
+        1
+    };
+    let scalar_visits = elements.checked_mul(scalar_width)?;
+    let output_type = match (input.storage, target) {
+        (ProviderStorage::DenseReal, target) => target,
+        (ProviderStorage::DenseComplexInterleaved, ProviderElementType::F32) => {
+            ProviderElementType::ComplexF32
+        }
+        (ProviderStorage::DenseComplexInterleaved, ProviderElementType::F64) => {
+            ProviderElementType::ComplexF64
+        }
+        _ => return None,
+    };
     let workgroup = provider.elementwise_geometry()?.workgroup_size;
     let capacity = crate::backend::wgpu_geometry::elementwise_chunk_capacity(workgroup)?;
-    let same = input.element_type == target;
-    let dispatches = if same || elements == 0 {
+    let same = input.element_type == output_type;
+    let dispatches = if same || scalar_visits == 0 {
         0
     } else {
-        u32::try_from(elements.div_ceil(capacity)).ok()?
+        u32::try_from(scalar_visits.div_ceil(capacity)).ok()?
     };
     let source_bytes = input.checked_byte_len()?;
-    let output_payload = elements.checked_mul(target.byte_width())?;
+    let output_payload = elements.checked_mul(output_type.byte_width())?;
     let output_requested = if same {
         0
     } else {
@@ -66,8 +92,8 @@ pub(super) fn build(
         },
         #[cfg(any(feature = "wgpu", test))]
         source: match input.element_type {
-            ProviderElementType::F32 => ProviderPrecision::F32,
-            ProviderElementType::F64 => ProviderPrecision::F64,
+            ProviderElementType::F32 | ProviderElementType::ComplexF32 => ProviderPrecision::F32,
+            ProviderElementType::F64 | ProviderElementType::ComplexF64 => ProviderPrecision::F64,
             _ => return None,
         },
         #[cfg(any(feature = "wgpu", test))]
@@ -87,7 +113,7 @@ pub(super) fn build(
         #[cfg(any(feature = "wgpu", test))]
         scratch_bytes,
         #[cfg(any(feature = "wgpu", test))]
-        scalar_visits: if dispatches == 0 { 0 } else { elements },
+        scalar_visits: if dispatches == 0 { 0 } else { scalar_visits },
     })
 }
 

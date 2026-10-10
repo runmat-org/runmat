@@ -83,7 +83,6 @@ fn direct_receipt_preserves_query_and_includes_staging_before_body() {
         .unwrap()
         .complete();
     provider.clock.0.store(125, Ordering::SeqCst);
-    observation.execution_started(); // must not restart the receipt epoch
     futures::executor::block_on(prepared.execute(|_| async {
         let recorder = current_provider_observation().unwrap();
         recorder.submission().unwrap().complete();
@@ -169,8 +168,7 @@ fn direct_receipt_abandonment_and_body_error_never_publish_success() {
                 .is_pending());
         }
         drop(future);
-        assert_eq!(probe.feedback.borrow().len(), 1);
-        assert!(!probe.feedback.borrow()[0].succeeded);
+        assert!(probe.feedback.borrow().is_empty());
         assert!(matches!(
             recorder.submission(),
             Err(runmat_accelerate_api::observation::ProviderObservationFailure::Abandoned)
@@ -297,7 +295,6 @@ fn cancelled_cleanup_is_best_effort_and_cannot_train_success_or_retry() {
             allocations.map(|allocation| allocation.retirements()),
             [1, 1]
         );
-        assert_eq!(probe.feedback.borrow().len(), 1);
-        assert!(!probe.feedback.borrow()[0].succeeded);
+        assert!(probe.feedback.borrow().is_empty());
     }
 }

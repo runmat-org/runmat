@@ -8,11 +8,11 @@ use runmat_accelerate_api::{
 };
 use runmat_runtime::builtins::plotting::{clone_figure, lock_plot_test_context, new_figure_handle};
 use runmat_value::{Tensor, Value};
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    OnceLock,
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
+
+#[path = "support/retained_provider.rs"]
+mod retained_provider;
 
 struct Provider {
     inner: InProcessProvider,
@@ -48,8 +48,7 @@ impl AccelProvider for Provider {
 
 #[test]
 fn dispatched_stem_and_stairs_publish_only_after_preparation_completes() {
-    static PROVIDER: OnceLock<Provider> = OnceLock::new();
-    let provider = PROVIDER.get_or_init(|| Provider {
+    let provider = retained_provider::retained_test_provider!(PROVIDER: Provider = Provider {
         inner: InProcessProvider::new(),
         mode: AtomicUsize::new(0),
     });

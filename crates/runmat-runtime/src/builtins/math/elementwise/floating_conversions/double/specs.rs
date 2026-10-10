@@ -32,6 +32,9 @@ const FUSION_SEMANTICS: crate::builtins::common::spec::FusionSemanticDeclaration
         },
         revision: 2,
         admit: None,
+        admit_static: None,
+        required_real_unary: None,
+        required_arithmetic: None,
         helpers: &[],
         scalar_operation: Some(runmat_types::ScalarOperation::Cast(
             runmat_types::NumericClass::Double,

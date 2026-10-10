@@ -85,18 +85,22 @@ impl AccelProvider for Provider {
     fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         panic!("resolved Double must use typed upload")
     }
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         host.validate()?;
         let HostNumericDataView::F64(data) = host.data else {
             panic!("expected resolved Double output");
         };
         if self.fail_upload {
-            anyhow::bail!("injected typed Double upload failure");
+            return Err(anyhow::anyhow!("injected typed Double upload failure").into());
         }
         if !self.supports_double {
             return Err(runmat_accelerate_api::unsupported_provider_operation(
                 "fixture cannot encode Double",
-            ));
+            )
+            .into());
         }
         Ok(
             self.remember(self.owner.allocate_numeric(HostNumericTensorOwned {

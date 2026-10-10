@@ -83,7 +83,7 @@ pub(crate) fn retained_upload_fixture() -> (MexGpuError, std::sync::Weak<()>) {
     (
         MexGpuError::Upload {
             context: "test upload",
-            source: NumericUploadError::Provider(anyhow::Error::new(RetainedCause {
+            source: NumericUploadError::from(anyhow::Error::new(RetainedCause {
                 _retained: retained,
             })),
         },

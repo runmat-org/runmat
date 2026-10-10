@@ -113,13 +113,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "sum",
     binding_variant = "default",
-    builtin_path = "crate::builtins::math::reduction::sum"
+    builtin_path = "crate::builtins::math::reduction::sum",
+    call_observation = true
 )]
-pub(crate) async fn sum_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    sum_with_nan_policy(value, rest, None).await
+pub(crate) async fn sum_builtin(
+    observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
+    value: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    sum_for_invocation_observed(value, rest, None, SumInvocation::Sum, observation).await
 }
 
-pub(crate) async fn sum_with_nan_policy(
+#[cfg(test)]
+async fn sum_with_nan_policy(
     value: Value,
     rest: Vec<Value>,
     imposed_nan_mode: Option<ReductionNaN>,
@@ -127,11 +133,22 @@ pub(crate) async fn sum_with_nan_policy(
     sum_for_invocation(value, rest, imposed_nan_mode, SumInvocation::Sum).await
 }
 
-pub(crate) async fn sum_for_invocation(
+#[cfg(test)]
+async fn sum_for_invocation(
     value: Value,
     rest: Vec<Value>,
     imposed_nan_mode: Option<ReductionNaN>,
     invocation: SumInvocation,
+) -> crate::BuiltinResult<Value> {
+    sum_for_invocation_observed(value, rest, imposed_nan_mode, invocation, None).await
+}
+
+pub(crate) async fn sum_for_invocation_observed(
+    value: Value,
+    rest: Vec<Value>,
+    imposed_nan_mode: Option<ReductionNaN>,
+    invocation: SumInvocation,
+    observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
 ) -> crate::BuiltinResult<Value> {
     let input_count = rest.len() + 1;
     if crate::builtins::common::validation::is_typed_complex_integer(&value) {
@@ -147,7 +164,7 @@ pub(crate) async fn sum_for_invocation(
         SumInvocation::Sum => imposed_nan_mode.unwrap_or(parsed.nan_mode),
     };
     if preparation::eligible(&value, parsed.output) {
-        return preparation::execute(value, parsed, input_meta, input_count).await;
+        return preparation::execute(value, parsed, input_meta, input_count, observation).await;
     }
     let raw_result = execute_raw(value, &parsed).await?;
     apply_output_template(raw_result, &parsed.output, &input_meta).await
@@ -657,6 +674,10 @@ fn sum_provider_error(
 mod owning_tests;
 
 #[cfg(test)]
+#[path = "sum/omit_effect_tests.rs"]
+mod omit_effect_tests;
+
+#[cfg(test)]
 #[path = "sum/single_cast_tests.rs"]
 mod single_cast_tests;
 
@@ -684,6 +705,14 @@ fn reduce_omitnan_2d(
     provider
         .fused_reduction(
             &shader,
+            match provider.precision() {
+                runmat_accelerate_api::ProviderPrecision::F32 => {
+                    runmat_accelerate_api::ProviderShaderRequirements::Basic
+                }
+                runmat_accelerate_api::ProviderPrecision::F64 => {
+                    runmat_accelerate_api::ProviderShaderRequirements::F64IeeeWords
+                }
+            },
             std::slice::from_ref(handle),
             expected_shape,
             reduce_len,
@@ -1246,7 +1275,7 @@ pub(crate) mod tests {
     use runmat_value::{IntValue, IntegerStorage};
 
     fn sum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::sum_builtin(value, rest))
+        block_on(super::sum_builtin(None, value, rest))
     }
 
     fn values(tensor: &Tensor) -> Vec<f64> {

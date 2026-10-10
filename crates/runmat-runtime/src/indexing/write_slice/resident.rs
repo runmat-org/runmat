@@ -17,6 +17,17 @@ fn optional<T>(result: anyhow::Result<T>, context: &str) -> Result<Option<T>, Ru
     }
 }
 
+fn optional_execution<T>(
+    result: runmat_accelerate_api::ProviderExecutionResult<T>,
+    context: &str,
+) -> Result<Option<T>, RuntimeError> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(cause) if cause.is_unsupported() => Ok(None),
+        Err(cause) => Err(ownership::failure(context, cause)),
+    }
+}
+
 fn same_owner(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool {
     match (
         gpu_helpers::exact_provider_for_handle(left),
@@ -131,8 +142,8 @@ pub async fn assign_gpu_slice_with_plan(
                     if col < cols
                         && matches!(rhs_handle.shape(), [length] | [length, 1] if *length == rows)
                     {
-                        if let Some(output) = optional(
-                            provider.scatter_column(target, col, rhs_handle),
+                        if let Some(output) = optional_execution(
+                            provider.scatter_column(target, col, rhs_handle).await,
                             "column assignment",
                         )? {
                             return functional_result(output, target, rhs_handle);
@@ -143,8 +154,8 @@ pub async fn assign_gpu_slice_with_plan(
                     if row < rows
                         && matches!(rhs_handle.shape(), [length] | [1, length] if *length == cols)
                     {
-                        if let Some(output) = optional(
-                            provider.scatter_row(target, row, rhs_handle),
+                        if let Some(output) = optional_execution(
+                            provider.scatter_row(target, row, rhs_handle).await,
                             "row assignment",
                         )? {
                             return functional_result(output, target, rhs_handle);

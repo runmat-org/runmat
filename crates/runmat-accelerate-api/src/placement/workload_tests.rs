@@ -200,6 +200,64 @@ fn convolution_route_round_trips_without_changing_legacy_workloads() {
 }
 
 #[test]
+fn extrema_route_separates_public_demand_from_physical_two_result_hook() {
+    use crate::{
+        test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        ProviderExtremaDemand, ProviderExtremaInputBacking, ProviderExtremaKind,
+        ProviderExtremaWorkload,
+    };
+
+    let legacy: ProviderWorkload =
+        serde_json::from_str(r#"{"elements":3,"flops":null,"batch":null}"#).unwrap();
+    assert_eq!(legacy.extrema, None);
+    let one = ProviderWorkload {
+        extrema: Some(ProviderExtremaWorkload {
+            kind: ProviderExtremaKind::Minimum,
+            axis: 1,
+            demand: ProviderExtremaDemand::ValuesOnly,
+            input_backing: None,
+        }),
+        requested_outputs: Some(1),
+        ..ProviderWorkload::default()
+    };
+    let two = ProviderWorkload {
+        extrema: Some(ProviderExtremaWorkload {
+            kind: ProviderExtremaKind::Maximum,
+            axis: 0,
+            demand: ProviderExtremaDemand::ValuesAndIndices,
+            input_backing: None,
+        }),
+        requested_outputs: Some(2),
+        ..ProviderWorkload::default()
+    };
+    assert_ne!(one, two);
+    for workload in [one, two] {
+        let bytes = serde_json::to_vec(&workload).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<ProviderWorkload>(&bytes).unwrap(),
+            workload
+        );
+    }
+
+    let input = TestAllocationOwner::new()
+        .allocate_zeroed(vec![2, 3], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap()
+        .handle;
+    let live = ProviderExtremaInputBacking::from_full_live_handle(&input)
+        .unwrap()
+        .expect("full contiguous source");
+    assert!(live.matches_live_handle(&input).unwrap());
+    assert_eq!(
+        live.live_requested_bytes(),
+        Some(input.physical().requested_bytes())
+    );
+    let decoded: ProviderExtremaInputBacking =
+        serde_json::from_slice(&serde_json::to_vec(&live).unwrap()).unwrap();
+    assert_eq!(decoded.live_requested_bytes(), None);
+    assert!(!decoded.matches_live_handle(&input).unwrap());
+}
+
+#[test]
 fn fspecial_route_keeps_exact_scalar_bits_in_serialized_identity() {
     use crate::{FspecialFilter, FspecialRequest, ProviderFspecialFilter};
     let first = ProviderFspecialFilter::from(&FspecialRequest {

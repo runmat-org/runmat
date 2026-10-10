@@ -109,9 +109,7 @@ pub(super) fn materialize_gpu_loss_factor(
                 provider, &tensor, protected,
             ) {
                 Ok(handle) => handle,
-                Err(NumericUploadError::Provider(error))
-                    if runmat_accelerate_api::is_unsupported_provider_operation(&error) =>
-                {
+                Err(NumericUploadError::Provider(error)) if error.is_unsupported() => {
                     return Ok(MaterializedFactor::Unsupported);
                 }
                 Err(NumericUploadError::Provider(error)) => return Err(provider_error(error)),

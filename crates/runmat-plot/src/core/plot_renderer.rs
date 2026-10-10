@@ -31,9 +31,9 @@ mod y_direction;
 #[derive(Clone, Debug)]
 struct CachedSceneBuffers {
     vertex_signature: (usize, usize),
-    vertex_buffer: Arc<wgpu::Buffer>,
+    vertex_buffer: runmat_accelerate_api::WgpuBufferOwner,
     index_signature: Option<(usize, usize)>,
-    index_buffer: Option<Arc<wgpu::Buffer>>,
+    index_buffer: Option<runmat_accelerate_api::WgpuBufferOwner>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -256,7 +256,10 @@ impl PlotRenderer {
         emission: &runmat_accelerate_api::WgpuEmission<'_>,
         node_id: u64,
         render_data: &crate::core::RenderData,
-    ) -> Option<(Arc<wgpu::Buffer>, Option<Arc<wgpu::Buffer>>)> {
+    ) -> Option<(
+        runmat_accelerate_api::WgpuBufferOwner,
+        Option<runmat_accelerate_api::WgpuBufferOwner>,
+    )> {
         let mut cache = self.scene_buffer_cache.borrow_mut();
         let vertex_signature = (
             render_data.vertices.as_ptr() as usize,
@@ -280,10 +283,11 @@ impl PlotRenderer {
             render_data.gpu_vertices.as_ref(),
             &render_data.vertices,
         )?;
-        let index_buffer = render_data
-            .indices
-            .as_ref()
-            .map(|indices| Arc::new(self.wgpu_renderer.create_index_buffer(emission, indices)));
+        let index_buffer = render_data.indices.as_ref().map(|indices| {
+            runmat_accelerate_api::WgpuBufferOwner::new(
+                self.wgpu_renderer.create_index_buffer(emission, indices),
+            )
+        });
 
         cache.insert(
             node_id,
@@ -2428,7 +2432,7 @@ impl PlotRenderer {
                 if let Some(dc) = owned_render_data[idx].draw_calls.get_mut(0) {
                     dc.vertex_count = vcount;
                 }
-                let vb = Arc::new(
+                let vb = runmat_accelerate_api::WgpuBufferOwner::new(
                     self.wgpu_renderer
                         .create_vertex_buffer(emission, &owned_render_data[idx].vertices),
                 );

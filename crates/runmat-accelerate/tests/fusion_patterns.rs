@@ -1,5 +1,5 @@
 use runmat_accelerate::fusion::{detect_fusion_groups, FusionKind, FusionPlan};
-use runmat_accelerate::graph::{AccelGraph, AccelNodeLabel, PrimitiveOp, ValueOrigin};
+use runmat_accelerate::graph::{AccelGraph, AccelNodeLabel, PrimitiveOp, ShapeInfo, ValueOrigin};
 use runmat_hir::LoweringContext;
 use runmat_parser::parse;
 use std::sync::Once;
@@ -335,9 +335,29 @@ fn detects_image_normalize_group_with_vecdim_and_clamp() {
                 pattern.clamp_zero,
                 "clamped vecdim image normalize script should set clamp_zero"
             );
+            assert!(pattern.requires_single_input);
         }
         _ => panic!("missing image normalize pattern"),
     }
+
+    let mut known_scalar_cast = graph.clone();
+    let clamp = known_scalar_cast
+        .nodes
+        .iter()
+        .find(|node| matches!(&node.label, AccelNodeLabel::Builtin { name, .. } if name == "max"))
+        .expect("compiled clamp");
+    let cast_output = clamp.inputs[0];
+    let cast_value = known_scalar_cast
+        .values
+        .iter_mut()
+        .find(|value| value.id == cast_output)
+        .expect("compiled cast output");
+    assert!(matches!(cast_value.shape, ShapeInfo::Unknown));
+    cast_value.shape = ShapeInfo::Scalar;
+    assert!(known_scalar_cast
+        .detect_fusion_groups()
+        .iter()
+        .all(|group| group.kind != FusionKind::ImageNormalize));
 }
 
 #[test]

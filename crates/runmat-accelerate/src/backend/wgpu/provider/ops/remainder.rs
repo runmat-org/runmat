@@ -81,6 +81,7 @@ impl WgpuProvider {
                 GpuTensorStorage::Real,
             );
         }
+        self.require_ieee_words(self.precision)?;
         self.fused_elementwise_with_telemetry_and_storage_exec(
             &crate::backend::wgpu::shaders::remainder::shader(self.precision, kind),
             &[a.clone(), b.clone()],

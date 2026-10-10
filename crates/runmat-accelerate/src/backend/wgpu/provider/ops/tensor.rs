@@ -365,6 +365,17 @@ impl WgpuProvider {
             new_shape_arr[i] = crate::backend::wgpu::params::AlignedU32::new(new_shape[i] as u32);
             strides_arr[i] = crate::backend::wgpu::params::AlignedU32::new(base_strides[i] as u32);
         }
+        let pipeline_bundle = if integer_type.is_some() {
+            &self.pipelines.integer_repmat
+        } else {
+            &self.pipelines.repmat
+        };
+        let launch = pipeline_bundle
+            .linear_launch()
+            .ok_or_else(|| anyhow!("repmat pipeline has no linear launch"))?;
+        let chunk_capacity = launch
+            .chunk_capacity()
+            .ok_or_else(|| anyhow!("repmat chunk capacity overflows"))?;
 
         // Use checked allocation so we fail with a clear error instead of
         // creating an invalid WebGPU buffer (which later triggers a validation error).
@@ -401,11 +412,7 @@ impl WgpuProvider {
                 label: Some("runmat-repmat-noop-pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(if integer_type.is_some() {
-                &self.pipelines.integer_repmat.get(emission)?.pipeline
-            } else {
-                &self.pipelines.repmat.get(emission)?.pipeline
-            });
+            pass.set_pipeline(&pipeline_bundle.get(emission)?.pipeline);
             drop(pass);
             self.submit(emission, pending, enc)?;
             Ok(())
@@ -422,8 +429,6 @@ impl WgpuProvider {
                 self.submit(emission, pending, enc)?;
             }
 
-            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
             let mut offset = 0usize;
             while offset < storage_total {
                 let remaining = storage_total - offset;
@@ -443,11 +448,7 @@ impl WgpuProvider {
                     .device()
                     .create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("runmat-repmat-bind"),
-                        layout: if integer_type.is_some() {
-                            &self.pipelines.integer_repmat.get(emission)?.layout
-                        } else {
-                            &self.pipelines.repmat.get(emission)?.layout
-                        },
+                        layout: &pipeline_bundle.get(emission)?.layout,
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
@@ -463,18 +464,13 @@ impl WgpuProvider {
                             },
                         ],
                     });
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_len as u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
+                let workgroups = launch
+                    .dispatch_groups(chunk_len)
+                    .ok_or_else(|| anyhow!("repmat launch exceeds enabled limits"))?;
                 crate::backend::wgpu::dispatch::repmat::run(
                     emission,
                     pending,
-                    if integer_type.is_some() {
-                        &self.pipelines.integer_repmat.get(emission)?.pipeline
-                    } else {
-                        &self.pipelines.repmat.get(emission)?.pipeline
-                    },
+                    &pipeline_bundle.get(emission)?.pipeline,
                     &bind_group,
                     workgroups,
                 )?;
@@ -774,6 +770,14 @@ impl WgpuProvider {
             stride_a_arr[i] = crate::backend::wgpu::params::AlignedU32::new(strides_a[i] as u32);
             stride_b_arr[i] = crate::backend::wgpu::params::AlignedU32::new(strides_b[i] as u32);
         }
+        let launch = self
+            .pipelines
+            .kron
+            .linear_launch()
+            .ok_or_else(|| anyhow!("kron pipeline has no linear launch"))?;
+        let chunk_capacity = launch
+            .chunk_capacity()
+            .ok_or_else(|| anyhow!("kron chunk capacity overflows"))?;
 
         let out_buffer = self.with_emission(|emission, _| {
             self.create_storage_buffer_checked(emission, len_out, "runmat-kron-out")
@@ -808,8 +812,6 @@ impl WgpuProvider {
                 self.submit(emission, pending, enc)?;
             }
 
-            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
             let mut offset = 0usize;
             while offset < len_out {
                 let remaining = len_out - offset;
@@ -850,10 +852,9 @@ impl WgpuProvider {
                             },
                         ],
                     });
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_len as u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
+                let workgroups = launch
+                    .dispatch_groups(chunk_len)
+                    .ok_or_else(|| anyhow!("kron launch exceeds enabled limits"))?;
                 crate::backend::wgpu::dispatch::kron::run(
                     emission,
                     pending,
@@ -1062,6 +1063,17 @@ impl WgpuProvider {
             .len
             .checked_mul(word_factor)
             .ok_or_else(|| anyhow!("circshift: tensor storage length exceeds GPU limits"))?;
+        let pipeline_bundle = if integer_type.is_some() {
+            &self.pipelines.integer_circshift
+        } else {
+            &self.pipelines.circshift
+        };
+        let launch = pipeline_bundle
+            .linear_launch()
+            .ok_or_else(|| anyhow!("circshift pipeline has no linear launch"))?;
+        let chunk_capacity = launch
+            .chunk_capacity()
+            .ok_or_else(|| anyhow!("circshift chunk capacity overflows"))?;
         let out_buffer = if integer_type.is_some() {
             self.with_emission(|emission, _| {
                 self.create_integer_word_buffer(
@@ -1088,11 +1100,7 @@ impl WgpuProvider {
                 label: Some("runmat-circshift-noop-pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(if integer_type.is_some() {
-                &self.pipelines.integer_circshift.get(emission)?.pipeline
-            } else {
-                &self.pipelines.circshift.get(emission)?.pipeline
-            });
+            pass.set_pipeline(&pipeline_bundle.get(emission)?.pipeline);
             drop(pass);
             self.submit(emission, pending, enc)?;
             Ok(())
@@ -1109,8 +1117,6 @@ impl WgpuProvider {
                 self.submit(emission, pending, enc)?;
             }
 
-            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
             let mut offset = 0usize;
             while offset < entry.len {
                 let remaining = entry.len - offset;
@@ -1130,11 +1136,7 @@ impl WgpuProvider {
                     .device()
                     .create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("runmat-circshift-bind"),
-                        layout: if integer_type.is_some() {
-                            &self.pipelines.integer_circshift.get(emission)?.layout
-                        } else {
-                            &self.pipelines.circshift.get(emission)?.layout
-                        },
+                        layout: &pipeline_bundle.get(emission)?.layout,
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
@@ -1150,18 +1152,13 @@ impl WgpuProvider {
                             },
                         ],
                     });
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_len as u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
+                let workgroups = launch
+                    .dispatch_groups(chunk_len)
+                    .ok_or_else(|| anyhow!("circshift launch exceeds enabled limits"))?;
                 crate::backend::wgpu::dispatch::circshift::run(
                     emission,
                     pending,
-                    if integer_type.is_some() {
-                        &self.pipelines.integer_circshift.get(emission)?.pipeline
-                    } else {
-                        &self.pipelines.circshift.get(emission)?.pipeline
-                    },
+                    &pipeline_bundle.get(emission)?.pipeline,
                     &bind_group,
                     workgroups,
                 )?;
@@ -1226,6 +1223,14 @@ impl WgpuProvider {
         } else {
             offset as i32
         };
+        let launch = self
+            .pipelines
+            .tril
+            .linear_launch()
+            .ok_or_else(|| anyhow!("tril pipeline has no linear launch"))?;
+        let chunk_capacity = launch
+            .chunk_capacity()
+            .ok_or_else(|| anyhow!("tril chunk capacity overflows"))?;
 
         let out_buffer = self.with_emission(|emission, _| {
             self.create_storage_buffer(emission, entry.len, "runmat-tril-out")
@@ -1260,8 +1265,6 @@ impl WgpuProvider {
                 self.submit(emission, pending, enc)?;
             }
 
-            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
             let rows_u32 = rows as u32;
             let cols_u32 = cols as u32;
             let plane_u32 = plane as u32;
@@ -1300,10 +1303,9 @@ impl WgpuProvider {
                             },
                         ],
                     });
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_len as u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
+                let workgroups = launch
+                    .dispatch_groups(chunk_len)
+                    .ok_or_else(|| anyhow!("tril launch exceeds enabled limits"))?;
                 crate::backend::wgpu::dispatch::tril::run(
                     emission,
                     pending,
@@ -1377,6 +1379,14 @@ impl WgpuProvider {
         } else {
             offset as i32
         };
+        let launch = self
+            .pipelines
+            .triu
+            .linear_launch()
+            .ok_or_else(|| anyhow!("triu pipeline has no linear launch"))?;
+        let chunk_capacity = launch
+            .chunk_capacity()
+            .ok_or_else(|| anyhow!("triu chunk capacity overflows"))?;
 
         let out_buffer = self.with_emission(|emission, _| {
             self.create_storage_buffer(emission, entry.len, "runmat-triu-out")
@@ -1411,8 +1421,6 @@ impl WgpuProvider {
                 self.submit(emission, pending, enc)?;
             }
 
-            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
             let rows_u32 = rows as u32;
             let cols_u32 = cols as u32;
             let plane_u32 = plane as u32;
@@ -1451,10 +1459,9 @@ impl WgpuProvider {
                             },
                         ],
                     });
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_len as u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
+                let workgroups = launch
+                    .dispatch_groups(chunk_len)
+                    .ok_or_else(|| anyhow!("triu launch exceeds enabled limits"))?;
                 crate::backend::wgpu::dispatch::triu::run(
                     emission,
                     pending,
@@ -1611,6 +1618,17 @@ impl WgpuProvider {
             flags_arr[i] =
                 crate::backend::wgpu::params::AlignedU32::new(if kernel_flags[i] { 1 } else { 0 });
         }
+        let pipeline_bundle = if integer_type.is_some() {
+            &self.pipelines.integer_flip
+        } else {
+            &self.pipelines.flip
+        };
+        let launch = pipeline_bundle
+            .linear_launch()
+            .ok_or_else(|| anyhow!("flip pipeline has no linear launch"))?;
+        let chunk_capacity = launch
+            .chunk_capacity()
+            .ok_or_else(|| anyhow!("flip chunk capacity overflows"))?;
 
         let out_buffer = if integer_type.is_some() {
             self.with_emission(|emission, _| {
@@ -1641,11 +1659,7 @@ impl WgpuProvider {
                 label: Some("runmat-flip-noop-pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(if integer_type.is_some() {
-                &self.pipelines.integer_flip.get(emission)?.pipeline
-            } else {
-                &self.pipelines.flip.get(emission)?.pipeline
-            });
+            pass.set_pipeline(&pipeline_bundle.get(emission)?.pipeline);
             drop(pass);
             self.submit(emission, pending, enc)?;
             Ok(())
@@ -1662,8 +1676,6 @@ impl WgpuProvider {
                 self.submit(emission, pending, enc)?;
             }
 
-            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
             let mut offset = 0usize;
             while offset < storage_total {
                 let remaining = storage_total - offset;
@@ -1682,11 +1694,7 @@ impl WgpuProvider {
                     .device()
                     .create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("runmat-flip-bind"),
-                        layout: if integer_type.is_some() {
-                            &self.pipelines.integer_flip.get(emission)?.layout
-                        } else {
-                            &self.pipelines.flip.get(emission)?.layout
-                        },
+                        layout: &pipeline_bundle.get(emission)?.layout,
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
@@ -1702,18 +1710,13 @@ impl WgpuProvider {
                             },
                         ],
                     });
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_len as u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
+                let workgroups = launch
+                    .dispatch_groups(chunk_len)
+                    .ok_or_else(|| anyhow!("flip launch exceeds enabled limits"))?;
                 crate::backend::wgpu::dispatch::flip::run(
                     emission,
                     pending,
-                    if integer_type.is_some() {
-                        &self.pipelines.integer_flip.get(emission)?.pipeline
-                    } else {
-                        &self.pipelines.flip.get(emission)?.pipeline
-                    },
+                    &pipeline_bundle.get(emission)?.pipeline,
                     &bind_group,
                     workgroups,
                 )?;
@@ -1742,6 +1745,10 @@ impl WgpuProvider {
 #[cfg(test)]
 #[path = "tensor/preparation_geometry_tests.rs"]
 mod preparation_geometry_tests;
+
+#[cfg(test)]
+#[path = "tensor/linear_launch_tests.rs"]
+mod linear_launch_tests;
 
 #[cfg(test)]
 mod tests {

@@ -13,6 +13,11 @@ use crate::build_runtime_error;
 
 mod residency_cleanup;
 pub(crate) use residency_cleanup::clear_input_residency;
+mod real_range;
+pub use real_range::{
+    probe_real_extrema, probe_real_extrema_observed, probe_real_nan_absence,
+    probe_real_nan_absence_observed, RealExtrema, RealProbeDiagnostic, RealProbeStage,
+};
 
 pub fn integer_storage_from_owned(data: HostIntegerDataOwned) -> IntegerStorage {
     match data {

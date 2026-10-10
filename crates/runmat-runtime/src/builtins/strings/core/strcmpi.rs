@@ -11,6 +11,9 @@ use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, comp
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
+use crate::builtins::strings::core::comparison_observation::{
+    host_string_lengths, ComparisonMode, ScalarComparisonWorkload,
+};
 use crate::builtins::strings::search::text_utils::{logical_result, TextCollection, TextElement};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -38,9 +41,16 @@ fn remap_strcmpi_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "strcmpi",
     binding_variant = "default",
-    builtin_path = "crate::builtins::strings::core::strcmpi"
+    builtin_path = "crate::builtins::strings::core::strcmpi",
+    requested_outputs = true,
+    call_observation = true
 )]
-async fn strcmpi_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
+async fn strcmpi_builtin(
+    requested_outputs: Option<usize>,
+    observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
+    a: Value,
+    b: Value,
+) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &STRCMPI_DESCRIPTOR,
         &STRCMPI_ERROR_TOO_MANY_OUTPUTS,
@@ -49,6 +59,7 @@ async fn strcmpi_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
     if contains_numeric_or_resident_text_input(&a) || contains_numeric_or_resident_text_input(&b) {
         return Ok(Value::Bool(false));
     }
+    let host_lengths = host_string_lengths(&a, &b);
     let a = gather_if_needed_async(&a)
         .await
         .map_err(remap_strcmpi_flow)?;
@@ -59,13 +70,32 @@ async fn strcmpi_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
         .map_err(|_| strcmpi_error(&STRCMPI_ERROR_INVALID_INPUT))?;
     let right = TextCollection::from_argument(BUILTIN_NAME, b, "second argument")
         .map_err(|_| strcmpi_error(&STRCMPI_ERROR_INVALID_INPUT))?;
-    evaluate_strcmpi(&left, &right)
+    evaluate_strcmpi(&left, &right, host_lengths, requested_outputs, observation)
 }
 
-fn evaluate_strcmpi(left: &TextCollection, right: &TextCollection) -> BuiltinResult<Value> {
+fn evaluate_strcmpi(
+    left: &TextCollection,
+    right: &TextCollection,
+    host_lengths: Option<(usize, usize)>,
+    requested_outputs: Option<usize>,
+    observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
+) -> BuiltinResult<Value> {
     let shape = broadcast_shapes(BUILTIN_NAME, &left.shape, &right.shape)
         .map_err(|_| strcmpi_error(&STRCMPI_ERROR_SHAPE_MISMATCH))?;
     let total = tensor::element_count(&shape);
+    if total == 1 && left.shape == [1, 1] && right.shape == [1, 1] {
+        if let (Some((left_utf8_bytes, right_utf8_bytes)), Some(observation)) =
+            (host_lengths, observation)
+        {
+            observation.admit(ScalarComparisonWorkload {
+                left_utf8_bytes,
+                right_utf8_bytes,
+                mode: ComparisonMode::CaseInsensitive,
+                prefix: None,
+                requested_outputs,
+            });
+        }
+    }
     if total == 0 {
         return logical_result(BUILTIN_NAME, Vec::new(), shape)
             .map_err(|_| strcmpi_error(&STRCMPI_ERROR_INTERNAL));
@@ -100,7 +130,7 @@ pub(crate) mod tests {
     use runmat_value::{CellArray, CharArray, LogicalArray, StringArray};
 
     fn strcmpi_builtin(a: Value, b: Value) -> BuiltinResult<Value> {
-        futures::executor::block_on(super::strcmpi_builtin(a, b))
+        futures::executor::block_on(super::strcmpi_builtin(None, None, a, b))
     }
 
     fn error_message(err: RuntimeError) -> String {
@@ -259,6 +289,39 @@ pub(crate) mod tests {
         let result =
             strcmpi_builtin(Value::Num(1.0), Value::String("a".into())).expect("comparison");
         assert_eq!(result, Value::Bool(false));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn strcmpi_direct_numeric_false_precedes_invalid_peer_container() {
+        let malformed = Value::Struct(runmat_value::StructValue::new());
+        for (a, b) in [
+            (Value::Num(1.0), malformed.clone()),
+            (malformed, Value::Num(1.0)),
+        ] {
+            assert_eq!(strcmpi_builtin(a, b).unwrap(), Value::Bool(false));
+        }
+        let malformed_cell = CellArray::new(vec![Value::Num(42.0)], 1, 1).unwrap();
+        let error = strcmpi_builtin(Value::Cell(malformed_cell), Value::String("a".into()))
+            .expect_err("invalid host cell without direct numeric input");
+        assert_eq!(error.identifier(), STRCMPI_ERROR_INVALID_INPUT.identifier);
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        assert_eq!(
+            strcmpi_builtin(
+                Value::GpuTensor(allocation.handle.clone()),
+                Value::Struct(runmat_value::StructValue::new()),
+            )
+            .unwrap(),
+            Value::Bool(false)
+        );
+        assert!(allocation.handle.allocation_lease().validate_live().is_ok());
+        assert_eq!(allocation.probe.retirements(), 0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

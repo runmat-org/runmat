@@ -11,7 +11,7 @@ pub(super) enum GpuLowerBoundResult {
 
 #[derive(Debug)]
 pub(super) enum GpuDomainProbeError {
-    ProviderReduce(anyhow::Error),
+    ProviderReduce(runmat_accelerate_api::ProviderExecutionError),
     ProviderDownload(Box<crate::RuntimeError>),
     AliasedReduction,
     MalformedInput,
@@ -39,7 +39,7 @@ impl std::fmt::Display for GpuDomainProbeError {
 impl std::error::Error for GpuDomainProbeError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::ProviderReduce(error) => Some(error.as_ref()),
+            Self::ProviderReduce(error) => Some(error),
             Self::ProviderDownload(error) => Some(error.as_ref()),
             _ => None,
         }
@@ -66,6 +66,10 @@ pub(super) async fn probe_gpu_lower_bound(
     {
         return Err(GpuDomainProbeError::MalformedInput);
     }
+    handle
+        .allocation_lease()
+        .validate_live()
+        .map_err(|_| GpuDomainProbeError::MalformedInput)?;
     if handle.shape().contains(&0) {
         return Ok(GpuLowerBoundResult::AtOrAbove);
     }
@@ -84,9 +88,7 @@ pub(super) async fn probe_gpu_lower_bound(
     };
     let minimum = match reduction {
         Ok(handle) => handle,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
-            return Ok(GpuLowerBoundResult::Unknown)
-        }
+        Err(error) if error.is_unsupported() => return Ok(GpuLowerBoundResult::Unknown),
         Err(error) => return Err(GpuDomainProbeError::ProviderReduce(error)),
     };
 

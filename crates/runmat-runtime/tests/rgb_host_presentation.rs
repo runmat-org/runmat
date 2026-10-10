@@ -193,7 +193,10 @@ impl AccelProvider for FiniteReadbackOwner {
     fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.inner.upload(host)
     }
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.inner.upload_numeric_raw(host)
     }
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {

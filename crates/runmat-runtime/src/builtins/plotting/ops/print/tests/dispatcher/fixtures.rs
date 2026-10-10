@@ -121,7 +121,10 @@ impl AccelProvider for CountingDownloadProvider {
         self.inner.upload(host)
     }
 
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.inner.upload_numeric_raw(host)
     }
 

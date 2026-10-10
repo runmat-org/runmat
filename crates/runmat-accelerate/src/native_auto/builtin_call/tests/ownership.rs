@@ -49,10 +49,10 @@ impl AccelProvider for CounterProvider {
     fn upload_numeric_raw(
         &self,
         view: &runmat_accelerate_api::HostNumericTensorView<'_>,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         if self.fail_on == Some(id) {
-            return Err(anyhow!("selected upload failure"));
+            return Err(anyhow!("selected upload failure").into());
         }
         if let Some((at, alias)) = *self.alias_on.lock().unwrap() {
             if at == id {
@@ -71,7 +71,7 @@ impl AccelProvider for CounterProvider {
         let HostNumericDataView::F64(data) = view.data else {
             panic!("F64 fixture input")
         };
-        self.allocate(id, data.to_vec(), view.shape.to_vec())
+        Ok(self.allocate(id, data.to_vec(), view.shape.to_vec())?)
     }
     fn upload(&self, view: &HostTensorView<'_>) -> Result<GpuTensorHandle> {
         let id = self.next.fetch_add(1, Ordering::Relaxed);

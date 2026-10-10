@@ -11,6 +11,38 @@ use std::rc::Rc;
 use std::task::{Context, Poll};
 
 #[test]
+fn sort_errors_preserve_allocation_and_execution_sources() {
+    use std::error::Error;
+
+    let allocation = Vec::<u8>::new().try_reserve(usize::MAX).unwrap_err();
+    let expected = allocation.to_string();
+    let error = CooperativeSortError::Resource(allocation);
+    assert_eq!(
+        error.to_string(),
+        format!("sort allocation failed: {expected}")
+    );
+    assert!(error
+        .source()
+        .unwrap()
+        .downcast_ref::<std::collections::TryReserveError>()
+        .is_some());
+    assert_eq!(error.source().unwrap().to_string(), expected);
+
+    let error = CooperativeSortError::Service(ExecutionServiceError::Cancelled);
+    assert_eq!(
+        error.to_string(),
+        "sort execution failed: execution was cancelled"
+    );
+    assert_eq!(
+        error
+            .source()
+            .unwrap()
+            .downcast_ref::<ExecutionServiceError>(),
+        Some(&ExecutionServiceError::Cancelled),
+    );
+}
+
+#[test]
 fn stable_order_matches_library_sort_at_empty_single_and_run_boundaries() {
     for count in [0, 1, RUN_LEN - 1, RUN_LEN, RUN_LEN + 1, 2 * RUN_LEN + 3] {
         let mut actual = (0..count)

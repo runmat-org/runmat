@@ -73,14 +73,14 @@ impl AccelProvider for LogicalProvider {
         &'a self,
         _: &'a GpuTensorHandle,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         panic!("logical U8 must not enter the integer remainder hook")
     }
     fn elem_mod<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         panic!("logical U8 must not enter the integer modulus hook")
     }
     fn device_id(&self) -> u32 {

@@ -4,11 +4,15 @@
 //! does not authenticate shader behavior, grant provider access, or replace
 //! backend checks against actual buffers, device limits and compiled pipelines.
 //! Runtime controls, canonical binding evidence and graph IDs remain upstream.
+mod input_preparation;
 mod recipe;
 mod submission;
 mod types;
 mod validation;
 
+pub use input_preparation::{
+    ProviderReductionInputInventory, ProviderReductionInputPreparation, ProviderReductionInputStage,
+};
 pub use recipe::{ProviderReductionRecipe, ReductionRecipeDescriptor, ReductionShaderSources};
 pub use submission::{
     ReductionSelection, ReductionStrategy, ReductionSubmission, SelectedReductionWork,

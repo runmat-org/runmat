@@ -38,7 +38,7 @@ fn nan_aliases_impose_typed_omission_after_owner_controls() {
     let cases: [(&str, Invoke, f64); 5] = [
         (
             "nansum",
-            |value, rest| block_on(nansum_builtin(value, rest)),
+            |value, rest| block_on(nansum_builtin(None, value, rest)),
             4.0,
         ),
         (
@@ -96,7 +96,7 @@ fn legacy_nan_reductions_gate_typed_integer_data_by_compatibility_mode() {
             "RunMat:compatibility:NanmeanTypedIntegerInputExtension",
         ),
         (
-            |value, rest| block_on(nansum_builtin(value, rest)),
+            |value, rest| block_on(nansum_builtin(None, value, rest)),
             "nansum",
             "RunMat:compatibility:NansumTypedIntegerInputExtension",
         ),
@@ -140,7 +140,7 @@ fn legacy_nan_reductions_gate_typed_integer_dimensions() {
         error.identifier(),
         Some("RunMat:compatibility:NanmeanTypedIntegerInputExtension")
     );
-    let error = block_on(nansum_builtin(floating(), vec![dimension()]))
+    let error = block_on(nansum_builtin(None, floating(), vec![dimension()]))
         .expect_err("strict nansum typed-integer dimension");
     assert_eq!(
         error.identifier(),
@@ -274,7 +274,7 @@ fn legacy_nan_integer_extensions_preserve_declared_residency() {
             ),
             (
                 "nansum",
-                |value, rest| block_on(nansum_builtin(value, rest)),
+                |value, rest| block_on(nansum_builtin(None, value, rest)),
                 vec![4.0, 12.0],
             ),
         ];

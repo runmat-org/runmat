@@ -3,7 +3,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
         "`isstrprop(text, category)` classifies characters by `alpha`, `alphanum`, `digit`, `xdigit`, `wspace`, `upper`, `lower`, `punct`, `cntrl`, `graphic`, or `print`. Category may be a character vector or string scalar.",
         "Character input returns a same-shaped logical array. String arrays and cell containers produce cell arrays of logical character classifications. Numeric values, including all eight integer classes, are interpreted as Unicode character codes; integer values are read exactly and clamped to the BMP code-unit range before classification.",
-        "The optional `\"ForceCellOutput\", flag` pair wraps a non-cell result in a scalar cell when flag is true. Flag accepts a logical scalar or numeric zero/one. Invalid categories, options, flags, and unsupported text values error.",
+        "The optional `\"ForceCellOutput\", flag` pair wraps a non-cell result in a scalar cell when flag is true. Flag accepts a one-element logical value or a real double scalar or dense array equal to zero or one. Single, integer, complex, sparse, and GPU-resident flags are not supported. Invalid categories, options, flags, and unsupported text values error.",
     ] },
     BuiltinDocumentationSection { heading: "Placement and compatibility", paragraphs: &[
         "Classification runs on the host in native and browser runtimes. Automatic resident numeric input is downloaded exactly; explicit resident input is a RunMat-only form and is rejected in strict MATLAB compatibility mode before provider access. A supported download or property gather can suspend.",
@@ -48,6 +48,19 @@ const EXAMPLES: &[BuiltinExample] = &[
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(iscell(C)); assert(isequal(C{1}, logical([1 0])));",
+        },
+    },
+    BuiltinExample {
+        id: "force-cell-double-flag",
+        title: "Use the exact Double zero/one flag with integer character codes",
+        program: "C = isstrprop(uint16([65 49]), \"alpha\", \"ForceCellOutput\", 1)",
+        display_output: Some("C is a scalar cell containing [true false]"),
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(iscell(C)); assert(isequal(size(C), [1 1])); assert(isequal(C{1}, logical([1 0])));",
         },
     },
 ];

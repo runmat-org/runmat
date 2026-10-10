@@ -22,9 +22,9 @@ fn cospi_window(value: f64) -> f64 {
     let rounded = round(doubled);
     if (doubled == rounded) {
         let residue = u32(rounded) % 4u;
-        if (residue == 0u) { return 1.0; }
-        if (residue == 2u) { return -1.0; }
-        return 0.0;
+        if (residue == 0u) { return 1.0lf; }
+        if (residue == 2u) { return f64(-1.0); }
+        return 0.0lf;
     }
     let cycle = value - 2.0 * floor(value / 2.0);
     let reduced = select(cycle, 2.0 - cycle, cycle > 1.0);
@@ -33,10 +33,10 @@ fn cospi_window(value: f64) -> f64 {
 
 fn coeff(kind: u32, idx: u32, total: u32) -> f64 {
     if (total == 0u) {
-        return 0.0;
+        return 0.0lf;
     }
     if (total == 1u) {
-        return 1.0;
+        return 1.0lf;
     }
     switch kind {
         case 0u: { return 0.5 - 0.5 * cospi_window(2.0 * f64(idx) / f64(total - 1u)); }

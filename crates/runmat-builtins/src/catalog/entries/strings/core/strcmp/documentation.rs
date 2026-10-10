@@ -5,7 +5,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         "`strcmp(A, B)` compares text exactly and returns a logical scalar or array. It accepts string scalars and arrays, character vectors and matrices, and cell arrays of character vectors.",
         "Each character-array row is one text element. Character matrices therefore produce column-shaped comparison results; scalar operands expand against compatible text arrays, including N-D string arrays.",
         "Missing string elements compare false, even against another missing element. Comparison is case-sensitive; use `strcmpi` to ignore letter case.",
-        "Direct integer, numeric, symbolic, logical, and provider-resident operands are unsupported text and return scalar logical false before provider access. Malformed host cell elements report an input error rather than being silently converted.",
+        "Direct integer, numeric, symbolic, logical, and provider-resident operands are unsupported text and return scalar logical false before provider access or validation of the other operand. When neither operand takes that direct-false route, malformed host cell elements report an input error rather than being silently converted.",
     ] },
     BuiltinDocumentationSection { heading: "Placement and effects", paragraphs: &[
         "The default binding compares text on the host in native and browser runtimes. It has no GPU text kernel or fusion form. It may throw for invalid text containers or incompatible shapes, but has no callback, workspace, filesystem, randomness, network, or time effects.",

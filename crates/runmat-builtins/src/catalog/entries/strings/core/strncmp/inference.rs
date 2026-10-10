@@ -8,6 +8,8 @@ use runmat_types::{
     CallInference, CallRequest, DynamicReason, NumericDomain, ValueFact, ValueKindFact,
 };
 
+use super::super::support::known_invalid_prefix_count;
+
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
     if request.arguments.len() != 3 {
@@ -37,7 +39,14 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             let numeric_or_logical = matches!(&limit.kind,
                 ValueKindFact::Numeric(numeric) if numeric.domain == NumericDomain::Real)
                 || matches!(&limit.kind, ValueKindFact::Logical | ValueKindFact::Unknown);
-            if !numeric_or_logical || limit.shape.element_count().is_some_and(|count| count != 1) {
+            if !numeric_or_logical
+                || limit.shape.element_count().is_some_and(|count| count != 1)
+                || request
+                    .literals
+                    .literal_args
+                    .get(2)
+                    .is_some_and(known_invalid_prefix_count)
+            {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-STRNCMP-LIMIT",
                     "N must be a real integer-valued scalar",
@@ -62,7 +71,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_types::{LiteralContext, OutputSelection, ShapeFact, StorageFact};
+    use runmat_types::{
+        LiteralContext, LiteralValue, NumericClass, NumericFact, OutputSelection, ShapeFact,
+        StorageFact,
+    };
     fn request(arguments: Vec<ValueFact>) -> CallRequest {
         CallRequest {
             arguments,
@@ -70,7 +82,8 @@ mod tests {
             outputs: OutputSelection::default(),
         }
     }
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn text_shape_and_invalid_count_are_distinct() {
         let entry = &super::super::STRNCMP_CATALOG_ENTRY;
         let strings = ValueFact::proven(
@@ -100,5 +113,45 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.code == "RM-CATALOG-STRNCMP-LIMIT"));
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn source_known_fractional_count_errors_but_direct_numeric_text_returns_false_first() {
+        let mut call = request(vec![
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            })),
+        ]);
+        call.literals.literal_args = vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Number(1.0 + f64::EPSILON),
+        ];
+        let entry = &super::super::STRNCMP_CATALOG_ENTRY;
+        let invalid = infer(&call, entry);
+        assert!(invalid
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-STRNCMP-LIMIT"));
+        call.literals.literal_args[2] = LiteralValue::Number(1e100);
+        let overflow = infer(&call, entry);
+        assert!(overflow
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-STRNCMP-LIMIT"));
+        call.arguments[0] = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt8,
+            domain: NumericDomain::Real,
+        }));
+        let bypass = infer(&call, entry);
+        assert!(!bypass
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-STRNCMP-LIMIT"));
+        assert_eq!(bypass.outputs[0], ValueFact::scalar(ValueKindFact::Logical));
     }
 }

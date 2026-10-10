@@ -8,9 +8,12 @@ use runmat_accelerate_api::{
 use runmat_value::{CharArray, Value};
 use std::{
     future::Future,
-    sync::{Mutex, OnceLock},
+    sync::Mutex,
     task::{Context, Poll},
 };
+
+#[path = "support/retained_provider.rs"]
+mod retained_provider;
 
 #[derive(Clone, Copy, Default)]
 enum Fault {
@@ -38,7 +41,7 @@ impl Provider {
         &'a self,
         _left: &'a GpuTensorHandle,
         right: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let fault = {
                 let mut state = self.state.lock().unwrap();
@@ -47,7 +50,7 @@ impl Provider {
             };
             match fault {
                 Fault::Pending => std::future::pending().await,
-                Fault::Failed => anyhow::bail!("injected remainder failure"),
+                Fault::Failed => Err(anyhow::anyhow!("injected remainder failure").into()),
                 Fault::Alias => Ok(right.clone()),
                 Fault::WrongShape => {
                     let output = self.inner.upload_integer(
@@ -101,14 +104,14 @@ impl AccelProvider for Provider {
         &'a self,
         left: &'a GpuTensorHandle,
         right: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         self.binary(left, right)
     }
     fn elem_rem<'a>(
         &'a self,
         left: &'a GpuTensorHandle,
         right: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         self.binary(left, right)
     }
     fn upload(&self, view: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
@@ -158,15 +161,18 @@ impl AccelProvider for Provider {
         input: &'a GpuTensorHandle,
         _digits: i32,
         _significant: bool,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        self.invoke(input)
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.invoke(input).await.map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
+        })
     }
 }
 
 #[test]
 fn rounding_dispatch_preserves_borrowed_metadata_and_releases_invalid_outputs() {
-    static PROVIDER: OnceLock<Provider> = OnceLock::new();
-    let provider = PROVIDER.get_or_init(|| Provider {
+    let provider = retained_provider::retained_test_provider!(PROVIDER: Provider = Provider {
         inner: InProcessProvider::new(),
         state: Mutex::default(),
     });

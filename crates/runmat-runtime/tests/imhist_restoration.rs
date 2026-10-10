@@ -41,7 +41,10 @@ impl AccelProvider for Provider {
     fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         panic!("histogram outputs require the native typed transfer")
     }
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         assert_eq!(host.data.element_type(), NumericElementType::F64);
         let call = self.uploads.fetch_add(1, Ordering::SeqCst) + 1;
         if call == self.fail_at {
@@ -49,7 +52,8 @@ impl AccelProvider for Provider {
                 unsupported_provider_operation("histogram native double unavailable")
             } else {
                 anyhow::Error::new(RestoreFailure)
-            });
+            }
+            .into());
         }
         let output = self.inner.upload_numeric_raw(host)?;
         self.outputs

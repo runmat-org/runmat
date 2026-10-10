@@ -42,13 +42,14 @@ impl AccelProvider for PreferredSingleWithDoubleUpload {
     fn upload_numeric_raw(
         &self,
         host: &HostNumericTensorView<'_>,
-    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<runmat_accelerate_api::GpuTensorHandle>
+    {
         self.uploads.fetch_add(1, Ordering::SeqCst);
         host.validate()?;
         let data = match host.data {
             HostNumericDataView::F64(values) => HostNumericDataOwned::F64(values.to_vec()),
             HostNumericDataView::F32(values) => HostNumericDataOwned::F32(values.to_vec()),
-            _ => anyhow::bail!("fixture accepts only floating storage"),
+            _ => return Err(anyhow::anyhow!("fixture accepts only floating storage").into()),
         };
         let allocation = self.owner.allocate_numeric(HostNumericTensorOwned {
             data,

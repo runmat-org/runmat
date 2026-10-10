@@ -47,7 +47,7 @@ runmat-thread-local = { workspace = true }
 runmat-builtins = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wgpu = "24.0.0"
+wgpu = { workspace = true }
 egui = { version = "0.31.1", optional = true }
 egui-wgpu = { version = "0.31.1", optional = true }
 web-sys = { version = "0.3", features = [
@@ -60,11 +60,11 @@ web-sys = { version = "0.3", features = [
 tokio = { version = "1.0", default-features = false, features = ["sync", "time"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-wgpu = "0.19.1"
-winit = { version = "0.29.11", optional = true }
-egui = { version = "0.27.2", optional = true }
-egui-wgpu = { version = "0.27.2", optional = true }
-egui-winit = { version = "0.27.2", optional = true }
+wgpu = { workspace = true }
+winit = { version = "0.30.7", optional = true }
+egui = { version = "0.31.1", optional = true }
+egui-wgpu = { version = "0.31.1", optional = true }
+egui-winit = { version = "0.31.1", optional = true }
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -79,10 +79,16 @@ egui-overlay = ["egui", "egui-wgpu"]
 gui = ["winit", "egui-overlay", "egui-winit", "rfd"]
 web = []  # WebGL backend for web
 
+[[example]]
+name = "native_gui_smoke"
+path = "examples/native_gui_smoke.rs"
+required-features = ["gui"]
+
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 runmat-accelerate-api = { workspace = true, features = ["test-support"] }
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+runmat-accelerate-api = { workspace = true, features = ["test-support"] }
 tokio = { version = "1.0", default-features = false, features = ["rt", "macros"] }
 wasm-bindgen-test = "0.3"

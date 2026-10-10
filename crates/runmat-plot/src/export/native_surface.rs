@@ -46,6 +46,24 @@ enum BackgroundPolicy {
     Explicit(glam::Vec4),
 }
 
+struct PreparedOverlayRender {
+    result: RenderResult,
+    preparation: Vec<wgpu::CommandBuffer>,
+}
+
+impl PreparedOverlayRender {
+    fn submit(self, queue: &wgpu::Queue, encoder: wgpu::CommandEncoder) -> RenderResult {
+        // egui's buffer preparation may encode work outside the main render encoder.
+        // Keep that work ordered before the scene and overlay in one submission.
+        queue.submit(
+            self.preparation
+                .into_iter()
+                .chain(std::iter::once(encoder.finish())),
+        );
+        self.result
+    }
+}
+
 #[cfg(feature = "egui-overlay")]
 struct NativeOverlayState {
     egui_ctx: egui::Context,
@@ -265,11 +283,8 @@ impl NativeSurfaceRenderContext {
                             label: Some("Native Surface Render Encoder"),
                         });
 
-                let render_result = self.render_scene_with_overlay(emission, &mut encoder, view)?;
-
-                emission.queue().submit(std::iter::once(encoder.finish()));
-
-                Ok(render_result)
+                let prepared = self.render_scene_with_overlay(emission, &mut encoder, view)?;
+                Ok(prepared.submit(emission.queue(), encoder))
             })
             .map_err(|error| error.to_string())?
     }
@@ -303,11 +318,8 @@ impl NativeSurfaceRenderContext {
                             label: Some("Native Geometry Scene Render Encoder"),
                         });
 
-                let render_result = self.render_scene_with_overlay(emission, &mut encoder, view)?;
-
-                emission.queue().submit(std::iter::once(encoder.finish()));
-
-                Ok(render_result)
+                let prepared = self.render_scene_with_overlay(emission, &mut encoder, view)?;
+                Ok(prepared.submit(emission.queue(), encoder))
             })
             .map_err(|error| error.to_string())?
     }
@@ -370,9 +382,9 @@ impl NativeSurfaceRenderContext {
             width,
             height
         );
-        self.render_scene_with_overlay(emission, &mut encoder, &color_view)?;
+        let prepared = self.render_scene_with_overlay(emission, &mut encoder, &color_view)?;
         log::debug!("runmat-plot: native_surface.render_to_rgba.render_scene_ok");
-        queue.submit(std::iter::once(encoder.finish()));
+        prepared.submit(queue, encoder);
 
         let bytes_per_pixel = 4u32;
         let padded_bytes_per_row = (width * bytes_per_pixel).div_ceil(256) * 256;
@@ -469,8 +481,9 @@ impl NativeSurfaceRenderContext {
                 let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Native Geometry Surface RGBA Render Encoder"),
                 });
-                self.render_scene_with_overlay(emission, &mut encoder, &color_view)?;
-                queue.submit(std::iter::once(encoder.finish()));
+                let prepared =
+                    self.render_scene_with_overlay(emission, &mut encoder, &color_view)?;
+                prepared.submit(queue, encoder);
 
                 let bytes_per_pixel = 4u32;
                 let padded_bytes_per_row = (width * bytes_per_pixel).div_ceil(256) * 256;
@@ -592,17 +605,21 @@ impl NativeSurfaceRenderContext {
         emission: &WgpuEmission<'_>,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
-    ) -> Result<RenderResult, String> {
+    ) -> Result<PreparedOverlayRender, String> {
         #[cfg(feature = "egui-overlay")]
         {
             let Some(overlay) = self.overlay.as_mut() else {
                 log::debug!(
                     "runmat-plot: native_surface.render_scene_with_overlay.branch_no_overlay"
                 );
-                return self
+                let result = self
                     .renderer
                     .render_scene_to_target(emission, encoder, target_view, &self.config)
-                    .map_err(|err| format!("native surface render failed: {err}"));
+                    .map_err(|err| format!("native surface render failed: {err}"))?;
+                return Ok(PreparedOverlayRender {
+                    result,
+                    preparation: Vec::new(),
+                });
             };
 
             let start_time = Instant::now();
@@ -728,7 +745,7 @@ impl NativeSurfaceRenderContext {
                 size_in_pixels: [self.config.width.max(1), self.config.height.max(1)],
                 pixels_per_point: full_output.pixels_per_point,
             };
-            overlay.egui_renderer.update_buffers(
+            let preparation = overlay.egui_renderer.update_buffers(
                 emission.device(),
                 emission.queue(),
                 encoder,
@@ -937,24 +954,22 @@ impl NativeSurfaceRenderContext {
             }
 
             {
-                let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("runmat-native-egui-overlay"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: target_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
-                #[cfg(target_arch = "wasm32")]
-                let mut render_pass = render_pass.forget_lifetime();
-                #[cfg(not(target_arch = "wasm32"))]
-                let mut render_pass = render_pass;
+                let mut render_pass = encoder
+                    .begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("runmat-native-egui-overlay"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: target_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    })
+                    .forget_lifetime();
                 overlay
                     .egui_renderer
                     .render(&mut render_pass, &paint_jobs, &screen_descriptor);
@@ -970,21 +985,29 @@ impl NativeSurfaceRenderContext {
                 overlay.egui_renderer.free_texture(id);
             }
 
-            Ok(RenderResult {
-                success: true,
-                data_bounds: self.renderer.data_bounds(),
-                axes_viewports_px,
-                vertex_count: scene_stats.total_vertices,
-                triangle_count: scene_stats.total_triangles,
-                render_time_ms: start_time.elapsed().as_secs_f64() * 1000.0,
+            Ok(PreparedOverlayRender {
+                result: RenderResult {
+                    success: true,
+                    data_bounds: self.renderer.data_bounds(),
+                    axes_viewports_px,
+                    vertex_count: scene_stats.total_vertices,
+                    triangle_count: scene_stats.total_triangles,
+                    render_time_ms: start_time.elapsed().as_secs_f64() * 1000.0,
+                },
+                preparation,
             })
         }
 
         #[cfg(not(feature = "egui-overlay"))]
         {
-            self.renderer
+            let result = self
+                .renderer
                 .render_scene_to_target(emission, encoder, target_view, &self.config)
-                .map_err(|err| format!("native surface render failed: {err}"))
+                .map_err(|err| format!("native surface render failed: {err}"))?;
+            Ok(PreparedOverlayRender {
+                result,
+                preparation: Vec::new(),
+            })
         }
     }
 
@@ -1005,6 +1028,10 @@ fn is_default_figure_bg(bg: glam::Vec4) -> bool {
         && (bg.z - 1.0).abs() <= EPS
         && (bg.w - 1.0).abs() <= EPS
 }
+
+#[cfg(all(test, feature = "egui-overlay", not(target_arch = "wasm32")))]
+#[path = "native_surface/preparation_tests.rs"]
+mod preparation_tests;
 
 async fn create_headless_context(
     width: u32,

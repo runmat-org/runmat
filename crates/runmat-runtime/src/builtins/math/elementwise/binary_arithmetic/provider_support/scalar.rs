@@ -5,6 +5,10 @@ use runmat_value::Value;
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::BuiltinResult;
 
+#[path = "scalar/floating_literal.rs"]
+mod floating_literal;
+pub(in crate::builtins::math::elementwise::binary_arithmetic) use floating_literal::host_floating_scalar_literal;
+
 pub(in crate::builtins::math::elementwise::binary_arithmetic) fn host_real_scalar(
     value: &Value,
 ) -> Option<f64> {
@@ -42,13 +46,28 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) async fn device_re
     let tensor = gpu_helpers::gather_tensor_async(handle)
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, identity.name))?;
-    Ok(tensor::tensor_values_f64(&tensor).first().copied())
+    tensor::tensor_values_f64(&tensor)
+        .first()
+        .copied()
+        .map(Some)
+        .ok_or_else(|| {
+            crate::build_runtime_error(format!(
+                "{}: provider scalar download lost its one-element value",
+                identity.name
+            ))
+            .with_builtin(identity.name)
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build()
+        })
 }
 
 pub(in crate::builtins::math::elementwise::binary_arithmetic) fn is_scalar_shape(
     shape: &[usize],
 ) -> bool {
-    shape.iter().copied().product::<usize>() <= 1
+    shape
+        .iter()
+        .try_fold(1usize, |count, &extent| count.checked_mul(extent))
+        == Some(1)
 }
 
 #[cfg(test)]
@@ -70,6 +89,8 @@ mod tests {
     fn recognizes_provider_scalar_shapes() {
         assert!(is_scalar_shape(&[]));
         assert!(is_scalar_shape(&[1, 1, 1]));
+        assert!(!is_scalar_shape(&[0, 1]));
+        assert!(!is_scalar_shape(&[usize::MAX, 2]));
         assert!(!is_scalar_shape(&[1, 2]));
     }
 }

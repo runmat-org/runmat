@@ -61,6 +61,11 @@ fn declared_rounding_hooks_execute_the_admitted_representations() {
 #[test]
 fn digit_work_counts_real_chunking_uniform_transfers_and_scaling_bound() {
     use runmat_accelerate_api::{NumericalDomainEvidence, RoundDigitsMode};
+    let launch = crate::backend::wgpu::pipelines::FrozenLinearLaunch::new(
+        crate::backend::wgpu::config::WORKGROUP_SIZE,
+        crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS,
+    )
+    .unwrap();
     let capacity = usize::try_from(crate::backend::wgpu::config::WORKGROUP_SIZE).unwrap()
         * usize::try_from(crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS).unwrap();
     let mut query = ProviderFeasibilityQuery {
@@ -82,7 +87,7 @@ fn digit_work_counts_real_chunking_uniform_transfers_and_scaling_bound() {
             ..Default::default()
         },
     };
-    let work = wgpu_work(ProviderPrecision::F64, &query).unwrap();
+    let work = wgpu_work(ProviderPrecision::F64, &query, launch).unwrap();
     assert_eq!(work.dispatches, 2);
     assert_eq!(work.queue_submissions, 2);
     assert_eq!(work.allocations, 2);
@@ -91,14 +96,54 @@ fn digit_work_counts_real_chunking_uniform_transfers_and_scaling_bound() {
     assert!(work.execution_units > (capacity as u64 + 1) * 96);
     assert_eq!(work.execution_units, (capacity as u64 + 1) * (96 + 15 + 7));
     query.inputs[0].shape = vec![0, u64::MAX];
-    let work = wgpu_work(ProviderPrecision::F64, &query).unwrap();
+    let work = wgpu_work(ProviderPrecision::F64, &query, launch).unwrap();
     assert_eq!(work.dispatches, 0);
     assert_eq!(work.queue_submissions, 0);
     assert_eq!(work.allocations, 1);
     assert_eq!(work.scratch_bytes, 0);
     assert_eq!(work.execution_units, 0);
     query.inputs[0].shape = vec![u64::MAX, u64::MAX];
-    assert!(wgpu_work(ProviderPrecision::F64, &query).is_none());
+    assert!(wgpu_work(ProviderPrecision::F64, &query, launch).is_none());
+}
+
+#[cfg(feature = "wgpu")]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn digit_work_dispatches_follow_selected_launch_not_static_default() {
+    use runmat_accelerate_api::{NumericalDomainEvidence, RoundDigitsMode};
+    let selected = crate::backend::wgpu::pipelines::FrozenLinearLaunch::new(256, 3).unwrap();
+    let baseline = crate::backend::wgpu::pipelines::FrozenLinearLaunch::new(512, 3).unwrap();
+    let query = ProviderFeasibilityQuery {
+        operation: ProviderOperationIdentity::new(ROUND_CATALOG_ENTRY.identity.name),
+        family: ProviderOperationFamily::Elementwise,
+        inputs: vec![ProviderRepresentation {
+            element_type: ProviderElementType::F32,
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            shape: vec![1, 769],
+            residency: ProviderResidency::Device,
+        }],
+        outputs: vec![],
+        workload: ProviderWorkload {
+            numerical_domain: NumericalDomainEvidence::RoundDigits {
+                digits: 2,
+                mode: RoundDigitsMode::Decimals,
+            },
+            ..Default::default()
+        },
+    };
+    assert_eq!(
+        wgpu_work(ProviderPrecision::F32, &query, selected)
+            .unwrap()
+            .dispatches,
+        2
+    );
+    assert_eq!(
+        wgpu_work(ProviderPrecision::F32, &query, baseline)
+            .unwrap()
+            .dispatches,
+        1
+    );
 }
 
 #[test]

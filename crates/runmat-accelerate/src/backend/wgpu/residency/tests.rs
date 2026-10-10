@@ -1,5 +1,17 @@
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
+#[test]
+fn symbolic_extent_is_the_same_nonzero_size_used_by_exact_pool_keys() {
+    assert_eq!(BufferResidency::requested_bytes(40, 4), Some(160));
+    assert_eq!(BufferResidency::requested_bytes(40, 8), Some(320));
+    assert_eq!(BufferResidency::requested_bytes(0, 4), Some(4));
+    assert_eq!(BufferResidency::requested_bytes(0, 8), Some(8));
+    assert_eq!(BufferResidency::requested_bytes(1, 0), None);
+    #[cfg(target_pointer_width = "64")]
+    assert_eq!(BufferResidency::requested_bytes(usize::MAX, 8), None);
+}
 
 #[test]
 fn pool_retains_exact_usage_and_bytes_and_returns_rejected_payload() {

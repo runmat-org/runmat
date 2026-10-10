@@ -6,6 +6,9 @@ use runmat_value::{Value, ValueSequence};
 
 #[cfg(test)]
 mod tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "program/s1_aot_direct_call_tests.rs"]
+mod s1_aot_direct_call_tests;
 mod bound;
 
 pub async fn invoke(
@@ -162,7 +165,8 @@ impl ProgramInvocationGuards {
                 let functions = Arc::clone(&bound_functions);
                 let previous = previous_bound.clone();
                 Box::pin(async move {
-                    let Some(function) = functions.resolve(&binding)? else {
+                    let Some(function) = functions.resolve(&binding).map_err(|error| *error)?
+                    else {
                         if let Some(previous) = previous {
                             return previous(runtime, binding, arguments, requested_outputs).await;
                         }

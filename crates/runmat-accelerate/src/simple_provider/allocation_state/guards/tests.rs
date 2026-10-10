@@ -1,11 +1,10 @@
 use super::*;
-use crate::simple_provider::allocation_state::NumericAllocationState;
+use crate::simple_provider::allocation_state::{NumericAllocationState, NumericOwner};
 use runmat_accelerate_api::allocation::AllocationIdentity;
 use runmat_accelerate_api::GpuTensorStorage;
-use std::sync::Arc;
 
-fn owned(logical: bool) -> (Arc<NumericAllocationState>, GpuTensorHandle) {
-    let state = Arc::new(NumericAllocationState::default());
+fn owned(logical: bool) -> (NumericOwner, GpuTensorHandle) {
+    let state = NumericOwner::new(NumericAllocationState::default());
     let id = AllocationIdentity::new(runmat_accelerate_api::next_device_id(), 1, 1);
     let handle = state
         .stage(

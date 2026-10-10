@@ -1,4 +1,5 @@
 use crate::bytecode::instr::Instr;
+#[cfg(feature = "native-accel")]
 use crate::bytecode::program::Bytecode;
 use crate::interpreter::timing::InterpreterTiming;
 use crate::runtime::gc::InterpretContext;

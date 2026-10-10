@@ -189,7 +189,10 @@ impl AccelProvider for FailingProvider {
     fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         panic!("typed upload required")
     }
-    fn upload_numeric_raw(&self, view: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        view: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let HostNumericDataView::F64(data) = view.data else {
             panic!("F64 fixture");
         };

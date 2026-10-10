@@ -4,9 +4,9 @@ use super::*;
 use crate::backend::wgpu::provider::WgpuProvider;
 use runmat_accelerate_api::{
     observation::{ProviderObservationCapability, ProviderObservationSupport},
-    AccelDownloadFuture, AccelNumericDownloadFuture, AccelProviderFuture, GpuTensorHandle,
-    HostNumericDataOwned, HostNumericTensorView, ProviderCapabilitySnapshot, ProviderCostEstimate,
-    ProviderCostQuery, ProviderElementwiseGeometry, ProviderFeasibility, ProviderFeasibilityQuery,
+    AccelDownloadFuture, AccelNumericDownloadFuture, GpuTensorHandle, HostNumericDataOwned,
+    HostNumericTensorView, ProviderCapabilitySnapshot, ProviderCostEstimate, ProviderCostQuery,
+    ProviderElementwiseGeometry, ProviderFeasibility, ProviderFeasibilityQuery,
     ProviderPreparationProgram, ProviderPreparationSnapshot,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -28,7 +28,10 @@ impl AccelProvider for UnsupportedCast {
         self.inner.download(handle)
     }
 
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView<'_>) -> Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView<'_>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::Relaxed);
         self.inner.upload_numeric_raw(host)
     }
@@ -98,12 +101,13 @@ impl AccelProvider for UnsupportedCast {
     fn unary_single<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         self.casts.fetch_add(1, Ordering::Relaxed);
         Box::pin(async {
             Err(runmat_accelerate_api::unsupported_provider_operation(
                 "fixture declines cast after admission",
-            ))
+            )
+            .into())
         })
     }
 }

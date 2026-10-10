@@ -5,12 +5,12 @@ use super::*;
 use runmat_accelerate_api::ProviderSumWorkload;
 use runmat_types::{NumericClass, NumericDomain, ReductionNaN, SumInvocation, SumOutputClass};
 
-#[cfg(test)]
-mod tests;
-mod global;
 mod floating;
+mod global;
 mod integer;
 mod omit;
+#[cfg(test)]
+mod tests;
 
 pub(crate) struct SumWork {
     pub estimate: ProviderResourceEstimate,
@@ -236,6 +236,14 @@ fn work(
         return Err(reject(
             ProviderRejectionCode::UnsupportedElementType,
             "sum.double_accumulator_requires_f64",
+        ));
+    }
+    if !provider.supports_shader_requirements(
+        runmat_accelerate_api::ProviderShaderRequirements::F64IeeeWords,
+    ) {
+        return Err(reject(
+            ProviderRejectionCode::UnsupportedElementType,
+            "sum.selected_f64_reduction_requires_ieee_words",
         ));
     }
     // Host-origin allocation geometry is known. Resident views need the

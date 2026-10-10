@@ -1,6 +1,57 @@
+use super::global_pass::{GlobalPassKind, GlobalReductionPassPolicy};
+use super::phase_context::{DimSumMeanSelection, SelectedEmission, StdFormulaPhase};
 use super::*;
 
+#[path = "core/power_probe.rs"]
+mod power_probe;
+pub(crate) use power_probe::{AnyStageObserved, FrozenAnyPipeline, FrozenAnySnapshot};
+
+struct DimEmissionObserved {
+    output_buffer_bytes: u64,
+    snapshot_copy_bytes: Option<u64>,
+    uniform_buffer_bytes: Option<u64>,
+    workgroups_x: Option<u32>,
+    snapshot_copy_submitted: bool,
+    dispatch_submitted: bool,
+    snapshot_fence_requested_bytes: Option<u64>,
+    dispatch_fence_requested_bytes: Option<u64>,
+    snapshot_ticket: Option<crate::backend::wgpu::dispatch::observation::ProbeFenceTicket>,
+    dispatch_ticket: Option<crate::backend::wgpu::dispatch::observation::ProbeFenceTicket>,
+    output_resource_ticket: Option<runmat_accelerate_api::observation::ProviderResourceTicket>,
+}
+
+impl DimEmissionObserved {
+    fn new(
+        output_buffer_bytes: u64,
+        snapshot_copy_bytes: Option<u64>,
+        snapshot_copy_submitted: bool,
+        snapshot_fence_requested_bytes: Option<u64>,
+    ) -> Self {
+        Self {
+            output_buffer_bytes,
+            snapshot_copy_bytes,
+            uniform_buffer_bytes: None,
+            workgroups_x: None,
+            snapshot_copy_submitted,
+            dispatch_submitted: false,
+            snapshot_fence_requested_bytes,
+            dispatch_fence_requested_bytes: None,
+            snapshot_ticket: None,
+            dispatch_ticket: None,
+            output_resource_ticket: None,
+        }
+    }
+}
+
 impl WgpuProvider {
+    pub(crate) fn prepare_power_any_pipeline_exec(&self) -> Result<FrozenAnyPipeline> {
+        FrozenAnyPipeline::prepare(
+            self.device_id(),
+            self.precision,
+            &self.pipelines.reduce_dim_sum_mean,
+        )
+    }
+
     pub(crate) fn reduce_any_exec(
         &self,
         a: &GpuTensorHandle,
@@ -11,9 +62,12 @@ impl WgpuProvider {
         } else {
             crate::backend::wgpu::types::DimReduceOp::AnyInclude
         };
-        let first = self.reduce_dim_sum_mean_exec(a, 0, op)?;
-        match self.reduce_dim_sum_mean_exec(&first, 1, op) {
-            Ok(handle) => {
+        let snapshot = FrozenAnySnapshot::capture();
+        let first = self
+            .reduce_dim_sum_mean_with_snapshot_exec(a, 0, op, snapshot, None)?
+            .0;
+        match self.reduce_dim_sum_mean_with_snapshot_exec(&first, 1, op, snapshot, None) {
+            Ok((handle, _)) => {
                 drop(first);
                 Ok(handle)
             }
@@ -22,6 +76,42 @@ impl WgpuProvider {
                 Err(err)
             }
         }
+    }
+
+    /// The POWER probe uses both ordinary stages with one snapshot decision.
+    pub(crate) fn reduce_power_any_omit_observed_exec(
+        &self,
+        a: &GpuTensorHandle,
+        snapshot: FrozenAnySnapshot,
+        pipeline: &FrozenAnyPipeline,
+    ) -> Result<(GpuTensorHandle, [AnyStageObserved; 2])> {
+        use crate::backend::wgpu::types::DimReduceOp;
+        pipeline.require(
+            self.device_id(),
+            self.precision,
+            &self.pipelines.reduce_dim_sum_mean,
+        )?;
+        let (first, first_observed) = self.reduce_dim_sum_mean_with_snapshot_exec(
+            a,
+            0,
+            DimReduceOp::AnyOmit,
+            snapshot,
+            Some(pipeline),
+        )?;
+        first_observed.require_output(&first)?;
+        if let Some(scope) = runmat_accelerate_api::observation::current_provider_resource_scope() {
+            super::super::power::PowerProbeResourcePhase::AnyColumns.begin(&scope)?;
+        }
+        let (second, second_observed) = self.reduce_dim_sum_mean_with_snapshot_exec(
+            &first,
+            1,
+            DimReduceOp::AnyOmit,
+            snapshot,
+            Some(pipeline),
+        )?;
+        second_observed.require_output(&second)?;
+        drop(first);
+        Ok((second, [first_observed, second_observed]))
     }
 
     pub(crate) fn reduce_all_exec(
@@ -113,6 +203,20 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         op: crate::backend::wgpu::types::GlobalReduceOp,
     ) -> Result<GpuTensorHandle> {
+        self.reduce_global_with_selected_pipeline_exec(a, op, SelectedEmission::legacy())
+    }
+
+    pub(super) fn reduce_global_with_selected_pipeline_exec(
+        &self,
+        a: &GpuTensorHandle,
+        op: crate::backend::wgpu::types::GlobalReduceOp,
+        emission: SelectedEmission<'_>,
+    ) -> Result<GpuTensorHandle> {
+        let SelectedEmission {
+            selected: validated,
+            effect: allocated,
+            after_allocation,
+        } = emission;
         let entry = self.get_entry(a)?;
         if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
             log::debug!(
@@ -143,10 +247,16 @@ impl WgpuProvider {
             };
             return self.upload_exec(&view);
         }
+        self.require_ieee_words(entry.precision)?;
+        let pass_policy = GlobalReductionPassPolicy::for_operation(op);
+        let launch = self.global_reduce_launch;
+        let max_input_per_pass = launch
+            .max_input_per_pass()
+            .ok_or_else(|| anyhow!("reduce_global: frozen launch capacity overflows"))?;
         let current = self.with_emission(|emission, pending| -> Result<_> {
         let mut current = if std::env::var("RUNMAT_PROVIDER_REDUCTION_SNAPSHOT").is_ok() {
             let size_bytes = (entry.len * self.element_size) as u64;
-            let snap = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
+            let snap = runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-global-input-snapshot"),
                 size: size_bytes,
                 usage: wgpu::BufferUsages::STORAGE
@@ -154,6 +264,9 @@ impl WgpuProvider {
                     | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }));
+            if let Some(allocated) = allocated {
+                allocated.set(true);
+            }
             let mut enc =
                 emission.device()
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -166,13 +279,9 @@ impl WgpuProvider {
             entry.buffer.clone()
         };
         let mut current_len = entry.len;
-        while current_len > 1 {
-            let wg = crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE as usize;
-            let max_groups = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize;
-            let elems_per_group = 2 * wg;
-            let max_input_per_pass = max_groups * elems_per_group;
-
-            let output_len_total = current_len.div_ceil(elems_per_group).max(1);
+        let mut pass_kind = GlobalPassKind::SourceMapping;
+        while pass_policy.should_dispatch(pass_kind, current_len) {
+            let output_len_total = launch.output_len(current_len).max(1);
             // Metal-safe (opt-in): snapshot input buffer for this pass to avoid any SR/SRW conflicts
             // Enabled only if RUNMAT_FORCE_REDUCE_SNAPSHOT is set to avoid perf impact by default.
             let mut input_for_pass = current.clone();
@@ -180,7 +289,7 @@ impl WgpuProvider {
                 && std::env::var("RUNMAT_FORCE_REDUCE_SNAPSHOT").is_ok()
             {
                 let size_bytes = (current_len * self.element_size) as u64;
-                let snap = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
+                let snap = runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
                     label: Some("runmat-reduce-pass-input-snapshot"),
                     size: size_bytes,
                     usage: wgpu::BufferUsages::STORAGE
@@ -188,6 +297,9 @@ impl WgpuProvider {
                         | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 }));
+                if let Some(allocated) = allocated {
+                    allocated.set(true);
+                }
                 let mut enc =
                     emission.device()
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -199,6 +311,12 @@ impl WgpuProvider {
             }
             let mut out_buffer =
                 self.create_storage_buffer_checked(emission, output_len_total, "runmat-reduce-pass")?;
+            if let Some(allocated) = allocated {
+                allocated.set(true);
+            }
+            if let Some(after_allocation) = after_allocation {
+                after_allocation(&out_buffer)?;
+            }
             // Prevent aliasing: output buffer must not be the same as input buffer
             if std::ptr::eq(out_buffer.as_ref(), input_for_pass.as_ref()) {
                 if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
@@ -225,7 +343,7 @@ impl WgpuProvider {
                         self.adapter_limits.max_buffer_size,
                     ));
                 }
-                out_buffer = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
+                out_buffer = runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
                     label: Some("runmat-reduce-pass-unique"),
                     size: size_bytes,
                     usage: wgpu::BufferUsages::STORAGE
@@ -240,11 +358,11 @@ impl WgpuProvider {
             while in_offset_elems < current_len {
                 let remain = current_len - in_offset_elems;
                 let chunk_in = remain.min(max_input_per_pass);
-                let chunk_out = chunk_in.div_ceil(elems_per_group).max(1);
+                let chunk_out = launch.output_len(chunk_in).max(1);
 
                 let params = crate::backend::wgpu::params::ReduceGlobalParams {
                     len: chunk_in as u32,
-                    op: op as u32,
+                    op: pass_policy.operation(pass_kind) as u32,
                     offset: in_offset_elems as u32,
                     total: current_len as u32,
                 };
@@ -253,7 +371,10 @@ impl WgpuProvider {
                 let bind_group = emission.device()
                     .create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("runmat-reduce-global-bind"),
-                        layout: &self.pipelines.reduce_global.get(emission)?.layout,
+                        layout: match validated {
+                            Some(pipeline) => pipeline.layout.as_ref(),
+                            None => &self.pipelines.reduce_global.get(emission)?.layout,
+                        },
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
@@ -269,10 +390,9 @@ impl WgpuProvider {
                             },
                         ],
                     });
-                let groups = crate::backend::wgpu::dispatch::common::dispatch_size_reduce(
-                    chunk_in as u32,
-                    crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE,
-                );
+                let groups = launch
+                    .dispatch_groups(chunk_in)
+                    .ok_or_else(|| anyhow!("reduce_global: dispatch exceeds frozen launch"))?;
                 if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
                     log::debug!(
                         "reduce_global_exec: dispatch groups={} current_ptr={:p} out_ptr={:p}",
@@ -290,7 +410,10 @@ impl WgpuProvider {
                 crate::backend::wgpu::dispatch::reduction::run_single_pass(
                     emission,
                     pending,
-                    &self.pipelines.reduce_global.get(emission)?.pipeline,
+                    match validated {
+                        Some(pipeline) => pipeline.pipeline.as_ref(),
+                        None => &self.pipelines.reduce_global.get(emission)?.pipeline,
+                    },
                     &bind_group,
                     groups,
                 )?;
@@ -300,10 +423,11 @@ impl WgpuProvider {
 
             current = out_buffer;
             current_len = output_len_total;
+            pass_kind = GlobalPassKind::PartialCombine;
         }
         Ok(current)
         })??;
-        if Arc::ptr_eq(&current, &entry.buffer) {
+        if runmat_accelerate_api::WgpuBufferOwner::ptr_eq(&current, &entry.buffer) {
             return Ok(a.with_view(a.view().clone().with_shape(vec![1, 1]).with_logical(false))?);
         }
         self.register_existing_buffer(current, vec![1, 1], 1)
@@ -314,7 +438,82 @@ impl WgpuProvider {
         dim: usize,
         op: crate::backend::wgpu::types::DimReduceOp,
     ) -> Result<GpuTensorHandle> {
+        Ok(self
+            .reduce_dim_sum_mean_with_snapshot_exec(a, dim, op, FrozenAnySnapshot::capture(), None)?
+            .0)
+    }
+
+    fn reduce_dim_sum_mean_with_snapshot_exec(
+        &self,
+        a: &GpuTensorHandle,
+        dim: usize,
+        op: crate::backend::wgpu::types::DimReduceOp,
+        snapshot: FrozenAnySnapshot,
+        pipeline: Option<&FrozenAnyPipeline>,
+    ) -> Result<(GpuTensorHandle, AnyStageObserved)> {
+        self.reduce_dim_sum_mean_selected_exec(
+            a,
+            dim,
+            op,
+            DimSumMeanSelection {
+                snapshot,
+                power_pipeline: pipeline,
+                emission: SelectedEmission::legacy(),
+            },
+        )
+    }
+
+    pub(super) fn reduce_std_dim_sum_selected_exec(
+        &self,
+        a: &GpuTensorHandle,
+        dim: usize,
+        validated: &super::super::validated_fusion::ValidatedFusionPipeline,
+        effect: &std::cell::Cell<bool>,
+        after_allocation: Option<&super::phase_context::AllocationFault<'_>>,
+    ) -> Result<GpuTensorHandle> {
+        Ok(self
+            .reduce_dim_sum_mean_selected_exec(
+                a,
+                dim,
+                crate::backend::wgpu::types::DimReduceOp::Sum,
+                DimSumMeanSelection {
+                    snapshot: FrozenAnySnapshot::capture(),
+                    power_pipeline: None,
+                    emission: SelectedEmission {
+                        selected: Some(validated),
+                        effect: Some(effect),
+                        after_allocation,
+                    },
+                },
+            )?
+            .0)
+    }
+
+    fn reduce_dim_sum_mean_selected_exec(
+        &self,
+        a: &GpuTensorHandle,
+        dim: usize,
+        op: crate::backend::wgpu::types::DimReduceOp,
+        selection: DimSumMeanSelection<'_>,
+    ) -> Result<(GpuTensorHandle, AnyStageObserved)> {
+        let DimSumMeanSelection {
+            snapshot,
+            power_pipeline: pipeline,
+            emission:
+                SelectedEmission {
+                    selected: validated,
+                    effect,
+                    after_allocation,
+                },
+        } = selection;
         let entry = self.get_entry(a)?;
+        if let Some(pipeline) = pipeline {
+            pipeline.require(
+                self.device_id(),
+                entry.precision,
+                &self.pipelines.reduce_dim_sum_mean,
+            )?;
+        }
         if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
             eprintln!(
                 "[reduce-dim-sum-mean begin] in ptr={:p} shape={:?} dim={} op={}",
@@ -352,11 +551,47 @@ impl WgpuProvider {
         } else {
             vec![rows, 1]
         };
-        let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
+        let (_, shader_workgroup) = self
+            .pipelines
+            .reduce_dim_sum_mean
+            .frozen_reduction_source()
+            .ok_or_else(|| anyhow!("dimensional reduction shader workgroup is not frozen"))?;
+        let output_words = u32::try_from(out_len)
+            .map_err(|_| anyhow!("dimensional reduction output exceeds u32 dispatch"))?;
+        let groups =
+            crate::backend::wgpu::dispatch::common::dispatch_size(output_words, shader_workgroup);
+        ensure!(
+            shader_workgroup > 0
+                && groups <= self.adapter_limits.max_compute_workgroups_per_dimension,
+            "dimensional reduction dispatch exceeds enabled limits"
+        );
+        self.require_ieee_words(entry.precision)?;
+        let snapshot_size_bytes = snapshot
+            .enabled
+            .then(|| {
+                entry
+                    .len
+                    .checked_mul(self.element_size)
+                    .and_then(|bytes| u64::try_from(bytes).ok())
+                    .ok_or_else(|| anyhow!("reduce-dim snapshot extent overflow"))
+            })
+            .transpose()?;
+        if let Some(bytes) = snapshot_size_bytes {
+            ensure!(
+                bytes <= self.adapter_limits.max_buffer_size
+                    && bytes <= u64::from(self.adapter_limits.max_storage_buffer_binding_size),
+                "reduce-dim snapshot exceeds buffer/binding limit"
+            );
+        }
+        let (out_buffer, mut emitted) = self.with_emission(|emission, pending| -> Result<_> {
         // Optional snapshot of input
-        let in_buf = if std::env::var("RUNMAT_PROVIDER_REDUCTION_SNAPSHOT").is_ok() {
-            let size_bytes = (entry.len * self.element_size) as u64;
-            let snap = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
+        let mut snapshot_copy_bytes = None;
+        let mut snapshot_copy_submitted = false;
+        let mut snapshot_fence_requested_bytes = None;
+        let mut snapshot_ticket = None;
+        let mut snapshot_resource_ticket = None;
+        let in_buf = if let Some(size_bytes) = snapshot_size_bytes {
+            let snap = runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-dim-input-snapshot"),
                 size: size_bytes,
                 usage: wgpu::BufferUsages::STORAGE
@@ -364,19 +599,31 @@ impl WgpuProvider {
                     | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }));
+            if let Some(effect) = effect { effect.set(true); }
+            if pipeline.is_some() {
+                snapshot_resource_ticket =
+                    self.issue_power_probe_resource_ticket(snap.size())?;
+            }
             let mut enc =
                 emission.device()
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("runmat-reduce-dim-input-snapshot-copy"),
                     });
             enc.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, snap.as_ref(), 0, size_bytes);
+            let ticket = pipeline.map(|_| pending.arm_probe_completion());
             self.submit(emission, pending, enc)?;
+            snapshot_copy_bytes = Some(size_bytes);
+            snapshot_copy_submitted = true;
+            snapshot_fence_requested_bytes = pending.last_fence_requested_bytes();
+            snapshot_ticket = ticket;
             snap
         } else {
             entry.buffer.clone()
         };
         let mut out_buffer =
             self.create_storage_buffer_checked(emission, out_len, "runmat-reduce-dim-out")?;
+        if let Some(effect) = effect { effect.set(true); }
+        if let Some(after_allocation) = after_allocation { after_allocation(&out_buffer)?; }
         // Prevent aliasing: output must not be identical to input buffer
         if std::ptr::eq(out_buffer.as_ref(), entry.buffer.as_ref()) {
             if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
@@ -397,7 +644,7 @@ impl WgpuProvider {
                     self.adapter_limits.max_buffer_size,
                 ));
             }
-            out_buffer = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
+            out_buffer = runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-dim-out-unique"),
                 size: size_bytes,
                 usage: wgpu::BufferUsages::STORAGE
@@ -406,8 +653,17 @@ impl WgpuProvider {
                 mapped_at_creation: false,
             }));
         }
+        let output_resource_ticket = if pipeline.is_some() {
+            self.issue_power_probe_resource_ticket(out_buffer.size())?
+        } else {
+            None
+        };
         if out_len == 0 {
-            return Ok(out_buffer);
+            let bytes = out_buffer.size();
+            let mut observed = DimEmissionObserved::new(bytes, snapshot_copy_bytes, snapshot_copy_submitted, snapshot_fence_requested_bytes);
+            observed.snapshot_ticket = snapshot_ticket;
+            observed.output_resource_ticket = output_resource_ticket;
+            return Ok((out_buffer, observed));
         }
         let params = crate::backend::wgpu::params::ReduceDimParams {
             rows: rows as u32,
@@ -416,10 +672,19 @@ impl WgpuProvider {
             op: op as u32,
         };
         let params_buffer = self.uniform_buffer(emission, &params, "runmat-reduce-dim-params")?;
+        let uniform_buffer_bytes = params_buffer.size();
+        let uniform_resource_ticket = if pipeline.is_some() {
+            self.issue_power_probe_resource_ticket(uniform_buffer_bytes)?
+        } else {
+            None
+        };
         let bind_group = emission.device()
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("runmat-reduce-dim-bind"),
-                layout: &self.pipelines.reduce_dim_sum_mean.get(emission)?.layout,
+                layout: match validated {
+                    Some(selected) => selected.layout.as_ref(),
+                    None => &self.pipelines.reduce_dim_sum_mean.get(emission)?.layout,
+                },
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -435,10 +700,6 @@ impl WgpuProvider {
                     },
                 ],
             });
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            out_len as u32,
-            crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE,
-        );
         if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
             eprintln!(
                 "[reduce-dim-sum-mean] in ptr={:p} out ptr={:p} rows={} cols={} dim={} groups={}",
@@ -450,23 +711,68 @@ impl WgpuProvider {
                 groups
             );
         }
+        let dispatch_ticket = pipeline.map(|_| pending.arm_probe_completion());
+        for ticket in [snapshot_resource_ticket, uniform_resource_ticket]
+            .into_iter()
+            .flatten()
+        {
+            pending.retain_probe_resource_until_next_submit(ticket);
+        }
         crate::backend::wgpu::dispatch::reduction::run_single_pass(
             emission,
             pending,
-            &self.pipelines.reduce_dim_sum_mean.get(emission)?.pipeline,
+            match validated {
+                Some(selected) => selected.pipeline.as_ref(),
+                None => &self.pipelines.reduce_dim_sum_mean.get(emission)?.pipeline,
+            },
             &bind_group,
             groups,
         )?;
-        Ok(out_buffer)
+        let mut observed = DimEmissionObserved::new(out_buffer.size(), snapshot_copy_bytes, snapshot_copy_submitted, snapshot_fence_requested_bytes);
+        observed.uniform_buffer_bytes = Some(uniform_buffer_bytes);
+        observed.workgroups_x = Some(groups);
+        observed.dispatch_submitted = true;
+        observed.dispatch_fence_requested_bytes = pending.last_fence_requested_bytes();
+        observed.snapshot_ticket = snapshot_ticket;
+        observed.dispatch_ticket = dispatch_ticket;
+        observed.output_resource_ticket = output_resource_ticket;
+        Ok((out_buffer, observed))
         })??;
-        self.register_existing_buffer(out_buffer, out_shape, out_len)
+        let output = self.register_existing_buffer(out_buffer, out_shape, out_len)?;
+        if let Some(ticket) = emitted.output_resource_ticket.take() {
+            self.allocations
+                .attach_probe_resource_ticket(&output, ticket)?;
+        }
+        let observed = AnyStageObserved {
+            input_view: a.view_identity(),
+            output_allocation: output.allocation_identity(),
+            output_view: output.view_identity(),
+            output_buffer_bytes: emitted.output_buffer_bytes,
+            snapshot_copy_bytes: emitted.snapshot_copy_bytes,
+            uniform_buffer_bytes: emitted.uniform_buffer_bytes,
+            workgroups_x: emitted.workgroups_x,
+            snapshot_copy_submitted: emitted.snapshot_copy_submitted,
+            dispatch_submitted: emitted.dispatch_submitted,
+            snapshot_fence_requested_bytes: emitted.snapshot_fence_requested_bytes,
+            dispatch_fence_requested_bytes: emitted.dispatch_fence_requested_bytes,
+            snapshot_ticket: emitted.snapshot_ticket,
+            dispatch_ticket: emitted.dispatch_ticket,
+        };
+        Ok((output, observed))
     }
-    pub(crate) fn reduce_dim_minmax_exec(
+
+    pub(super) fn reduce_dim_minmax_with_selected_pipeline_exec(
         &self,
         a: &GpuTensorHandle,
         dim: usize,
         op: crate::backend::wgpu::types::DimReduceExtrema,
+        emission: SelectedEmission<'_>,
     ) -> Result<ReduceDimResult> {
+        let SelectedEmission {
+            selected: validated,
+            effect: allocated,
+            after_allocation,
+        } = emission;
         let original = self.get_entry_raw(a)?;
         if original.storage != GpuTensorStorage::Real || a.view().is_logical() {
             return Err(runmat_accelerate_api::unsupported_provider_operation(
@@ -482,13 +788,22 @@ impl WgpuProvider {
         )?;
         if original.integer_type().is_none() {
             self.get_entry(a)?; // Authenticate physical precision before materialization.
+            self.require_ieee_words(self.precision)?;
         }
         // The shader consumes contiguous logical order; preserve the owning
         // adapter until all submissions referencing its physical buffer exist.
         let contiguous = self.reshape_exec(a, a.shape())?;
+        if let Some(allocated) = allocated {
+            if !runmat_accelerate_api::WgpuBufferOwner::ptr_eq(
+                &self.get_entry_raw(&contiguous)?.buffer,
+                &original.buffer,
+            ) {
+                allocated.set(true);
+            }
+        }
         let a = &contiguous;
         if original.integer_type().is_some() {
-            return self.integer_reduce_extrema_dim_exec(
+            return self.integer_reduce_extrema_dim_with_selected_pipeline_exec(
                 matches!(op, crate::backend::wgpu::types::DimReduceExtrema::Min),
                 dim,
                 match op {
@@ -496,6 +811,7 @@ impl WgpuProvider {
                     crate::backend::wgpu::types::DimReduceExtrema::Max => "reduce_max_dim",
                 },
                 a,
+                emission,
             );
         }
         let entry = self.get_entry(a)?;
@@ -511,6 +827,12 @@ impl WgpuProvider {
                     out_len,
                     "runmat-reduce-dim-ext-values",
                 )?;
+                if let Some(allocated) = allocated {
+                    allocated.set(true);
+                }
+                if let Some(after_allocation) = after_allocation {
+                    after_allocation(&values_buffer)?;
+                }
                 let mut indices_buffer = self.create_storage_buffer_checked(
                     emission,
                     out_len,
@@ -526,15 +848,16 @@ impl WgpuProvider {
                             self.adapter_limits.max_buffer_size,
                         ));
                     }
-                    values_buffer =
-                        Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
+                    values_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
+                        emission.device().create_buffer(&wgpu::BufferDescriptor {
                             label: Some("runmat-reduce-dim-ext-values-unique"),
                             size: size_bytes,
                             usage: wgpu::BufferUsages::STORAGE
                                 | wgpu::BufferUsages::COPY_SRC
                                 | wgpu::BufferUsages::COPY_DST,
                             mapped_at_creation: false,
-                        }));
+                        }),
+                    );
                 }
                 if std::ptr::eq(indices_buffer.as_ref(), entry.buffer.as_ref()) {
                     let size_bytes = (out_len * self.element_size) as u64;
@@ -545,15 +868,16 @@ impl WgpuProvider {
                             self.adapter_limits.max_buffer_size,
                         ));
                     }
-                    indices_buffer =
-                        Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
+                    indices_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
+                        emission.device().create_buffer(&wgpu::BufferDescriptor {
                             label: Some("runmat-reduce-dim-ext-indices-unique"),
                             size: size_bytes,
                             usage: wgpu::BufferUsages::STORAGE
                                 | wgpu::BufferUsages::COPY_SRC
                                 | wgpu::BufferUsages::COPY_DST,
                             mapped_at_creation: false,
-                        }));
+                        }),
+                    );
                 }
                 if out_len == 0 {
                     return Ok((values_buffer, indices_buffer));
@@ -570,7 +894,10 @@ impl WgpuProvider {
                     .device()
                     .create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("runmat-reduce-dim-ext-bind"),
-                        layout: &self.pipelines.reduce_dim_minmax.get(emission)?.layout,
+                        layout: match validated {
+                            Some(pipeline) => pipeline.layout.as_ref(),
+                            None => &self.pipelines.reduce_dim_minmax.get(emission)?.layout,
+                        },
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
@@ -593,7 +920,10 @@ impl WgpuProvider {
                 crate::backend::wgpu::dispatch::reduction::run_single_pass(
                     emission,
                     pending,
-                    &self.pipelines.reduce_dim_minmax.get(emission)?.pipeline,
+                    match validated {
+                        Some(pipeline) => pipeline.pipeline.as_ref(),
+                        None => &self.pipelines.reduce_dim_minmax.get(emission)?.pipeline,
+                    },
                     &bind_group,
                     geometry.groups,
                 )?;
@@ -608,39 +938,47 @@ impl WgpuProvider {
         })
     }
 
-    fn finish_std_from_sums_exec(
+    pub(super) fn finish_std_from_sums_selected_exec(
         &self,
         sum_handle: GpuTensorHandle,
         sum_sq_handle: GpuTensorHandle,
         sample_count: usize,
         normalization: ProviderStdNormalization,
         nan_shape: &[usize],
+        phase: StdFormulaPhase<'_>,
     ) -> Result<GpuTensorHandle> {
+        let StdFormulaPhase { selected, effect } = phase;
         let inv_len = 1.0 / (sample_count as f64);
 
-        let sum_squared = self.binary_op_exec(
+        let sum_squared = self.std_binary_primitive_exec(
             crate::backend::wgpu::types::BinaryOpCode::Mul,
             &sum_handle,
             &sum_handle,
+            selected,
+            effect,
         )?;
-        drop(sum_handle);
+        super::typed_std::finish_std_temporary(sum_handle, selected);
 
         let sum_shape = self.get_entry(&sum_squared)?.shape.clone();
-        let scale_tensor = self.fill_exec(&sum_shape, inv_len)?;
-        let sum_squared_scaled = self.binary_op_exec(
+        let scale_tensor = self.std_fill_primitive_exec(&sum_shape, inv_len, selected, effect)?;
+        let sum_squared_scaled = self.std_binary_primitive_exec(
             crate::backend::wgpu::types::BinaryOpCode::Mul,
             &sum_squared,
             &scale_tensor,
+            selected,
+            effect,
         )?;
-        drop(scale_tensor);
-        let variance_numer = self.binary_op_exec(
+        super::typed_std::finish_std_temporary(scale_tensor, selected);
+        let variance_numer = self.std_binary_primitive_exec(
             crate::backend::wgpu::types::BinaryOpCode::Sub,
             &sum_sq_handle,
             &sum_squared_scaled,
+            selected,
+            effect,
         )?;
-        drop(sum_sq_handle);
-        drop(sum_squared);
-        drop(sum_squared_scaled);
+        super::typed_std::finish_std_temporary(sum_sq_handle, selected);
+        super::typed_std::finish_std_temporary(sum_squared, selected);
+        super::typed_std::finish_std_temporary(sum_squared_scaled, selected);
 
         let denom = match normalization {
             ProviderStdNormalization::Sample => {
@@ -653,120 +991,61 @@ impl WgpuProvider {
             ProviderStdNormalization::Population => sample_count as f64,
         };
         if denom == 0.0 {
-            drop(variance_numer);
-            return self.fill_exec(nan_shape, f64::NAN);
+            super::typed_std::finish_std_temporary(variance_numer, selected);
+            return self.std_fill_primitive_exec(nan_shape, f64::NAN, selected, effect);
         }
 
         let variance_shape = self.get_entry(&variance_numer)?.shape.clone();
-        let denom_tensor = self.fill_exec(&variance_shape, denom)?;
-        let variance = self.binary_op_exec(
+        let denom_tensor =
+            self.std_fill_primitive_exec(&variance_shape, denom, selected, effect)?;
+        let variance = self.std_binary_primitive_exec(
             crate::backend::wgpu::types::BinaryOpCode::Div,
             &variance_numer,
             &denom_tensor,
+            selected,
+            effect,
         )?;
-        drop(denom_tensor);
-        drop(variance_numer);
+        super::typed_std::finish_std_temporary(denom_tensor, selected);
+        super::typed_std::finish_std_temporary(variance_numer, selected);
 
-        let abs_variance =
-            self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Abs, &variance)?;
-        let variance_plus_abs = self.binary_op_exec(
+        let abs_variance = self.std_unary_primitive_exec(
+            crate::backend::wgpu::types::UnaryOpCode::Abs,
+            &variance,
+            selected,
+            effect,
+        )?;
+        if let Some(selected) = selected {
+            selected.track(&abs_variance);
+        }
+        let variance_plus_abs = self.std_binary_primitive_exec(
             crate::backend::wgpu::types::BinaryOpCode::Add,
             &variance,
             &abs_variance,
+            selected,
+            effect,
         )?;
-        drop(abs_variance);
-        drop(variance);
+        super::typed_std::finish_std_temporary(abs_variance, selected);
+        super::typed_std::finish_std_temporary(variance, selected);
 
         let half_shape = self.get_entry(&variance_plus_abs)?.shape.clone();
-        let half_tensor = self.fill_exec(&half_shape, 0.5)?;
-        let clamped = self.binary_op_exec(
+        let half_tensor = self.std_fill_primitive_exec(&half_shape, 0.5, selected, effect)?;
+        let clamped = self.std_binary_primitive_exec(
             crate::backend::wgpu::types::BinaryOpCode::Mul,
             &variance_plus_abs,
             &half_tensor,
+            selected,
+            effect,
         )?;
-        drop(half_tensor);
-        drop(variance_plus_abs);
+        super::typed_std::finish_std_temporary(half_tensor, selected);
+        super::typed_std::finish_std_temporary(variance_plus_abs, selected);
 
-        let std_handle =
-            self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sqrt, &clamped)?;
-        drop(clamped);
+        let std_handle = self.std_unary_primitive_exec(
+            crate::backend::wgpu::types::UnaryOpCode::Sqrt,
+            &clamped,
+            selected,
+            effect,
+        )?;
+        super::typed_std::finish_std_temporary(clamped, selected);
         Ok(std_handle)
-    }
-
-    pub(crate) fn reduce_std_dim_exec(
-        &self,
-        a: &GpuTensorHandle,
-        dim: usize,
-        normalization: ProviderStdNormalization,
-        nan_mode: ProviderNanMode,
-    ) -> Result<GpuTensorHandle> {
-        if matches!(nan_mode, ProviderNanMode::Omit) {
-            return Err(anyhow!(
-                "reduce_std_dim: omitnan is not supported by the wgpu provider"
-            ));
-        }
-        let entry = self.get_entry(a)?;
-        if entry.shape.len() != 2 {
-            return Err(anyhow!("reduce_std_dim: only 2D tensors supported"));
-        }
-        let rows = entry.shape[0];
-        let cols = entry.shape[1];
-        let reduce_len = match dim {
-            0 => rows,
-            1 => cols,
-            _ => return Err(anyhow!("reduce_std_dim: only dims 0 or 1 supported")),
-        };
-        let out_shape = if dim == 0 {
-            vec![1, cols]
-        } else {
-            vec![rows, 1]
-        };
-        if reduce_len == 0 {
-            return self.fill_exec(&out_shape, f64::NAN);
-        }
-
-        let sum_handle =
-            self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Sum)?;
-        let squared = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, a, a)?;
-        let sum_sq_handle = self.reduce_dim_sum_mean_exec(
-            &squared,
-            dim,
-            crate::backend::wgpu::types::DimReduceOp::Sum,
-        )?;
-        drop(squared);
-        self.finish_std_from_sums_exec(
-            sum_handle,
-            sum_sq_handle,
-            reduce_len,
-            normalization,
-            &out_shape,
-        )
-    }
-
-    pub(crate) fn reduce_std_exec(
-        &self,
-        a: &GpuTensorHandle,
-        normalization: ProviderStdNormalization,
-        nan_mode: ProviderNanMode,
-    ) -> Result<GpuTensorHandle> {
-        if matches!(nan_mode, ProviderNanMode::Omit) {
-            return Err(anyhow!(
-                "reduce_std: omitnan is not supported by the wgpu provider"
-            ));
-        }
-        let entry = self.get_entry(a)?;
-        let len = entry.len;
-        let scalar_shape = [1usize, 1usize];
-        if len == 0 {
-            return self.fill_exec(&scalar_shape, f64::NAN);
-        }
-
-        let sum_handle =
-            self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Sum)?;
-        let squared = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, a, a)?;
-        let sum_sq_handle =
-            self.reduce_global_exec(&squared, crate::backend::wgpu::types::GlobalReduceOp::Sum)?;
-        drop(squared);
-        self.finish_std_from_sums_exec(sum_handle, sum_sq_handle, len, normalization, &scalar_shape)
     }
 }

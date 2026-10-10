@@ -4,7 +4,6 @@ use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
 use crate::plots::line::LineStyle;
 use glam::Vec4;
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 #[derive(Debug, Clone)]
@@ -76,15 +75,17 @@ pub fn pack_vertical_vertices(
         _ => 12u64,
     };
     let max_vertices = inputs.len as u64 * segments_per_point;
-    let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("errorbar-gpu-vertices"),
-        size: max_vertices * std::mem::size_of::<Vertex>() as u64,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("errorbar-gpu-vertices"),
+            size: max_vertices * std::mem::size_of::<Vertex>() as u64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
     let uniforms = ErrorBarUniforms {
         color: params.color.to_array(),
         count: inputs.len,

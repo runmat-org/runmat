@@ -29,24 +29,27 @@ impl WgpuProvider {
         );
         let shader = match (self.precision, operation) {
             (NumericPrecision::F32, runmat_accelerate_api::ProviderActivationAdjoint::Relu) => {
-                RELU_ADJOINT_F32
+                std::borrow::Cow::Borrowed(RELU_ADJOINT_F32)
             }
             (NumericPrecision::F64, runmat_accelerate_api::ProviderActivationAdjoint::Relu) => {
-                RELU_ADJOINT_F64
+                self.require_ieee_words(self.precision)?;
+                std::borrow::Cow::Owned(crate::backend::wgpu::shaders::ieee_words::inject(
+                    RELU_ADJOINT_F64,
+                ))
             }
             (
                 NumericPrecision::F32,
                 runmat_accelerate_api::ProviderActivationAdjoint::Elu { .. },
-            ) => ELU_ADJOINT_F32,
+            ) => std::borrow::Cow::Borrowed(ELU_ADJOINT_F32),
             (
                 NumericPrecision::F64,
                 runmat_accelerate_api::ProviderActivationAdjoint::Elu { .. },
-            ) => ELU_ADJOINT_F64,
+            ) => std::borrow::Cow::Borrowed(ELU_ADJOINT_F64),
         };
         match operation {
             runmat_accelerate_api::ProviderActivationAdjoint::Relu => self
                 .fused_elementwise_with_telemetry_exec(
-                    shader,
+                    &shader,
                     &[input.clone(), upstream.clone()],
                     &x.shape,
                     x.len,
@@ -64,7 +67,7 @@ impl WgpuProvider {
                 }
                 let alpha_handle = self.fill_exec(&x.shape, alpha)?;
                 let result = self.fused_elementwise_with_telemetry_exec(
-                    shader,
+                    &shader,
                     &[input.clone(), upstream.clone(), alpha_handle.clone()],
                     &x.shape,
                     x.len,
@@ -162,9 +165,10 @@ struct Params { len: u32, _p0: u32, _p1: u32, _p2: u32 };
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let idx = gid.x; if (idx >= params.len) { return; }
   let x = input0.data[idx];
-  let bits = bitcast<vec2<u32>>(x);
-  let nan = (bits.y & 0x7ff00000u) == 0x7ff00000u &&
-            ((bits.y & 0x000fffffu) != 0u || bits.x != 0u);
+  let high = runmat_f64_high(x);
+  let low = runmat_f64_low(x);
+  let nan = (high & 0x7ff00000u) == 0x7ff00000u &&
+            ((high & 0x000fffffu) != 0u || low != 0u);
   let derivative = select(f64(0.0), f64(1.0), x > f64(0.0));
   output.data[idx] = upstream.data[idx] * select(derivative, x, nan);
 }
@@ -251,3 +255,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   output.data[idx] = select(alpha.data[idx] * (exp(value) - 1.0), value, value >= 0.0);
 }
 "#;
+
+#[cfg(test)]
+#[path = "activation/validation_tests.rs"]
+mod validation_tests;

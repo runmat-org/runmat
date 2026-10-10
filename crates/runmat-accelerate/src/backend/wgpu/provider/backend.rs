@@ -3,6 +3,8 @@ use anyhow::{anyhow, ensure, Result};
 mod allocation_state;
 #[path = "moments_cache.rs"]
 mod moments_cache;
+#[path = "owner_shared.rs"]
+mod owner_shared;
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
 use log::{debug, error};
 use once_cell::sync::OnceCell;
@@ -74,41 +76,28 @@ mod context;
 mod core;
 #[path = "ops/deep_learning.rs"]
 mod deep_learning;
-#[path = "ops/deep_learning/route.rs"]
-mod deep_learning_route;
-#[path = "ops/deep_learning/resource_bound.rs"]
-mod deep_learning_resource_bound;
-#[path = "ops/deep_learning/pooling.rs"]
-mod deep_learning_pooling;
 #[path = "ops/deep_learning/normalization/mod.rs"]
 mod deep_learning_normalization;
+#[path = "ops/deep_learning/pooling.rs"]
+mod deep_learning_pooling;
+#[path = "preparation/deep_learning.rs"]
+mod deep_learning_preparation;
+#[path = "ops/deep_learning/resource_bound.rs"]
+mod deep_learning_resource_bound;
+#[path = "ops/deep_learning/route.rs"]
+mod deep_learning_route;
 #[path = "ops/elementwise.rs"]
 mod elementwise;
-#[path = "ops/select.rs"]
-mod select;
-#[path = "ops/remainder.rs"]
-mod remainder;
-#[path = "ops/floating_cast.rs"]
-mod floating_cast;
-#[path = "ops/power.rs"]
-mod power;
 #[path = "ops/fft/mod.rs"]
 mod fft;
 #[path = "ops/finance.rs"]
 mod finance;
+#[path = "ops/floating_cast.rs"]
+mod floating_cast;
 #[path = "helpers.rs"]
 mod helpers;
-#[path = "pipeline_observation.rs"]
-mod pipeline_observation;
-#[path = "pipeline_recipe.rs"]
-mod pipeline_recipe;
-#[path = "preparation/deep_learning.rs"]
-mod deep_learning_preparation;
-#[path = "preparation.rs"]
-mod preparation;
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "observation_progress.rs"]
-mod observation_progress;
+#[path = "ieee_features.rs"]
+mod ieee_features;
 #[path = "ops/image.rs"]
 mod image;
 #[path = "ops/indexing.rs"]
@@ -125,22 +114,41 @@ mod interpolation;
 mod io;
 #[path = "ops/linalg/mod.rs"]
 mod linalg;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "observation_progress.rs"]
+mod observation_progress;
+#[path = "pipeline_observation.rs"]
+mod pipeline_observation;
+#[path = "pipeline_recipe.rs"]
+mod pipeline_recipe;
+#[path = "validated_fusion.rs"]
+mod validated_fusion;
 #[path = "ops/polynomial.rs"]
 mod polynomial;
+#[path = "ops/power.rs"]
+mod power;
+#[path = "preparation.rs"]
+mod preparation;
 #[path = "ops/random.rs"]
 mod random;
+#[path = "real_floating.rs"]
+mod real_floating;
 #[path = "ops/reduction/mod.rs"]
 mod reduction;
+#[path = "ops/remainder.rs"]
+mod remainder;
+#[path = "ops/select.rs"]
+mod select;
 #[path = "ops/signal.rs"]
 mod signal;
 #[path = "ops/solve.rs"]
 mod solve;
+#[path = "ops/storage_move.rs"]
+mod storage_move;
 #[path = "ops/telemetry.rs"]
 mod telemetry;
 #[path = "ops/tensor.rs"]
 mod tensor;
-#[path = "ops/storage_move.rs"]
-mod storage_move;
 #[path = "ops/view_plan.rs"]
 mod view_plan;
 #[path = "ops/window.rs"]
@@ -180,14 +188,14 @@ pub(super) use backend_types::*;
 #[cfg(not(target_arch = "wasm32"))]
 fn install_device_error_handlers(
     device: &wgpu::Device,
-    allocations: &Arc<allocation_state::AllocationState>,
+    allocations: &owner_shared::OwnerShared<allocation_state::AllocationState>,
 ) -> Arc<std::sync::atomic::AtomicBool> {
     device.on_uncaptured_error(Box::new(|error| {
         error!("WGPU uncaptured error: {:?}", error);
     }));
     let observation_stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let weak = Arc::downgrade(&observation_stopped);
-    let allocation_owner = Arc::downgrade(allocations);
+    let allocation_owner = owner_shared::OwnerShared::downgrade(allocations);
     device.set_device_lost_callback(move |reason, message| {
         if let Some(owner) = allocation_owner.upgrade() {
             owner.mark_device_lost();

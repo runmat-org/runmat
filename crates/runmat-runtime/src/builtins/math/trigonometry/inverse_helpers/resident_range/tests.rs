@@ -4,16 +4,22 @@ use crate::builtins::math::trigonometry::test_owner;
 use futures::{executor::block_on, task::noop_waker};
 use runmat_accelerate_api::{
     allocation::WeakGpuTensorHandle, test_support::RetirementProbe, GpuHandleProvenance,
+    GpuTensorStorage,
 };
-use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProviderFuture, HostTensorView, ThreadProviderGuard,
-};
+use runmat_accelerate_api::{AccelDownloadFuture, HostTensorView, ThreadProviderGuard};
 use runmat_value::Value;
 use std::{
     future::Future,
     sync::Mutex,
     task::{Context, Poll},
 };
+
+fn asin_diagnostic() -> gpu_helpers::RealProbeDiagnostic {
+    gpu_helpers::RealProbeDiagnostic {
+        builtin: runmat_builtins::ASIN_CATALOG_ENTRY.identity,
+        internal_error: &runmat_builtins::ASIN_ERROR_INTERNAL,
+    }
+}
 
 #[derive(Clone, Copy, Default)]
 enum Fault {
@@ -139,14 +145,22 @@ impl AccelProvider for Provider {
     fn reduce_min<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(self.reduce(input, true))
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.reduce(input, true).await.map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
+        })
     }
     fn reduce_max<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(self.reduce(input, false))
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.reduce(input, false).await.map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
+        })
     }
 }
 
@@ -314,7 +328,7 @@ fn inverse_range_rejects_aliases_and_wrong_storage_without_freeing_borrowed_inpu
             provider,
             &input,
             RealDomain::ClosedUnitInterval,
-            "asin"
+            asin_diagnostic()
         ))
         .is_err());
         assert_eq!(provider.state.lock().unwrap().calls, step);
@@ -333,7 +347,7 @@ fn inverse_range_only_unsupported_hook_is_inconclusive() {
                 provider,
                 &input,
                 RealDomain::ClosedUnitInterval,
-                "asin"
+                asin_diagnostic()
             ))
             .unwrap(),
             None
@@ -347,7 +361,7 @@ fn inverse_range_only_unsupported_hook_is_inconclusive() {
             provider,
             &input,
             RealDomain::ClosedUnitInterval,
-            "asin"
+            asin_diagnostic()
         ))
         .unwrap(),
         Some(false)
@@ -364,7 +378,7 @@ fn inverse_range_abandonment_keeps_its_admitted_provider_after_selection_is_remo
         provider,
         &input,
         RealDomain::ClosedUnitInterval,
-        "asin",
+        asin_diagnostic(),
     ));
     assert!(matches!(
         call.as_mut().poll(&mut Context::from_waker(&noop_waker())),

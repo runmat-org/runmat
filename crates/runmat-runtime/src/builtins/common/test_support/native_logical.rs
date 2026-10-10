@@ -60,12 +60,10 @@ impl AccelProvider for NativeLogicalProvider {
     fn upload_numeric_raw(
         &self,
         host: &HostNumericTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         host.validate()?;
         let HostNumericDataView::F32(data) = host.data else {
-            return Err(unsupported_provider_operation(
-                "fixture native numeric class",
-            ));
+            return Err(unsupported_provider_operation("fixture native numeric class").into());
         };
         Ok(
             self.publish(self.owner.allocate_numeric(HostNumericTensorOwned {

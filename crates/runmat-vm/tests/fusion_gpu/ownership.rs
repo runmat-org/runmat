@@ -27,6 +27,7 @@ pub(super) type BufferStore = HashMap<u64, BufferRecord>;
 pub(super) enum BufferPayload {
     F32(Vec<f32>),
     F64(Vec<f64>),
+    U8(Vec<u8>),
 }
 
 impl BufferPayload {
@@ -38,25 +39,29 @@ impl BufferPayload {
                 Self::F32(data.into_iter().map(|value| value as f32).collect())
             }
             NumericElementType::F64 => Self::F64(data),
-            _ => panic!("fixture only supports floating-point payloads"),
+            NumericElementType::U8 => Self::U8(data.into_iter().map(|value| value as u8).collect()),
+            _ => panic!("fixture only supports floating-point and logical-byte payloads"),
         }
     }
     pub fn len(&self) -> usize {
         match self {
             Self::F32(data) => data.len(),
             Self::F64(data) => data.len(),
+            Self::U8(data) => data.len(),
         }
     }
     pub fn to_f64(&self) -> Vec<f64> {
         match self {
             Self::F32(data) => data.iter().copied().map(f64::from).collect(),
             Self::F64(data) => data.clone(),
+            Self::U8(data) => data.iter().copied().map(f64::from).collect(),
         }
     }
     pub fn write(&mut self, index: usize, value: f64) {
         match self {
             Self::F32(data) => data[index] = value as f32,
             Self::F64(data) => data[index] = value,
+            Self::U8(data) => data[index] = value as u8,
         }
     }
     pub fn exact_eq(&self, other: &Self) -> bool {
@@ -67,6 +72,7 @@ impl BufferPayload {
             (Self::F64(a), Self::F64(b)) => {
                 a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits()) && a.len() == b.len()
             }
+            (Self::U8(a), Self::U8(b)) => a == b,
             _ => false,
         }
     }
@@ -77,6 +83,7 @@ pub(super) struct BufferRecord {
     pub data: BufferPayload,
     pub shape: Vec<usize>,
     physical: GpuPhysicalDescriptor,
+    logical: bool,
     lease: Option<WeakAllocationLease>,
     phase: Phase,
 }
@@ -90,7 +97,12 @@ enum Phase {
 }
 
 impl BufferRecord {
-    pub fn new(data: BufferPayload, shape: Vec<usize>, physical: GpuPhysicalDescriptor) -> Self {
+    pub fn new(
+        data: BufferPayload,
+        shape: Vec<usize>,
+        physical: GpuPhysicalDescriptor,
+        logical: bool,
+    ) -> Self {
         assert_eq!(
             shape.iter().try_fold(1usize, |n, &dim| n.checked_mul(dim)),
             Some(data.len())
@@ -99,6 +111,7 @@ impl BufferRecord {
             data,
             shape,
             physical,
+            logical,
             lease: None,
             phase: Phase::Pending,
         }
@@ -120,6 +133,7 @@ impl BufferRecord {
     pub fn exact_snapshot_eq(&self, other: &Self) -> bool {
         self.shape == other.shape
             && self.physical == other.physical
+            && self.logical == other.logical
             && self.phase == other.phase
             && self.data.exact_eq(&other.data)
     }
@@ -200,7 +214,14 @@ impl AllocationOwner for TestProvider {
         view: &GpuTensorView,
     ) -> Result<(), AllocationAcquisitionError> {
         self.validate_live(identity)?;
-        if view.is_logical() {
+        if view.is_logical()
+            != self
+                .buffers
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .get(&identity.allocation_id())
+                .is_some_and(|record| record.logical)
+        {
             return Err(AllocationAcquisitionError::Unsupported);
         }
         Ok(())
@@ -276,7 +297,7 @@ fn typed_payload_reshape_retains_one_physical_allocation_until_final_view() {
     runmat_gc::gc_test_context(|| {
         let _lock = super::accel_test_lock();
         super::ensure_provider_registered();
-        let provider = super::PROVIDER.get().unwrap();
+        let provider = super::registered_provider().unwrap();
         let original = provider.push_typed(vec![1.25, 2.5], vec![1, 2], NumericElementType::F32);
         let id = original.buffer_id();
         let reshaped = provider.reshape(&original, &[2, 1]).unwrap();

@@ -14,7 +14,7 @@ fn binary(
     lhs: &GpuTensorHandle,
     rhs: &GpuTensorHandle,
     op: Operation,
-) -> Result<GpuTensorHandle> {
+) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
     block_on(match op {
         Operation::Add => provider.elem_add(lhs, rhs),
         Operation::Sub => provider.elem_sub(lhs, rhs),
@@ -418,12 +418,12 @@ fn invalid_owner_and_shape_are_not_unsupported_and_integer_fallback_stays_exact(
     }
     for input in unsupported {
         for op in OPERATIONS {
-            assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-                &binary(&provider, &input, &numeric, op).unwrap_err()
-            ));
-            assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
-                &binary(&provider, &input, &foreign, op).unwrap_err()
-            ));
+            assert!(binary(&provider, &input, &numeric, op)
+                .unwrap_err()
+                .is_unsupported());
+            assert!(!binary(&provider, &input, &foreign, op)
+                .unwrap_err()
+                .is_unsupported());
         }
         assert!(runmat_accelerate_api::is_unsupported_provider_operation(
             &provider.scalar_add(&input, 1.0).unwrap_err()
@@ -431,7 +431,7 @@ fn invalid_owner_and_shape_are_not_unsupported_and_integer_fallback_stays_exact(
     }
     let a = upload(&provider, &[1.0, 2.0], &[2, 1], true, false);
     let b = upload(&provider, &[1.0, 2.0, 3.0], &[3, 1], true, false);
-    assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
-        &binary(&provider, &a, &b, Operation::Add).unwrap_err()
-    ));
+    assert!(!binary(&provider, &a, &b, Operation::Add)
+        .unwrap_err()
+        .is_unsupported());
 }

@@ -16,8 +16,10 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy,
+    FusionAdmissionContext, FusionAdmissionFuture, FusionError, FusionExprContext,
+    FusionKernelTemplate, FusionSemanticDeclaration, GpuOpKind, ProviderHook, ReductionNaN,
+    ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -60,15 +62,50 @@ fn acosh_error_with_detail(
     builder.build()
 }
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::acosh")]
+const FUSION_SEMANTICS: FusionSemanticDeclaration = FusionSemanticDeclaration {
+    binding: runmat_builtins::BuiltinBindingIdentity {
+        builtin: runmat_builtins::ACOSH_CATALOG_ENTRY.identity,
+        variant: "default",
+    },
+    revision: 1,
+    admit: Some(admit_fusion),
+    admit_static: None,
+    required_real_unary: Some((
+        runmat_types::RealUnaryPredicate::AtLeastOne,
+        &ACOSH_ERROR_INTERNAL,
+    )),
+    required_arithmetic: None,
+    helpers: &[],
+    scalar_operation: None,
+};
+
+fn admit_fusion(context: FusionAdmissionContext<'_>) -> FusionAdmissionFuture<'_> {
+    super::inverse_helpers::fusion::admit_real_unary(
+        context,
+        runmat_types::RealUnaryPredicate::AtLeastOne,
+    )
+}
+
+#[runmat_macros::register_fusion_spec(
+    builtin_path = "crate::builtins::math::trigonometry::acosh",
+    semantics = FUSION_SEMANTICS
+)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "acosh",
     shape: ShapeRequirements::BroadcastCompatible,
     constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
+    elementwise: Some(FusionKernelTemplate {
+        scalar_precisions: &[ScalarType::F32, ScalarType::F64],
+        wgsl_body: |ctx: &FusionExprContext| {
+            let [input] = ctx.inputs else {
+                return Err(FusionError::MissingInput(0));
+            };
+            Ok(format!("acosh({input})"))
+        },
+    }),
     reduction: None,
     emits_nan: true,
-    notes: "Fusion is disabled because real input below one must promote to a complex result instead of producing NaN.",
+    notes: "Selected real-domain fusion requires request-local proof that every represented input is at least one; unknown or complex-promoting inputs remain on the shared runtime path.",
 };
 
 #[runtime_builtin(
@@ -163,7 +200,10 @@ async fn detect_gpu_requires_complex(
         provider,
         handle,
         super::inverse_helpers::resident_range::RealDomain::AtLeastOne,
-        BUILTIN_NAME,
+        gpu_helpers::RealProbeDiagnostic {
+            builtin: runmat_builtins::ACOSH_CATALOG_ENTRY.identity,
+            internal_error: &ACOSH_ERROR_INTERNAL,
+        },
     )
     .await
 }

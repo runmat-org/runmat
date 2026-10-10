@@ -2,12 +2,15 @@ use futures::executor::block_on;
 use runmat_accelerate::simple_provider::InProcessProvider;
 use runmat_accelerate_api::allocation::{WeakAllocationLease, WeakGpuTensorHandle};
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorHandle,
-    HostNumericTensorView, HostTensorView, ProviderPrecision, ThreadProviderGuard,
+    AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostNumericTensorView, HostTensorView,
+    ProviderPrecision, ThreadProviderGuard,
 };
 use runmat_value::{Tensor, Value};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
+
+#[path = "support/retained_provider.rs"]
+mod retained_provider;
 
 struct Provider {
     inner: InProcessProvider,
@@ -33,7 +36,7 @@ impl AccelProvider for Provider {
     fn upload_numeric_raw(
         &self,
         _view: &HostNumericTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::SeqCst);
         if self.mode.load(Ordering::SeqCst) == 2 {
             let fresh = self.inner.upload(&HostTensorView {
@@ -60,16 +63,15 @@ impl AccelProvider for Provider {
         &'a self,
         _: &'a GpuTensorHandle,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         self.hooks.fetch_add(1, Ordering::SeqCst);
-        Box::pin(async { Err(anyhow::anyhow!("unexpected arithmetic hook")) })
+        Box::pin(async { Err(anyhow::anyhow!("unexpected arithmetic hook").into()) })
     }
 }
 
 #[test]
 fn prototype_preflight_precedes_hooks_and_upload_cleanup_protects_borrowed_handles() {
-    static PROVIDER: OnceLock<Provider> = OnceLock::new();
-    let provider = PROVIDER.get_or_init(|| Provider {
+    let provider = retained_provider::retained_test_provider!(PROVIDER: Provider = Provider {
         inner: InProcessProvider::new(),
         borrowed: Mutex::new(None),
         outputs: Mutex::default(),

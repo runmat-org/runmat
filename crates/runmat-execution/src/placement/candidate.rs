@@ -385,6 +385,12 @@ pub enum CandidateOutputResidency {
     Mirrored {
         device_id: u32,
     },
+    /// Distinct public outputs from one provider computation: at least one
+    /// retained resident result and at least one result read back to host.
+    ProviderAndHost {
+        device_id: u32,
+        host_bytes: ResourceByteBound,
+    },
     /// One provider-first route may publish either a provider allocation or a
     /// host value after a genuine Unsupported hook result. `host_bytes` is the
     /// separately proven retained host payload; provider retained bytes remain
@@ -407,6 +413,15 @@ pub enum CandidateOutputPresentation {
     /// the host. Provider-owned mapped staging remains a provider resource.
     ProviderDownload {
         device_id: u32,
+        provider_scratch_bytes: ResourceByteBound,
+        queue_slots: u32,
+    },
+    /// A provider hook first produces its physical outputs; one authenticated
+    /// output is then read back for host publication. The readback is a real
+    /// post-compute stage, not an original-input preparation or a free mirror.
+    ProviderProducedReadback {
+        device_id: u32,
+        transfer_bytes: u64,
         provider_scratch_bytes: ResourceByteBound,
         queue_slots: u32,
     },
@@ -476,6 +491,14 @@ impl CandidateOutputPresentation {
     ) -> Result<(), &'static str> {
         match (self, execution, output) {
             (
+                Self::ProviderProducedReadback { device_id: stage, queue_slots, .. },
+                CandidateExecutionLocation::Provider { device_id: execution },
+                CandidateOutputResidency::ProviderAndHost { device_id: output, .. },
+            ) if stage == &execution && stage == &output && *queue_slots > 0 => Ok(()),
+            (Self::ProviderProducedReadback { .. }, _, _) => {
+                Err("provider-produced readback needs one provider owner, mixed public outputs, and a completion queue slot")
+            }
+            (
                 Self::ProviderDownload { queue_slots, provider_scratch_bytes, .. },
                 CandidateExecutionLocation::Host,
                 CandidateOutputResidency::Host,
@@ -493,6 +516,7 @@ impl CandidateOutputPresentation {
             }
             (Self::Direct, CandidateExecutionLocation::Host, CandidateOutputResidency::Provider { .. }
                 | CandidateOutputResidency::Mirrored { .. }
+                | CandidateOutputResidency::ProviderAndHost { .. }
                 | CandidateOutputResidency::ConditionalHostOrProvider { .. }) => {
                 Err("host execution needs an admitted provider presentation stage")
             }
@@ -538,6 +562,9 @@ impl CandidateOutputPresentation {
             }
             (Self::ConditionalProviderUpload { .. }, _, _) => {
                 Err("conditional provider upload needs the same selected provider/output owner and a completion queue slot")
+            }
+            (Self::Direct, _, CandidateOutputResidency::ProviderAndHost { .. }) => {
+                Err("mixed provider and host outputs need an admitted produced-output readback")
             }
             (Self::Direct, _, _) => Ok(()),
         }
@@ -590,5 +617,55 @@ impl ExecutionCandidateDescriptor {
             return Err("candidate guards must belong to the candidate region");
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod produced_readback_tests {
+    use super::*;
+
+    #[test]
+    fn mixed_output_requires_exact_selected_provider_and_real_readback_stage() {
+        let stage = CandidateOutputPresentation::ProviderProducedReadback {
+            device_id: 7,
+            transfer_bytes: 12,
+            provider_scratch_bytes: ResourceByteBound::Known(12),
+            queue_slots: 1,
+        };
+        let output = CandidateOutputResidency::ProviderAndHost {
+            device_id: 7,
+            host_bytes: ResourceByteBound::Known(24),
+        };
+        assert_eq!(
+            stage.validate_for(
+                CandidateExecutionLocation::Provider { device_id: 7 },
+                output
+            ),
+            Ok(())
+        );
+        assert!(stage
+            .validate_for(
+                CandidateExecutionLocation::Provider { device_id: 8 },
+                output
+            )
+            .is_err());
+        assert!(stage
+            .validate_for(CandidateExecutionLocation::Host, output)
+            .is_err());
+        assert!(CandidateOutputPresentation::Direct
+            .validate_for(CandidateExecutionLocation::Host, output)
+            .is_err());
+        let no_completion = CandidateOutputPresentation::ProviderProducedReadback {
+            device_id: 7,
+            transfer_bytes: 12,
+            provider_scratch_bytes: ResourceByteBound::Known(12),
+            queue_slots: 0,
+        };
+        assert!(no_completion
+            .validate_for(
+                CandidateExecutionLocation::Provider { device_id: 7 },
+                output
+            )
+            .is_err());
     }
 }

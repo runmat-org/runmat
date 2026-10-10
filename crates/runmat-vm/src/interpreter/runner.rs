@@ -1,3 +1,4 @@
+#[cfg(feature = "native-accel")]
 use crate::accel::fusion as accel_fusion;
 use crate::bytecode::{Bytecode, FunctionRegistry, Instr};
 use crate::interpreter::api::{InterpreterOutcome, InterpreterResumeState, InterpreterState};
@@ -37,9 +38,7 @@ use runmat_accelerate::placement::{
     begin_trace, fusion_operation_token, PlacementEventKind, PlacementVariant,
 };
 #[cfg(feature = "native-accel")]
-use runmat_accelerate::{
-    activate_fusion_plan, active_group_plan_clone, deactivate_fusion_plan, set_current_pc,
-};
+use runmat_accelerate::{activate_fusion_plan, deactivate_fusion_plan, set_current_pc};
 #[cfg(feature = "native-accel")]
 use runmat_time::{duration_ns_saturating, Instant};
 
@@ -483,6 +482,9 @@ pub async fn interpret_resume_in_context(
 fn with_default_acceleration_service(
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> runmat_runtime::context::RuntimeContext {
+    // A nested interpreter owns a distinct instruction stream and cannot
+    // confirm its caller's installed region, even if it inherits other ports.
+    let runtime = runtime.without_vm_fusion_host_route();
     #[cfg(feature = "native-accel")]
     let runtime = runmat_accelerate::native_auto::install_preparation_service(runtime);
     runtime
@@ -721,9 +723,18 @@ async fn run_interpreter_inner(
         current_function_name,
         initial_assigned_var_count,
         #[cfg(feature = "native-accel")]
-            fusion_plan: _,
+        fusion_plan,
         #[cfg(feature = "native-accel")]
         fusion_accel_graph,
+        #[cfg(feature = "native-accel")]
+        fusion_installation,
+        #[cfg(all(
+            test,
+            not(target_arch = "wasm32"),
+            feature = "native-accel",
+            feature = "wgpu"
+        ))]
+        mut fusion_publication_fault,
         bytecode,
     } = state;
     let _source_context_guard = runmat_runtime::source_context::replace_current_source_id(
@@ -960,7 +971,18 @@ async fn run_interpreter_inner(
         #[cfg(feature = "native-accel")]
         fusion_accel_graph: &fusion_accel_graph,
         #[cfg(feature = "native-accel")]
+        fusion_plan: &fusion_plan,
+        #[cfg(feature = "native-accel")]
+        fusion_installation: &fusion_installation,
+        #[cfg(feature = "native-accel")]
         fusion_observations: &mut fusion_observations,
+        #[cfg(all(
+            test,
+            not(target_arch = "wasm32"),
+            feature = "native-accel",
+            feature = "wgpu"
+        ))]
+        fusion_publication_fault: &mut fusion_publication_fault,
     });
     let execution_result =
         super::dispatch_cancellation::until_cancelled(&cancellation, instruction_loop).await;
@@ -1303,9 +1325,11 @@ mod persistent_resume_tests;
 #[cfg(test)]
 mod tests {
     use super::{
-        interpret_function_with_counts_in_context, interpret_resume_in_context,
-        interpret_with_vars, output_sequence, run_interpreter, run_interpreter_inner,
+        interpret_function_with_counts_in_context, interpret_resume_in_context, output_sequence,
+        run_interpreter,
     };
+    #[cfg(feature = "native-accel")]
+    use super::{interpret_with_vars, run_interpreter_inner};
     use crate::bytecode::program::Bytecode;
     use crate::bytecode::Instr;
     use crate::interpreter::api::{InterpreterResumeState, InterpreterState};
@@ -1318,7 +1342,9 @@ mod tests {
         value_is_real, value_is_scalar_or_empty, value_is_text,
     };
     use runmat_runtime::context::RuntimeInvocationArity;
-    use runmat_value::{CellArray, HandleRef, StructValue, Tensor, Value};
+    use runmat_value::{CellArray, Tensor, Value};
+    #[cfg(feature = "native-accel")]
+    use runmat_value::{HandleRef, StructValue};
     use std::future::Future;
     use std::task::{Context, Poll};
     #[cfg(feature = "native-accel")]

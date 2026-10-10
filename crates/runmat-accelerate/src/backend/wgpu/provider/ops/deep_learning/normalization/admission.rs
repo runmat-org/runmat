@@ -103,6 +103,9 @@ impl WgpuProvider {
         if !self.supports_native_real_element_type(element_type) {
             return Ok(DeepLearningLayerNormCapability::UnsupportedOperation);
         }
+        if total != 0 && !self.ieee_words_available(self.precision) {
+            return Ok(DeepLearningLayerNormCapability::UnsupportedOperation);
+        }
         if self.precision == crate::backend::wgpu::types::NumericPrecision::F32
             && (!(request.epsilon as f32).is_finite() || request.epsilon as f32 == 0.0)
         {

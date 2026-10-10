@@ -112,6 +112,17 @@ impl RuntimeCallService for RuntimeCallRouter {
 /// discovery for a missing name.
 pub trait RuntimeBuiltinService {
     fn bindings_by_name(&self, name: &str) -> Vec<RuntimeBuiltinBinding>;
+
+    /// Stable generation for this exact selected scoped binding while it
+    /// remains installed. A mutable service must change this when the binding
+    /// or registration changes. None declines session-local timing feedback.
+    /// Function addresses may validate membership but are not revision data.
+    fn binding_registration_revision(
+        &self,
+        _binding: RuntimeBuiltinBinding,
+    ) -> Option<runmat_execution::Digest> {
+        None
+    }
 }
 
 pub trait RuntimeWorkspaceService {
@@ -450,6 +461,23 @@ pub trait RuntimeWholeWorkObservationPermit: Send + Sync {
     fn is_current(&self) -> bool;
 }
 
+/// Selection-owned graph observation authority. Its concrete owner binds the
+/// exact signature and selected candidate before the caller begins effects.
+/// The permit is not a placement decision or a provider execution lease.
+pub trait RuntimeGraphObservationPermit: Send + Sync + std::fmt::Debug {
+    fn authorizes(
+        &self,
+        signature: &runmat_execution::PlacementSignature,
+        candidate: &str,
+        kind: runmat_execution::ExecutionCandidateKind,
+    ) -> bool;
+}
+
+pub struct RuntimeGraphPlacementSelection {
+    pub decision: runmat_execution::PlacementDecision,
+    pub observation_permit: Option<std::sync::Arc<dyn RuntimeGraphObservationPermit>>,
+}
+
 /// The finite managed route retains a value slot/generation lease instead of
 /// allocating one dynamic observation permit per invocation.
 pub enum RuntimeWholeWorkObservationAuthority {
@@ -599,6 +627,34 @@ pub trait RuntimeHostEffectResourceService {
 /// executor-neutral contracts; candidate generation and policy remain in their
 /// owning executor/acceleration crates.
 pub trait RuntimePlacementService {
+    /// Select and register one graph decision's exact observation right on
+    /// this service's owner thread. The default still plans/executes, but
+    /// deliberately returns no permission to learn from a later completion.
+    fn plan_with_observation_permit(
+        &self,
+        request: runmat_execution::PlacementPlanRequest,
+    ) -> Result<RuntimeGraphPlacementSelection, RuntimeError> {
+        self.plan(request)
+            .map(|decision| RuntimeGraphPlacementSelection {
+                decision,
+                observation_permit: None,
+            })
+    }
+
+    /// Only the selected graph observation right can publish feedback. A
+    /// missing or revoked permit suppresses the sample, never execution.
+    fn observe_selected_graph(
+        &self,
+        permit: &dyn RuntimeGraphObservationPermit,
+        feedback: runmat_execution::PlacementFeedback,
+    ) -> Result<(), RuntimeError> {
+        if permit.authorizes(&feedback.signature, &feedback.candidate, feedback.kind) {
+            self.observe(feedback)
+        } else {
+            Ok(())
+        }
+    }
+
     /// Owning placement policy supplies revisions for complete-route feedback.
     /// A third-party service that does not support this contract returns None
     /// rather than inventing catalog/compiler/policy identities in the caller.
@@ -607,6 +663,30 @@ pub trait RuntimePlacementService {
         _program: Option<runmat_execution::ProgramRevision>,
         _provider: runmat_execution::Digest,
     ) -> Option<runmat_execution::PlacementRevision> {
+        None
+    }
+
+    /// Nonpersistable revision for a selected compiled/runtime binding.
+    /// The caller supplies a certified registration generation, not a name
+    /// or function-pointer hash. The placement owner adds its session identity.
+    fn whole_work_runtime_binding_session_revision(
+        &self,
+        _program: Option<runmat_execution::ProgramRevision>,
+        _binding: runmat_builtins::BuiltinBindingIdentity,
+        _registration: runmat_execution::Digest,
+    ) -> Option<runmat_execution::PlacementRevision> {
+        None
+    }
+
+    /// VM-host registration of an actually installed fusion region. The
+    /// placement session supplies its own nonpersistable authority; it never
+    /// accepts a serialized profile or free-form operation digest as proof.
+    fn whole_work_vm_fusion_region_session_revision(
+        &self,
+        _program: Option<runmat_execution::ProgramRevision>,
+        _region: super::VmFusionRegionRegistration,
+        _liveness: std::sync::Weak<()>,
+    ) -> Option<super::VmFusionSessionRegistration> {
         None
     }
 
@@ -1562,6 +1642,8 @@ mod tests {
             region: None,
             operation: "route".into(),
             runtime_facts: digest,
+            provider_provenance: None,
+            graph_output_authority: None,
             revision: runmat_execution::PlacementRevision {
                 program: None,
                 catalog: digest,

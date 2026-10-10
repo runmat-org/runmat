@@ -138,9 +138,14 @@ impl MinEvaluation {
 #[runtime_builtin(
     name = "min",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::reduction::min"
 )]
-pub(crate) async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn min_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     if let Some(eval) = crate::builtins::table::categorical_min_evaluate(&value, &rest).await {
         return crate::builtins::table::categorical_extrema_to_value(eval?);
     }
@@ -158,7 +163,7 @@ pub(crate) async fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult
     } else {
         super::extrema_provider::ExtremaDemand::ValuesOnly
     };
-    let eval = evaluate_for_demand(value, &rest, demand).await?;
+    let eval = evaluate_for_demand(runtime.as_ref(), value, &rest, demand).await?;
     min_output_from_eval(eval)
 }
 
@@ -187,7 +192,7 @@ pub(crate) async fn min_reduction_with_nan_policy(
     } else {
         super::extrema_provider::ExtremaDemand::ValuesOnly
     };
-    let eval = reduction_min(value, parsed, demand).await?;
+    let eval = reduction_min(None, value, parsed, demand).await?;
     min_output_from_eval(eval)
 }
 
@@ -211,6 +216,7 @@ fn min_output_from_eval(eval: super::extrema_provider::ExtremaResult) -> Builtin
 /// Evaluate the builtin once and expose both outputs (value + indices).
 pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluation> {
     let evaluated = evaluate_for_demand(
+        None,
         value,
         rest,
         super::extrema_provider::ExtremaDemand::ValuesAndIndices,
@@ -221,6 +227,7 @@ pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluati
 }
 
 async fn evaluate_for_demand(
+    runtime: Option<&crate::context::RuntimeContext>,
     value: Value,
     rest: &[Value],
     demand: super::extrema_provider::ExtremaDemand,
@@ -232,7 +239,7 @@ async fn evaluate_for_demand(
     }
     match parse_call(rest).await? {
         ParsedCall::Elementwise(args) => elementwise_min(value, args, demand).await,
-        ParsedCall::Reduction(args) => reduction_min(value, args, demand).await,
+        ParsedCall::Reduction(args) => reduction_min(runtime, value, args, demand).await,
     }
 }
 
@@ -527,13 +534,14 @@ fn map_vector_dim_error(error: tensor::DimensionDecodeError) -> RuntimeError {
 }
 
 async fn reduction_min(
+    runtime: Option<&crate::context::RuntimeContext>,
     value: Value,
     args: ReductionArgs,
     demand: super::extrema_provider::ExtremaDemand,
 ) -> BuiltinResult<super::extrema_provider::ExtremaResult> {
     match value {
         Value::GpuTensor(handle) => {
-            if let Some(eval) = reduction_min_gpu(handle.clone(), &args, demand).await? {
+            if let Some(eval) = reduction_min_gpu(runtime, handle.clone(), &args, demand).await? {
                 return Ok(eval);
             }
             // Fall back to host if GPU path is unavailable.
@@ -544,13 +552,32 @@ async fn reduction_min(
                 super::extrema_provider::ExtremaResult::from_pair(demand, eval.values, eval.indices)
             })
         }
-        other => reduction_min_host(other, &args).map(|eval| {
-            super::extrema_provider::ExtremaResult::from_pair(demand, eval.values, eval.indices)
-        }),
+        other => {
+            let typed_host_input = matches!(&other, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32);
+            let eval = reduction_min_host(other, &args)?;
+            if typed_host_input
+                && matches!(&eval.values, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
+            {
+                if let Some(runtime) = runtime {
+                    if let Some(route) = runtime.vm_fusion_host_route() {
+                        route.confirm_host_branch(
+                            runtime,
+                            crate::context::VmFusionHostInstruction::Reduction,
+                        );
+                    }
+                }
+            }
+            Ok(super::extrema_provider::ExtremaResult::from_pair(
+                demand,
+                eval.values,
+                eval.indices,
+            ))
+        }
     }
 }
 
 async fn reduction_min_gpu(
+    runtime: Option<&crate::context::RuntimeContext>,
     handle: GpuTensorHandle,
     args: &ReductionArgs,
     demand: super::extrema_provider::ExtremaDemand,
@@ -596,7 +623,7 @@ async fn reduction_min_gpu(
         handle.device_id()
     );
     super::extrema_provider::ExtremaKind::Min
-        .reduce_dim(&handle, zero_based, demand)
+        .reduce_dim(runtime, &handle, zero_based, demand)
         .await
 }
 
@@ -1767,7 +1794,7 @@ pub(crate) mod tests {
     };
 
     fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::min_builtin(value, rest))
+        block_on(super::min_builtin(None, value, rest))
     }
 
     #[test]

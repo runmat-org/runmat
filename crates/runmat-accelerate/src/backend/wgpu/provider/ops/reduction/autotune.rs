@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 enum PreparedReduction<T> {
-    PipelineOnly(Arc<wgpu::Buffer>),
+    PipelineOnly(runmat_accelerate_api::WgpuBufferOwner),
     Ready(T),
 }
 
@@ -12,6 +12,7 @@ impl WgpuProvider {
     pub(crate) fn fused_reduction_exec(
         &self,
         shader: &str,
+        requirements: runmat_accelerate_api::ProviderShaderRequirements,
         inputs: &[GpuTensorHandle],
         output_shape: &[usize],
         reduce_len: usize,
@@ -19,6 +20,14 @@ impl WgpuProvider {
         workgroup_size: u32,
         flavor: ReductionFlavor,
     ) -> Result<GpuTensorHandle> {
+        if self.precision == crate::backend::wgpu::types::NumericPrecision::F64
+            && requirements == runmat_accelerate_api::ProviderShaderRequirements::Basic
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "unsealed f64 fused reduction shader has no physical feature proof",
+            ));
+        }
+        self.require_selected_shader_requirements(requirements)?;
         if inputs.is_empty() {
             return Err(anyhow!("fused_reduction: no inputs"));
         }
@@ -39,7 +48,25 @@ impl WgpuProvider {
         } else {
             workgroup_size
         };
-        let tuning_key = ReductionAutotuneKey::new(self.precision, num_slices, reduce_len);
+        let limits = &self.adapter_limits;
+        let tile_bytes = crate::backend::wgpu::shaders::reduction::two_pass_tile_bytes(
+            self.precision,
+            workgroup_size,
+        )
+        .ok_or_else(|| anyhow!("fused_reduction: workgroup tile byte overflow"))?;
+        if !workgroup_size.is_power_of_two()
+            || workgroup_size > limits.max_compute_workgroup_size_x
+            || workgroup_size > limits.max_compute_invocations_per_workgroup
+            || tile_bytes > u64::from(limits.max_compute_workgroup_storage_size)
+        {
+            return Err(anyhow!(
+                "fused_reduction: unsupported workgroup {} or {} tile bytes for adapter limits",
+                workgroup_size,
+                tile_bytes
+            ));
+        }
+        let tuning_key =
+            ReductionAutotuneKey::new(self.precision, requirements, num_slices, reduce_len);
         if self.reduction_autotune.is_enabled() {
             if let Some(tuning) = self.reduction_autotune.get(&tuning_key) {
                 return self.execute_reduction_with_strategy(
@@ -271,24 +298,28 @@ impl WgpuProvider {
                 .queue()
                 .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
             let mut entries_vec: Vec<wgpu::BindGroupEntry> = Vec::with_capacity(inputs.len() + 2);
-            let mut input_bufs: Vec<(Arc<wgpu::Buffer>, u64)> = Vec::with_capacity(inputs.len());
+            let mut input_bufs: Vec<(runmat_accelerate_api::WgpuBufferOwner, u64)> =
+                Vec::with_capacity(inputs.len());
             for h in inputs.iter() {
                 let e = self.get_entry(h)?;
                 let bytes = (e.len * self.element_size) as u64;
                 input_bufs.push((e.buffer.clone(), bytes));
             }
             let snapshot_inputs = std::env::var("RUNMAT_FUSED_SNAPSHOT_INPUTS").is_ok();
-            let mut bind_input_bufs: Vec<Arc<wgpu::Buffer>> = Vec::with_capacity(inputs.len());
+            let mut bind_input_bufs: Vec<runmat_accelerate_api::WgpuBufferOwner> =
+                Vec::with_capacity(inputs.len());
             if snapshot_inputs {
                 for (buf, bytes) in input_bufs.iter() {
-                    let snap = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("runmat-fused-input-snapshot"),
-                        size: *bytes,
-                        usage: wgpu::BufferUsages::STORAGE
-                            | wgpu::BufferUsages::COPY_SRC
-                            | wgpu::BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                    }));
+                    let snap = runmat_accelerate_api::WgpuBufferOwner::new(
+                        emission.device().create_buffer(&wgpu::BufferDescriptor {
+                            label: Some("runmat-fused-input-snapshot"),
+                            size: *bytes,
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_SRC
+                                | wgpu::BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        }),
+                    );
                     let mut enc =
                         emission
                             .device()
@@ -414,9 +445,11 @@ impl WgpuProvider {
         chunk_rows: u32,
         flavor: ReductionFlavor,
     ) -> Result<GpuTensorHandle> {
-        let scalar_ty = match self.provider_precision_exec() {
-            runmat_accelerate_api::ProviderPrecision::F64 => "f64",
-            _ => "f32",
+        let precision = match self.provider_precision_exec() {
+            runmat_accelerate_api::ProviderPrecision::F64 => {
+                crate::backend::wgpu::types::NumericPrecision::F64
+            }
+            _ => crate::backend::wgpu::types::NumericPrecision::F32,
         };
         let flags = if shader.contains("const OMITNAN: bool = true") {
             1u32
@@ -430,7 +463,7 @@ impl WgpuProvider {
             u32::try_from(total_chunks).map_err(|_| anyhow!("reduction: too many chunks"))?;
         let partials_len = num_slices.max(1) * (total_chunks as usize);
         let (pass1, pass2) = crate::backend::wgpu::shaders::reduction::build_two_pass_shaders(
-            scalar_ty,
+            precision,
             workgroup_size,
         );
         let prepared = self.with_emission(|emission, _| -> Result<_> {
@@ -534,14 +567,16 @@ impl WgpuProvider {
                 let input_buf = self.get_entry(&inputs[0])?.buffer.clone();
                 let input_buf = if std::env::var("RUNMAT_FUSED_SNAPSHOT_INPUTS").is_ok() {
                     let bytes = (reduce_len * num_slices.max(1) * self.element_size) as u64;
-                    let snap = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("runmat-fused-p1-input-snapshot"),
-                        size: bytes,
-                        usage: wgpu::BufferUsages::STORAGE
-                            | wgpu::BufferUsages::COPY_SRC
-                            | wgpu::BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                    }));
+                    let snap = runmat_accelerate_api::WgpuBufferOwner::new(
+                        emission.device().create_buffer(&wgpu::BufferDescriptor {
+                            label: Some("runmat-fused-p1-input-snapshot"),
+                            size: bytes,
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_SRC
+                                | wgpu::BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        }),
+                    );
                     let mut enc =
                         emission
                             .device()
@@ -852,6 +887,13 @@ impl WgpuProvider {
         match tuning.mode {
             ReductionMode::SinglePass => Some(*tuning),
             ReductionMode::TwoPass { chunk_rows } => {
+                let tile_bytes = crate::backend::wgpu::shaders::reduction::two_pass_tile_bytes(
+                    self.precision,
+                    workgroup_size,
+                )?;
+                if tile_bytes > u64::from(self.adapter_limits.max_compute_workgroup_storage_size) {
+                    return None;
+                }
                 let rows = self.sanitize_chunk_rows_for_limits(
                     chunk_rows,
                     reduce_len,
@@ -865,7 +907,7 @@ impl WgpuProvider {
         }
     }
 
-    fn heuristic_reduction_tuning(
+    pub(super) fn heuristic_reduction_tuning(
         &self,
         reduce_len: usize,
         num_slices: usize,
@@ -892,7 +934,7 @@ impl WgpuProvider {
         }
     }
 
-    fn default_chunk_rows(&self, reduce_len: usize, workgroup_size: u32) -> u32 {
+    pub(super) fn default_chunk_rows(&self, reduce_len: usize, workgroup_size: u32) -> u32 {
         let wg = workgroup_size.max(1) as usize;
         if reduce_len <= wg {
             return reduce_len.min(u32::MAX as usize) as u32;

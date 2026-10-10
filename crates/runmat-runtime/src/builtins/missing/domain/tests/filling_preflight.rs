@@ -28,9 +28,12 @@ impl AccelProvider for RejectingTransfers {
         anyhow::bail!("invalid fillmissing call attempted upload")
     }
 
-    fn upload_numeric_raw(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        _: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::SeqCst);
-        anyhow::bail!("invalid fillmissing call attempted numeric upload")
+        Err(anyhow::anyhow!("invalid fillmissing call attempted numeric upload").into())
     }
 
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {

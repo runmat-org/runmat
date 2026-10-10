@@ -12,6 +12,16 @@ pub(super) struct PostCallWorkspaceEffectFence {
     workspace: Option<Rc<dyn RuntimeWorkspaceService>>,
 }
 
+/// Whether the entire outer boundary is attributable to its selected call.
+/// A primary body error does not prove the checkpoint succeeded: the fence
+/// deliberately preserves that error even when reconciliation also fails.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum PostCallObservationOutcome {
+    CompletedSuccess,
+    CompletedFailure,
+    Unattributable,
+}
+
 impl PostCallWorkspaceEffectFence {
     pub(super) fn capture(context: Option<&RuntimeContext>) -> Self {
         Self {
@@ -33,38 +43,80 @@ impl PostCallWorkspaceEffectFence {
         self.finish_optional_rooted(result)
     }
 
+    #[cfg(test)]
     pub(super) fn finish_sequence(
         self,
         result: Result<ValueSequence, RuntimeError>,
     ) -> Result<ValueSequence, RuntimeError> {
-        self.finish_optional_sequence(result.map(Some))
-            .map(|sequence| sequence.expect("selected builtin result remains present"))
+        self.finish_sequence_observed(result).0
     }
 
+    pub(super) fn finish_sequence_observed(
+        self,
+        result: Result<ValueSequence, RuntimeError>,
+    ) -> (
+        Result<ValueSequence, RuntimeError>,
+        PostCallObservationOutcome,
+    ) {
+        let (result, outcome) = self.finish_optional_sequence_observed(result.map(Some));
+        (
+            result.map(|sequence| sequence.expect("selected builtin result remains present")),
+            outcome,
+        )
+    }
+
+    #[cfg(test)]
     pub(super) fn finish_optional_sequence(
         self,
         result: Result<Option<ValueSequence>, RuntimeError>,
     ) -> Result<Option<ValueSequence>, RuntimeError> {
-        self.finish_optional_rooted(result)
+        self.finish_optional_sequence_observed(result).0
     }
 
+    pub(super) fn finish_optional_sequence_observed(
+        self,
+        result: Result<Option<ValueSequence>, RuntimeError>,
+    ) -> (
+        Result<Option<ValueSequence>, RuntimeError>,
+        PostCallObservationOutcome,
+    ) {
+        self.finish_optional_rooted_observed(result)
+    }
+
+    #[cfg(test)]
     fn finish_optional_rooted<T: runmat_gc::Trace>(
         self,
         result: Result<Option<T>, RuntimeError>,
     ) -> Result<Option<T>, RuntimeError> {
+        self.finish_optional_rooted_observed(result).0
+    }
+
+    fn finish_optional_rooted_observed<T: runmat_gc::Trace>(
+        self,
+        result: Result<Option<T>, RuntimeError>,
+    ) -> (Result<Option<T>, RuntimeError>, PostCallObservationOutcome) {
         if self.workspace.is_none() {
-            return result;
+            let outcome = match &result {
+                Ok(Some(_)) => PostCallObservationOutcome::CompletedSuccess,
+                Err(_) => PostCallObservationOutcome::CompletedFailure,
+                Ok(None) => PostCallObservationOutcome::Unattributable,
+            };
+            return (result, outcome);
         }
         match result {
             // No implementation was selected, so no builtin call completed
             // and this probe must remain observationally inert.
-            Ok(None) => Ok(None),
+            Ok(None) => (Ok(None), PostCallObservationOutcome::Unattributable),
             // A language or implementation failure remains the primary cause.
             // The checkpoint still runs so a catch handler observes effects
             // completed before that failure.
             Err(error) => {
-                let _ = self.checkpoint();
-                Err(error)
+                let outcome = if self.checkpoint().is_ok() {
+                    PostCallObservationOutcome::CompletedFailure
+                } else {
+                    PostCallObservationOutcome::Unattributable
+                };
+                (Err(error), outcome)
             }
             Ok(value) => {
                 // The builtin has already released its argument/result roots,
@@ -85,8 +137,14 @@ impl PostCallWorkspaceEffectFence {
                     })
                     .transpose();
                 let checkpoint = self.checkpoint();
-                let _roots = roots?;
-                checkpoint.map(|()| value)
+                match (roots, checkpoint) {
+                    (Ok(_roots), Ok(())) => {
+                        (Ok(value), PostCallObservationOutcome::CompletedSuccess)
+                    }
+                    (Err(error), _) | (_, Err(error)) => {
+                        (Err(error), PostCallObservationOutcome::Unattributable)
+                    }
+                }
             }
         }
     }
@@ -188,10 +246,11 @@ mod tests {
         let original =
             crate::runtime_error::semantic_error("RunMat:PostCallFixture", "original call failure");
 
-        let error = PostCallWorkspaceEffectFence::capture(Some(&runtime))
-            .finish_sequence(Err(original))
-            .unwrap_err();
+        let (result, outcome) = PostCallWorkspaceEffectFence::capture(Some(&runtime))
+            .finish_sequence_observed(Err(original));
+        let error = result.unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:PostCallFixture"));
+        assert_eq!(outcome, PostCallObservationOutcome::Unattributable);
     }
 
     struct CollectingWorkspace {

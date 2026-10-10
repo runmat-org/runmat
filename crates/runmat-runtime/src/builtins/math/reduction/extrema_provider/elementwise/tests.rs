@@ -8,7 +8,8 @@ use std::{
 mod fixture;
 use fixture::{all_retired_except, provider, Mode};
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn broadcast_geometry_checks_overflow_and_preserves_empty_shapes() {
     assert!(broadcast_repeats(&[usize::MAX, 1], &[1, 2]).is_err());
     assert_eq!(
@@ -21,10 +22,11 @@ fn broadcast_geometry_checks_overflow_and_preserves_empty_shapes() {
     assert!(broadcast_repeats(&[2, 3], &[4, 3]).unwrap().is_none());
 }
 
-#[test]
-fn successful_fill_and_unsupported_pair_keep_supported_scalar_max_route() {
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn unsupported_fill_before_allocation_keeps_supported_scalar_max_route() {
     for scalar_left in [false, true] {
-        let provider = provider(Mode::UnsupportedPair);
+        let provider = provider(Mode::UnsupportedFill);
         let _selected = ThreadProviderGuard::set(Some(provider));
         let input = provider.allocate(vec![1.0, 4.0], vec![2, 1]);
         let resident = Value::GpuTensor(input.handle.clone());
@@ -48,6 +50,42 @@ fn successful_fill_and_unsupported_pair_keep_supported_scalar_max_route() {
     }
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn successful_fill_then_unsupported_pair_is_terminal_without_scalar_replay() {
+    for scalar_left in [false, true] {
+        let provider = provider(Mode::UnsupportedPair);
+        let _selected = ThreadProviderGuard::set(Some(provider));
+        let input = provider.allocate(vec![1.0, 4.0], vec![2, 1]);
+        let original = input.handle.wire_descriptor();
+        let resident = Value::GpuTensor(input.handle.clone());
+        let args = if scalar_left {
+            [Value::Num(3.0), resident]
+        } else {
+            [resident, Value::Num(3.0)]
+        };
+        let error = futures::executor::block_on(crate::call_builtin_async("max", &args))
+            .expect_err("unsupported pair after fill cannot replay scalar_max");
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        let cause = std::error::Error::source(&error)
+            .and_then(|source| {
+                source.downcast_ref::<runmat_accelerate_api::ProviderExecutionError>()
+            })
+            .expect("typed post-fill pair failure retained");
+        assert!(cause.is_after_effect());
+        assert!(!cause.is_unsupported());
+        assert_eq!(provider.fills.load(Ordering::SeqCst), 1);
+        assert_eq!(provider.values.load(Ordering::SeqCst), 0);
+        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+        assert_eq!(input.handle.wire_descriptor(), original);
+        input.handle.allocation_lease().validate_live().unwrap();
+        drop((error, args));
+        all_retired_except(provider, &[input.handle.buffer_id()]);
+        drop(input.handle);
+        all_retired_except(provider, &[]);
+    }
+}
+
 async fn full(name: &str, input: Value, other: Value) -> BuiltinResult<(Value, Value)> {
     match name {
         "min" => crate::builtins::math::reduction::min::evaluate(input, &[other])
@@ -58,7 +96,8 @@ async fn full(name: &str, input: Value, other: Value) -> BuiltinResult<(Value, V
             .map(|result| result.into_pair()),
     }
 }
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn builtin_values_only_skips_origin_work_but_public_evaluate_preserves_exact_origins() {
     for name in ["min", "max"] {
         let provider = provider(Mode::Normal);
@@ -135,7 +174,8 @@ fn builtin_values_only_skips_origin_work_but_public_evaluate_preserves_exact_ori
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn malformed_stages_and_pending_futures_preserve_inputs_and_retire_owned_intermediates() {
     for mode in [
         Mode::WrongValues,
@@ -196,7 +236,8 @@ fn malformed_stages_and_pending_futures_preserve_inputs_and_retire_owned_interme
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn valid_immutable_result_alias_is_adopted_without_retiring_caller() {
     let provider = provider(Mode::AliasValues);
     let _selected = ThreadProviderGuard::set(Some(provider));
@@ -220,7 +261,8 @@ fn valid_immutable_result_alias_is_adopted_without_retiring_caller() {
     all_retired_except(provider, &[]);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn broadcast_and_scalar_routes_keep_validated_values_and_exact_host_origins() {
     for name in ["min", "max"] {
         let provider = provider(Mode::Normal);

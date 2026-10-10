@@ -41,16 +41,23 @@ impl Outputs {
         }
     }
 
-    pub(super) async fn run_protected<T>(
+    pub(super) async fn run_protected<T, E: Into<runmat_accelerate_api::ProviderExecutionError>>(
         &self,
-        future: impl std::future::Future<Output = anyhow::Result<T>>,
-    ) -> anyhow::Result<T> {
+        future: impl std::future::Future<Output = Result<T, E>>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<T> {
         let guards: Vec<_> = self
             .protected()
             .into_iter()
             .map(runmat_accelerate_api::ResidencyRestoreGuard::new)
             .collect();
-        let result = future.await;
+        let result = future.await.map_err(|error| {
+            let error = error.into();
+            if self.owned.is_empty() {
+                error
+            } else {
+                error.after_effect()
+            }
+        });
         drop(guards);
         result
     }

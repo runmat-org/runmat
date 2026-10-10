@@ -123,11 +123,7 @@ pub(super) async fn output_gpu(
             };
             let result = match result {
                 Ok(result) => result,
-                Err(error)
-                    if crate::builtins::common::gpu_helpers::provider_hook_is_unsupported(
-                        &error,
-                    ) =>
-                {
+                Err(error) if error.is_unsupported() => {
                     return output_host_hold_from_frames(
                         provider,
                         handle,

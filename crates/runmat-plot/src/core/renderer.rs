@@ -983,11 +983,13 @@ impl WgpuRenderer {
         emission: &runmat_accelerate_api::WgpuEmission<'_>,
         gpu: Option<&GpuVertexBuffer>,
         cpu_vertices: &[Vertex],
-    ) -> Option<Arc<wgpu::Buffer>> {
+    ) -> Option<runmat_accelerate_api::WgpuBufferOwner> {
         if let Some(buffer) = gpu {
             Some(buffer.buffer.clone())
         } else if !cpu_vertices.is_empty() {
-            Some(Arc::new(self.create_vertex_buffer(emission, cpu_vertices)))
+            Some(runmat_accelerate_api::WgpuBufferOwner::new(
+                self.create_vertex_buffer(emission, cpu_vertices),
+            ))
         } else {
             None
         }

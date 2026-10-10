@@ -6,9 +6,12 @@ use runmat_accelerate_api::{
 use runmat_value::{Tensor, Value};
 use std::{
     future::Future,
-    sync::{Mutex, OnceLock},
+    sync::Mutex,
     task::{Context, Poll},
 };
+
+#[path = "support/retained_provider.rs"]
+mod retained_provider;
 
 #[derive(Default)]
 struct State {
@@ -57,8 +60,7 @@ impl AccelProvider for Provider {
 
 #[test]
 fn failed_and_cancelled_downloads_restore_borrowed_residency_without_free_or_retry() {
-    static PROVIDER: OnceLock<Provider> = OnceLock::new();
-    let provider = PROVIDER.get_or_init(|| Provider {
+    let provider = retained_provider::retained_test_provider!(PROVIDER: Provider = Provider {
         inner: InProcessProvider::new(),
         state: Mutex::new(State::default()),
     });

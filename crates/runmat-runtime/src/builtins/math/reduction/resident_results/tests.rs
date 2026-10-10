@@ -28,15 +28,18 @@ impl AccelProvider for Provider {
             })?
             .handle)
     }
-    fn upload_numeric_raw(&self, view: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        view: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         if self.uploads.fetch_add(1, Ordering::SeqCst) == 1 {
             if self.alias_second {
                 return Ok(self.first.lock().unwrap().take().unwrap());
             }
-            anyhow::bail!("injected second-output upload failure");
+            return Err(anyhow::anyhow!("injected second-output upload failure").into());
         }
         let HostNumericDataView::F64(data) = view.data else {
-            anyhow::bail!("fixture expects double scalar restoration");
+            return Err(anyhow::anyhow!("fixture expects double scalar restoration").into());
         };
         let output = self.owner.allocate_numeric(HostNumericTensorOwned {
             data: HostNumericDataOwned::F64(data.to_vec()),

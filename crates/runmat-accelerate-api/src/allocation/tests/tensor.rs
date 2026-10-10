@@ -1,6 +1,6 @@
 use super::*;
 
-fn tensor(owner: &Arc<TestOwner>) -> GpuTensorHandle {
+fn tensor(owner: &Shared<TestOwner>) -> GpuTensorHandle {
     GpuTensorHandle::from_allocation(
         AllocationLease::register(ID, owner.clone()).unwrap(),
         GpuTensorView::contiguous(vec![1, 2]),
@@ -170,7 +170,8 @@ fn native_logical_bytes_require_producer_evidence_not_public_view_flag() {
     );
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn failed_explicit_retirement_retains_the_record_owner_without_live_reacquisition() {
     let owner = TestOwner::new(
         ID,
@@ -180,7 +181,7 @@ fn failed_explicit_retirement_retains_the_record_owner_without_live_reacquisitio
     );
     let handle = tensor(&owner);
     let weak = owner.weak_lease(ID);
-    let owner_weak = Arc::downgrade(&owner);
+    let owner_weak = Shared::downgrade(&owner);
     drop(owner);
     let failure = handle.release().unwrap_err().physical.unwrap_err();
     assert_eq!(failure.identity(), ID);
@@ -202,7 +203,7 @@ fn release_and_weak_acquisition_race_never_retire_a_live_acquired_view() {
         let handle = tensor(&owner);
         let wire = handle.wire_descriptor();
         let weak = owner.weak_lease(ID);
-        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         let worker = {
             let barrier = barrier.clone();
             std::thread::spawn(move || {

@@ -1,5 +1,119 @@
 use wgpu::{BindGroupLayoutEntry, BindingType, BufferBindingType, ShaderStages};
 
+/// Serialized cache tag for the typed modulation binding recipe.
+pub(crate) const MODULATION_LAYOUT_TAG: &str = "runmat-modulate-constellation-layout";
+pub(crate) const SOFTMAX_ROWS_LAYOUT_TAG: &str = "runmat-softmax-rows-layout";
+pub(crate) const TRIANGULAR_SOLVE_LAYOUT_TAG: &str = "runmat-triangular-solve-layout";
+pub(crate) const MATMUL_EPILOGUE_LAYOUT_TAG: &str = "runmat-matmul-epilogue-layout";
+pub(crate) const INTEGER_COMPARE_LAYOUT_TAG: &str = "runmat-integer-compare-bgl";
+pub(crate) const ROUND_DECIMALS_LAYOUT_TAG: &str = "runmat-round-decimals";
+pub(crate) const ROUND_SIGNIFICANT_LAYOUT_TAG: &str = "runmat-round-significant";
+
+pub(crate) fn build_matmul_epilogue_bgl(
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
+) -> wgpu::BindGroupLayout {
+    let entries = [
+        storage_read_entry(0),
+        storage_read_entry(1),
+        storage_read_write_entry(2),
+        uniform_entry(3),
+        storage_read_entry(4),
+        storage_read_entry(5),
+        uniform_entry(6),
+    ];
+    emission
+        .device()
+        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some(MATMUL_EPILOGUE_LAYOUT_TAG),
+            entries: &entries,
+        })
+}
+
+pub(crate) fn build_integer_compare_bgl(
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
+) -> wgpu::BindGroupLayout {
+    let entries = [
+        storage_read_entry(0),
+        storage_read_entry(1),
+        storage_read_write_entry(2),
+        uniform_entry(3),
+    ];
+    emission
+        .device()
+        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some(INTEGER_COMPARE_LAYOUT_TAG),
+            entries: &entries,
+        })
+}
+
+pub(crate) fn build_round_digits_bgl(
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
+) -> wgpu::BindGroupLayout {
+    let entries = [
+        storage_read_entry(0),
+        storage_read_write_entry(1),
+        uniform_entry(2),
+    ];
+    emission
+        .device()
+        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("runmat-round-digits-bgl"),
+            entries: &entries,
+        })
+}
+
+pub(crate) fn build_triangular_solve_bgl(
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
+) -> wgpu::BindGroupLayout {
+    let entries = [
+        storage_read_entry(0),
+        storage_read_entry(1),
+        storage_read_entry(2),
+        storage_read_write_entry(3),
+        uniform_entry(4),
+    ];
+    emission
+        .device()
+        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some(TRIANGULAR_SOLVE_LAYOUT_TAG),
+            entries: &entries,
+        })
+}
+
+pub(crate) fn build_softmax_rows_bgl(
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
+) -> wgpu::BindGroupLayout {
+    let entries = [
+        storage_read_entry(0),
+        storage_read_write_entry(1),
+        uniform_entry(2),
+    ];
+    emission
+        .device()
+        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some(SOFTMAX_ROWS_LAYOUT_TAG),
+            entries: &entries,
+        })
+}
+
+pub(crate) fn build_modulation_bgl(
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
+) -> wgpu::BindGroupLayout {
+    let entries = [
+        storage_read_entry(0),
+        storage_read_entry(1),
+        storage_read_write_entry(2),
+        storage_read_write_entry(3),
+        uniform_entry(4),
+    ];
+    emission
+        .device()
+        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("warmup-modulate-constellation-bgl"),
+            entries: &entries,
+        })
+}
+
 pub fn storage_read_entry(binding: u32) -> BindGroupLayoutEntry {
     BindGroupLayoutEntry {
         binding,
@@ -99,20 +213,11 @@ pub fn build_bgl_for_layout_tag(
                 },
             ));
         }
-        "runmat-modulate-constellation-layout" => {
-            let entries = [
-                storage_read_entry(0),
-                storage_read_entry(1),
-                storage_read_write_entry(2),
-                storage_read_write_entry(3),
-                uniform_entry(4),
-            ];
-            return Some(emission.device().create_bind_group_layout(
-                &wgpu::BindGroupLayoutDescriptor {
-                    label: Some("warmup-modulate-constellation-bgl"),
-                    entries: &entries,
-                },
-            ));
+        MODULATION_LAYOUT_TAG => return Some(build_modulation_bgl(emission)),
+        MATMUL_EPILOGUE_LAYOUT_TAG => return Some(build_matmul_epilogue_bgl(emission)),
+        INTEGER_COMPARE_LAYOUT_TAG => return Some(build_integer_compare_bgl(emission)),
+        ROUND_DECIMALS_LAYOUT_TAG | ROUND_SIGNIFICANT_LAYOUT_TAG => {
+            return Some(build_round_digits_bgl(emission));
         }
         "runmat-fill-layout" => {
             let entries = [storage_read_write_entry(0), uniform_entry(1)];

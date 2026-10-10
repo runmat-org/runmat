@@ -5,13 +5,19 @@ use std::collections::{BTreeMap, BTreeSet};
 
 #[cfg(feature = "native-accel")]
 pub(crate) fn fusion_stage_source_fingerprint(
-    revision: &runmat_mir::analysis::AnalysisRevision,
-    portable_origin: runmat_types::ProgramFunctionId,
-    owner: runmat_types::ProgramFunctionId,
-    mir_local_count: usize,
-    statements: &[crate::bytecode::fusion_stage::CompiledFusionStageStatement],
+    projection: &crate::bytecode::FusionStageProjection,
     stream: &crate::bytecode::fusion_stage::FusionStageStream<'_>,
 ) -> Result<String, serde_json::Error> {
+    let crate::bytecode::FusionStageProjection {
+        revision,
+        portable_origin,
+        selection_origin,
+        owner,
+        mir_local_count,
+        statements,
+        private_temporary_slots,
+        source_fingerprint: _,
+    } = projection;
     let mut payload = Vec::new();
     macro_rules! append {
         ($value:expr) => {{
@@ -30,19 +36,35 @@ pub(crate) fn fusion_stage_source_fingerprint(
     append!(stream.catch_scopes);
     append!(&stream.resume_points.iter().collect::<Vec<_>>());
     append!(&stream.var_count);
-    append!(&stream.source_id.map(|source| match source {
-        super::BytecodeSourceRef::Program(id) => SemanticSourceRevision::Program(id),
-        super::BytecodeSourceRef::Runtime(reference) => {
-            SemanticSourceRevision::Runtime(reference.semantic_content_revision())
-        }
-    }));
+    append!(&semantic_source_revision(stream.source_id));
+    // Absence retains the exact pre-origin fingerprint for legacy artifacts;
+    // only a compiler-minted origin can authorize new image proposals.
+    if let Some(origin) = selection_origin {
+        append!("selected-mir-fusion-stage-origin-v1");
+        append!(&origin);
+    }
+    if !private_temporary_slots.is_empty() {
+        append!("selected-mir-private-temporary-slots-v1");
+        append!(private_temporary_slots);
+    }
     Ok(runmat_execution::Digest::sha256(&payload).to_string())
 }
 
 #[derive(serde::Serialize)]
-enum SemanticSourceRevision {
+pub(super) enum SemanticSourceRevision {
     Program(runmat_types::ProgramSourceId),
     Runtime(runmat_execution::Digest),
+}
+
+pub(super) fn semantic_source_revision(
+    source: Option<super::BytecodeSourceRef>,
+) -> Option<SemanticSourceRevision> {
+    source.map(|source| match source {
+        super::BytecodeSourceRef::Program(id) => SemanticSourceRevision::Program(id),
+        super::BytecodeSourceRef::Runtime(reference) => {
+            SemanticSourceRevision::Runtime(reference.semantic_content_revision())
+        }
+    })
 }
 
 pub fn semantic_definition_fingerprint(
@@ -105,12 +127,7 @@ pub fn semantic_definition_fingerprint(
     append!(display_name);
     append!(class_method_owner);
     append!(private_owner_scope);
-    append!(&source_id.map(|source| match source {
-        super::BytecodeSourceRef::Program(id) => SemanticSourceRevision::Program(id),
-        super::BytecodeSourceRef::Runtime(reference) => {
-            SemanticSourceRevision::Runtime(reference.semantic_content_revision())
-        }
-    }));
+    append!(&semantic_source_revision(*source_id));
     append!(source_role);
     append!(capabilities);
     #[cfg(feature = "native-accel")]
@@ -147,3 +164,7 @@ pub fn semantic_definition_fingerprint(
     append!(collective_contracts);
     Ok(runmat_execution::Digest::sha256(&payload).to_string())
 }
+
+#[cfg(all(test, feature = "native-accel"))]
+#[path = "semantic_fingerprint/tests.rs"]
+mod tests;

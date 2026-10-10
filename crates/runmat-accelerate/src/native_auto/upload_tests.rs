@@ -34,12 +34,16 @@ impl AccelProvider for Provider {
     ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
         Box::pin(async { anyhow::bail!("unused") })
     }
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         match self.mode {
             Mode::Unsupported => Err(runmat_accelerate_api::unsupported_provider_operation(
                 "integer transfer test",
-            )),
-            Mode::Failure => Err(anyhow!("injected integer allocation failure")),
+            )
+            .into()),
+            Mode::Failure => Err(anyhow!("injected integer allocation failure").into()),
             Mode::Malformed | Mode::Success => {
                 let HostNumericDataView::I64(values) = host.data else {
                     panic!("exact integer upload")

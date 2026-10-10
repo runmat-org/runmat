@@ -6,16 +6,18 @@ pub(crate) fn helpers(precision: NumericPrecision) -> String {
     let (classification, infinity, nan, cutoff) = match precision {
         NumericPrecision::F32 => (
             "let bits = bitcast<u32>(a);\nlet magnitude = bits & 0x7fffffffu;\nlet is_nan = magnitude > 0x7f800000u;\nlet is_infinite = magnitude == 0x7f800000u;\nlet is_zero = magnitude == 0u;\nlet negative = (bits & 0x80000000u) != 0u;",
-            "bitcast<f32>(0x7f800000u)", "bitcast<f32>(0x7fc00000u)", "1.0e-4",
+            "bitcast<f32>(infinity_bits)", "bitcast<f32>(nan_bits)", "1.0e-4",
         ),
         NumericPrecision::F64 => (
-            "let bits = bitcast<vec2<u32>>(a);\nlet magnitude = bits.y & 0x7fffffffu;\nlet is_nan = magnitude > 0x7ff00000u || (magnitude == 0x7ff00000u && bits.x != 0u);\nlet is_infinite = magnitude == 0x7ff00000u && bits.x == 0u;\nlet is_zero = magnitude == 0u && bits.x == 0u;\nlet negative = (bits.y & 0x80000000u) != 0u;",
-            "bitcast<f64>(vec2<u32>(0u, 0x7ff00000u))", "bitcast<f64>(vec2<u32>(0u, 0x7ff80000u))", "1.0e-6",
+            "let low = runmat_f64_low(a);\nlet high = runmat_f64_high(a);\nlet magnitude = high & 0x7fffffffu;\nlet is_nan = magnitude > 0x7ff00000u || (magnitude == 0x7ff00000u && low != 0u);\nlet is_infinite = magnitude == 0x7ff00000u && low == 0u;\nlet is_zero = magnitude == 0u && low == 0u;\nlet negative = (high & 0x80000000u) != 0u;",
+            "runmat_f64_from_words(0u, 0x7ff00000u)", "runmat_f64_from_words(0u, 0x7ff80000u)", "1.0e-6",
         ),
     };
     format!(
         r#"
 fn runmat_log(a: {ty}) -> {ty} {{
+    let infinity_bits: u32 = 0x7f800000u;
+    let nan_bits: u32 = 0x7fc00000u;
     {classification}
     if is_nan {{ return a; }}
     if is_zero {{ return -{infinity}; }}
@@ -24,6 +26,7 @@ fn runmat_log(a: {ty}) -> {ty} {{
     return log(a);
 }}
 fn runmat_log1p(a: {ty}) -> {ty} {{
+    let nan_bits: u32 = 0x7fc00000u;
     {classification}
     if is_nan {{ return a; }}
     if is_infinite {{
@@ -53,10 +56,13 @@ mod tests {
     fn logarithms_classify_encodings_before_finite_math() {
         for precision in [NumericPrecision::F32, NumericPrecision::F64] {
             let source = helpers(precision);
-            assert!(source.contains("bitcast<"));
+            assert!(source.contains(match precision {
+                NumericPrecision::F32 => "bitcast<u32>",
+                NumericPrecision::F64 => "runmat_f64_high",
+            }));
             assert!(source.find("if is_nan").unwrap() < source.find("return log(a)").unwrap());
-            assert!(source.contains("if is_zero { return -bitcast"));
-            assert!(source.contains("if negative { return bitcast"));
+            assert!(source.contains("if is_zero { return -"));
+            assert!(source.contains("if negative { return "));
             assert!(source.contains("return runmat_log("));
         }
     }

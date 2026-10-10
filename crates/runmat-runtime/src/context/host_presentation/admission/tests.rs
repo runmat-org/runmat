@@ -31,6 +31,8 @@ fn budget_request(logical: u64, physical: u64, capacity: u64) -> WholeWorkPlacem
             region: None,
             operation: "imhist".into(),
             runtime_facts: digest,
+            provider_provenance: None,
+            graph_output_authority: None,
             revision: PlacementRevision {
                 program: None,
                 catalog: digest,

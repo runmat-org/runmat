@@ -3,6 +3,7 @@
 mod broadcast;
 mod dispatch;
 mod expanded;
+mod fallback;
 mod operation;
 mod residency;
 mod scalar;
@@ -14,6 +15,7 @@ pub(super) use dispatch::{
     try_pair,
 };
 pub(super) use expanded::ExpandedPair;
+pub(super) use fallback::HostFallbackAdmission;
 pub(super) use operation::ArithmeticProviderOperation;
 pub(super) use residency::resident_output_from_sources;
 pub(super) use scalar::{device_real_scalar, host_real_scalar};

@@ -154,11 +154,11 @@ async fn pskmod_gpu(
                     }
                     return gpu_helpers::complex_gpu_value(out);
                 }
-                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                Err(error) if error.is_unsupported() => {}
                 Err(error) => {
                     return Err(crate::runtime_error::with_provider_execution_source(
                         pskmod_error(format!("pskmod: provider modulation failed: {error}")),
-                        runmat_accelerate_api::ProviderExecutionError::from(error),
+                        error,
                     ));
                 }
             }

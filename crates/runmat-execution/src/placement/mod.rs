@@ -24,8 +24,8 @@ pub use decision::{
 };
 pub use graph::{
     CandidatePeakLiveDemand, CandidateResourceDemand, PlacementGraph, PlacementGraphCandidate,
-    PlacementGraphEdge, PlacementGraphLimits, PlacementGraphNode, PlacementPlanRequest,
-    ResourceBoundUnavailable, ResourceByteBound,
+    PlacementGraphEdge, PlacementGraphLimits, PlacementGraphNode, PlacementGraphOutputFact,
+    PlacementPlanRequest, ResourceBoundUnavailable, ResourceByteBound, SourceOutputOrdinal,
 };
 pub use resource::{PlacementResourceSnapshot, ProviderResourceSnapshot};
 pub use whole_work::{

@@ -1,7 +1,7 @@
 use runmat_accelerate_api::{
     test_support::{RetirementProbe, TestAllocation, TestAllocationOwner},
-    AccelDownloadFuture, AccelNumericDownloadFuture, AccelProviderFuture, HostNumericDataOwned,
-    HostNumericDataView, HostNumericTensorOwned, HostTensorView,
+    AccelDownloadFuture, AccelNumericDownloadFuture, HostNumericDataOwned, HostNumericDataView,
+    HostNumericTensorOwned, HostTensorView,
 };
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use std::sync::{
@@ -20,6 +20,7 @@ pub(super) enum Mode {
     PendingDownload,
     FailedValues,
     UnsupportedPair,
+    UnsupportedFill,
 }
 
 pub(super) struct Provider {
@@ -147,7 +148,7 @@ impl AccelProvider for Provider {
         &'a self,
         left: &'a GpuTensorHandle,
         right: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let output = self.output(left, &self.read(right)?, false)?;
             if matches!(self.mode, Mode::PendingValues) {
@@ -160,12 +161,13 @@ impl AccelProvider for Provider {
         &'a self,
         left: &'a GpuTensorHandle,
         right: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             if matches!(self.mode, Mode::UnsupportedPair) {
                 return Err(runmat_accelerate_api::unsupported_provider_operation(
                     "pair extrema unavailable",
-                ));
+                )
+                .into());
             }
             let output = self.output(left, &self.read(right)?, true)?;
             if matches!(self.mode, Mode::PendingValues) {
@@ -178,14 +180,14 @@ impl AccelProvider for Provider {
         &'a self,
         _: &'a GpuTensorHandle,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async { panic!("comparison masks are not extrema origins") })
     }
     fn elem_ge<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async { panic!("comparison masks are not extrema origins") })
     }
     fn scalar_min(&self, input: &GpuTensorHandle, scalar: f64) -> anyhow::Result<GpuTensorHandle> {
@@ -196,6 +198,11 @@ impl AccelProvider for Provider {
     }
     fn fill_like(&self, input: &GpuTensorHandle, scalar: f64) -> anyhow::Result<GpuTensorHandle> {
         self.fills.fetch_add(1, Ordering::SeqCst);
+        if matches!(self.mode, Mode::UnsupportedFill) {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "fill unavailable before allocation",
+            ));
+        }
         let shape = if matches!(self.mode, Mode::WrongFill) {
             vec![1, 1]
         } else {

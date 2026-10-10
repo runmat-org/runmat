@@ -339,7 +339,10 @@ impl AccelProvider for SiblingAliasProvider {
             })
         })
     }
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let index = self.uploads.fetch_add(1, Ordering::SeqCst);
         let mut retained = self.retained.lock().unwrap();
         if index == 1 {

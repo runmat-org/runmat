@@ -771,6 +771,7 @@ impl WebRenderer {
             return Ok(());
         }
 
+        let preparation: Vec<wgpu::CommandBuffer>;
         if !use_overlay {
             // Existing fast path: full-surface render (clears).
             let use_msaa = requested_samples > 1;
@@ -814,6 +815,7 @@ impl WebRenderer {
                     )
                     .map_err(|err| WebRendererError::Render(err.to_string()))?;
             }
+            preparation = Vec::new();
         } else {
             #[cfg(feature = "egui-overlay")]
             {
@@ -968,7 +970,7 @@ impl WebRenderer {
                     pixels_per_point: full_output.pixels_per_point,
                 };
 
-                overlay.egui_renderer.update_buffers(
+                preparation = overlay.egui_renderer.update_buffers(
                     emission.device(),
                     emission.queue(),
                     &mut encoder,
@@ -1125,24 +1127,22 @@ impl WebRenderer {
 
                 // Render egui on top.
                 {
-                    let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("runmat-plot-web-egui"),
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: &frame_view,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Load,
-                                store: wgpu::StoreOp::Store,
-                            },
-                        })],
-                        depth_stencil_attachment: None,
-                        timestamp_writes: None,
-                        occlusion_query_set: None,
-                    });
-                    #[cfg(target_arch = "wasm32")]
-                    let mut render_pass = render_pass.forget_lifetime();
-                    #[cfg(not(target_arch = "wasm32"))]
-                    let mut render_pass = render_pass;
+                    let mut render_pass = encoder
+                        .begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("runmat-plot-web-egui"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: &frame_view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Load,
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            })],
+                            depth_stencil_attachment: None,
+                            timestamp_writes: None,
+                            occlusion_query_set: None,
+                        })
+                        .forget_lifetime();
                     overlay
                         .egui_renderer
                         .render(&mut render_pass, &paint_jobs, &screen_descriptor);
@@ -1152,9 +1152,17 @@ impl WebRenderer {
                     overlay.egui_renderer.free_texture(id);
                 }
             }
+            #[cfg(not(feature = "egui-overlay"))]
+            {
+                preparation = Vec::new();
+            }
         }
 
-        emission.queue().submit(Some(encoder.finish()));
+        emission.queue().submit(
+            preparation
+                .into_iter()
+                .chain(std::iter::once(encoder.finish())),
+        );
         frame.present();
         Ok(())
     }

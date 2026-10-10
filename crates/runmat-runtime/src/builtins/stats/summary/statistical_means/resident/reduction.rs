@@ -1,5 +1,8 @@
 //! Dimension selection and NaN-aware mean on one provider.
-use super::{admitted_real, expected_shape, provider_failure, reject_output, Failure};
+use super::{
+    admitted_real, expected_shape, reject_output, Failure, ObserveResidentHook,
+    ResidentStageProgress,
+};
 use crate::builtins::stats::summary::statistical_means::options::{
     Axes, MissingMode, ReductionKind,
 };
@@ -41,13 +44,14 @@ async fn sum(
     input: &GpuTensorHandle,
     axes: &[usize],
     protected: &[&GpuTensorHandle],
+    progress: &mut ResidentStageProgress,
 ) -> Result<GpuTensorHandle, Failure> {
     let mut current = input.clone();
     for axis in axes {
         let next = provider
             .reduce_sum_dim(&current, *axis)
             .await
-            .map_err(|source| provider_failure(kind, source))?;
+            .observe(progress, kind)?;
         let expected = expected_shape(current.shape(), &Axes::Dims(vec![axis + 1]));
         let next = admitted_real(
             kind,
@@ -77,10 +81,12 @@ pub(super) async fn mean(
     transformed: &GpuTensorHandle,
     axes: &Axes,
     missing: MissingMode,
+    progress: &mut ResidentStageProgress,
 ) -> Result<GpuTensorHandle, Failure> {
     let selected = selected_axes(original.shape(), axes);
-    let precision =
-        runmat_accelerate_api::handle_precision(original).ok_or(Failure::Unsupported)?;
+    let precision = runmat_accelerate_api::handle_precision(original).ok_or_else(|| {
+        progress.unavailable(kind, "resident mean input has no floating precision")
+    })?;
     if selected.is_empty() {
         return Ok(transformed.clone());
     }
@@ -90,7 +96,7 @@ pub(super) async fn mean(
             let next = provider
                 .reduce_mean_dim(&current, *axis)
                 .await
-                .map_err(|source| provider_failure(kind, source))?;
+                .observe(progress, kind)?;
             let expected = expected_shape(current.shape(), &Axes::Dims(vec![axis + 1]));
             current = admitted_real(kind, provider, original, next, &expected, precision)?;
         }
@@ -98,7 +104,7 @@ pub(super) async fn mean(
     }
     let cleaned = provider
         .map_nan_to_zero(transformed)
-        .map_err(|source| provider_failure(kind, source))?;
+        .observe(progress, kind)?;
     let cleaned = admitted_real(
         kind,
         provider,
@@ -113,9 +119,7 @@ pub(super) async fn mean(
         &[original, transformed],
         "resident NaN map aliased an input",
     )?;
-    let mask = provider
-        .not_nan_mask(original)
-        .map_err(|source| provider_failure(kind, source))?;
+    let mask = provider.not_nan_mask(original).observe(progress, kind)?;
     let mask = admitted_real(kind, provider, original, mask, original.shape(), precision)?;
     let mask = protect_live_operands(
         kind,
@@ -129,6 +133,7 @@ pub(super) async fn mean(
         &cleaned,
         &selected,
         &[original, transformed, &mask],
+        progress,
     )
     .await?;
     let denominator = sum(
@@ -137,12 +142,13 @@ pub(super) async fn mean(
         &mask,
         &selected,
         &[original, transformed, &cleaned, &numerator],
+        progress,
     )
     .await?;
     let result = provider
         .elem_div(&numerator, &denominator)
         .await
-        .map_err(|source| provider_failure(kind, source))?;
+        .observe(progress, kind)?;
     let result = admitted_real(
         kind,
         provider,
@@ -170,7 +176,7 @@ pub(super) async fn mean(
     let output = provider
         .unary_single(&result)
         .await
-        .map_err(|source| provider_failure(kind, source))?;
+        .observe(progress, kind)?;
     let output = admitted_real(
         kind,
         provider,
@@ -206,6 +212,30 @@ mod tests {
     use runmat_value::Value;
 
     #[test]
+    fn completed_resident_mean_stage_rejects_unsupported_replay() {
+        let unsupported = || {
+            runmat_accelerate_api::unsupported_provider_operation(
+                "fixture rejects a later mean stage",
+            )
+        };
+        let mut progress = ResidentStageProgress::default();
+        assert!(matches!(
+            progress.observe::<(), _>(ReductionKind::Harmonic, Err(unsupported())),
+            Err(Failure::Unsupported)
+        ));
+        progress
+            .observe(ReductionKind::Harmonic, Ok::<(), anyhow::Error>(()))
+            .unwrap();
+        let Err(Failure::Execution(error)) =
+            progress.observe::<(), _>(ReductionKind::Harmonic, Err(unsupported()))
+        else {
+            panic!("completed mean stage must not replay")
+        };
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert!(error.source.is_some());
+    }
+
+    #[test]
     fn omitted_single_observations_accumulate_in_double_and_publish_single() {
         crate::builtins::common::test_support::with_test_provider(|provider| {
             let samples = [16_777_216.0_f32, 1.0, 1.0, f32::NAN];
@@ -224,6 +254,7 @@ mod tests {
                 &input,
                 &Axes::Default,
                 MissingMode::Omit,
+                &mut ResidentStageProgress::default(),
             ))
             .unwrap();
             assert_eq!(

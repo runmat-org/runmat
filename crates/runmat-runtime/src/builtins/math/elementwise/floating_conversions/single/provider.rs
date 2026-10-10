@@ -85,11 +85,15 @@ pub(super) async fn single_from_gpu(
                     ),
                 ));
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(error) if error.is_unsupported() => {}
             Err(error) => {
-                return Err(single_error_with_detail(
+                let mut failure = single_error_with_detail(
                     &SINGLE_ERROR_INTERNAL,
                     format!("provider unary_single failed: {error}"),
+                );
+                failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    failure, error,
                 ));
             }
         }

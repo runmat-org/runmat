@@ -8,6 +8,7 @@
 //! Nested operations should share the current recorder, not record a second total.
 mod activation;
 mod budget;
+mod resource_activation;
 mod state;
 #[cfg(feature = "wgpu")]
 mod wgpu_progress;
@@ -20,8 +21,11 @@ pub use activation::{
     current_provider_observation, observe_provider_future, with_provider_observation,
 };
 pub use budget::ProviderObservationBudget;
+pub use resource_activation::{current_provider_resource_scope, observe_provider_resource_future};
 pub use state::{
     ProviderCompletedSubmission, ProviderOperationReceipt, ProviderOperationRecorder,
+    ProviderResourcePhasePlan, ProviderResourcePhaseToken, ProviderResourceScope,
+    ProviderResourceSnapshot, ProviderResourceTicket, ProviderScopedResourceSnapshot,
     ProviderSubmission,
 };
 
@@ -50,10 +54,6 @@ impl ProviderObservationClock for Clock {
     }
 }
 
-pub(super) fn clock() -> Arc<dyn ProviderObservationClock> {
-    Arc::new(Clock(runmat_time::Instant::now()))
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProviderObservationFailure {
     Cancelled,
@@ -66,6 +66,14 @@ pub enum ProviderObservationFailure {
     ExecutionUnproven,
     SharedRuntimeFallback,
 }
+
+impl std::fmt::Display for ProviderObservationFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "provider observation failed: {self:?}")
+    }
+}
+
+impl std::error::Error for ProviderObservationFailure {}
 
 /// Reported by the admitted operation owner, never inferred from output
 /// residency or the presence of transfer submissions. Selected execution means
@@ -175,6 +183,8 @@ pub struct ProviderOperationObservation {
     pub stages: [ProviderStageMeasurement; ProviderObservationStage::COUNT],
     /// Actual selected pipeline events, not global cache-counter differences.
     pub pipelines: ProviderPipelineObservations,
+    /// Explicitly issued resource tickets only; None means no coverage.
+    pub resources: Option<ProviderResourceSnapshot>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

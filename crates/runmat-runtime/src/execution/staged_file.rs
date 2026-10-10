@@ -45,10 +45,21 @@ impl<'a> StagedCpuCooperation<'a> {
             builtin,
         }
     }
-}
 
-impl StagedWriteCooperation for StagedCpuCooperation<'_> {
-    async fn completed(&mut self, work: usize) -> BuiltinResult<()> {
+    #[cfg(test)]
+    pub(crate) fn with_test_budget(
+        runtime: &'a RuntimeContext,
+        builtin: &'static str,
+        budget: CpuCooperationBudget,
+    ) -> Self {
+        Self {
+            runtime: Some(runtime),
+            budget: Some(budget),
+            builtin,
+        }
+    }
+
+    pub(crate) async fn completed(&mut self, work: usize) -> BuiltinResult<()> {
         let (Some(runtime), Some(budget)) = (self.runtime, self.budget.as_mut()) else {
             return Ok(());
         };
@@ -56,6 +67,12 @@ impl StagedWriteCooperation for StagedCpuCooperation<'_> {
             .checkpoint(u64::try_from(work).unwrap_or(u64::MAX))
             .await
             .map_err(|source| execution_error(runtime, self.builtin, source))
+    }
+}
+
+impl StagedWriteCooperation for StagedCpuCooperation<'_> {
+    async fn completed(&mut self, work: usize) -> BuiltinResult<()> {
+        StagedCpuCooperation::completed(self, work).await
     }
 }
 

@@ -9,7 +9,11 @@ use runmat_value::{Tensor, Value};
 mod demand;
 mod elementwise;
 mod output;
+mod placement;
 mod reduction;
+#[cfg(all(test, feature = "wgpu", not(target_arch = "wasm32")))]
+#[path = "extrema_provider/wgpu_required_tests.rs"]
+mod wgpu_required_tests;
 pub(super) use demand::{ExtremaDemand, ExtremaResult};
 
 /// Single has no immediate scalar `Value` representation. Its scalar extrema
@@ -87,23 +91,43 @@ impl ExtremaKind {
             .ok_or_else(|| self.contract_error("resident input has no exact owning provider"))
     }
 
-    pub(super) fn optional<T>(
+    pub(super) fn optional<T, E: Into<runmat_accelerate_api::ProviderExecutionError>>(
         self,
         operation: &str,
-        result: anyhow::Result<T>,
+        result: Result<T, E>,
     ) -> BuiltinResult<Option<T>> {
         match result {
             Ok(output) => Ok(Some(output)),
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
-            Err(error) => Err(crate::runtime_error::with_provider_execution_source(
-                self.contract_error(format!("provider {operation} failed: {error}")),
-                error.into(),
-            )),
+            Err(error) => {
+                let error = error.into();
+                if error.is_unsupported() {
+                    return Ok(None);
+                }
+                Err(crate::runtime_error::with_provider_execution_source(
+                    self.contract_error(format!("provider {operation} failed: {error}")),
+                    error,
+                ))
+            }
         }
+    }
+
+    pub(super) fn optional_after_effect<
+        T,
+        E: Into<runmat_accelerate_api::ProviderExecutionError>,
+    >(
+        self,
+        operation: &str,
+        result: Result<T, E>,
+    ) -> BuiltinResult<Option<T>> {
+        self.optional(
+            operation,
+            result.map_err(|error| error.into().after_effect()),
+        )
     }
 
     pub(super) async fn reduce_dim(
         self,
+        runtime: Option<&crate::context::RuntimeContext>,
         input: &GpuTensorHandle,
         dimension: usize,
         demand: ExtremaDemand,
@@ -114,16 +138,111 @@ impl ExtremaKind {
         if input.physical().storage() == GpuTensorStorage::ComplexInterleaved {
             return Ok(None);
         }
-        let result = match self {
-            Self::Min => provider.reduce_min_dim(input, dimension).await,
-            Self::Max => provider.reduce_max_dim(input, dimension).await,
+        let mut selected = placement::select(runtime, self, provider, input, dimension, demand)?;
+        if let Some(selection) = selected.as_ref() {
+            if !selection.revalidate(input)? {
+                return Err(
+                    self.contract_error("dimensional extrema input changed before dispatch")
+                );
+            }
+        }
+        let recorder = selected
+            .as_ref()
+            .map(|selection| selection.placement.recorder());
+        let checkpoint = recorder
+            .as_ref()
+            .map(|recorder| recorder.submission_checkpoint());
+        let result =
+            runmat_accelerate_api::observation::observe_provider_future(recorder.clone(), async {
+                match self {
+                    Self::Min => provider.reduce_min_dim(input, dimension).await,
+                    Self::Max => provider.reduce_max_dim(input, dimension).await,
+                }
+            })
+            .await;
+        if result
+            .as_ref()
+            .err()
+            .is_some_and(|error| error.is_unsupported())
+            && recorder
+                .as_ref()
+                .zip(checkpoint)
+                .is_some_and(|(recorder, checkpoint)| recorder.submission_checkpoint() > checkpoint)
+        {
+            if let Some(selection) = selected {
+                selection.placement.finish(Err(
+                    runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed,
+                ));
+            }
+            let source = result.expect_err("unsupported provider result");
+            return Err(crate::runtime_error::with_provider_execution_source(
+                self.contract_error(format!(
+                    "dimensional extrema provider failed after submission: {source}"
+                )),
+                source.after_effect(),
+            ));
+        }
+        let result = match self.optional("dimensional extrema reduction", result) {
+            Ok(result) => result,
+            Err(error) => {
+                if let Some(selection) = selected {
+                    selection.placement.finish(Err(
+                        runmat_accelerate_api::observation::ProviderObservationFailure::ProviderFailed,
+                    ));
+                }
+                return Err(error);
+            }
         };
-        let Some(result) = self.optional("dimensional extrema reduction", result)? else {
+        let Some(result) = result else {
+            if let Some(selection) = selected {
+                selection.placement.finish(Ok(false));
+            }
             return Ok(None);
         };
-        self.adopt_reduction_result(provider, input, dimension, result, demand)
-            .await
-            .map(Some)
+        if let Some(selection) = selected.as_mut() {
+            let published = match demand {
+                ExtremaDemand::ValuesOnly => selection
+                    .placement
+                    .validate_direct_provider_outputs(&[&result.values]),
+                ExtremaDemand::ValuesAndIndices => selection
+                    .placement
+                    .validate_direct_provider_outputs(&[&result.values, &result.indices]),
+            };
+            if !published
+                || (demand == ExtremaDemand::ValuesAndIndices
+                    && provider.precision() == runmat_accelerate_api::ProviderPrecision::F32
+                    && !selection
+                        .placement
+                        .admits_produced_readback(&result.indices))
+            {
+                let error = self.contract_error(
+                    "dimensional extrema output did not match selected physical publication",
+                );
+                let error = gpu_helpers::reject_gpu_output(
+                    result.indices,
+                    gpu_helpers::reject_gpu_output(result.values, error),
+                );
+                selected.expect("selected output").placement.finish(Err(
+                    runmat_accelerate_api::observation::ProviderObservationFailure::PublicationFailed,
+                ));
+                return Err(error);
+            }
+        }
+        let recorder = selected
+            .as_ref()
+            .map(|selection| selection.placement.recorder());
+        let adopted = runmat_accelerate_api::observation::observe_provider_future(
+            recorder,
+            self.adopt_reduction_result(provider, input, dimension, result, demand),
+        )
+        .await;
+        if let Some(selection) = selected {
+            selection.placement.finish(match adopted.as_ref() {
+                Ok(_) => Ok(true),
+                Err(_) => Err(runmat_accelerate_api::observation::ProviderObservationFailure::PublicationFailed),
+            });
+        }
+        adopted.map(Some)
     }
 
     pub(super) fn pair_owner(

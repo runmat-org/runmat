@@ -1,6 +1,8 @@
 use super::RuntimeBuiltinBinding;
 use std::collections::{BTreeMap, BTreeSet};
 
+pub mod registration;
+
 #[cfg(not(target_arch = "wasm32"))]
 inventory::collect!(RuntimeBuiltinBinding);
 
@@ -20,18 +22,25 @@ pub mod wasm_registry {
 
     thread_local! {
         static BINDINGS: RefCell<Vec<&'static RuntimeBuiltinBinding>> = const { RefCell::new(Vec::new()) };
-        static NAME_INDEX: RefCell<Vec<RuntimeBuiltinBinding>> = const { RefCell::new(Vec::new()) };
+        static NAME_INDEX: RefCell<super::registration::RegistrationIndex> =
+            RefCell::new(super::registration::RegistrationIndex::default());
     }
 
     pub fn submit(binding: RuntimeBuiltinBinding) {
-        BINDINGS.with_borrow_mut(|bindings| bindings.push(Box::leak(Box::new(binding))));
-        NAME_INDEX.with_borrow_mut(|entries| {
-            super::insert_binding(entries, binding);
+        NAME_INDEX.with_borrow_mut(|index| {
+            index.insert(binding);
         });
+        BINDINGS.with_borrow_mut(|bindings| bindings.push(Box::leak(Box::new(binding))));
     }
 
     pub(super) fn with_index<R>(visit: impl FnOnce(&[RuntimeBuiltinBinding]) -> R) -> R {
-        NAME_INDEX.with_borrow(|entries| visit(entries))
+        NAME_INDEX.with_borrow(|index| visit(&index.entries))
+    }
+
+    pub(super) fn with_index_and_generation<R>(
+        visit: impl FnOnce(&[RuntimeBuiltinBinding], u64) -> R,
+    ) -> R {
+        NAME_INDEX.with_borrow(|index| visit(&index.entries, index.generation))
     }
 
     pub fn bindings() -> Vec<&'static RuntimeBuiltinBinding> {
@@ -85,11 +94,15 @@ fn matching_bindings<'a>(
     entries: &'a [RuntimeBuiltinBinding],
     name: &str,
 ) -> &'a [RuntimeBuiltinBinding] {
+    &entries[matching_binding_range(entries, name)]
+}
+
+fn matching_binding_range(entries: &[RuntimeBuiltinBinding], name: &str) -> std::ops::Range<usize> {
     let first =
         entries.partition_point(|entry| compare_names(entry.identity.builtin.name, name).is_lt());
     let count = entries[first..]
         .partition_point(|entry| entry.identity.builtin.name.eq_ignore_ascii_case(name));
-    &entries[first..first + count]
+    first..first + count
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]

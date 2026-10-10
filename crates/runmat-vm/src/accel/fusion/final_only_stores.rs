@@ -9,6 +9,15 @@ pub fn final_only_span_requires_ordinary_stores(
     instructions: &[Instr],
     span: &InstrSpan,
 ) -> bool {
+    final_only_span_requires_ordinary_stores_with_private(kind, instructions, span, &[])
+}
+
+pub(crate) fn final_only_span_requires_ordinary_stores_with_private(
+    kind: &FusionKind,
+    instructions: &[Instr],
+    span: &InstrSpan,
+    private_store_pcs: &[usize],
+) -> bool {
     match kind {
         FusionKind::ElementwiseChain => false,
         FusionKind::Reduction
@@ -18,8 +27,10 @@ pub fn final_only_span_requires_ordinary_stores(
         | FusionKind::PowerStepNormalize
         | FusionKind::ExplainedVariance => {
             instructions.get(span.start..=span.end).is_none_or(|slice| {
-                slice.iter().any(|instruction| {
-                    matches!(instruction, Instr::StoreVar(_) | Instr::StoreLocal(_))
+                slice.iter().enumerate().any(|(offset, instruction)| {
+                    matches!(instruction, Instr::StoreLocal(_))
+                        || matches!(instruction, Instr::StoreVar(_))
+                            && !private_store_pcs.contains(&(span.start + offset))
                 })
             })
         }

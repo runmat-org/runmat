@@ -720,6 +720,12 @@ pub enum Instr {
     LoadVarForStructAssignment(usize),
 }
 
+#[cfg(feature = "native-accel")]
+#[path = "instr/slot_references.rs"]
+mod slot_references;
+#[cfg(feature = "native-accel")]
+pub(crate) use slot_references::VmSlotAccess;
+
 impl Instr {
     pub fn stack_effect(&self) -> Option<StackEffect> {
         fn effect(pops: usize, pushes: usize) -> Option<StackEffect> {

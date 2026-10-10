@@ -52,9 +52,10 @@ runmat-vm = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-hir = { workspace = true }
 runmat-mir = { workspace = true }
+naga = { version = "24.0.0", features = ["wgsl-in"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wgpu = { version = "24.0.0", optional = true }
+wgpu = { workspace = true, optional = true }
 tokio = { workspace = true, default-features = false, features = ["macros", "rt"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
@@ -74,9 +75,12 @@ web-sys = { version = "0.3", features = [
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
-naga = { version = "24.0.0", features = ["wgsl-in"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-wgpu = { version = "0.19", optional = true, features = ["trace"] }
+wgpu = { workspace = true, optional = true }
 libloading = { version = "0.8.9", optional = true }
 tokio = { workspace = true, default-features = false, features = ["macros", "rt-multi-thread"] }
+
+[[bench]]
+name = "direct_call_observation"
+harness = false

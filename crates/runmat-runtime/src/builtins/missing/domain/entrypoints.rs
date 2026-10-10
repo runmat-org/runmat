@@ -249,12 +249,24 @@ pub(super) async fn nanmean_builtin(value: Value, rest: Vec<Value>) -> BuiltinRe
 #[runtime_builtin(
     name = "nansum",
     binding_variant = "default",
-    builtin_path = "crate::builtins::missing"
+    builtin_path = "crate::builtins::missing",
+    call_observation = true
 )]
-pub(super) async fn nansum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn nansum_builtin(
+    observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     ensure_output_arity("nansum", 1)?;
     ensure_nan_integer_extension(&NANSUM_INTEGER_EXTENSION, "nansum", &value, &rest)?;
-    sum::sum_for_invocation(value, rest, None, runmat_types::SumInvocation::NanSum).await
+    sum::sum_for_invocation_observed(
+        value,
+        rest,
+        None,
+        runmat_types::SumInvocation::NanSum,
+        observation,
+    )
+    .await
 }
 
 #[runtime_builtin(

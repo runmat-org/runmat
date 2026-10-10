@@ -60,6 +60,33 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("range").build()
 }
 
+fn terminal_provider_error(
+    stage: &'static str,
+    source: impl Into<runmat_accelerate_api::ProviderExecutionError>,
+) -> crate::RuntimeError {
+    let source = source.into().after_effect();
+    let mut error = builtin_error(format!(
+        "range: {stage} failed after resident reduction: {source}"
+    ));
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    crate::runtime_error::with_provider_execution_source(error, source)
+}
+
+fn initial_provider_error(
+    stage: &'static str,
+    source: runmat_accelerate_api::ProviderExecutionError,
+) -> crate::RuntimeError {
+    let mut error = builtin_error(format!("range: {stage} failed: {source}"));
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    crate::runtime_error::with_provider_execution_source(error, source)
+}
+
+fn invalid_reduction_shape(stage: &'static str) -> crate::RuntimeError {
+    let mut error = builtin_error(format!("range: {stage} returned an invalid shape"));
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
+}
+
 fn range_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
@@ -623,11 +650,23 @@ async fn range_gpu(
         return range_gpu_fallback(&handle, selection, nan_mode).await;
     };
 
+    handle
+        .allocation_lease()
+        .validate_live()
+        .map_err(|source| {
+            let mut error = builtin_error(format!(
+                "range: resident input allocation is unavailable: {source}"
+            ));
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error.source = Some(Box::new(source));
+            error
+        })?;
+
     let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
     let resolved = resolve_dims(handle.shape(), &selection)?;
 
     if should_use_global_reduce(handle.shape(), &selection, &resolved) {
-        if let Some(diff) = range_gpu_all(provider, &handle).await {
+        if let Some(diff) = range_gpu_all(provider, &handle).await? {
             return Ok(Value::GpuTensor(diff));
         }
         return range_gpu_fallback(&handle, selection, nan_mode).await;
@@ -644,7 +683,7 @@ async fn range_gpu(
         return range_gpu_fallback(&handle, selection, nan_mode).await;
     }
 
-    if let Some(diff) = range_gpu_single_dim(provider, &handle, dim, &expected_shape).await {
+    if let Some(diff) = range_gpu_single_dim(provider, &handle, dim, &expected_shape).await? {
         return Ok(Value::GpuTensor(diff));
     }
 
@@ -678,10 +717,21 @@ fn should_use_global_reduce(
 async fn range_gpu_all(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     handle: &GpuTensorHandle,
-) -> Option<GpuTensorHandle> {
-    let min_handle = provider.reduce_min(handle).await.ok()?;
-    let max_handle = provider.reduce_max(handle).await.ok()?;
-    provider.elem_sub(&max_handle, &min_handle).await.ok()
+) -> crate::BuiltinResult<Option<GpuTensorHandle>> {
+    let min_handle = match provider.reduce_min(handle).await {
+        Ok(value) => value,
+        Err(error) if error.is_unsupported() => return Ok(None),
+        Err(error) => return Err(initial_provider_error("global minimum", error)),
+    };
+    let max_handle = provider
+        .reduce_max(handle)
+        .await
+        .map_err(|error| terminal_provider_error("global maximum", error))?;
+    provider
+        .elem_sub(&max_handle, &min_handle)
+        .await
+        .map(Some)
+        .map_err(|error| terminal_provider_error("global subtraction", error))
 }
 
 async fn range_gpu_single_dim(
@@ -689,47 +739,39 @@ async fn range_gpu_single_dim(
     handle: &GpuTensorHandle,
     dim_zero_based: usize,
     expected_shape: &[usize],
-) -> Option<GpuTensorHandle> {
-    let mut candidates = Vec::with_capacity(2);
-    candidates.push(dim_zero_based);
-    if let Some(next) = dim_zero_based.checked_add(1) {
-        if next != dim_zero_based {
-            candidates.push(next);
-        }
+) -> crate::BuiltinResult<Option<GpuTensorHandle>> {
+    let min_result = match provider.reduce_min_dim(handle, dim_zero_based).await {
+        Ok(result) => result,
+        Err(error) if error.is_unsupported() => return Ok(None),
+        Err(error) => return Err(initial_provider_error("dimensional minimum", error)),
+    };
+    if min_result.values.shape() != expected_shape || min_result.indices.shape() != expected_shape {
+        let error = invalid_reduction_shape("dimensional minimum");
+        return Err(gpu_helpers::reject_gpu_output(
+            min_result.indices,
+            gpu_helpers::reject_gpu_output(min_result.values, error),
+        ));
     }
-    let mut seen = HashSet::new();
-    for candidate in candidates {
-        if !seen.insert(candidate) {
-            continue;
-        }
-        let min_result = match provider.reduce_min_dim(handle, candidate).await {
-            Ok(res) => res,
-            Err(_) => continue,
-        };
-        if min_result.values.shape() != expected_shape {
-            continue;
-        }
-        let max_result = match provider.reduce_max_dim(handle, candidate).await {
-            Ok(res) => res,
-            Err(_) => {
-                continue;
-            }
-        };
-        if max_result.values.shape() != expected_shape {
-            continue;
-        }
-        let diff = match provider
-            .elem_sub(&max_result.values, &min_result.values)
-            .await
-        {
-            Ok(handle) => handle,
-            Err(_) => {
-                continue;
-            }
-        };
-        return Some(diff);
+    let max_result = provider
+        .reduce_max_dim(handle, dim_zero_based)
+        .await
+        .map_err(|error| terminal_provider_error("dimensional maximum", error))?;
+    if max_result.values.shape() != expected_shape || max_result.indices.shape() != expected_shape {
+        let error = invalid_reduction_shape("dimensional maximum");
+        let error = gpu_helpers::reject_gpu_output(
+            max_result.indices,
+            gpu_helpers::reject_gpu_output(max_result.values, error),
+        );
+        return Err(gpu_helpers::reject_gpu_output(
+            min_result.indices,
+            gpu_helpers::reject_gpu_output(min_result.values, error),
+        ));
     }
-    None
+    let diff = provider
+        .elem_sub(&max_result.values, &min_result.values)
+        .await
+        .map_err(|error| terminal_provider_error("dimensional subtraction", error))?;
+    Ok(Some(diff))
 }
 
 async fn range_gpu_fallback(

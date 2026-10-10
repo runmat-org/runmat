@@ -44,6 +44,13 @@ pub(super) fn admitted_candidate(
                 prepared.preparation_host_workspace,
                 prepared.conditional_readback_host_workspace,
                 request.output_queue_slots,
+                prepared.produced_readback.as_ref().map(|readback| {
+                    (
+                        &readback.output,
+                        readback.evidence,
+                        readback.public_host_bytes,
+                    )
+                }),
                 request.conditional_host_fallback,
                 request.conditional_host_scratch,
                 request.provider_host_mediated,
@@ -61,6 +68,8 @@ pub(super) fn admitted_candidate(
             ))
             .expect("typed provider operation serializes"),
         ),
+        provider_provenance: None,
+        graph_output_authority: None,
         revision,
     };
     // Completion fences coexist with the operation's output/temporary peak.
@@ -68,6 +77,13 @@ pub(super) fn admitted_candidate(
     let peak_live = estimate
         .transient_bytes
         .and_then(|bytes| bytes.checked_add(observation.requested_peak_buffer_bytes))
+        .and_then(|bytes| match prepared.produced_readback.as_ref() {
+            Some(readback) => match readback.evidence.provider_scratch_bytes {
+                ResourceByteBound::Known(scratch) => bytes.checked_add(scratch),
+                ResourceByteBound::Unavailable(_) => None,
+            },
+            None => Some(bytes),
+        })
         .map(|peak_bytes| CandidatePeakLiveDemand {
             peak_bytes,
             already_live_bytes: request.already_live_bytes,
@@ -78,7 +94,12 @@ pub(super) fn admitted_candidate(
             device_id: provider.device_id(),
         },
         preparation: CandidatePreparationState::Ready,
-        output_residency: if let Some(host_bytes) = request.conditional_host_fallback {
+        output_residency: if let Some(readback) = prepared.produced_readback.as_ref() {
+            CandidateOutputResidency::ProviderAndHost {
+                device_id: provider.device_id(),
+                host_bytes: readback.public_host_bytes,
+            }
+        } else if let Some(host_bytes) = request.conditional_host_fallback {
             CandidateOutputResidency::ConditionalHostOrProvider {
                 device_id: provider.device_id(),
                 host_bytes,
@@ -88,17 +109,26 @@ pub(super) fn admitted_candidate(
                 device_id: provider.device_id(),
             }
         },
-        presentation: conditional_provider_upload.as_ref().map_or(
-            CandidateOutputPresentation::Direct,
-            |upload| CandidateOutputPresentation::ConditionalProviderUpload {
+        presentation: if let Some(readback) = prepared.produced_readback.as_ref() {
+            CandidateOutputPresentation::ProviderProducedReadback {
                 device_id: provider.device_id(),
-                transfer_bytes: upload.transfer_bytes,
-                host_result_bytes: Some(upload.host_result_bytes),
-                host_scratch_bytes: upload.host_scratch_bytes,
-                provider_scratch_bytes: upload.provider_scratch_bytes,
-                queue_slots: upload.queue_slots,
-            },
-        ),
+                transfer_bytes: readback.evidence.transfer_bytes,
+                provider_scratch_bytes: readback.evidence.provider_scratch_bytes,
+                queue_slots: readback.evidence.queue_slots,
+            }
+        } else {
+            conditional_provider_upload.as_ref().map_or(
+                CandidateOutputPresentation::Direct,
+                |upload| CandidateOutputPresentation::ConditionalProviderUpload {
+                    device_id: provider.device_id(),
+                    transfer_bytes: upload.transfer_bytes,
+                    host_result_bytes: Some(upload.host_result_bytes),
+                    host_scratch_bytes: upload.host_scratch_bytes,
+                    provider_scratch_bytes: upload.provider_scratch_bytes,
+                    queue_slots: upload.queue_slots,
+                },
+            )
+        },
         route_facts: Digest::sha256(
             serde_json::to_vec(&(
                 query,
@@ -117,6 +147,13 @@ pub(super) fn admitted_candidate(
                 }),
                 input_stages,
                 request.output_queue_slots,
+                prepared.produced_readback.as_ref().map(|readback| {
+                    (
+                        &readback.output,
+                        readback.evidence,
+                        readback.public_host_bytes,
+                    )
+                }),
             ))
             .expect("provider route serializes"),
         ),
@@ -134,7 +171,13 @@ pub(super) fn admitted_candidate(
             provider_input_stages: input_stages,
             queue_slots: request
                 .output_queue_slots
-                .unwrap_or_else(|| estimate.dispatches.unwrap_or(1)),
+                .unwrap_or_else(|| estimate.dispatches.unwrap_or(1))
+                .max(
+                    prepared
+                        .produced_readback
+                        .as_ref()
+                        .map_or(0, |readback| readback.evidence.queue_slots),
+                ),
             peak_live,
         },
         transactional_results: provider

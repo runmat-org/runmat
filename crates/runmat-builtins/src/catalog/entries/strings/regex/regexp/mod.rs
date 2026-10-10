@@ -2,7 +2,13 @@ use crate::*;
 mod contract;
 mod documentation;
 mod inference;
+mod options;
 pub use contract::*;
+pub(crate) use inference::{infer_for, RegexBuiltin};
+pub use options::{
+    project_regex_options, EmptyMatchPolicy, RegexOptionError, RegexOptionProjection, RegexOptions,
+    RegexOutput, RegexParseMode,
+};
 
 pub const REGEXP_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),

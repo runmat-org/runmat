@@ -44,7 +44,10 @@ impl AccelProvider for Provider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { panic!("restoration must not download") })
     }
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         if self.unavailable_upload.load(Ordering::SeqCst)
             || matches!(self.numeric_upload, NumericUpload::Success)
         {
@@ -65,7 +68,8 @@ impl AccelProvider for Provider {
                 runmat_accelerate_api::unsupported_provider_operation("fixture unsupported")
             }
             NumericUpload::Execution => anyhow::anyhow!("fixture execution failed"),
-        })
+        }
+        .into())
     }
     fn upload_logical_raw(&self, view: &HostLogicalTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.logical_uploads.fetch_add(1, Ordering::SeqCst);

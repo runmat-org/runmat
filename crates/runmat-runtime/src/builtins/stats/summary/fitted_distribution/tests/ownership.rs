@@ -50,7 +50,10 @@ impl AccelProvider for RestoreProvider {
         Box::pin(async { panic!("result publication must not gather") })
     }
 
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         match self.behavior {
             UploadBehavior::AliasParameter => Ok(self
                 .alias
@@ -58,7 +61,7 @@ impl AccelProvider for RestoreProvider {
                 .unwrap()
                 .take()
                 .expect("one borrowed-alias result")),
-            UploadBehavior::Fail => Err(anyhow::anyhow!("provider restoration failed")),
+            UploadBehavior::Fail => Err(anyhow::anyhow!("provider restoration failed").into()),
             UploadBehavior::Fresh => Ok(self
                 .owner
                 .allocate_zeroed(host.shape.to_vec(), host.data.element_type(), host.storage)?

@@ -102,7 +102,7 @@ pub(super) async fn backward(
                                 "dlgradient",
                                 "dlgradient: resident gradient accumulation failed",
                             ),
-                            error.into(),
+                            error,
                         )
                     })?;
                 admit_cancellation(runtime)?;

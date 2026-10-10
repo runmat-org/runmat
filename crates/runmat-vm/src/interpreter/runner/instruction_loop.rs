@@ -5,6 +5,8 @@
 //! the concrete instruction-loop future in every nested semantic Process frame.
 
 use super::*;
+#[cfg(feature = "native-accel")]
+use runmat_runtime::context::VmFusionHostInstruction;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -44,8 +46,20 @@ pub(super) struct InstructionLoopContext<'a> {
     #[cfg(feature = "native-accel")]
     pub(super) fusion_accel_graph: &'a Option<runmat_accelerate::graph::AccelGraph>,
     #[cfg(feature = "native-accel")]
+    pub(super) fusion_plan: &'a Option<runmat_accelerate::FusionPlanRef>,
+    #[cfg(feature = "native-accel")]
+    pub(super) fusion_installation: &'a Option<crate::bytecode::program::VmFusionPlanInstallation>,
+    #[cfg(feature = "native-accel")]
     pub(super) fusion_observations:
         &'a mut crate::interpreter::fusion_observation::FusionRegionObservations,
+    #[cfg(all(
+        test,
+        not(target_arch = "wasm32"),
+        feature = "native-accel",
+        feature = "wgpu"
+    ))]
+    pub(super) fusion_publication_fault:
+        &'a mut Option<crate::interpreter::state::VmFusionPublicationFault>,
 }
 
 pub(super) type BoxedInstructionLoop<'a> =
@@ -89,6 +103,7 @@ fn boxed_fusion_execution<'a>(
     graph: &'a runmat_accelerate::AccelGraph,
     frame: FusionExecutionFrame<'a>,
     placement: Option<runmat_accelerate::placement::PlacementCorrelationId>,
+    right: Option<runmat_runtime::context::VmFusionCompletionRight>,
 ) -> FusionExecutionFuture<'a> {
     #[cfg(test)]
     fusion_store_tests::record_fusion_execution_entry();
@@ -125,7 +140,8 @@ fn boxed_fusion_execution<'a>(
                 }
             }
         }
-        accel_fusion::try_execute_fusion_group(plan, graph, stack, vars, context, placement).await
+        accel_fusion::try_execute_fusion_group(plan, graph, stack, vars, context, placement, right)
+            .await
     })
 }
 
@@ -156,8 +172,31 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
         #[cfg(feature = "native-accel")]
         fusion_accel_graph,
         #[cfg(feature = "native-accel")]
+        fusion_plan,
+        #[cfg(feature = "native-accel")]
+        fusion_installation,
+        #[cfg(feature = "native-accel")]
         fusion_observations,
+        #[cfg(all(
+            test,
+            not(target_arch = "wasm32"),
+            feature = "native-accel",
+            feature = "wgpu"
+        ))]
+        fusion_publication_fault,
     } = loop_context;
+    #[cfg(feature = "native-accel")]
+    let private_temp_bridges = if fusion_plan.is_some() {
+        crate::bytecode::fusion_private_temp::bridges(bytecode)
+    } else {
+        Vec::new()
+    };
+    #[cfg(feature = "native-accel")]
+    let private_empty_controls = if fusion_plan.is_some() {
+        crate::bytecode::fusion_private_temp::empty_controls(bytecode)
+    } else {
+        Vec::new()
+    };
     while *pc < bytecode.instructions.len() {
         crate::runtime::workspace::reconcile_workspace_vars(&mut *vars);
         if let (Some(scope), Some(exception)) = (catch_entries.get(&*pc), last_exception.as_ref()) {
@@ -180,8 +219,12 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             .flatten()
             .and_then(|scope| catch_exceptions.get(&scope).cloned());
         #[cfg(feature = "native-accel")]
-        if let (Some(plan), Some(graph)) = (active_group_plan_clone(), fusion_accel_graph.as_ref())
-        {
+        if let (Some(plan), Some(graph)) = (
+            fusion_plan
+                .as_ref()
+                .and_then(|plan| plan.group_for_pc_clone(*pc)),
+            fusion_accel_graph.as_ref(),
+        ) {
             if plan.group.span.start == *pc && !fusion_observations.contains_start(*pc) {
                 let span = plan.group.span.clone();
                 let crosses_catch_scope = !bytecode.catch_scopes.is_empty()
@@ -193,13 +236,20 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                                 .first()
                                 .is_some_and(|first| scopes.iter().any(|scope| scope != first))
                         });
+                let private_store_pcs =
+                    crate::bytecode::fusion_private_temp::private_reduction_store_pcs(
+                        &plan.group,
+                        &private_temp_bridges,
+                        &private_empty_controls,
+                    );
                 let has_barrier = !plan.kernel.supported
                     || crosses_catch_scope
                     || accel_fusion::fusion_span_has_vm_barrier(&bytecode.instructions, &span)
-                    || accel_fusion::final_only_span_requires_ordinary_stores(
+                    || accel_fusion::final_only_span_requires_ordinary_stores_with_private(
                         &plan.group.kind,
                         &bytecode.instructions,
                         &span,
+                        &private_store_pcs,
                     );
                 #[cfg(feature = "native-accel")]
                 {
@@ -243,6 +293,24 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                 if !has_barrier {
                     let _consumed_fusion = crate::runtime::gc::ManagedRoots::new(&*stack)
                         .map_err(RuntimeError::new)?;
+                    let right = if plan.group.kind.is_reduction() {
+                        fusion_installation.as_ref().and_then(|installation| {
+                            fusion_plan.as_ref().and_then(|active| {
+                                installation.right_for(active, &plan, &context.runtime)
+                            })
+                        })
+                    } else {
+                        None
+                    };
+                    let publication_pc = if plan.group.kind.is_reduction() {
+                        fusion_installation.as_ref().and_then(|installation| {
+                            fusion_plan
+                                .as_ref()
+                                .and_then(|active| installation.publication_pc_for(active, &plan))
+                        })
+                    } else {
+                        None
+                    };
                     let fusion_future = boxed_fusion_execution(
                         &plan,
                         graph,
@@ -254,6 +322,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                             current_function_name,
                         },
                         Some(trace.correlation()),
+                        right,
                     );
                     let fusion_result = if let Some(exception) = active_catch.clone() {
                         catch_runtime
@@ -264,7 +333,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                     };
                     match fusion_result {
                         Ok(runmat_accelerate::fusion_exec::FusionExecutionOutcome::Executed(
-                            result,
+                            mut result,
                         )) => {
                             trace.submitted(
                                 PlacementVariant::ProviderFusion,
@@ -300,8 +369,16 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                                 }
                             }
                             stack.push(result.final_value);
-                            let executed_pc = *pc;
+                            let executed_pc = plan.group.span.end;
                             *pc = plan.group.span.end + 1;
+                            if let Some(completion) = result.completion.take() {
+                                fusion_observations.begin_provider_publication(
+                                    span.clone(),
+                                    completion,
+                                    fusion_started,
+                                    publication_pc,
+                                );
+                            }
                             fusion_observations.instruction_exit(executed_pc, *pc);
                             continue;
                         }
@@ -310,7 +387,13 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                                 ticket,
                             ),
                         ) => {
-                            fusion_observations.begin(span.clone(), Some(ticket), trace);
+                            fusion_observations.begin_at(
+                                span.clone(),
+                                Some(ticket),
+                                trace,
+                                fusion_started,
+                                publication_pc,
+                            );
                             // Planning may yield or request cancellation. Install
                             // the observation first so cancellation retires the
                             // selected ticket as failure, even for a one-instruction
@@ -343,7 +426,13 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                                 None,
                                 &[],
                             );
-                            fusion_observations.begin(span.clone(), None, trace);
+                            fusion_observations.begin_at(
+                                span.clone(),
+                                None,
+                                trace,
+                                fusion_started,
+                                None,
+                            );
                             log::debug!("fusion fallback at pc {}: {}", *pc, err);
                         }
                     }
@@ -356,7 +445,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                         None,
                         &[],
                     );
-                    fusion_observations.begin(span.clone(), None, trace);
+                    fusion_observations.begin_at(span.clone(), None, trace, fusion_started, None);
                     interp_engine::note_fusion_skip(*pc, &span);
                 }
             }
@@ -404,6 +493,58 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             };
         #[cfg(feature = "native-accel")]
         let executed_pc = *pc;
+        // The installed region supplies only request-local, instruction-scoped
+        // host evidence. The ordinary dispatcher still owns execution and
+        // restores the outer runtime before any result or catch is handled.
+        #[cfg(feature = "native-accel")]
+        let outer_runtime = context.runtime.clone();
+        #[cfg(feature = "native-accel")]
+        let host_kind = host_instruction_kind(
+            &bytecode.instructions[*pc],
+            *pc,
+            &private_temp_bridges,
+            &private_empty_controls,
+            fusion_observations.is_terminal(*pc),
+        );
+        #[cfg(feature = "native-accel")]
+        if let Some(route) = fusion_observations.instruction_route(*pc, host_kind) {
+            if matches!(
+                host_kind,
+                VmFusionHostInstruction::ElementwiseBinary | VmFusionHostInstruction::Reduction
+            ) {
+                context.runtime = outer_runtime.clone().with_vm_fusion_host_route(Some(route));
+            }
+        }
+        #[cfg(all(
+            test,
+            not(target_arch = "wasm32"),
+            feature = "native-accel",
+            feature = "wgpu"
+        ))]
+        if fusion_publication_fault.as_ref().is_some_and(|fault| {
+            fusion_observations.checked_publication_store_pending(*pc, fault.route())
+        }) && matches!(&bytecode.instructions[*pc], Instr::StoreVar(_))
+        {
+            if let Some(fault) = fusion_publication_fault.take() {
+                use crate::interpreter::state::VmFusionPublicationFault;
+                match fault {
+                    VmFusionPublicationFault::Reject(_, reached) => {
+                        reached.set(true);
+                        *stack.last_mut().expect("checked publication has a result") =
+                            Value::OutputList(vec![Value::Num(0.0)]);
+                    }
+                    VmFusionPublicationFault::Cancel(_, source, reached) => {
+                        reached.set(true);
+                        source.cancel(runmat_execution::CancellationReason::User);
+                        std::future::pending::<()>().await;
+                    }
+                    VmFusionPublicationFault::Suspend(_, reached) => {
+                        reached.set(true);
+                        std::future::pending::<()>().await;
+                    }
+                }
+            }
+        }
         let dispatch_future = interp_dispatch::dispatch_instruction(
             interp_dispatch::DispatchMeta {
                 instr: &bytecode.instructions[*pc],
@@ -446,6 +587,10 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
         } else {
             dispatch_future.await
         };
+        #[cfg(feature = "native-accel")]
+        {
+            context.runtime = outer_runtime;
+        }
         let dispatch_result = match dispatch_result {
             Ok(result) => result,
             Err(err) => {
@@ -719,6 +864,52 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
     Ok::<(), RuntimeError>(())
 }
 
+#[cfg(feature = "native-accel")]
+fn host_instruction_kind(
+    instr: &Instr,
+    pc: usize,
+    private_bridges: &[crate::bytecode::fusion_private_temp::FusionPrivateTempBridge],
+    private_controls: &[crate::bytecode::fusion_private_temp::FusionPrivateEmptyControl],
+    selected_terminal: bool,
+) -> VmFusionHostInstruction {
+    match instr {
+        Instr::Add => VmFusionHostInstruction::ElementwiseBinary,
+        // The actual selected builtin identity is checked by the runtime
+        // dispatcher and the host reduction branch. This opcode alone never
+        // certifies a reduction or a CPU sample.
+        Instr::CallBuiltinMulti(..) | Instr::CallBuiltinMultiUsingOutputSlot(..)
+            if selected_terminal =>
+        {
+            VmFusionHostInstruction::Reduction
+        }
+        Instr::StoreVar(slot)
+            if private_bridges
+                .iter()
+                .any(|bridge| bridge.store_pc == pc && bridge.slot == *slot)
+                || private_controls
+                    .iter()
+                    .any(|control| control.store_pc == pc && control.slot == *slot) =>
+        {
+            VmFusionHostInstruction::Structural
+        }
+        Instr::CreateMatrix(0, 0)
+            if private_controls
+                .iter()
+                .any(|control| control.producer_pc == pc) =>
+        {
+            VmFusionHostInstruction::Structural
+        }
+        Instr::LoadVar(_)
+        | Instr::LoadLocal(_)
+        | Instr::LoadConst(_)
+        | Instr::LoadInt(_)
+        | Instr::LoadBool(_)
+        | Instr::Swap
+        | Instr::Pop => VmFusionHostInstruction::Structural,
+        _ => VmFusionHostInstruction::Unproved,
+    }
+}
+
 #[cfg(all(test, feature = "native-accel"))]
 #[path = "instruction_loop/fusion_store_tests.rs"]
 mod fusion_store_tests;
@@ -726,3 +917,16 @@ mod fusion_store_tests;
 #[cfg(all(test, feature = "native-accel"))]
 #[path = "instruction_loop/persistent_fusion_tests.rs"]
 mod persistent_fusion_tests;
+
+#[cfg(all(test, feature = "native-accel"))]
+#[path = "instruction_loop/host_route_tests.rs"]
+mod host_route_tests;
+
+#[cfg(all(
+    test,
+    not(target_arch = "wasm32"),
+    feature = "native-accel",
+    feature = "wgpu"
+))]
+#[path = "instruction_loop/publication_lifecycle_tests.rs"]
+mod publication_lifecycle_tests;

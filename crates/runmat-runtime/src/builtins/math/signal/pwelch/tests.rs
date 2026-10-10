@@ -140,7 +140,8 @@ fn wide_resident_integer_signal_is_read_back_once_and_input_remains_borrowed() {
         fn upload_numeric_raw(
             &self,
             host: &runmat_accelerate_api::HostNumericTensorView,
-        ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+        ) -> runmat_accelerate_api::ProviderExecutionResult<runmat_accelerate_api::GpuTensorHandle>
+        {
             self.inner.upload_numeric_raw(host)
         }
         fn download<'a>(

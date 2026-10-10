@@ -4,13 +4,13 @@
 use std::future::Future;
 
 use crate::context::RuntimeContext;
-use crate::execution::{staged_file, CpuCooperationBudget, ExecutionServiceError};
-use crate::{BuiltinResult, RuntimeError};
+use crate::execution::staged_file::{self, StagedCpuCooperation};
+#[cfg(test)]
+use crate::execution::CpuCooperationBudget;
+use crate::BuiltinResult;
 
 pub(super) struct TabularCooperation<'a> {
-    runtime: Option<&'a RuntimeContext>,
-    budget: Option<CpuCooperationBudget>,
-    builtin: &'static str,
+    cooperation: StagedCpuCooperation<'a>,
 }
 
 impl staged_file::StagedWriteCooperation for TabularCooperation<'_> {
@@ -22,9 +22,7 @@ impl staged_file::StagedWriteCooperation for TabularCooperation<'_> {
 impl<'a> TabularCooperation<'a> {
     pub(super) fn new(runtime: Option<&'a RuntimeContext>, builtin: &'static str) -> Self {
         Self {
-            runtime,
-            budget: runtime.map(RuntimeContext::cpu_cooperation),
-            builtin,
+            cooperation: StagedCpuCooperation::new(runtime, builtin),
         }
     }
 
@@ -35,20 +33,12 @@ impl<'a> TabularCooperation<'a> {
         budget: CpuCooperationBudget,
     ) -> Self {
         Self {
-            runtime: Some(runtime),
-            budget: Some(budget),
-            builtin,
+            cooperation: StagedCpuCooperation::with_test_budget(runtime, builtin, budget),
         }
     }
 
     pub(super) async fn completed(&mut self, work: usize) -> BuiltinResult<()> {
-        let (Some(runtime), Some(budget)) = (self.runtime, self.budget.as_mut()) else {
-            return Ok(());
-        };
-        budget
-            .checkpoint(u64::try_from(work).unwrap_or(u64::MAX))
-            .await
-            .map_err(|source| execution_error(runtime, self.builtin, source))
+        self.cooperation.completed(work).await
     }
 }
 
@@ -61,12 +51,4 @@ where
     F: Future<Output = T>,
 {
     staged_file::await_cancellable(runtime, builtin, work).await
-}
-
-fn execution_error(
-    runtime: &RuntimeContext,
-    builtin: &'static str,
-    source: ExecutionServiceError,
-) -> RuntimeError {
-    staged_file::execution_error(runtime, builtin, source)
 }

@@ -31,6 +31,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ));
         }
     }
+    super::options::diagnose(request, &mut diagnostics);
     let output = match request.arguments.first() {
         Some(subject) => match &subject.kind {
             ValueKindFact::String | ValueKindFact::Cell(_) => {
@@ -62,7 +63,8 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
 mod tests {
     use super::*;
     use runmat_types::{LiteralContext, OutputSelection};
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn string_array_shape_survives_and_char_width_does_not() {
         let entry = &super::super::REGEXPREP_CATALOG_ENTRY;
         let mut request = CallRequest {
@@ -91,5 +93,127 @@ mod tests {
             infer(&request, entry).outputs[0].shape,
             ShapeFact::from(vec![Some(1), None])
         );
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn known_options_and_occurrences_follow_runtime_admission() {
+        use runmat_types::{LiteralValue, NumericClass};
+        let entry = &super::super::REGEXPREP_CATALOG_ENTRY;
+        let base = vec![ValueFact::scalar(ValueKindFact::String); 3];
+        let check = |tail: Vec<(ValueFact, LiteralValue)>| {
+            let mut arguments = base.clone();
+            let mut literals = vec![LiteralValue::Unknown; 3];
+            for (fact, literal) in tail {
+                arguments.push(fact);
+                literals.push(literal);
+            }
+            infer(
+                &CallRequest {
+                    arguments,
+                    literals: LiteralContext::new(literals),
+                    outputs: OutputSelection::default(),
+                },
+                entry,
+            )
+            .diagnostics
+        };
+        let text = || ValueFact::scalar(ValueKindFact::String);
+        let numeric = |class| {
+            ValueFact::scalar(ValueKindFact::Numeric(runmat_types::NumericFact {
+                class,
+                domain: runmat_types::NumericDomain::Real,
+            }))
+        };
+        assert!(check(vec![(text(), LiteralValue::String("IgnoreCase".into()))]).is_empty());
+        assert!(
+            check(vec![(text(), LiteralValue::String("notAnOption".into()))])
+                .iter()
+                .any(|d| d.code == "RM-CATALOG-REGEXPREP-OPTION")
+        );
+        for invalid in [LiteralValue::Number(0.0), LiteralValue::Number(1.5)] {
+            assert!(check(vec![(numeric(NumericClass::Double), invalid)])
+                .iter()
+                .any(|d| d.code == "RM-CATALOG-REGEXPREP-OCCURRENCE"));
+        }
+        assert!(check(vec![(
+            numeric(NumericClass::Int64),
+            LiteralValue::Integer {
+                text: "-1".into(),
+                class: NumericClass::Int64,
+            }
+        )])
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-REGEXPREP-OCCURRENCE"));
+        assert!(check(vec![(
+            numeric(NumericClass::UInt64),
+            LiteralValue::Integer {
+                text: "18446744073709551615".into(),
+                class: NumericClass::UInt64,
+            }
+        )])
+        .is_empty());
+        assert!(check(vec![
+            (text(), LiteralValue::String("dotall".into())),
+            (text(), LiteralValue::String("off".into())),
+            (text(), LiteralValue::String("once".into())),
+        ])
+        .is_empty());
+        assert!(check(vec![
+            (text(), LiteralValue::String("warnings".into())),
+            (text(), LiteralValue::String("notAnOption".into())),
+        ])
+        .is_empty());
+        let single = || {
+            ValueFact::proven(
+                ValueKindFact::Numeric(runmat_types::NumericFact {
+                    class: NumericClass::Single,
+                    domain: runmat_types::NumericDomain::Real,
+                }),
+                ShapeFact::Scalar,
+                StorageFact::Dense,
+            )
+        };
+        let one_single = || LiteralValue::Real {
+            text: "1".into(),
+            class: NumericClass::Single,
+        };
+        assert!(check(vec![
+            (text(), LiteralValue::String("preservecase".into())),
+            (single(), one_single()),
+        ])
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-REGEXPREP-OPTION"));
+        assert!(check(vec![
+            (text(), LiteralValue::String("lineanchors".into())),
+            (single(), one_single()),
+            (text(), LiteralValue::String("notAnOption".into())),
+        ])
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-REGEXPREP-OPTION" && d.argument == Some(5)));
+        assert!(check(vec![
+            (text(), LiteralValue::String("dotall".into())),
+            (
+                single(),
+                LiteralValue::Real {
+                    text: "0".into(),
+                    class: NumericClass::Single
+                }
+            ),
+            (text(), LiteralValue::String("once".into())),
+        ])
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-REGEXPREP-OCCURRENCE" && d.argument == Some(4)));
+        for flag in ["lineanchors", "preservecase"] {
+            assert!(check(vec![
+                (text(), LiteralValue::String(flag.into())),
+                (
+                    ValueFact::unknown(DynamicReason::RuntimeValue),
+                    LiteralValue::Unknown
+                ),
+                (text(), LiteralValue::String("notAnOption".into())),
+            ])
+            .is_empty());
+        }
     }
 }

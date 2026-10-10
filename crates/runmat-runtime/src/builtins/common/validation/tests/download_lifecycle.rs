@@ -19,7 +19,10 @@ impl AccelProvider for DownloadOwner {
     fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.inner.upload(host)
     }
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.inner.upload_numeric_raw(host)
     }
     fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {

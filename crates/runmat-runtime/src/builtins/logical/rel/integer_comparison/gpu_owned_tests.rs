@@ -57,7 +57,7 @@ impl AccelProvider for Provider {
         &'a self,
         _: &'a GpuTensorHandle,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let output = match self.mode {
                 Mode::Logical => self.owner.allocate_logical(vec![1, 0], vec![1, 2])?,
@@ -69,9 +69,10 @@ impl AccelProvider for Provider {
                 Mode::Unsupported => {
                     return Err(runmat_accelerate_api::unsupported_provider_operation(
                         "comparison unavailable",
-                    ))
+                    )
+                    .into())
                 }
-                Mode::Failure => anyhow::bail!("comparison execution failure"),
+                Mode::Failure => return Err(anyhow::anyhow!("comparison execution failure").into()),
                 Mode::PendingSecondProjection => unreachable!(),
             };
             self.outputs.lock().unwrap().push(output.probe);

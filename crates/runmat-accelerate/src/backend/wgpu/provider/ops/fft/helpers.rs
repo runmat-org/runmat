@@ -6,7 +6,7 @@ impl WgpuProvider {
         emission: &runmat_accelerate_api::WgpuEmission<'_>,
         data: &T,
         label: &'static str,
-    ) -> Result<Arc<wgpu::Buffer>> {
+    ) -> Result<runmat_accelerate_api::WgpuBufferOwner> {
         let size = std::mem::size_of::<T>() as u64;
         let buffer = self.kernel_resources.uniform_buffer(
             emission,
@@ -25,14 +25,16 @@ impl WgpuProvider {
         emission: &runmat_accelerate_api::WgpuEmission<'_>,
         data: &T,
         label: &str,
-    ) -> Result<Arc<wgpu::Buffer>> {
+    ) -> Result<runmat_accelerate_api::WgpuBufferOwner> {
         let size = std::mem::size_of::<T>() as u64;
-        let buffer = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: size.max(1),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }));
+        let buffer = runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(
+            &wgpu::BufferDescriptor {
+                label: Some(label),
+                size: size.max(1),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        ));
         emission
             .queue()
             .write_buffer(buffer.as_ref(), 0, bytes_of(data));
@@ -46,7 +48,7 @@ impl WgpuProvider {
     pub(super) fn fft_debug_dump_scalar_buffer(
         &self,
         label: &str,
-        buffer: &Arc<wgpu::Buffer>,
+        buffer: &runmat_accelerate_api::WgpuBufferOwner,
         scalar_len: usize,
     ) {
         if !Self::fft_debug_enabled() || scalar_len == 0 {
@@ -99,25 +101,30 @@ impl WgpuProvider {
         len: usize,
         label_a: &str,
         label_b: &str,
-    ) -> Result<(Arc<wgpu::Buffer>, Arc<wgpu::Buffer>)> {
+    ) -> Result<(
+        runmat_accelerate_api::WgpuBufferOwner,
+        runmat_accelerate_api::WgpuBufferOwner,
+    )> {
         let a = self.create_storage_buffer(emission, len, label_a)?;
         let mut b = self.create_storage_buffer(emission, len, label_b)?;
-        if Arc::ptr_eq(&a, &b) {
+        if runmat_accelerate_api::WgpuBufferOwner::ptr_eq(&a, &b) {
             let size_bytes = (len.max(1) as u64).saturating_mul(self.element_size as u64);
-            b = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
-                label: Some(label_b),
-                size: size_bytes,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_SRC
-                    | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
+            b = runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(
+                &wgpu::BufferDescriptor {
+                    label: Some(label_b),
+                    size: size_bytes,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_SRC
+                        | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                },
+            ));
         }
         if Self::fft_debug_enabled() {
             eprintln!(
                 "[fft-debug] stage buffers a={:p} b={:p}",
-                Arc::as_ptr(&a),
-                Arc::as_ptr(&b)
+                runmat_accelerate_api::WgpuBufferOwner::as_ptr(&a),
+                runmat_accelerate_api::WgpuBufferOwner::as_ptr(&b)
             );
         }
         Ok((a, b))
@@ -129,7 +136,7 @@ impl WgpuProvider {
         len: usize,
         half_only: bool,
         label: &str,
-    ) -> Result<Arc<wgpu::Buffer>> {
+    ) -> Result<runmat_accelerate_api::WgpuBufferOwner> {
         let mode = if half_only { 1u8 } else { 0u8 };
         if let Ok(cache) = self.fft_twiddle_cache.lock() {
             if let Some(existing) = cache.get(&(len, mode)) {
@@ -144,14 +151,16 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("fft_dim: twiddle buffer length overflow"))?;
         let size_bytes =
             (twiddle_scalar_len.max(1) as u64).saturating_mul(self.element_size as u64);
-        let twiddle = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: size_bytes,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        }));
+        let twiddle = runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(
+            &wgpu::BufferDescriptor {
+                label: Some(label),
+                size: size_bytes,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            },
+        ));
         let tau = std::f64::consts::TAU;
         match self.precision {
             NumericPrecision::F64 => {

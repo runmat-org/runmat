@@ -13,7 +13,27 @@ pub use convolution::{
 };
 mod cost;
 mod execution_inventory;
+mod extrema;
 mod feasibility;
+pub use extrema::{
+    ProviderExtremaDemand, ProviderExtremaGeometry, ProviderExtremaInputBacking,
+    ProviderExtremaKind, ProviderExtremaWorkload,
+};
+mod image_stages;
+mod reduction_nd;
+pub use image_stages::{
+    moment_precision, ProviderImageMeanCall, ProviderImageMeanClass, ProviderImageMeanHook,
+    ProviderImageMomentConversion, ProviderImageMomentProgram, ProviderImageMomentPublication,
+    ProviderImageOutputCall, ProviderImageOutputHook, ProviderImageOutputOperand,
+    ProviderImageOutputProgram, ProviderImagePowerCall, ProviderImagePowerProgram,
+    ProviderImageStageWorkload,
+};
+pub use reduction_nd::{
+    ProviderColdNdMean, ProviderExecutedColdNdMean, ProviderExecutedOrderedRealMean,
+    ProviderOrderedRealMean, ProviderOrderedRealMeanControl, ProviderOrderedRealMeanLimits,
+    ProviderOrderedRealMeanRecipe, ProviderOrderedRealMeanResources, ProviderOrderedRealMeanSource,
+    ProviderOrderedRealMeanStep, ProviderPinnedNdMean, ProviderRealMeanNaNMode,
+};
 mod fspecial;
 pub use fspecial::ProviderFspecialFilter;
 mod imfilter;
@@ -29,8 +49,25 @@ pub use iir::{
 mod matmul;
 pub use matmul::{MatmulScaleWork, MatmulWorkload, ProviderMatmulGeometry};
 mod representation;
+mod real_elementwise;
+pub use real_elementwise::{
+    ProviderExecutedMixedRealAdd, ProviderExecutedRealElementwise, ProviderMixedRealAddObserved,
+    ProviderMixedRealAddRecipe, ProviderMixedRealAddResources,
+    ProviderMixedRealAddStepObservations, ProviderRealElementwiseObserved,
+    ProviderRealElementwiseOperation, ProviderRealElementwiseOutputRoute,
+    ProviderRealElementwisePhysicalProposal, ProviderRealElementwiseRecipe,
+    ProviderRealElementwiseRequest,
+};
+mod real_binary;
+pub use real_binary::{
+    ProviderExecutedRealBinary, ProviderRealBinaryInput, ProviderRealBinaryObserved,
+    ProviderRealBinaryOperation, ProviderRealBinaryPhysicalProposal, ProviderRealBinaryRecipe,
+    ProviderRealBinaryRequest, ProviderRealBinaryRoute,
+};
 mod sum;
 pub use sum::{ProviderSumGeometry, ProviderSumWorkload};
+mod typed_reduction;
+pub use typed_reduction::ProviderTypedReductionWorkload;
 mod preparation;
 pub use preparation::{
     ProviderElementwiseGeometry, ProviderPreparationProgram, ProviderPreparationRoute,
@@ -49,8 +86,9 @@ pub use execution_inventory::{
 };
 pub use feasibility::{
     ProviderFeasibility, ProviderFeasibilityQuery, ProviderNumericUploadPhysicalEvidence,
-    ProviderOperationIdentity, ProviderRejection, ProviderRejectionCode, ProviderResourceEstimate,
-    ProviderTransferOutputBound, ProviderUploadPhysicalEvidence, ProviderWorkload,
+    ProviderOperationIdentity, ProviderProducedNumericReadbackEvidence, ProviderRejection,
+    ProviderRejectionCode, ProviderResourceEstimate, ProviderTransferOutputBound,
+    ProviderUploadPhysicalEvidence, ProviderWorkload,
 };
 pub use representation::{
     ProviderElementType, ProviderLayout, ProviderRepresentation, ProviderResidency, ProviderStorage,

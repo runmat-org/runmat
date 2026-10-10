@@ -3,6 +3,7 @@
 pub mod char;
 pub mod blanks;
 pub(crate) mod classification;
+pub(crate) mod comparison_observation;
 pub mod compat;
 pub(crate) mod conversion;
 pub mod convert_chars_to_strings;
@@ -37,3 +38,7 @@ pub mod strlength;
 pub mod strncmp;
 pub mod strncmpi;
 pub mod unicode2native;
+
+#[cfg(test)]
+#[path = "character_property_tests.rs"]
+mod character_property_tests;

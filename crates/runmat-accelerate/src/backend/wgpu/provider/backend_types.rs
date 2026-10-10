@@ -1,3 +1,4 @@
+use super::owner_shared::OwnerShared;
 use super::*;
 
 #[derive(Clone, Debug)]
@@ -15,6 +16,35 @@ impl Default for WgpuProviderOptions {
     }
 }
 
+#[cfg(test)]
+mod image_normalize_key_tests {
+    use super::*;
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn persisted_pre_centered_variance_tuning_does_not_match_current_key() {
+        let current = ImageNormalizeKey::new(NumericPrecision::F32, 16, 2160 * 3840);
+        assert_eq!(current.version, 2);
+        let prior = ImageNormalizeKey {
+            version: 1,
+            ..current.clone()
+        };
+        let tuning = ImageNormalizeTuning {
+            batch_tile: 8,
+            values_per_thread: 4,
+            lane_count: 64,
+            spatial_tile: 2,
+        };
+        // AutotuneController persists Vec<(K, V)> and loads it into a map.
+        let persisted = serde_json::to_vec(&vec![(prior.clone(), tuning)]).unwrap();
+        let loaded: Vec<(ImageNormalizeKey, ImageNormalizeTuning)> =
+            serde_json::from_slice(&persisted).unwrap();
+        let cache: HashMap<_, _> = loaded.into_iter().collect();
+        assert_eq!(cache.get(&prior), Some(&tuning));
+        assert_eq!(cache.get(&current), None);
+    }
+}
+
 // Core WGPU provider state (device, caches, pipelines)
 pub struct WgpuProvider {
     pub(super) instance: Arc<wgpu::Instance>,
@@ -24,9 +54,16 @@ pub struct WgpuProvider {
     pub(super) adapter: Arc<wgpu::Adapter>,
     pub(super) adapter_info: wgpu::AdapterInfo,
     pub(super) adapter_limits: wgpu::Limits,
+    /// Features of the device actually created, not the adapter's advertised set.
+    pub(super) enabled_features: wgpu::Features,
     pub(super) workgroup_config: WorkgroupConfig,
-    pub(super) allocations: Arc<super::allocation_state::AllocationState>,
+    pub(super) linear_launch: crate::backend::wgpu::pipelines::FrozenLinearLaunch,
+    pub(super) global_reduce_launch: crate::backend::wgpu::pipelines::FrozenGlobalReductionLaunch,
+    pub(super) allocations: OwnerShared<super::allocation_state::AllocationState>,
     pub(super) pipelines: WgpuPipelines,
+    pub(super) f32_real_elementwise:
+        Option<crate::backend::wgpu::pipelines::F32RealElementwisePipelines>,
+    pub(super) ordered_real_mean: Option<crate::backend::wgpu::pipelines::OrderedRealMeanPipelines>,
     pub(super) runtime_device_id: u32,
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) observation_progress:
@@ -37,12 +74,22 @@ pub struct WgpuProvider {
     pub(super) precision: NumericPrecision,
     pub(super) element_size: usize,
     pub(super) fused_pipeline_cache: Mutex<HashMap<u64, Arc<wgpu::ComputePipeline>>>,
+    /// Only pipelines whose complete driver error scope resolved successfully.
+    /// Migrated ordinary fusion and tagged generic routes carry the exact pair
+    /// to emission; legacy shared-cache writers cannot substitute it.
+    pub(super) validated_fusion_cache:
+        Mutex<HashMap<u64, Arc<super::validated_fusion::ValidatedFusionPipeline>>>,
     pub(super) bind_group_layout_cache: Mutex<HashMap<String, Arc<wgpu::BindGroupLayout>>>,
     pub(super) bind_group_layout_tags: Mutex<HashMap<usize, String>>,
     pub(super) bind_group_cache: Arc<BindGroupCache>,
-    pub(super) kernel_resources: Arc<KernelResourceRegistry>,
+    pub(super) kernel_resources: OwnerShared<KernelResourceRegistry>,
     pub(super) metrics: crate::backend::wgpu::metrics::WgpuMetrics,
     pub(super) telemetry: AccelTelemetry,
+    /// A per-provider, one-shot fault at the actual post-buffer upload edge.
+    #[cfg(test)]
+    pub(super) numeric_upload_post_buffer_fault: Mutex<Option<anyhow::Error>>,
+    #[cfg(test)]
+    pub(super) numeric_upload_post_buffer_count: std::sync::atomic::AtomicUsize,
     pub(super) reduction_two_pass_mode: ReductionTwoPassMode,
     pub(super) reduction_two_pass_threshold: usize,
     pub(super) reduction_workgroup_size_default: u32,
@@ -56,8 +103,9 @@ pub struct WgpuProvider {
     #[allow(dead_code)]
     pub(super) autotune_device_tag: String,
     // Optimization caches
-    pub(super) reduction_reuse: Arc<Mutex<super::moments_cache::ReductionReuseCache>>,
-    pub(super) fft_twiddle_cache: Mutex<HashMap<(usize, u8), Arc<wgpu::Buffer>>>, // (len, mode) -> twiddle buffer
+    pub(super) reduction_reuse: OwnerShared<Mutex<super::moments_cache::ReductionReuseCache>>,
+    pub(super) fft_twiddle_cache:
+        Mutex<HashMap<(usize, u8), runmat_accelerate_api::WgpuBufferOwner>>, // (len, mode) -> twiddle buffer
 }
 
 #[derive(Clone)]
@@ -65,7 +113,7 @@ pub(super) struct BufferEntry {
     /// Operation-local interpretation copied from an admitted view. The owning
     /// record separately retains immutable logical producer authority.
     pub(super) logical: bool,
-    pub(super) buffer: Arc<wgpu::Buffer>,
+    pub(super) buffer: runmat_accelerate_api::WgpuBufferOwner,
     pub(super) len: usize,
     pub(super) shape: Vec<usize>,
     pub(super) storage: GpuTensorStorage,
@@ -279,17 +327,24 @@ pub(super) struct ReductionTuning {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(super) struct ReductionAutotuneKey {
     pub(super) precision: u8,
+    pub(super) shader_requirements: runmat_accelerate_api::ProviderShaderRequirements,
     pub(super) slices_bucket: u32,
     pub(super) reduce_bucket: u32,
 }
 
 impl ReductionAutotuneKey {
-    pub(super) fn new(precision: NumericPrecision, num_slices: usize, reduce_len: usize) -> Self {
+    pub(super) fn new(
+        precision: NumericPrecision,
+        shader_requirements: runmat_accelerate_api::ProviderShaderRequirements,
+        num_slices: usize,
+        reduce_len: usize,
+    ) -> Self {
         Self {
             precision: match precision {
                 NumericPrecision::F64 => 64,
                 NumericPrecision::F32 => 32,
             },
+            shader_requirements,
             slices_bucket: bucketize_dimension(num_slices),
             reduce_bucket: bucketize_dimension(reduce_len),
         }

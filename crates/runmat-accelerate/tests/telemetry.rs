@@ -68,15 +68,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             runmat_accelerate_api::ProviderElementType::F64,
         ),
     };
-    let _ = provider
-        .fused_elementwise(
-            &shader,
-            std::slice::from_ref(&elem),
-            &elem_shape,
-            elem_len,
-            output_class,
-        )
-        .expect("fused_elementwise");
+    let _ = block_on(provider.fused_elementwise(
+        &shader,
+        runmat_accelerate_api::ProviderShaderRequirements::Basic,
+        std::slice::from_ref(&elem),
+        &elem_shape,
+        elem_len,
+        output_class,
+    ))
+    .expect("fused_elementwise");
 
     let mat_shape = [2usize, 2usize];
     let a_data = vec![1.0, 2.0, 3.0, 4.0];

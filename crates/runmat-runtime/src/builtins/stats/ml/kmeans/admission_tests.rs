@@ -69,15 +69,19 @@ impl AccelProvider for RestoreProvider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { panic!("restoration cannot download") })
     }
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let attempt = self.uploads.fetch_add(1, Ordering::SeqCst);
         match &*self.behavior.lock().unwrap() {
             UploadBehavior::Alias(handle) => Ok(handle.clone()),
             UploadBehavior::Unsupported => Err(
-                runmat_accelerate_api::unsupported_provider_operation("fixture has no f64 upload"),
+                runmat_accelerate_api::unsupported_provider_operation("fixture has no f64 upload")
+                    .into(),
             ),
             UploadBehavior::FailSecond if attempt > 0 => {
-                Err(anyhow::anyhow!("second output failed"))
+                Err(anyhow::anyhow!("second output failed").into())
             }
             UploadBehavior::FailSecond => {
                 let result = self.owner.allocate_zeroed(
@@ -119,7 +123,10 @@ impl AccelProvider for CountingProvider {
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         self.inner.download(handle)
     }
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.inner.upload_numeric_raw(host)
     }
     fn download_numeric<'a>(

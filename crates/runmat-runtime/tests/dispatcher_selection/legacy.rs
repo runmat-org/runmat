@@ -7,9 +7,12 @@ use runmat_runtime::call_builtin;
     category = "fixture-library",
     builtin_path = "tests::category_failure_fallback"
 )]
-#[expect(
-    clippy::result_large_err,
-    reason = "runtime_builtin callback ABI returns RuntimeError"
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    expect(
+        clippy::result_large_err,
+        reason = "runtime_builtin callback ABI returns RuntimeError"
+    )
 )]
 fn category_failure_fallback(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     record("categorized-fallback");
@@ -21,9 +24,12 @@ fn category_failure_fallback(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     category = "",
     builtin_path = "tests::category_failure_override"
 )]
-#[expect(
-    clippy::result_large_err,
-    reason = "runtime_builtin callback ABI returns RuntimeError"
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    expect(
+        clippy::result_large_err,
+        reason = "runtime_builtin callback ABI returns RuntimeError"
+    )
 )]
 fn category_failure_override(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     record("uncategorized-error");
@@ -37,9 +43,12 @@ fn category_failure_override(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     category = "fixture-library",
     builtin_path = "tests::category_success_fallback"
 )]
-#[expect(
-    clippy::result_large_err,
-    reason = "runtime_builtin callback ABI returns RuntimeError"
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    expect(
+        clippy::result_large_err,
+        reason = "runtime_builtin callback ABI returns RuntimeError"
+    )
 )]
 fn category_success_fallback(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     record("categorized-fallback");
@@ -51,9 +60,12 @@ fn category_success_fallback(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     category = "",
     builtin_path = "tests::category_success_override"
 )]
-#[expect(
-    clippy::result_large_err,
-    reason = "runtime_builtin callback ABI returns RuntimeError"
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    expect(
+        clippy::result_large_err,
+        reason = "runtime_builtin callback ABI returns RuntimeError"
+    )
 )]
 fn category_success_override(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     record("uncategorized-success");

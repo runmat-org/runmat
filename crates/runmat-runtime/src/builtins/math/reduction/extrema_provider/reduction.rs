@@ -7,6 +7,18 @@ use runmat_accelerate_api::{
 };
 use runmat_value::{Tensor, Value};
 
+/// Values and one-based indices are independent products of a dimensional
+/// reduction. An immutable sibling view cannot represent both roles: the
+/// index would alias value storage and may be dropped while values publish.
+/// This does not change the separate policy allowing an output to reuse its
+/// input allocation when that is otherwise semantically valid.
+pub(super) fn independent_output_allocations(
+    values: &GpuTensorHandle,
+    indices: &GpuTensorHandle,
+) -> bool {
+    !values.shares_allocation_with(indices)
+}
+
 impl ExtremaKind {
     pub(super) async fn adopt_reduction_result(
         self,
@@ -71,8 +83,8 @@ impl ExtremaKind {
             input,
             provider,
             &index_contract,
-        ) && (index_precision != Some(ProviderPrecision::F32)
-            || axis_extent <= (1 << 24));
+        ) && independent_output_allocations(&values, &indices)
+            && (index_precision != Some(ProviderPrecision::F32) || axis_extent <= (1 << 24));
         if !valid {
             let error = self.contract_error("dimensional extrema returned invalid owner, shape, value class, or index representation");
             return Err(gpu_helpers::reject_gpu_output(

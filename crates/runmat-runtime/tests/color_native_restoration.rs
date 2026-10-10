@@ -98,7 +98,7 @@ fn color_native_single_uses_actual_owner_capability_not_preferred_precision() {
                         .downcast_ref::<NumericUploadError>()
                         .unwrap();
                     assert!(
-                        matches!(upload, NumericUploadError::Provider(cause) if is_unsupported_provider_operation(cause))
+                        matches!(upload, NumericUploadError::Provider(cause) if cause.is_unsupported())
                     );
                 }
                 Mode::Failure | Mode::Alias => fixture::assert_upload_failure(
@@ -197,7 +197,7 @@ fn scalar_color_fallback_preserves_the_original_host_carrier() {
                 runmat_runtime::GpuGatherRetry::Never
             );
             assert!(
-                matches!(error.source.as_ref().unwrap().downcast_ref::<NumericUploadError>().unwrap(), NumericUploadError::Provider(cause) if is_unsupported_provider_operation(cause))
+                matches!(error.source.as_ref().unwrap().downcast_ref::<NumericUploadError>().unwrap(), NumericUploadError::Provider(cause) if cause.is_unsupported())
             );
         } else {
             assert_eq!(result.unwrap(), expected);

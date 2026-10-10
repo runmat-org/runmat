@@ -1,7 +1,7 @@
 //! Selected-binding evidence exists only for this invocation. It is acquired
 //! before domain probes, placement, compilation, uploads or provider execution.
-use super::FusionExecutionRequest;
-use crate::fusion::semantic_bindings::SemanticBinding;
+use super::{unbound_constant_values, FusionExecutionRequest};
+use crate::fusion::semantic_bindings::{selected_host_binding_for_primitive, SemanticBinding};
 use crate::{
     fusion::FusionOp,
     graph::{FusionCallOrigin, PrimitiveOp},
@@ -35,12 +35,41 @@ pub(super) struct AdmittedBindings {
 }
 
 impl AdmittedBindings {
+    /// Exact canonical implementations already captured for the selected
+    /// fusion program. Legacy or opaque entries cannot certify a VM host
+    /// region's inner execution.
+    pub fn canonical_bindings(
+        &self,
+        runtime: Option<&runmat_runtime::context::RuntimeContext>,
+    ) -> Option<Vec<runmat_builtins::BuiltinBindingIdentity>> {
+        let mut bindings = Vec::new();
+        for operation in &self.operations {
+            match &operation.identity {
+                Identity::Primitive(op) => {
+                    bindings.push(selected_host_binding_for_primitive(*op, runtime)?);
+                }
+                Identity::Call {
+                    binding: SelectedFusionIdentity::Canonical(binding),
+                    ..
+                } => {
+                    bindings.push(*binding);
+                }
+                Identity::Call {
+                    binding: SelectedFusionIdentity::Legacy { .. },
+                    ..
+                } => {
+                    return None;
+                }
+            }
+        }
+        Some(bindings)
+    }
     pub fn new(request: &FusionExecutionRequest<'_>) -> Option<Self> {
         if request.inputs.len() != request.plan.inputs.len()
             || !request
                 .inputs
                 .iter()
-                .chain(request.plan.const_values.values())
+                .chain(unbound_constant_values(request.plan))
                 .all(closed_value)
         {
             return None;
@@ -132,7 +161,9 @@ impl AdmittedBindings {
             .map(|operation| {
                 (
                     &operation.identity,
-                    operation.reduction.map(|declaration| declaration.revision),
+                    operation
+                        .reduction
+                        .map(|declaration| (declaration.revision, declaration.operation)),
                 )
             })
             .collect();

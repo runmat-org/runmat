@@ -173,10 +173,10 @@ impl AccelProvider for FixtureCudaProvider {
     fn upload_numeric_raw(
         &self,
         host: &HostNumericTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         host.validate()?;
         let HostNumericDataView::F64(values) = host.data else {
-            anyhow::bail!("fixture provider accepts only double data");
+            return Err(anyhow::anyhow!("fixture provider accepts only double data").into());
         };
         runmat_value::record_host_copy(
             runmat_value::HostCopyReason::ProviderUpload,

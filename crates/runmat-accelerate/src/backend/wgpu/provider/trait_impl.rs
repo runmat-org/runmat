@@ -4,6 +4,25 @@ use runmat_accelerate_api::{
     HostNumericTensorView, IntegerElementType,
 };
 
+#[cfg(test)]
+#[path = "trait_impl/numeric_upload_error_tests.rs"]
+mod numeric_upload_error_tests;
+#[cfg(test)]
+#[path = "trait_impl/validated_fusion_tests.rs"]
+mod validated_fusion_tests;
+
+fn numeric_upload_failure(
+    error: anyhow::Error,
+    buffer_created: bool,
+) -> runmat_accelerate_api::ProviderExecutionError {
+    let error = runmat_accelerate_api::ProviderExecutionError::from(error);
+    if buffer_created {
+        error.after_effect()
+    } else {
+        error
+    }
+}
+
 /// A host upload may use mapped-at-creation rather than a provider dispatch.
 /// Submit a provider-owned fence *after* publication so the whole-call receipt
 /// observes queue completion, not merely the return of `create_buffer_init`.
@@ -95,7 +114,164 @@ fn confirm_sum_kernel_submission(
     }
 }
 
+fn extrema_submission_checkpoint(
+    kind: runmat_accelerate_api::ProviderExtremaKind,
+) -> Option<(
+    runmat_accelerate_api::observation::ProviderOperationRecorder,
+    u64,
+    runmat_accelerate_api::ProviderOperationIdentity,
+)> {
+    let recorder = runmat_accelerate_api::observation::current_provider_observation()?;
+    let identity = runmat_accelerate_api::ProviderOperationIdentity::new(match kind {
+        runmat_accelerate_api::ProviderExtremaKind::Minimum => {
+            runmat_builtins::MIN_CATALOG_ENTRY.identity.name
+        }
+        runmat_accelerate_api::ProviderExtremaKind::Maximum => {
+            runmat_builtins::MAX_CATALOG_ENTRY.identity.name
+        }
+    });
+    recorder.expects_operation(&identity).then(|| {
+        let checkpoint = recorder.submission_checkpoint();
+        (recorder, checkpoint, identity)
+    })
+}
+
+fn confirm_extrema_kernel_submission(
+    provider: &WgpuProvider,
+    checkpoint: Option<(
+        runmat_accelerate_api::observation::ProviderOperationRecorder,
+        u64,
+        runmat_accelerate_api::ProviderOperationIdentity,
+    )>,
+) {
+    if let Some((recorder, before, identity)) = checkpoint {
+        recorder.confirm_submitted_provider_execution_after(
+            provider.device_id_exec(),
+            &identity,
+            before,
+        );
+    }
+}
+
 impl AccelProvider for WgpuProvider {
+    fn propose_real_binary(
+        &self,
+        request: &runmat_accelerate_api::ProviderRealBinaryRequest,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::ProviderRealBinaryPhysicalProposal>,
+    > {
+        self.propose_real_binary_exec(request)
+    }
+
+    fn execute_real_binary_recipe<'a>(
+        &'a self,
+        lhs: &'a GpuTensorHandle,
+        rhs: &'a GpuTensorHandle,
+        recipe: &'a runmat_accelerate_api::ProviderRealBinaryRecipe,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        runmat_accelerate_api::ProviderExecutedRealBinary,
+    > {
+        Box::pin(async move { self.execute_real_binary_recipe_exec(lhs, rhs, recipe) })
+    }
+
+    fn propose_real_elementwise(
+        &self,
+        request: &runmat_accelerate_api::ProviderRealElementwiseRequest,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::ProviderRealElementwisePhysicalProposal>,
+    > {
+        self.propose_real_elementwise_exec(request)
+    }
+
+    fn execute_real_elementwise_recipe<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        recipe: &'a runmat_accelerate_api::ProviderRealElementwiseRecipe,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        runmat_accelerate_api::ProviderExecutedRealElementwise,
+    > {
+        Box::pin(async move {
+            self.execute_real_elementwise_recipe_exec(input, recipe)
+                .await
+        })
+    }
+    fn plan_dense_real_output_buffer_bytes(
+        &self,
+        output: &runmat_accelerate_api::ProviderRepresentation,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<u64>> {
+        self.plan_dense_real_output_buffer_bytes_exec(output)
+    }
+
+    fn plan_power_output_buffer_bytes(
+        &self,
+        planned: &runmat_accelerate_api::power_service::PowerSymbolicPlan,
+        domain: runmat_accelerate_api::PowerResultDomain,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<u64>> {
+        self.plan_power_output_buffer_bytes_exec(planned, domain)
+    }
+
+    fn plan_ordered_real_mean(
+        &self,
+        source: &runmat_accelerate_api::ProviderRepresentation,
+        source_buffer_bytes: u64,
+        axes_zero_based: &[usize],
+        output_precision: ProviderPrecision,
+        nan_mode: runmat_accelerate_api::ProviderRealMeanNaNMode,
+    ) -> Result<Option<runmat_accelerate_api::ProviderOrderedRealMeanRecipe>> {
+        self.plan_ordered_real_mean_exec(
+            source,
+            source_buffer_bytes,
+            axes_zero_based,
+            output_precision,
+            nan_mode,
+        )
+    }
+    fn prepare_ordered_real_mean(
+        &self,
+        source: &GpuTensorHandle,
+        axes_zero_based: &[usize],
+        output_precision: ProviderPrecision,
+        nan_mode: runmat_accelerate_api::ProviderRealMeanNaNMode,
+    ) -> Result<Option<runmat_accelerate_api::ProviderOrderedRealMean>> {
+        self.prepare_ordered_real_mean_exec(source, axes_zero_based, output_precision, nan_mode)
+    }
+    fn prepare_ordered_real_mean_against_recipe(
+        &self,
+        source: &GpuTensorHandle,
+        recipe: &runmat_accelerate_api::ProviderOrderedRealMeanRecipe,
+    ) -> Result<Option<runmat_accelerate_api::ProviderOrderedRealMean>> {
+        self.prepare_ordered_real_mean_against_recipe_exec(source, recipe)
+    }
+    fn execute_ordered_real_mean(
+        &self,
+        selected: runmat_accelerate_api::ProviderOrderedRealMean,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        runmat_accelerate_api::ProviderExecutedOrderedRealMean,
+    > {
+        self.execute_ordered_real_mean_exec(selected)
+    }
+    fn reserve_cached_mean_nd(
+        &self,
+        source: &GpuTensorHandle,
+        dims_zero_based: &[usize],
+    ) -> Result<Option<runmat_accelerate_api::ProviderPinnedNdMean>> {
+        self.reserve_cached_mean_nd_exec(source, dims_zero_based)
+    }
+    fn prepare_cold_mean_nd(
+        &self,
+        source: &GpuTensorHandle,
+        dims_zero_based: &[usize],
+    ) -> Result<Option<runmat_accelerate_api::ProviderColdNdMean>> {
+        self.prepare_cold_mean_nd_exec(source, dims_zero_based)
+    }
+    fn execute_cold_mean_nd(
+        &self,
+        selected: runmat_accelerate_api::ProviderColdNdMean,
+    ) -> Result<runmat_accelerate_api::ProviderExecutedColdNdMean> {
+        self.execute_cold_mean_nd_exec(selected)
+    }
     fn resident_network_adjoint_supported(
         &self,
         stages: &[runmat_accelerate_api::ProviderResidentAdjointStage],
@@ -138,6 +314,12 @@ impl AccelProvider for WgpuProvider {
             .is_some_and(|progress| progress.is_available())
         {
             return runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported;
+        }
+        if query.workload.typed_reduction.is_some() {
+            return crate::placement::typed_reduction_observation_capability(query);
+        }
+        if query.workload.extrema.is_some() {
+            return crate::placement::extrema_observation_capability(self, query);
         }
         if query.operation.0 == "transfer.upload" {
             let output_count = query
@@ -256,13 +438,13 @@ impl AccelProvider for WgpuProvider {
             max_buffer_bytes: self.adapter_limits.max_buffer_size,
             max_binding_bytes: u64::from(self.adapter_limits.max_storage_buffer_binding_size),
             nd_chunk_elements: crate::backend::wgpu::config::elementwise_chunk_capacity(
-                crate::backend::wgpu::config::effective_workgroup_size(),
+                self.workgroup_config.scalar,
             )?,
             cast_chunk_elements: crate::backend::wgpu::config::elementwise_chunk_capacity(
                 self.workgroup_config.scalar,
             )?,
             integer_cast_chunk_elements: crate::backend::wgpu::config::elementwise_chunk_capacity(
-                crate::backend::wgpu::config::effective_workgroup_size(),
+                self.workgroup_config.scalar,
             )?,
             dimension_2_max_output_elements: u64::from(
                 self.adapter_limits.max_compute_workgroups_per_dimension,
@@ -275,6 +457,15 @@ impl AccelProvider for WgpuProvider {
             global_group_elements: 2 * u64::from(
                 crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE,
             ),
+        })
+    }
+
+    fn extrema_geometry(&self) -> Option<runmat_accelerate_api::ProviderExtremaGeometry> {
+        Some(runmat_accelerate_api::ProviderExtremaGeometry {
+            max_buffer_bytes: self.adapter_limits.max_buffer_size,
+            max_binding_bytes: u64::from(self.adapter_limits.max_storage_buffer_binding_size),
+            workgroup_size: self.workgroup_config.scalar,
+            max_workgroups_per_dimension: self.adapter_limits.max_compute_workgroups_per_dimension,
         })
     }
 
@@ -486,7 +677,8 @@ impl AccelProvider for WgpuProvider {
         &self,
         query: &runmat_accelerate_api::ProviderCostQuery,
     ) -> Option<runmat_accelerate_api::ProviderCostEstimate> {
-        if query.preparation == runmat_execution::CandidatePreparationState::Unknown
+        if query.operation.workload.image_stages.is_some()
+            || query.preparation == runmat_execution::CandidatePreparationState::Unknown
             || crate::placement::floating_cast_unresolved_adaptation(&query.operation)
             || query.operation.workload.iir.is_some()
             || query.operation.workload.fspecial.is_some()
@@ -499,7 +691,11 @@ impl AccelProvider for WgpuProvider {
         {
             return None;
         }
-        Some(crate::placement::wgpu_cost_estimate(self, query))
+        Some(crate::placement::wgpu_cost_estimate_with_geometry(
+            self,
+            query,
+            self.linear_launch,
+        ))
     }
 
     fn placement_resources(&self) -> runmat_execution::ProviderResourceSnapshot {
@@ -590,7 +786,7 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn fill_like(&self, prototype: &GpuTensorHandle, value: f64) -> Result<GpuTensorHandle> {
-        if value == 0.0 {
+        if value.to_bits() == 0 {
             return self.zeros_like_exec(prototype, prototype.shape());
         }
         let entry = self.get_entry_raw(prototype)?;
@@ -935,9 +1131,15 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Add, a, b)
+            self.binary_op_public_exec(
+                crate::backend::wgpu::types::BinaryOpCode::Add,
+                "elem_add",
+                a,
+                b,
+            )
+            .await
         })
     }
 
@@ -945,9 +1147,15 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, a, b)
+            self.binary_op_public_exec(
+                crate::backend::wgpu::types::BinaryOpCode::Mul,
+                "elem_mul",
+                a,
+                b,
+            )
+            .await
         })
     }
 
@@ -955,9 +1163,15 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, a, b)
+            self.binary_op_public_exec(
+                crate::backend::wgpu::types::BinaryOpCode::Sub,
+                "elem_sub",
+                a,
+                b,
+            )
+            .await
         })
     }
 
@@ -965,9 +1179,15 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Max, a, b)
+            self.binary_op_public_exec(
+                crate::backend::wgpu::types::BinaryOpCode::Max,
+                "elem_max",
+                a,
+                b,
+            )
+            .await
         })
     }
 
@@ -984,9 +1204,15 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Min, a, b)
+            self.binary_op_public_exec(
+                crate::backend::wgpu::types::BinaryOpCode::Min,
+                "elem_min",
+                a,
+                b,
+            )
+            .await
         })
     }
 
@@ -994,9 +1220,15 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Div, a, b)
+            self.binary_op_public_exec(
+                crate::backend::wgpu::types::BinaryOpCode::Div,
+                "elem_div",
+                a,
+                b,
+            )
+            .await
         })
     }
 
@@ -1004,14 +1236,19 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             if self.get_entry_raw(a)?.integer_type().is_some()
                 || self.get_entry_raw(b)?.integer_type().is_some()
             {
-                self.integer_arithmetic_exec(5, "elem_rem", a, b)
+                self.integer_remainder_exec(false, "elem_rem", a, b).await
             } else {
+                let _ = (self.get_entry(a)?, self.get_entry(b)?);
                 self.floating_remainder_exec(a, b, runmat_types::FloatingRemainderKind::Remainder)
+                    .map_err(|error| {
+                        runmat_accelerate_api::ProviderExecutionError::from(error)
+                            .with_unproven_effects()
+                    })
             }
         })
     }
@@ -1020,14 +1257,19 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             if self.get_entry_raw(a)?.integer_type().is_some()
                 || self.get_entry_raw(b)?.integer_type().is_some()
             {
-                self.integer_arithmetic_exec(6, "elem_mod", a, b)
+                self.integer_remainder_exec(true, "elem_mod", a, b).await
             } else {
+                let _ = (self.get_entry(a)?, self.get_entry(b)?);
                 self.floating_remainder_exec(a, b, runmat_types::FloatingRemainderKind::Modulus)
+                    .map_err(|error| {
+                        runmat_accelerate_api::ProviderExecutionError::from(error)
+                            .with_unproven_effects()
+                    })
             }
         })
     }
@@ -1036,9 +1278,9 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            if matches!(
+            let downloaded_exponent = matches!(
                 self.get_entry_raw(b)?.integer_type(),
                 Some(
                     IntegerElementType::I8
@@ -1046,29 +1288,17 @@ impl AccelProvider for WgpuProvider {
                         | IntegerElementType::I32
                         | IntegerElementType::I64
                 )
-            ) {
-                let exponent = self.download_integer_exec(b).await?;
-                let has_negative = match exponent.data {
-                    runmat_accelerate_api::HostIntegerDataOwned::I8(values) => {
-                        values.into_iter().any(|value| value < 0)
-                    }
-                    runmat_accelerate_api::HostIntegerDataOwned::I16(values) => {
-                        values.into_iter().any(|value| value < 0)
-                    }
-                    runmat_accelerate_api::HostIntegerDataOwned::I32(values) => {
-                        values.into_iter().any(|value| value < 0)
-                    }
-                    runmat_accelerate_api::HostIntegerDataOwned::I64(values) => {
-                        values.into_iter().any(|value| value < 0)
-                    }
-                    _ => false,
-                };
-                ensure!(
-                    !has_negative,
-                    "elem_pow: integer exponents must be nonnegative"
-                );
+            );
+            if downloaded_exponent {
+                return self.integer_signed_power_exec(a, b).await;
             }
-            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Pow, a, b)
+            self.binary_op_public_exec(
+                crate::backend::wgpu::types::BinaryOpCode::Pow,
+                "elem_pow",
+                a,
+                b,
+            )
+            .await
         })
     }
 
@@ -1107,14 +1337,14 @@ impl AccelProvider for WgpuProvider {
     fn modulate_constellation<'a>(
         &'a self,
         request: ProviderModulationRequest<'a>,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.modulate_constellation_exec(&request).await })
     }
 
     fn modulate_bits_constellation<'a>(
         &'a self,
         request: ProviderBitModulationRequest<'a>,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.modulate_bits_constellation_exec(&request).await })
     }
 
@@ -1122,48 +1352,48 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.elem_ge_exec(a, b) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.elem_ge_exec(a, b).await })
     }
 
     fn elem_le<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.elem_le_exec(a, b) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.elem_le_exec(a, b).await })
     }
 
     fn elem_lt<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.elem_lt_exec(a, b) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.elem_lt_exec(a, b).await })
     }
 
     fn elem_gt<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.elem_gt_exec(a, b) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.elem_gt_exec(a, b).await })
     }
 
     fn elem_eq<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.elem_eq_exec(a, b) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.elem_eq_exec(a, b).await })
     }
 
     fn elem_ne<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.elem_ne_exec(a, b) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.elem_ne_exec(a, b).await })
     }
 
     fn logical_and(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -1387,8 +1617,8 @@ impl AccelProvider for WgpuProvider {
         a: &'a GpuTensorHandle,
         digits: i32,
         significant: bool,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.round_digits_exec(a, digits, significant) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.round_digits_exec(a, digits, significant).await })
     }
 
     fn unary_fix<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
@@ -1491,7 +1721,9 @@ impl AccelProvider for WgpuProvider {
         );
         precision_matches
             && match operation {
-                runmat_accelerate_api::ProviderActivationAdjoint::Relu => true,
+                runmat_accelerate_api::ProviderActivationAdjoint::Relu => {
+                    self.ieee_words_available(self.precision)
+                }
                 runmat_accelerate_api::ProviderActivationAdjoint::Elu { alpha } => {
                     alpha.is_finite()
                         && alpha >= 0.0
@@ -1512,8 +1744,8 @@ impl AccelProvider for WgpuProvider {
     fn activation_softmax_rows<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.softmax_rows_exec(a) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.softmax_rows_exec(a).await })
     }
 
     fn unary_log<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
@@ -1561,15 +1793,21 @@ impl AccelProvider for WgpuProvider {
     fn unary_double<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.floating_cast_exec(a, NumericPrecision::F64) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.floating_cast_exec_typed(a, NumericPrecision::F64)
+                .await
+        })
     }
 
     fn unary_single<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.floating_cast_exec(a, NumericPrecision::F32) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.floating_cast_exec_typed(a, NumericPrecision::F32)
+                .await
+        })
     }
 
     fn unary_pow2<'a>(
@@ -1985,7 +2223,7 @@ impl AccelProvider for WgpuProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
         ep: &'a runmat_accelerate_api::MatmulEpilogue,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.matmul_epilogue_exec(a, b, ep).await })
     }
 
@@ -2156,7 +2394,7 @@ impl AccelProvider for WgpuProvider {
             }
             if entry.integer_type().is_some() {
                 let checkpoint = sum_submission_checkpoint();
-                let result = self.integer_floating_sum_dim_exec(a, dim);
+                let result = self.integer_floating_sum_dim_exec(a, dim).await;
                 if result.is_ok() && entry.len != 0 {
                     confirm_sum_kernel_submission(self, checkpoint);
                 }
@@ -2164,20 +2402,17 @@ impl AccelProvider for WgpuProvider {
             }
             let checkpoint = sum_submission_checkpoint();
             let result = if entry.precision == crate::backend::wgpu::types::NumericPrecision::F32 {
-                self.single_double_sum_dim_exec(a, dim)
+                self.single_double_sum_dim_exec(a, dim).await
+            } else if a.shape().len() > 2 {
+                self.reduce_nd_sum_f64_exec(a, dim).await
             } else {
-                let result = if a.shape().len() > 2 {
-                    self.reduce_nd_sum_f64_exec(a, dim)
-                } else {
-                    self.reduce_dim_sum_mean_exec(
-                        a,
-                        dim,
-                        crate::backend::wgpu::types::DimReduceOp::Sum,
-                    )
-                };
-                result.map_err(runmat_accelerate_api::ProviderExecutionError::from)
+                self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Sum)
+                    .map_err(runmat_accelerate_api::ProviderExecutionError::from)
             };
-            if result.is_ok() && entry.len != 0 {
+            if (result.is_ok() && entry.len != 0)
+                || (entry.precision == crate::backend::wgpu::types::NumericPrecision::F64
+                    && result.is_err())
+            {
                 confirm_sum_kernel_submission(self, checkpoint);
             }
             result
@@ -2263,8 +2498,8 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         target: IntegerElementType,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.cast_to_integer_exec(a, target) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.cast_to_integer_exec(a, target).await })
     }
     fn reduce_mean_dim<'a>(
         &'a self,
@@ -2281,6 +2516,8 @@ impl AccelProvider for WgpuProvider {
                 Err(runmat_accelerate_api::unsupported_provider_operation(
                     "complex resident mean requires a complex reduction kernel",
                 ))
+            } else if entry.shape.len() > 2 {
+                self.reduce_rank_n_mean_dim_exec(a, dim)
             } else {
                 self.reduce_dim_sum_mean_exec(
                     a,
@@ -2360,7 +2597,7 @@ impl AccelProvider for WgpuProvider {
             }
             if entry.integer_type().is_some() {
                 let checkpoint = sum_submission_checkpoint();
-                let result = self.integer_floating_sum_global_exec(a);
+                let result = self.integer_floating_sum_global_exec(a).await;
                 if result.is_ok() && entry.len > 1 {
                     confirm_sum_kernel_submission(self, checkpoint);
                 }
@@ -2368,12 +2605,15 @@ impl AccelProvider for WgpuProvider {
             }
             let checkpoint = sum_submission_checkpoint();
             let result = if entry.precision == crate::backend::wgpu::types::NumericPrecision::F32 {
-                self.single_double_sum_global_exec(a)
+                self.single_double_sum_global_exec(a).await
             } else {
                 self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Sum)
                     .map_err(runmat_accelerate_api::ProviderExecutionError::from)
             };
-            if result.is_ok() && entry.len > 1 {
+            if (result.is_ok() && entry.len > 1)
+                || (entry.precision == crate::backend::wgpu::types::NumericPrecision::F64
+                    && result.is_err())
+            {
                 confirm_sum_kernel_submission(self, checkpoint);
             }
             result
@@ -2424,8 +2664,8 @@ impl AccelProvider for WgpuProvider {
         a: &'a GpuTensorHandle,
         normalization: ProviderStdNormalization,
         nan_mode: ProviderNanMode,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.reduce_std_exec(a, normalization, nan_mode) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.typed_std_exec(a, None, normalization, nan_mode).await })
     }
 
     fn reduce_std_dim<'a>(
@@ -2434,25 +2674,30 @@ impl AccelProvider for WgpuProvider {
         dim: usize,
         normalization: ProviderStdNormalization,
         nan_mode: ProviderNanMode,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.reduce_std_dim_exec(a, dim, normalization, nan_mode) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.typed_std_exec(a, Some(dim), normalization, nan_mode)
+                .await
+        })
     }
 
     fn reduce_min<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Min)
+            self.typed_global_extrema_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Min)
+                .await
         })
     }
 
     fn reduce_max<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Max)
+            self.typed_global_extrema_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Max)
+                .await
         })
     }
 
@@ -2460,9 +2705,19 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         dim: usize,
-    ) -> AccelProviderFuture<'a, ReduceDimResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ReduceDimResult> {
         Box::pin(async move {
-            self.reduce_dim_minmax_exec(a, dim, crate::backend::wgpu::types::DimReduceExtrema::Min)
+            let checkpoint =
+                extrema_submission_checkpoint(runmat_accelerate_api::ProviderExtremaKind::Minimum);
+            let result = self
+                .typed_dimensional_extrema_exec(
+                    a,
+                    dim,
+                    crate::backend::wgpu::types::DimReduceExtrema::Min,
+                )
+                .await;
+            confirm_extrema_kernel_submission(self, checkpoint);
+            result
         })
     }
 
@@ -2470,9 +2725,19 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         dim: usize,
-    ) -> AccelProviderFuture<'a, ReduceDimResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ReduceDimResult> {
         Box::pin(async move {
-            self.reduce_dim_minmax_exec(a, dim, crate::backend::wgpu::types::DimReduceExtrema::Max)
+            let checkpoint =
+                extrema_submission_checkpoint(runmat_accelerate_api::ProviderExtremaKind::Maximum);
+            let result = self
+                .typed_dimensional_extrema_exec(
+                    a,
+                    dim,
+                    crate::backend::wgpu::types::DimReduceExtrema::Max,
+                )
+                .await;
+            confirm_extrema_kernel_submission(self, checkpoint);
+            result
         })
     }
 
@@ -2513,41 +2778,76 @@ impl AccelProvider for WgpuProvider {
         self.read_scalar_exec(h, linear_index)
     }
 
-    fn fused_elementwise(
-        &self,
-        shader: &str,
-        inputs: &[GpuTensorHandle],
-        output_shape: &[usize],
+    fn fused_elementwise<'a>(
+        &'a self,
+        shader: &'a str,
+        requirements: runmat_accelerate_api::ProviderShaderRequirements,
+        inputs: &'a [GpuTensorHandle],
+        output_shape: &'a [usize],
         len: usize,
         output_class: runmat_accelerate_api::ProviderElementType,
-    ) -> Result<GpuTensorHandle> {
-        runmat_accelerate_api::validate_fused_output_classes(self.precision(), &[output_class])?;
-        if output_class == runmat_accelerate_api::ProviderElementType::Logical {
-            self.fused_logical_with_telemetry_exec(shader, inputs, output_shape, len)
-        } else {
-            self.fused_elementwise_with_telemetry_exec(shader, inputs, output_shape, len)
-        }
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.require_selected_shader_requirements(requirements)?;
+            let frame = self
+                .plan_ordinary_single_fusion(shader, inputs, output_shape, len, output_class)
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
+            let validated = self
+                .prepare_validated_fusion_pipeline(
+                    frame.recipe.pipeline(),
+                    inputs.len(),
+                    super::pipeline_recipe::FusionPipelineLayout::Single,
+                )
+                .await?;
+            self.fused_elementwise_validated_with_telemetry_exec(
+                shader,
+                inputs,
+                output_shape,
+                len,
+                &frame,
+                &validated,
+            )
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
+        })
     }
 
-    fn fused_elementwise_multi(
-        &self,
-        shader: &str,
-        inputs: &[GpuTensorHandle],
-        output_shape: &[usize],
+    fn fused_elementwise_multi<'a>(
+        &'a self,
+        shader: &'a str,
+        requirements: runmat_accelerate_api::ProviderShaderRequirements,
+        inputs: &'a [GpuTensorHandle],
+        output_shape: &'a [usize],
         len: usize,
-        output_classes: &[runmat_accelerate_api::ProviderElementType],
-    ) -> Result<Vec<GpuTensorHandle>> {
-        self.fused_elementwise_multi_with_telemetry_exec(
-            shader,
-            inputs,
-            output_shape,
-            len,
-            output_classes,
-        )
+        output_classes: &'a [runmat_accelerate_api::ProviderElementType],
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Vec<GpuTensorHandle>> {
+        Box::pin(async move {
+            self.require_selected_shader_requirements(requirements)?;
+            let frame = self
+                .plan_ordinary_multi_fusion(shader, inputs, output_shape, len, output_classes)
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
+            let validated = self
+                .prepare_validated_fusion_pipeline(
+                    &frame.recipe,
+                    inputs.len(),
+                    super::pipeline_recipe::FusionPipelineLayout::Multiple(output_classes.len()),
+                )
+                .await?;
+            self.fused_elementwise_multi_validated_with_telemetry_exec(
+                shader, inputs, &frame, &validated,
+            )
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
+        })
     }
 
-    fn map_nan_to_zero(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.map_nan_to_zero_exec(a)
+    fn map_nan_to_zero(
+        &self,
+        a: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        self.map_nan_to_zero_exec_typed(a)
     }
     fn not_nan_mask(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.not_nan_mask_exec(a)
@@ -2556,6 +2856,7 @@ impl AccelProvider for WgpuProvider {
     fn fused_reduction(
         &self,
         shader: &str,
+        requirements: runmat_accelerate_api::ProviderShaderRequirements,
         inputs: &[GpuTensorHandle],
         output_shape: &[usize],
         reduce_len: usize,
@@ -2566,6 +2867,7 @@ impl AccelProvider for WgpuProvider {
         self.fused_reduction_with_telemetry_exec(
             crate::backend::wgpu::provider::backend::telemetry::FusedReductionTelemetryRequest {
                 shader,
+                requirements,
                 inputs,
                 output_shape,
                 reduce_len,
@@ -2574,6 +2876,39 @@ impl AccelProvider for WgpuProvider {
                 flavor,
             },
         )
+    }
+
+    fn reduction_recipe_config(
+        &self,
+        reduce_elements: u32,
+        slices: u32,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        runmat_accelerate_api::reduction::ReductionRecipeConfig,
+    > {
+        self.typed_reduction_config(reduce_elements, slices)
+    }
+
+    fn reduction_recipe_candidates(
+        &self,
+        recipe: &runmat_accelerate_api::reduction::ProviderReductionRecipe,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Vec<runmat_accelerate_api::reduction::ReductionStrategy>,
+    > {
+        self.typed_reduction_candidates(recipe)
+    }
+
+    fn submit_reduction_recipe(
+        &self,
+        submission: &runmat_accelerate_api::reduction::ReductionSubmission<'_>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        self.submit_reduction_recipe_exec(submission)
+    }
+
+    fn supports_shader_requirements(
+        &self,
+        requirements: runmat_accelerate_api::ProviderShaderRequirements,
+    ) -> bool {
+        self.supports_selected_shader_requirements(requirements)
     }
     fn warmup(&self) {
         self.warmup_exec();
@@ -2606,49 +2941,55 @@ impl AccelProvider for WgpuProvider {
         self.reduction_two_pass_mode_exec()
     }
 
-    fn scatter_column(
-        &self,
-        matrix: &GpuTensorHandle,
+    fn scatter_column<'a>(
+        &'a self,
+        matrix: &'a GpuTensorHandle,
         col_index: usize,
-        values: &GpuTensorHandle,
-    ) -> Result<GpuTensorHandle> {
-        self.scatter_column_exec(matrix, col_index, values)
+        values: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.scatter_column_exec(matrix, col_index, values).await })
     }
-    fn scatter_row(
-        &self,
-        matrix: &GpuTensorHandle,
+    fn scatter_row<'a>(
+        &'a self,
+        matrix: &'a GpuTensorHandle,
         row_index: usize,
-        values: &GpuTensorHandle,
-    ) -> Result<GpuTensorHandle> {
-        self.scatter_row_exec(matrix, row_index, values)
+        values: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.scatter_row_exec(matrix, row_index, values).await })
     }
 
-    fn sub2ind(
-        &self,
-        dims: &[usize],
-        strides: &[usize],
-        inputs: &[&GpuTensorHandle],
-        scalar_mask: &[bool],
+    fn sub2ind<'a>(
+        &'a self,
+        dims: &'a [usize],
+        strides: &'a [usize],
+        inputs: &'a [&'a GpuTensorHandle],
+        scalar_mask: &'a [bool],
         len: usize,
-        output_shape: &[usize],
-    ) -> Result<GpuTensorHandle> {
-        self.sub2ind_exec(dims, strides, inputs, scalar_mask, len, output_shape)
+        output_shape: &'a [usize],
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.sub2ind_exec(dims, strides, inputs, scalar_mask, len, output_shape)
+                .await
+        })
     }
 
     fn supports_ind2sub(&self) -> bool {
         true
     }
 
-    fn ind2sub(
-        &self,
-        dims: &[usize],
-        strides: &[usize],
-        indices: &GpuTensorHandle,
+    fn ind2sub<'a>(
+        &'a self,
+        dims: &'a [usize],
+        strides: &'a [usize],
+        indices: &'a GpuTensorHandle,
         total: usize,
         len: usize,
-        output_shape: &[usize],
-    ) -> Result<Vec<GpuTensorHandle>> {
-        self.ind2sub_exec(dims, strides, indices, total, len, output_shape)
+        output_shape: &'a [usize],
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Vec<GpuTensorHandle>> {
+        Box::pin(async move {
+            self.ind2sub_exec(dims, strides, indices, total, len, output_shape)
+                .await
+        })
     }
 
     fn upload(&self, host: &HostTensorView) -> Result<GpuTensorHandle> {
@@ -2659,9 +3000,32 @@ impl AccelProvider for WgpuProvider {
     fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async move { self.download_exec(h).await })
     }
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> Result<GpuTensorHandle> {
-        let output = self.upload_numeric_exec(host)?;
-        complete_observed_upload(self)?;
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        let buffer_created = std::cell::Cell::new(false);
+        let output = self
+            .upload_numeric_exec_observed(host, || {
+                buffer_created.set(true);
+                #[cfg(test)]
+                {
+                    use std::sync::atomic::Ordering;
+                    self.numeric_upload_post_buffer_count
+                        .fetch_add(1, Ordering::SeqCst);
+                    if let Some(error) = self
+                        .numeric_upload_post_buffer_fault
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("numeric upload test fault lock poisoned"))?
+                        .take()
+                    {
+                        return Err(error);
+                    }
+                }
+                Ok(())
+            })
+            .map_err(|error| numeric_upload_failure(error, buffer_created.get()))?;
+        complete_observed_upload(self).map_err(|error| numeric_upload_failure(error, true))?;
         Ok(output)
     }
     fn upload_logical_raw(
@@ -2718,6 +3082,42 @@ impl AccelProvider for WgpuProvider {
         // download_numeric_exec returns directly for the provider's genuine
         // empty payload; no staging, encoder, or submission is created.
         u32::from(handle.physical().payload_bytes() != 0)
+    }
+
+    fn produced_numeric_readback_evidence(
+        &self,
+        output: &runmat_accelerate_api::ProviderRepresentation,
+    ) -> Option<runmat_accelerate_api::ProviderProducedNumericReadbackEvidence> {
+        use runmat_accelerate_api::{
+            ProviderElementType, ProviderLayout, ProviderResidency, ProviderStorage,
+        };
+        use runmat_execution::ResourceByteBound;
+        if output.residency != ProviderResidency::Device
+            || output.storage != ProviderStorage::DenseReal
+            || output.layout != ProviderLayout::ColumnMajorContiguous
+            || !matches!(
+                output.element_type,
+                ProviderElementType::F32 | ProviderElementType::F64
+            )
+        {
+            return None;
+        }
+        let bytes = output.checked_byte_len()?;
+        // The selected route must validate the actual produced handle before
+        // readback. For a nonempty contiguous native buffer, the WGPU staging
+        // copy has precisely its requested physical extent and one submission.
+        if bytes == 0 || bytes > self.adapter_limits.max_buffer_size {
+            return None;
+        }
+        Some(
+            runmat_accelerate_api::ProviderProducedNumericReadbackEvidence {
+                source_requested_bytes: bytes,
+                transfer_bytes: bytes,
+                host_workspace_bytes: ResourceByteBound::Known(bytes),
+                provider_scratch_bytes: ResourceByteBound::Known(bytes),
+                queue_slots: 1,
+            },
+        )
     }
     fn upload_integer(&self, host: &HostIntegerTensorView) -> Result<GpuTensorHandle> {
         let output = self.upload_integer_exec(host)?;

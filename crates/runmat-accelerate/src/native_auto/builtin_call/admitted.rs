@@ -97,9 +97,28 @@ impl RuntimeAccelerationService for AdmittedAcceleration {
 pub(super) fn prepare_with(
     auto: &NativeAutoOffload,
     context: &RuntimeContext,
-    request: AdmittedBuiltinPreparation,
+    mut request: AdmittedBuiltinPreparation,
 ) -> PreparationResult<PreparedBuiltinCall> {
     if request.form().operation == Operation::RuntimeOwned {
+        return Ok(PreparedBuiltinCall::unobserved(request.into_operands()));
+    }
+    let host_instruction = match request.form().operation {
+        Operation::ElementwiseBinary => {
+            Some(runmat_runtime::context::VmFusionHostInstruction::ElementwiseBinary)
+        }
+        Operation::Reduction(runmat_builtins::BuiltinPreparationReduction::Min) => {
+            Some(runmat_runtime::context::VmFusionHostInstruction::Reduction)
+        }
+        _ => None,
+    };
+    if host_instruction.is_some_and(|instruction| {
+        context.vm_fusion_host_route().is_some_and(|route| {
+            route.allows_host_preparation(context, instruction)
+                && request.operands().iter().all(|value| {
+                    matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_value::NumericDType::F32)
+                })
+        })
+    }) {
         return Ok(PreparedBuiltinCall::unobserved(request.into_operands()));
     }
     if !auto.enabled
@@ -201,12 +220,14 @@ pub(super) fn prepare_with(
             unreachable!("runtime-owned and sink forms bypass automatic promotion")
         }
     };
+    let completion = request.take_prepared_completion_right();
     let prepared = auto
-        .prepare_operation(
+        .prepare_operation_with_completion(
             request.admission().binding.builtin.name,
             request.operands(),
             Some(context),
             operation,
+            completion,
         )
         .map_err(preparation_error)?;
     Ok(prepared)
@@ -226,9 +247,6 @@ impl BuiltinPreparationObservation for BuiltinCallGuard {
         self.observation
             .as_ref()
             .and_then(BuiltinCallObservation::recorder)
-    }
-    fn begin_execution(&mut self) {
-        BuiltinCallGuard::begin_execution(self);
     }
     fn finish(self: Box<Self>, result: &Result<Value, RuntimeError>) -> Result<(), RuntimeError> {
         (*self).finish(result).map_err(|error| *error)

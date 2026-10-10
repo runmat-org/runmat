@@ -1,8 +1,10 @@
 mod complex;
-mod evaluation;
 mod errors;
+mod evaluation;
+mod fusion_sign;
 mod host;
 mod provider;
+mod publication;
 mod specs;
 #[cfg(test)]
 mod tests;

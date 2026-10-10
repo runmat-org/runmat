@@ -26,6 +26,7 @@ mod reduction_meta;
 pub mod simple_provider;
 mod sortrows_host;
 pub mod telemetry;
+mod wgsl;
 #[cfg(target_arch = "wasm32")]
 mod web_auto_offload_store;
 #[cfg(feature = "wgpu")]
@@ -34,10 +35,11 @@ pub use fusion::*;
 pub use graph::*;
 pub use native_auto::{
     apply_auto_offload_calibration_from_file, auto_offload_report, is_sink, prepare_builtin_args,
-    promote_binary, promote_reduction_args, promote_unary, reset_auto_offload_log,
-    AutoOffloadCalibrationOutcome, AutoOffloadCalibrationSummary, AutoOffloadDecisionEntry,
-    AutoOffloadDisposition, AutoOffloadReport, BinaryOp, CachedProviderInfo, DecisionReason,
-    ReductionOp, ThresholdBase, ThresholdDelta, ThresholdDeltaEntry, ThresholdSnapshot, UnaryOp,
+    promote_binary, promote_binary_in_context, promote_reduction_args, promote_unary,
+    reset_auto_offload_log, AutoOffloadCalibrationOutcome, AutoOffloadCalibrationSummary,
+    AutoOffloadDecisionEntry, AutoOffloadDisposition, AutoOffloadReport, BinaryOp,
+    CachedProviderInfo, DecisionReason, ReductionOp, ThresholdBase, ThresholdDelta,
+    ThresholdDeltaEntry, ThresholdSnapshot, UnaryOp,
 };
 pub use placement::{report as placement_report, PlacementReport};
 pub use reduction_meta::{value_is_all_keyword, ReductionAxes};

@@ -35,7 +35,10 @@ impl AccelProvider for Provider {
     fn upload(&self, view: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.inner.upload(view)
     }
-    fn upload_numeric_raw(&self, view: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        view: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         if let Some(alias) = self.alias.lock().unwrap().as_ref() {
             return Ok(alias.with_view(alias.view().clone()).unwrap());
         }

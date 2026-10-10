@@ -125,6 +125,15 @@ async fn validate_startswith_options(rest: Vec<Value>) -> BuiltinResult<bool> {
             BUILTIN_NAME,
         )?;
     }
+    // A resident control is its own declared extension. Reject it before
+    // generic numeric classification so MATLAB mode reports the resident gate
+    // without consulting any provider or gathering the borrowed handle.
+    if has_resident {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &STARTSWITH_RESIDENT_IGNORE_CASE_EXTENSION,
+            BUILTIN_NAME,
+        )?;
+    }
     let value = option_value(&rest);
     if value.is_some_and(is_numeric_ignore_case_value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -138,13 +147,6 @@ async fn validate_startswith_options(rest: Vec<Value>) -> BuiltinResult<bool> {
             BUILTIN_NAME,
         )?;
     }
-    if has_resident {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &STARTSWITH_RESIDENT_IGNORE_CASE_EXTENSION,
-            BUILTIN_NAME,
-        )?;
-    }
-
     if let Some(ignore_case) = parsed_host {
         return Ok(ignore_case);
     }
@@ -503,6 +505,88 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn startswith_matlab_mode_reports_distinct_control_extension_ids() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        for (rest, expected) in [
+            (
+                vec![Value::Bool(true)],
+                "RunMat:compatibility:StartsWithPositionalIgnoreCaseExtension",
+            ),
+            (
+                vec![
+                    Value::String("IgnoreCase".into()),
+                    Value::Int(IntValue::I32(1)),
+                ],
+                "RunMat:compatibility:StartsWithNumericIgnoreCaseExtension",
+            ),
+            (
+                vec![
+                    Value::String("IgnoreCase".into()),
+                    Value::String("on".into()),
+                ],
+                "RunMat:compatibility:StartsWithTextIgnoreCaseExtension",
+            ),
+        ] {
+            let err = run_startswith(
+                Value::String("RunMat".into()),
+                Value::String("run".into()),
+                rest,
+            )
+            .unwrap_err();
+            assert_eq!(err.identifier(), Some(expected));
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn startswith_resident_control_and_text_reject_before_provider_access() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("borrowed resident control");
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+        let err = run_startswith(
+            Value::String("RunMat".into()),
+            Value::String("run".into()),
+            vec![
+                Value::String("IgnoreCase".into()),
+                Value::GpuTensor(allocation.handle.clone()),
+            ],
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:compatibility:StartsWithResidentIgnoreCaseExtension")
+        );
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+        let err = run_startswith(
+            Value::GpuTensor(allocation.handle.clone()),
+            Value::String("run".into()),
+            Vec::new(),
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:startsWith:InvalidInput"));
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn startswith_ignore_case_logical_array_value() {
         let logical = LogicalArray::new(vec![1], vec![1, 1]).unwrap();
         let result = run_startswith(
@@ -677,6 +761,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_accepts_pattern_object() {
         let pattern = crate::builtins::strings::core::compat::pattern_object(r"run\d+");

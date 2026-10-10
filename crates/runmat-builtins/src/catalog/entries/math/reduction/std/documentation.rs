@@ -15,7 +15,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         ]},
         BuiltinDocumentationSection { heading: "Supported classes", paragraphs: &[
             "Real double and single inputs are admitted. Logical input is converted to numeric observations; integer and complex data are not currently admitted. Typed-integer normalization or dimension controls are a RunMat-only compatibility-mode extension, not integer data support.",
-            "The runtime does not currently admit `native`, `double`, `default`, or `like` as output-class controls for `std`. Host single reductions currently materialize in double while some provider reductions retain single; cross-path class parity remains under qualification.",
+            "The runtime does not currently admit `native`, `double`, `default`, or `like` as output-class controls for `std`. Real single reductions retain single output storage on host and admitted provider routes; double and logical inputs return double. Host reductions accumulate in double and round when constructing single output; CPU and GPU results can differ within floating-point precision.",
         ]},
         BuiltinDocumentationSection { heading: "GPU execution", paragraphs: &[
             "Eligible resident real reductions use an owning provider's standard-deviation hooks. Unsupported axes, shapes, or missing-value modes can gather to the host. Standard deviation is a fusion boundary, not an elementwise fused operation. Automatic placement may choose a GPU; explicit `gpuArray` remains available.",
@@ -66,7 +66,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[BuiltinDocumentationLink { label: "Owning std reduction", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/std.rs") }],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Normalization, dimensions, compatibility, provider parity", location: "builtins::math::reduction::std::tests" }],
-        notes: &["All seven substantive legacy examples, normalization and NaN behaviors, FAQs, and links retained or corrected. The old like prototype form and output-type FAQ described unsupported runtime behavior and were replaced. Native/browser/provider qualification and single-class parity remain open."],
+        notes: &["All seven substantive legacy examples, normalization and NaN behaviors, FAQs, and links retained or corrected. The old like prototype form and output-type FAQ described unsupported runtime behavior and were replaced. Host and provider class boundaries now retain single; native/browser numerical qualification remains open."],
     },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Partial),

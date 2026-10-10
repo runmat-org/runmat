@@ -3,8 +3,8 @@ use std::sync::Mutex;
 use futures::executor::block_on;
 use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocationOwner};
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorHandle, GpuTensorStorage,
-    HostTensorView, NumericElementType,
+    AccelDownloadFuture, AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView,
+    NumericElementType,
 };
 use runmat_builtins::PLUS_CATALOG_ENTRY;
 
@@ -61,13 +61,14 @@ impl AccelProvider for ControlledProvider {
         &'a self,
         _: &'a GpuTensorHandle,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             match self.behavior {
                 AddBehavior::Unsupported => Err(
-                    runmat_accelerate_api::unsupported_provider_operation("addition unavailable"),
+                    runmat_accelerate_api::unsupported_provider_operation("addition unavailable")
+                        .into(),
                 ),
-                AddBehavior::Failed => Err(anyhow::anyhow!("device lost")),
+                AddBehavior::Failed => Err(anyhow::anyhow!("device lost").into()),
                 AddBehavior::InvalidOutput => {
                     let allocation = self
                         .owner

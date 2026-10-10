@@ -7,7 +7,6 @@ use crate::core::renderer::{PipelineType, Vertex};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3, Vec4};
 use std::collections::HashMap;
-use std::sync::Arc;
 
 /// Unique identifier for scene nodes
 pub type NodeId = u64;
@@ -72,7 +71,7 @@ impl RenderData {
 /// Optional GPU-resident vertex storage supplied by higher-level systems.
 #[derive(Debug, Clone)]
 pub struct GpuVertexBuffer {
-    pub buffer: Arc<wgpu::Buffer>,
+    pub buffer: runmat_accelerate_api::WgpuBufferOwner,
     pub vertex_count: usize,
     /// Optional indirect draw arguments buffer (GPU-driven vertex count).
     ///
@@ -82,7 +81,7 @@ pub struct GpuVertexBuffer {
 }
 
 impl GpuVertexBuffer {
-    pub fn new(buffer: Arc<wgpu::Buffer>, vertex_count: usize) -> Self {
+    pub fn new(buffer: runmat_accelerate_api::WgpuBufferOwner, vertex_count: usize) -> Self {
         Self {
             buffer,
             vertex_count,
@@ -91,9 +90,9 @@ impl GpuVertexBuffer {
     }
 
     pub fn with_indirect(
-        buffer: Arc<wgpu::Buffer>,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
         vertex_count: usize,
-        indirect_args: Arc<wgpu::Buffer>,
+        indirect_args: runmat_accelerate_api::WgpuBufferOwner,
     ) -> Self {
         Self {
             buffer,
@@ -109,7 +108,7 @@ impl GpuVertexBuffer {
 /// GPU-driven draw call arguments for `draw_indirect`.
 #[derive(Debug, Clone)]
 pub struct GpuIndirectDraw {
-    pub args: Arc<wgpu::Buffer>,
+    pub args: runmat_accelerate_api::WgpuBufferOwner,
     pub offset: u64,
 }
 

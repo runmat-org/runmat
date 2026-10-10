@@ -1,5 +1,4 @@
-use super::{AllocationIdentity, AllocationOwner, AllocationRetirementOutcome};
-use std::sync::Arc;
+use super::{AllocationIdentity, AllocationOwnerHandle, AllocationRetirementOutcome};
 
 /// Both terminal phases are attempted once. A view failure never suppresses
 /// physical release, and a physical failure retains its exact owner.
@@ -32,13 +31,13 @@ pub enum AllocationReleaseOutcome {
 pub struct AllocationReleaseError {
     identity: AllocationIdentity,
     outcome: AllocationRetirementOutcome,
-    owner: Arc<dyn AllocationOwner>,
+    owner: AllocationOwnerHandle,
 }
 impl AllocationReleaseError {
     pub(super) fn new(
         identity: AllocationIdentity,
         outcome: AllocationRetirementOutcome,
-        owner: Arc<dyn AllocationOwner>,
+        owner: AllocationOwnerHandle,
     ) -> Self {
         Self {
             identity,
@@ -54,7 +53,7 @@ impl AllocationReleaseError {
     }
     /// Retain the same state while the embedding owner reports/drains failures.
     /// This is not a second allocation registry or a renewed allocation lease.
-    pub fn retained_owner(&self) -> &Arc<dyn AllocationOwner> {
+    pub fn retained_owner(&self) -> &AllocationOwnerHandle {
         &self.owner
     }
 }

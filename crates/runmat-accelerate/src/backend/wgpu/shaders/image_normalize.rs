@@ -1,3 +1,31 @@
+use crate::backend::wgpu::types::NumericPrecision;
+
+/// Source-specialization axes shared by bootstrap and adapter-tuned pipelines.
+/// The provider still owns capability sanitization; this only materializes WGSL.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ImageNormalizeShaderGeometry {
+    pub batch_tile: u32,
+    pub values_per_thread: u32,
+    pub lane_count: u32,
+    pub spatial_tile: u32,
+}
+
+pub(crate) fn materialize(
+    precision: NumericPrecision,
+    geometry: ImageNormalizeShaderGeometry,
+) -> String {
+    let (template, vector_width) = match precision {
+        NumericPrecision::F64 => (IMAGE_NORMALIZE_SHADER_F64, 2),
+        NumericPrecision::F32 => (IMAGE_NORMALIZE_SHADER_F32, 4),
+    };
+    template
+        .replace("@BT@", &geometry.batch_tile.to_string())
+        .replace("@VP@", &geometry.values_per_thread.to_string())
+        .replace("@WG@", &geometry.lane_count.to_string())
+        .replace("@BV@", &vector_width.to_string())
+        .replace("@ST@", &geometry.spatial_tile.to_string())
+}
+
 pub const IMAGE_NORMALIZE_SHADER_F64: &str = r#"
 const BATCH_TILE: u32 = @BT@u;
 const VALUES_PER_THREAD: u32 = @VP@u;
@@ -200,7 +228,7 @@ fn main(
     }
 
     if lane_index == 0u {
-        let inv_plane = 1.0f64 / f64(plane);
+        let inv_plane = f64(1.0) / f64(plane);
         for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
             let mask = batch_group_mask(active_batches, g);
             let total_sum = partial_sum[g];
@@ -260,7 +288,7 @@ fn main(
                         component = component + params.bias;
                     }
                     if apply_clamp_zero {
-                        component = max(component, 0.0f64);
+                        component = max(component, f64(0.0));
                     }
                     if apply_gamma {
                         component = pow(component, params.gamma);
@@ -419,13 +447,9 @@ fn main(
     let total_groups = group_count(active_batches);
     var sum: array<vec4<f32>, BATCH_GROUPS>;
     var sum_comp: array<vec4<f32>, BATCH_GROUPS>;
-    var sum_sq: array<vec4<f32>, BATCH_GROUPS>;
-    var sum_sq_comp: array<vec4<f32>, BATCH_GROUPS>;
     for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
         sum[g] = vec4<f32>(0.0);
         sum_comp[g] = vec4<f32>(0.0);
-        sum_sq[g] = vec4<f32>(0.0);
-        sum_sq_comp[g] = vec4<f32>(0.0);
     }
     loop {
         if idx >= plane {
@@ -453,11 +477,6 @@ fn main(
                 let t = sum[group] + y;
                 sum_comp[group] = (t - sum[group]) - y;
                 sum[group] = t;
-                let sq_val = value * value;
-                let y_sq = sq_val - sum_sq_comp[group];
-                let t_sq = sum_sq[group] + y_sq;
-                sum_sq_comp[group] = (t_sq - sum_sq[group]) - y_sq;
-                sum_sq[group] = t_sq;
                 group = group + 1u;
             }
             inner = inner + 1u;
@@ -467,7 +486,6 @@ fn main(
 
     for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
         partial_sum[lane_base + g] = sum[g];
-        partial_sum_sq[lane_base + g] = sum_sq[g];
     }
     workgroupBarrier();
 
@@ -481,8 +499,6 @@ fn main(
             let src = (lane_index + stride) * BATCH_GROUPS;
             for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
                 partial_sum[dst + g] = partial_sum[dst + g] + partial_sum[src + g];
-                partial_sum_sq[dst + g] =
-                    partial_sum_sq[dst + g] + partial_sum_sq[src + g];
             }
         }
         workgroupBarrier();
@@ -493,16 +509,85 @@ fn main(
         let inv_plane = 1.0f / f32(plane);
         for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
             let mask = batch_group_mask(active_batches, g);
-            let total_sum = partial_sum[g];
-            let total_sq = partial_sum_sq[g];
-            let mean = total_sum * inv_plane;
-            var variance = total_sq * inv_plane - mean * mean;
-            variance = max(variance, vec4<f32>(0.0));
+            shared_mean[g] = partial_sum[g] * inv_plane * mask;
+        }
+    }
+
+    workgroupBarrier();
+
+    // The source computes mean((x - mean(x)).^2). Accumulating E[x^2] and
+    // subtracting mean^2 loses all variance for nearly constant single data.
+    // A second pass also preserves the source's native-single reduction domain.
+    var sum_sq: array<vec4<f32>, BATCH_GROUPS>;
+    var sum_sq_comp: array<vec4<f32>, BATCH_GROUPS>;
+    for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
+        sum_sq[g] = vec4<f32>(0.0);
+        sum_sq_comp[g] = vec4<f32>(0.0);
+    }
+    idx = spatial_lane * (LANE_COUNT * VALUES_PER_THREAD) + lane * VALUES_PER_THREAD;
+    loop {
+        if idx >= plane {
+            break;
+        }
+        var inner = 0u;
+        loop {
+            if inner >= VALUES_PER_THREAD {
+                break;
+            }
+            let sample_idx = idx + inner;
+            if sample_idx >= plane {
+                break;
+            }
+            let sample_base = plane_offset(sample_idx) + base_batch;
+            var group = 0u;
+            loop {
+                if group >= total_groups {
+                    break;
+                }
+                let comp = group_component_count(active_batches, group);
+                let offset = sample_base + group * BATCH_VEC_WIDTH;
+                let diff = load_batch_group(offset, comp) - shared_mean[group];
+                let square = diff * diff;
+                let y = square - sum_sq_comp[group];
+                let t = sum_sq[group] + y;
+                sum_sq_comp[group] = (t - sum_sq[group]) - y;
+                sum_sq[group] = t;
+                group = group + 1u;
+            }
+            inner = inner + 1u;
+        }
+        idx = idx + lane_stride;
+    }
+    for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
+        partial_sum_sq[lane_base + g] = sum_sq[g];
+    }
+    workgroupBarrier();
+
+    stride = LANE_STRIDE / 2u;
+    loop {
+        if stride == 0u {
+            break;
+        }
+        if lane_index < stride {
+            let dst = lane_index * BATCH_GROUPS;
+            let src = (lane_index + stride) * BATCH_GROUPS;
+            for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
+                partial_sum_sq[dst + g] =
+                    partial_sum_sq[dst + g] + partial_sum_sq[src + g];
+            }
+        }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+    if lane_index == 0u {
+        let inv_plane = 1.0f / f32(plane);
+        for (var g = 0u; g < BATCH_GROUPS; g = g + 1u) {
+            let mask = batch_group_mask(active_batches, g);
+            let variance = partial_sum_sq[g] * inv_plane;
             let sigma = sqrt(variance + vec4<f32>(params.epsilon));
             var inv_sigma_vec = vec4<f32>(0.0);
             inv_sigma_vec =
                 select(inv_sigma_vec, vec4<f32>(1.0) / sigma, sigma > vec4<f32>(0.0));
-            shared_mean[g] = mean * mask;
             shared_inv_sigma[g] = inv_sigma_vec * mask;
         }
     }

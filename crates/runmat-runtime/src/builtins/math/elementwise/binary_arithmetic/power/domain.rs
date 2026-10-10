@@ -10,6 +10,13 @@
 //! those exceptional pairs.
 pub(super) use runmat_accelerate_api::PowerResultDomain;
 
+/// A represented integral exponent cannot promote a real base to complex,
+/// including negative finite bases. NaN and signed zero remain real-domain
+/// results; their eventual value semantics are still owned by evaluation.
+pub(super) fn real_for_any_real_base(exponent: f64) -> bool {
+    PowerResultDomain::real_for_any_real_base(exponent)
+}
+
 pub(super) fn classify_pair(
     plan: &crate::builtins::common::broadcast::BroadcastPlan,
     left: impl Fn(usize) -> f64,

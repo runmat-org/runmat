@@ -25,7 +25,6 @@ fn wide_tensor() -> Value {
     )
 }
 
-#[cfg(feature = "jit")]
 fn assert_wide_aliases(left: &Value, right: &Value) {
     let (Value::Tensor(left), Value::Tensor(right)) = (left, right) else {
         panic!("deal must retain tensor class in both outputs");
@@ -38,6 +37,93 @@ fn assert_wide_aliases(left: &Value, right: &Value) {
             .shares_allocation_with(right.host_buffer()),
         "deal replication must retain the same host allocation until mutation"
     );
+}
+
+#[test]
+fn forced_generic_native_deal_preserves_requested_discarded_and_zero_outputs() {
+    runmat_gc::gc_test_context(|| {
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
+        let unit = block_on(session.compile_executable_unit(
+            ExecutableSource::new(
+                "native-deal-outputs@1",
+                "nativeDealReplicate.m",
+                "function [left, right] = nativeDealReplicate(x)\n[left, right] = deal(x);\nend\nfunction selected = nativeDealDiscard(x)\n[~, selected] = deal(uint8(3), x);\nend\nfunction nativeDealZero(x)\ndeal(x);\nend\n",
+            ),
+            None,
+        ))
+        .expect("compile exact native deal forms");
+        let input = wide_tensor();
+        let control = InvocationControl::default().force_generic_native();
+        let invoke = |session: &mut RunMatSession, name: &str, requested_outputs| {
+            block_on(session.invoke_executable(
+                &unit,
+                ProcedureInvocation {
+                    target: ProcedureTarget::Function(name.into()),
+                    arguments: vec![input.clone()],
+                    requested_outputs,
+                },
+                &control,
+            ))
+            .unwrap_or_else(|error| panic!("{name}: {error:?}"))
+        };
+
+        let replicated = invoke(&mut session, "nativeDealReplicate", 2);
+        assert_eq!(replicated.as_slice().len(), 2);
+        assert_wide_aliases(&replicated.as_slice()[0], &replicated.as_slice()[1]);
+        let Value::Tensor(original) = &input else {
+            panic!("exact tensor input");
+        };
+        let Value::Tensor(first) = &replicated.as_slice()[0] else {
+            panic!("exact first output");
+        };
+        assert!(
+            original
+                .host_buffer()
+                .shares_allocation_with(first.host_buffer()),
+            "native deal must not copy the input payload"
+        );
+
+        let selected = invoke(&mut session, "nativeDealDiscard", 1);
+        assert_single_output(&selected, input.clone());
+        let Value::Tensor(chosen) = &selected.as_slice()[0] else {
+            panic!("discarded-output selection must preserve the tensor");
+        };
+        assert!(
+            original
+                .host_buffer()
+                .shares_allocation_with(chosen.host_buffer()),
+            "discarding the first deal output must not copy the selected payload"
+        );
+        let discarded = invoke(&mut session, "nativeDealZero", 0);
+        assert_output_values(&discarded, &[]);
+    });
+}
+
+#[test]
+fn forced_generic_native_deal_count_error_does_not_duplicate_prior_effects() {
+    runmat_gc::gc_test_context(|| {
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
+        let unit = block_on(session.compile_executable_unit(
+            ExecutableSource::new(
+                "native-deal-no-replay@1",
+                "nativeDealNoReplay.m",
+                "function calls = nativeDealNoReplay()\nglobal dealCalls; dealCalls = 0; caught = false;\ntry\n operation = @deal;\n [a,b,c] = operation(nextDealInput(), uint16(8));\ncatch failure\n caught = strcmp(failure.identifier, 'RunMat:deal:InputOutputCountMismatch');\nend\nassert(caught);\ncalls = dealCalls;\nend\nfunction value = nextDealInput()\nglobal dealCalls; dealCalls = dealCalls + 1;\nvalue = uint64(9007199254740992) + uint64(1);\nend\n",
+            ),
+            None,
+        ))
+        .expect("compile effect-counted deal error");
+        let output = block_on(session.invoke_executable(
+            &unit,
+            ProcedureInvocation {
+                target: ProcedureTarget::Function("nativeDealNoReplay".into()),
+                arguments: Vec::new(),
+                requested_outputs: 1,
+            },
+            &InvocationControl::default().force_generic_native(),
+        ))
+        .expect("catch exact deal count error");
+        assert_single_output(&output, Value::Num(1.0));
+    });
 }
 
 #[test]

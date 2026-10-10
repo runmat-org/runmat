@@ -56,7 +56,7 @@ fn shader_with_input_precision(
         .replace("real_power(", &format!("{name}("))
         .replace("needs_complex(", &format!("{name}_needs_complex("));
     let max_rank = crate::backend::wgpu::params::BCAST_MAX_RANK;
-    format!(
+    let source = format!(
         r#"
 alias T = {ty};
 const MAX_RANK: u32 = {max_rank}u;
@@ -93,12 +93,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     {body}
 }}
 "#
-    )
+    );
+    if precision == NumericPrecision::F64 {
+        super::ieee_words::inject(&source)
+    } else {
+        source
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::wgpu::shaders::validation_tests::{validate_generated, RequiredCaps};
 
     #[test]
     fn classification_shader_identity_contains_input_and_flag_precision() {
@@ -112,5 +118,34 @@ mod tests {
         assert!(typed.contains("let a = T(A.data[ia]);"));
         assert!(typed.contains("params.a_stride[d].value"));
         assert!(typed.contains("rm_power_f64_needs_complex(a, b)"));
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn generated_power_shaders_validate_without_constant_nonfinite_bitcasts() {
+        for precision in [NumericPrecision::F32, NumericPrecision::F64] {
+            let caps = if precision == NumericPrecision::F32 {
+                RequiredCaps::None
+            } else {
+                RequiredCaps::Float64Int64
+            };
+            for (name, source) in [
+                (
+                    "classification",
+                    classification_shader(precision, precision),
+                ),
+                (
+                    "real",
+                    shader(precision, PowerShader::Evaluate(PowerResultDomain::Real)),
+                ),
+                (
+                    "complex",
+                    shader(precision, PowerShader::Evaluate(PowerResultDomain::Complex)),
+                ),
+            ] {
+                assert!(!source.contains("bitcast<f32>(0x"), "{name} {precision:?}");
+                validate_generated(name, &source, 64, 8, caps);
+            }
+        }
     }
 }

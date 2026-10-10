@@ -34,6 +34,9 @@ const FUSION_SEMANTICS: FusionSemanticDeclaration = FusionSemanticDeclaration {
     },
     revision: 1,
     admit: None,
+    admit_static: None,
+    required_real_unary: None,
+    required_arithmetic: None,
     helpers: &[],
     scalar_operation: None,
 };

@@ -1,6 +1,7 @@
 //! MATLAB-compatible `std` builtin with GPU-aware semantics for RunMat.
 use runmat_accelerate_api::{
-    AccelProvider, GpuTensorHandle, ProviderNanMode, ProviderStdNormalization,
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, NumericElementType, ProviderNanMode,
+    ProviderStdNormalization,
 };
 use runmat_builtins::{
     BuiltinErrorDescriptor, DispersionControl, DispersionNormalization as StdNormalization,
@@ -452,7 +453,8 @@ fn std_scalar_tensor(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<T
             ReductionNaN::Include | ReductionNaN::Omit => 0.0,
         }
     };
-    Tensor::new(vec![result], vec![1, 1]).map_err(|e| std_internal_error(format!("std: {e}")))
+    Tensor::new_with_dtype(vec![result], vec![1, 1], tensor.numeric_dtype())
+        .map_err(|e| std_internal_error(format!("std: {e}")))
 }
 
 fn std_tensor_reduce(
@@ -473,7 +475,7 @@ fn std_tensor_reduce(
     let values = tensor::tensor_values_f64(tensor);
     if values.is_empty() {
         let fill = vec![f64::NAN; out_len];
-        return Tensor::new(fill, output_shape)
+        return Tensor::new_with_dtype(fill, output_shape, tensor.numeric_dtype())
             .map_err(|e| std_internal_error(format!("std: {e}")));
     }
 
@@ -534,7 +536,8 @@ fn std_tensor_reduce(
             };
     }
 
-    Tensor::new(output, output_shape).map_err(|e| std_internal_error(format!("std: {e}")))
+    Tensor::new_with_dtype(output, output_shape, tensor.numeric_dtype())
+        .map_err(|e| std_internal_error(format!("std: {e}")))
 }
 
 fn resolve_axes(shape: &[usize], axes: &StdAxes) -> BuiltinResult<(Vec<usize>, bool)> {
@@ -630,8 +633,19 @@ fn multi_to_linear(coords: &[usize], shape: &[usize]) -> usize {
 }
 
 async fn std_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Some(device_value) = std_gpu_reduce(provider, &handle, args).await {
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
+        handle
+            .allocation_lease()
+            .validate_live()
+            .map_err(|source| {
+                let mut error = std_internal_error(format!(
+                    "std: resident input allocation is unavailable: {source}"
+                ));
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                error.source = Some(Box::new(source));
+                error
+            })?;
+        if let Some(device_value) = std_gpu_reduce(provider, &handle, args).await? {
             return Ok(Value::GpuTensor(device_value));
         }
     }
@@ -639,11 +653,11 @@ async fn std_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResu
 }
 
 async fn std_gpu_reduce(
-    provider: &dyn AccelProvider,
+    provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
     args: &ParsedArguments,
-) -> Option<GpuTensorHandle> {
-    let (dims, _) = resolve_axes(handle.shape(), &args.axes).ok()?;
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    let (dims, _) = resolve_axes(handle.shape(), &args.axes)?;
     let normalization = match args.normalization {
         StdNormalization::Sample => ProviderStdNormalization::Sample,
         StdNormalization::Population => ProviderStdNormalization::Population,
@@ -654,52 +668,128 @@ async fn std_gpu_reduce(
     };
 
     if dims.is_empty() {
-        return Some(handle.clone());
+        if is_scalar_shape(handle.shape()) {
+            return accepted_std_result(
+                provider,
+                handle,
+                &normalize_scalar_shape(handle.shape()),
+                "reduce_std",
+                provider.reduce_std(handle, normalization, nan_mode).await,
+            );
+        }
+        return Ok(None);
     }
 
     if dims.len() == handle.shape().len() {
-        if is_scalar_shape(handle.shape()) {
-            return Some(handle.clone());
-        }
-        return provider
-            .reduce_std(handle, normalization, nan_mode)
-            .await
-            .map_err(|err| {
-                log::trace!("std: provider reduce_std fallback triggered: {err}");
-                err
-            })
-            .ok();
+        return accepted_std_result(
+            provider,
+            handle,
+            &reduced_shape(handle.shape(), &dims),
+            "reduce_std",
+            provider.reduce_std(handle, normalization, nan_mode).await,
+        );
     }
 
     if dims.len() == 1 {
         let dim = dims[0] + 1;
-        return reduce_std_dim_gpu(provider, handle.clone(), dim, normalization, nan_mode).await;
+        return reduce_std_dim_gpu(provider, handle, dim, normalization, nan_mode).await;
     }
 
-    None
+    Ok(None)
+}
+
+fn initial_std_result(
+    operation: &'static str,
+    result: runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle>,
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    match result {
+        Ok(output) => Ok(Some(output)),
+        Err(source) if source.is_unsupported() => Ok(None),
+        Err(source) => {
+            let mut error =
+                std_internal_error(format!("std: provider {operation} failed: {source}"));
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            Err(crate::runtime_error::with_provider_execution_source(
+                error, source,
+            ))
+        }
+    }
+}
+
+pub(super) fn std_output_matches(
+    provider: &'static dyn AccelProvider,
+    input: &GpuTensorHandle,
+    output: &GpuTensorHandle,
+    expected_shape: &[usize],
+) -> bool {
+    let element = input.physical().element_type();
+    if input.allocation_lease().validate_live().is_err()
+        || !matches!(element, NumericElementType::F32 | NumericElementType::F64)
+        || runmat_accelerate_api::handle_storage(input) != GpuTensorStorage::Real
+        || runmat_accelerate_api::handle_integer_type(input).is_some()
+        || runmat_accelerate_api::handle_is_logical(input)
+        || !gpu_helpers::numeric_descriptor_matches(input, element, GpuTensorStorage::Real)
+    {
+        return false;
+    }
+    gpu_helpers::unary_gpu_output_matches_shape(
+        output,
+        input,
+        provider,
+        expected_shape,
+        gpu_helpers::UnaryGpuOutputContract {
+            storage: GpuTensorStorage::Real,
+            precision: runmat_accelerate_api::handle_precision(input),
+            integer: None,
+            logical: false,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+        },
+    ) && output.physical().element_type() == element
+        && gpu_helpers::numeric_descriptor_matches(output, element, GpuTensorStorage::Real)
+}
+
+fn accepted_std_result(
+    provider: &'static dyn AccelProvider,
+    input: &GpuTensorHandle,
+    expected_shape: &[usize],
+    operation: &'static str,
+    result: runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle>,
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    let Some(output) = initial_std_result(operation, result)? else {
+        return Ok(None);
+    };
+    if !std_output_matches(provider, input, &output, expected_shape) {
+        let mut error = std_internal_error(format!(
+            "std: provider {operation} returned an invalid resident reduction"
+        ));
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        return Err(gpu_helpers::reject_gpu_output(output, error));
+    }
+    Ok(Some(output))
 }
 
 async fn reduce_std_dim_gpu(
-    provider: &dyn AccelProvider,
-    handle: GpuTensorHandle,
+    provider: &'static dyn AccelProvider,
+    handle: &GpuTensorHandle,
     dim: usize,
     normalization: ProviderStdNormalization,
     nan_mode: ProviderNanMode,
-) -> Option<GpuTensorHandle> {
+) -> BuiltinResult<Option<GpuTensorHandle>> {
     if dim == 0 {
-        return None;
+        return Ok(None);
     }
     if handle.shape().len() < dim {
-        return Some(handle);
+        return Ok(None);
     }
-    provider
-        .reduce_std_dim(&handle, dim - 1, normalization, nan_mode)
-        .await
-        .map_err(|err| {
-            log::trace!("std: provider reduce_std_dim fallback triggered: {err}");
-            err
-        })
-        .ok()
+    accepted_std_result(
+        provider,
+        handle,
+        &reduced_shape(handle.shape(), &[dim - 1]),
+        "reduce_std_dim",
+        provider
+            .reduce_std_dim(handle, dim - 1, normalization, nan_mode)
+            .await,
+    )
 }
 
 async fn std_gpu_fallback(
@@ -721,6 +811,14 @@ fn default_dimension_from_shape(shape: &[usize]) -> usize {
         .map(|idx| idx + 1)
         .unwrap_or(1)
 }
+
+#[cfg(all(test, any(feature = "wgpu", target_arch = "wasm32")))]
+#[path = "std/wgpu_required_tests.rs"]
+mod wgpu_required_tests;
+
+#[cfg(test)]
+#[path = "std/typed_phase_tests.rs"]
+mod typed_phase_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -823,6 +921,118 @@ pub(crate) mod tests {
             }
             other => panic!("expected scalar result, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn host_single_output_boundary_preserves_class_across_scalar_empty_and_nd() {
+        let scalar = Tensor::new_with_dtype(vec![7.0], vec![1, 1], runmat_value::NumericDType::F32)
+            .expect("single scalar");
+        let Value::Tensor(scalar_out) =
+            std_builtin(Value::Tensor(scalar), Vec::new()).expect("single std scalar")
+        else {
+            panic!("single scalar result must remain a tensor")
+        };
+        assert_eq!(scalar_out.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(scalar_out.shape(), [1, 1]);
+        assert_eq!(values(&scalar_out), vec![0.0]);
+
+        let input = Tensor::new_with_dtype(
+            (1..=8).map(f64::from).collect(),
+            vec![2, 2, 2],
+            runmat_value::NumericDType::F32,
+        )
+        .expect("single N-D input");
+        let axes = Tensor::new(vec![1.0, 3.0], vec![1, 2]).expect("axes");
+        let Value::Tensor(nd) = std_builtin(
+            Value::Tensor(input),
+            vec![Value::Num(0.0), Value::Tensor(axes)],
+        )
+        .expect("single N-D std") else {
+            panic!("single N-D result must remain a tensor")
+        };
+        assert_eq!(nd.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(nd.shape(), [1, 2, 1]);
+        for value in values(&nd) {
+            assert!((value - (17.0_f64 / 3.0).sqrt()).abs() < 1e-6);
+        }
+
+        let empty = Tensor::new_with_dtype(Vec::new(), vec![0, 2], runmat_value::NumericDType::F32)
+            .expect("single empty input");
+        let Value::Tensor(empty_out) =
+            std_builtin(Value::Tensor(empty.clone()), Vec::new()).expect("single empty std")
+        else {
+            panic!("single empty result must remain a tensor")
+        };
+        assert_eq!(empty_out.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(empty_out.shape(), [1, 2]);
+        assert!(values(&empty_out).iter().all(|value| value.is_nan()));
+        let Value::Tensor(empty_all) = std_builtin(Value::Tensor(empty), vec![Value::from("all")])
+            .expect("single empty all std")
+        else {
+            panic!("single empty all result must remain a tensor")
+        };
+        assert_eq!(empty_all.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(empty_all.shape(), [1, 1]);
+        assert!(values(&empty_all)[0].is_nan());
+
+        let beyond =
+            Tensor::new_with_dtype(vec![1.0, 2.0], vec![1, 2], runmat_value::NumericDType::F32)
+                .expect("single beyond-rank input");
+        let Value::Tensor(beyond_out) = std_builtin(
+            Value::Tensor(beyond),
+            vec![Value::Num(0.0), Value::Num(4.0)],
+        )
+        .expect("single beyond-rank std") else {
+            panic!("single beyond-rank result must remain a tensor")
+        };
+        assert_eq!(beyond_out.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(beyond_out.shape(), [1, 2]);
+        assert_eq!(values(&beyond_out), vec![0.0, 0.0]);
+
+        let population = Tensor::new_with_dtype(
+            (1..=4).map(f64::from).collect(),
+            vec![2, 2],
+            runmat_value::NumericDType::F32,
+        )
+        .expect("single population input");
+        let Value::Tensor(population_out) = std_builtin(
+            Value::Tensor(population),
+            vec![Value::Num(1.0), Value::from("all")],
+        )
+        .expect("single population std") else {
+            panic!("single population result must remain a tensor")
+        };
+        assert_eq!(
+            population_out.numeric_dtype(),
+            runmat_value::NumericDType::F32
+        );
+        assert_eq!(population_out.shape(), [1, 1]);
+        assert!((values(&population_out)[0] - (1.25_f64).sqrt()).abs() < 1e-6);
+
+        assert_eq!(
+            std_builtin(Value::Bool(true), Vec::new()).unwrap(),
+            Value::Num(0.0)
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn host_single_omitnan_rounds_once_at_output() {
+        let input = Tensor::new_with_dtype(
+            vec![f64::NAN, 2.0, 4.0],
+            vec![3, 1],
+            runmat_value::NumericDType::F32,
+        )
+        .expect("single NaN input");
+        let Value::Tensor(output) = std_builtin(Value::Tensor(input), vec![Value::from("omitnan")])
+            .expect("single omitnan std")
+        else {
+            panic!("single result must remain a tensor")
+        };
+        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
+        assert_eq!(output.shape(), [1, 1]);
+        assert!((values(&output)[0] - (2.0_f64).sqrt()).abs() < 1e-6);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1145,40 +1355,5 @@ pub(crate) mod tests {
             assert!((values(&gathered)[0] - SQRT_2).abs() < 1e-8);
             handle.release().unwrap();
         });
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    #[cfg(feature = "wgpu")]
-    fn std_wgpu_dim1_sample_matches_cpu() {
-        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        );
-        let provider = runmat_accelerate_api::provider().expect("wgpu provider registered");
-        let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 6.0], vec![2, 2]).unwrap();
-        let args = ParsedArguments {
-            axes: StdAxes::Dim(1),
-            normalization: StdNormalization::Sample,
-            nan_mode: ReductionNaN::Include,
-        };
-        let cpu = std_host(Value::Tensor(tensor.clone()), &args).expect("cpu std");
-        let cpu_tensor = test_support::gather(cpu).expect("gather cpu");
-
-        let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
-        let gpu_value = block_on(std_gpu(handle.clone(), &args)).expect("gpu std");
-        let gpu_tensor = test_support::gather(gpu_value).expect("gather gpu");
-        handle.release().unwrap();
-
-        assert_eq!(gpu_tensor.shape(), cpu_tensor.shape());
-        let tol = match provider.precision() {
-            runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
-            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
-        };
-        for (gpu, cpu) in values(&gpu_tensor).iter().zip(values(&cpu_tensor).iter()) {
-            assert!(
-                (gpu - cpu).abs() < tol,
-                "std mismatch: gpu={gpu} cpu={cpu} tol={tol}"
-            );
-        }
     }
 }

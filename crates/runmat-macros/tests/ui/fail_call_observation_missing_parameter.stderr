@@ -1,0 +1,11 @@
+error: custom attribute panicked
+ --> tests/ui/fail_call_observation_missing_parameter.rs:3:1
+  |
+3 | / #[runtime_builtin(
+4 | |     name = "missing_observation",
+5 | |     binding_variant = "default",
+6 | |     call_observation = true
+7 | | )]
+  | |__^
+  |
+  = help: message: call_observation injection requires an Option<CallAdmissionSink> parameter after invocation metadata

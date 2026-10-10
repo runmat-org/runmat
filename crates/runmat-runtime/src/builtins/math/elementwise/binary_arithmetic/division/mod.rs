@@ -10,7 +10,15 @@ use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[derive(Clone, Copy)]
+pub(super) enum PublicOperandOrder {
+    Numerical,
+    Reversed,
+}
+
+#[derive(Clone, Copy)]
 pub(super) struct DivisionContext {
+    pub entry: &'static runmat_builtins::BuiltinCatalogEntry,
+    pub public_order: PublicOperandOrder,
     pub identity: BuiltinCatalogIdentity,
     pub invalid_input: &'static BuiltinErrorDescriptor,
     pub size_mismatch: &'static BuiltinErrorDescriptor,
@@ -18,6 +26,17 @@ pub(super) struct DivisionContext {
 }
 
 impl DivisionContext {
+    fn public_operands<'a>(
+        self,
+        numerator: &'a Value,
+        denominator: &'a Value,
+    ) -> (&'a Value, &'a Value) {
+        match self.public_order {
+            PublicOperandOrder::Numerical => (numerator, denominator),
+            PublicOperandOrder::Reversed => (denominator, numerator),
+        }
+    }
+
     fn error(self, descriptor: &'static BuiltinErrorDescriptor) -> RuntimeError {
         let mut builder = build_runtime_error(descriptor.message).with_builtin(self.identity.name);
         if let Some(identifier) = descriptor.identifier {
@@ -46,9 +65,22 @@ impl DivisionContext {
             .build()
     }
 
-    fn provider_error(self, source: anyhow::Error) -> RuntimeError {
+    fn provider_error(
+        self,
+        source: impl Into<runmat_accelerate_api::ProviderExecutionError>,
+    ) -> RuntimeError {
+        let source = source.into();
         let error = self.provider_contract_error(&source);
-        crate::runtime_error::with_provider_execution_source(error, source.into())
+        crate::runtime_error::with_provider_execution_source(error, source)
+    }
+
+    fn provider_error_after_effect(
+        self,
+        source: impl Into<runmat_accelerate_api::ProviderExecutionError>,
+    ) -> RuntimeError {
+        let source = source.into().after_effect();
+        let error = self.provider_contract_error(&source);
+        crate::runtime_error::with_provider_execution_source(error, source)
     }
 
     fn provider_contract_error(self, detail: impl std::fmt::Display) -> RuntimeError {
@@ -98,10 +130,20 @@ pub(super) async fn execute(
                 .flatten(),
         );
     }
+    let has_explicit_source = originals
+        .iter()
+        .any(runmat_accelerate_api::handle_is_explicit);
+    let (public_left, public_right) = context.public_operands(&numerator, &denominator);
+    let fallback = super::provider_support::HostFallbackAdmission::new(
+        context.entry,
+        public_left,
+        public_right,
+    )?;
     let numerator = gather_operand(context, numerator).await?;
     let denominator = gather_operand(context, denominator).await?;
     let host = execute_host(context, numerator, denominator)?;
     match source {
+        Some(_) if has_explicit_source => fallback.finish(host),
         Some(source) => restore_residency(context, &source, host, &originals),
         None => Ok(host),
     }
@@ -193,6 +235,26 @@ fn restore_residency(
 #[cfg(test)]
 mod admission_tests {
     use super::*;
+
+    #[test]
+    fn left_division_keeps_public_catalog_order_while_numerics_are_reversed() {
+        let numerator = Value::Num(12.0);
+        let denominator = Value::Num(3.0);
+        let (left, right) =
+            super::super::ldivide::DIVISION_CONTEXT.public_operands(&numerator, &denominator);
+        assert!(std::ptr::eq(left, &denominator));
+        assert!(std::ptr::eq(right, &numerator));
+        let result = execute_host(
+            super::super::ldivide::DIVISION_CONTEXT,
+            numerator,
+            denominator,
+        )
+        .expect("asymmetric left division witness");
+        let Value::Num(quotient) = result else {
+            panic!("scalar quotient");
+        };
+        assert_eq!(quotient, 4.0);
+    }
 
     #[test]
     fn division_scalar_admission_requires_one_element_for_host_and_resident() {

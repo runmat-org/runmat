@@ -5,7 +5,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         "`strcmpi(A, B)` compares text elementwise without distinguishing letter case. It accepts string scalars and arrays, character vectors and matrices, and cell arrays of character vectors, including mixed text containers.",
         "Scalar operands expand against compatible text arrays. Each row of a character matrix is one text element and produces one comparison result. Non-scalar results are logical arrays with the broadcast shape.",
         "Missing string elements compare false even to other missing elements. Whitespace and text length remain significant. For case-sensitive equality, use `strcmp`; for leading-character comparison, use `strncmpi`.",
-        "Unsupported direct numeric, integer, logical, symbolic, and provider-resident inputs return scalar logical false before provider access. Host cell containers are checked elementwise and malformed elements produce an input error.",
+        "Unsupported direct numeric, integer, logical, symbolic, and provider-resident inputs return scalar logical false before provider access or validation of the other operand. Otherwise host cell containers are checked elementwise and malformed elements produce an input error.",
     ] },
     BuiltinDocumentationSection { heading: "Placement and effects", paragraphs: &[
         "Text comparison runs on the host in native and browser runtimes. There is no GPU text kernel or fusion form. The binding may throw on invalid containers or incompatible shapes, but has no callback, workspace, filesystem, randomness, network, or time effect.",

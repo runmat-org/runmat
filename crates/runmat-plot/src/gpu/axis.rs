@@ -1,6 +1,5 @@
 use crate::gpu::ScalarType;
 use runmat_accelerate_api::{WgpuDeviceAccess, WgpuEmission};
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 /// Axis data source used by GPU plot packers.
@@ -63,31 +62,35 @@ pub fn axis_storage_buffer(
             if scalar != ScalarType::F32 {
                 return Err(format!("{label}: expected f64 axis data for f64 shader"));
             }
-            Ok(Arc::new(
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(label),
-                    contents: bytemuck::cast_slice(values),
-                    usage: wgpu::BufferUsages::STORAGE
-                        | wgpu::BufferUsages::COPY_DST
-                        | wgpu::BufferUsages::COPY_SRC,
-                }),
+            Ok(
+                runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some(label),
+                        contents: bytemuck::cast_slice(values),
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_DST
+                            | wgpu::BufferUsages::COPY_SRC,
+                    },
+                ))
+                .into(),
             )
-            .into())
         }
         AxisData::F64(values) => {
             if scalar != ScalarType::F64 {
                 return Err(format!("{label}: expected f32 axis data for f32 shader"));
             }
-            Ok(Arc::new(
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(label),
-                    contents: bytemuck::cast_slice(values),
-                    usage: wgpu::BufferUsages::STORAGE
-                        | wgpu::BufferUsages::COPY_DST
-                        | wgpu::BufferUsages::COPY_SRC,
-                }),
+            Ok(
+                runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some(label),
+                        contents: bytemuck::cast_slice(values),
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_DST
+                            | wgpu::BufferUsages::COPY_SRC,
+                    },
+                ))
+                .into(),
             )
-            .into())
         }
     }
 }

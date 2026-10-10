@@ -185,7 +185,7 @@ impl AccelProvider for Provider {
     fn upload_numeric_raw(
         &self,
         host: &runmat_accelerate_api::HostNumericTensorView,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         if let Some(handle) = self.state.lock().unwrap().restore_alias.clone() {
             return Ok(handle.acquire()?);
         }

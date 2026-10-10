@@ -4,7 +4,6 @@ use crate::gpu::axis::{axis_storage_buffer, AxisData};
 use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
 use glam::Vec4;
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 pub struct AreaGpuInputs<'a> {
@@ -47,15 +46,17 @@ pub fn pack_vertices(
     let x_buffer = axis_storage_buffer(emission, "area-x", &inputs.x_axis, inputs.scalar)?;
     let segment_count = (inputs.rows - 1) as u64;
     let vertex_count = segment_count * 6;
-    let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("area-gpu-vertices"),
-        size: vertex_count * std::mem::size_of::<Vertex>() as u64,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("area-gpu-vertices"),
+            size: vertex_count * std::mem::size_of::<Vertex>() as u64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
     let uniforms = AreaUniforms {
         color: params.color.to_array(),
         rows: inputs.rows,
@@ -215,7 +216,7 @@ mod tests {
             return;
         };
         let x = [1.0f32, 2.0f32, 3.0f32];
-        let y = Arc::new(
+        let y = runmat_accelerate_api::WgpuBufferOwner::new(
             access
                 .with_shared(|emission| {
                     emission

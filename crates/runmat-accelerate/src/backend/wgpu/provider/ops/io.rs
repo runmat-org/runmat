@@ -1,4 +1,8 @@
 use super::*;
+#[path = "io/power_probe.rs"]
+mod power_probe;
+pub(crate) use power_probe::PowerProbeReadbackObserved;
+use power_probe::ProbeStaging;
 use runmat_accelerate_api::{
     HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorOwned, HostIntegerTensorView,
     HostNumericDataOwned, HostNumericDataView, HostNumericTensorOwned, HostNumericTensorView,
@@ -389,28 +393,32 @@ impl WgpuProvider {
                 match self.precision {
                     NumericPrecision::F64 => {
                         let contents = cast_slice(host.data);
-                        Arc::new(emission.device().create_buffer_init(
-                            &wgpu::util::BufferInitDescriptor {
-                                label: Some("runmat-upload-buffer"),
-                                contents,
-                                usage: wgpu::BufferUsages::STORAGE
-                                    | wgpu::BufferUsages::COPY_DST
-                                    | wgpu::BufferUsages::COPY_SRC,
-                            },
-                        ))
+                        runmat_accelerate_api::WgpuBufferOwner::new(
+                            emission.device().create_buffer_init(
+                                &wgpu::util::BufferInitDescriptor {
+                                    label: Some("runmat-upload-buffer"),
+                                    contents,
+                                    usage: wgpu::BufferUsages::STORAGE
+                                        | wgpu::BufferUsages::COPY_DST
+                                        | wgpu::BufferUsages::COPY_SRC,
+                                },
+                            ),
+                        )
                     }
                     NumericPrecision::F32 => {
                         let data_f32: Vec<f32> = host.data.iter().map(|v| *v as f32).collect();
                         let contents = cast_slice(&data_f32);
-                        Arc::new(emission.device().create_buffer_init(
-                            &wgpu::util::BufferInitDescriptor {
-                                label: Some("runmat-upload-buffer"),
-                                contents,
-                                usage: wgpu::BufferUsages::STORAGE
-                                    | wgpu::BufferUsages::COPY_DST
-                                    | wgpu::BufferUsages::COPY_SRC,
-                            },
-                        ))
+                        runmat_accelerate_api::WgpuBufferOwner::new(
+                            emission.device().create_buffer_init(
+                                &wgpu::util::BufferInitDescriptor {
+                                    label: Some("runmat-upload-buffer"),
+                                    contents,
+                                    usage: wgpu::BufferUsages::STORAGE
+                                        | wgpu::BufferUsages::COPY_DST
+                                        | wgpu::BufferUsages::COPY_SRC,
+                                },
+                            ),
+                        )
                     }
                 }
             };
@@ -449,6 +457,16 @@ impl WgpuProvider {
         self.upload_numeric_produced(host, false)
     }
 
+    /// Report the first buffer-creation effect to the typed raw hook. Legacy
+    /// callers share the same upload routine without adopting a typed result.
+    pub(crate) fn upload_numeric_exec_observed(
+        &self,
+        host: &HostNumericTensorView,
+        on_buffer_created: impl FnOnce() -> Result<()>,
+    ) -> Result<GpuTensorHandle> {
+        self.upload_numeric_produced_observed(host, false, on_buffer_created)
+    }
+
     pub(crate) fn upload_logical_exec(
         &self,
         host: &runmat_accelerate_api::HostLogicalTensorView<'_>,
@@ -485,6 +503,15 @@ impl WgpuProvider {
         host: &HostNumericTensorView<'_>,
         logical: bool,
     ) -> Result<GpuTensorHandle> {
+        self.upload_numeric_produced_observed(host, logical, || Ok(()))
+    }
+
+    fn upload_numeric_produced_observed(
+        &self,
+        host: &HostNumericTensorView<'_>,
+        logical: bool,
+        on_buffer_created: impl FnOnce() -> Result<()>,
+    ) -> Result<GpuTensorHandle> {
         host.validate()?;
         let element_type = host.element_type();
         let len = host.data.len();
@@ -505,36 +532,36 @@ impl WgpuProvider {
             ));
         }
         let buffer = self.with_emission(|emission, _| -> Result<_> {
-            let buffer =
-                if len == 0 {
-                    self.create_storage_buffer(emission, 0, "runmat-numeric-upload-empty")?
-                } else {
-                    let contents = match host.data {
-                        HostNumericDataView::F64(values) => cast_slice(values),
-                        HostNumericDataView::F32(values) => cast_slice(values),
-                        HostNumericDataView::I8(_)
-                        | HostNumericDataView::I16(_)
-                        | HostNumericDataView::I32(_)
-                        | HostNumericDataView::I64(_)
-                        | HostNumericDataView::U8(_)
-                        | HostNumericDataView::U16(_)
-                        | HostNumericDataView::U32(_)
-                        | HostNumericDataView::U64(_) => cast_slice(
-                            integer_words
-                                .as_ref()
-                                .expect("integer numeric upload words"),
-                        ),
-                    };
-                    Arc::new(emission.device().create_buffer_init(
-                        &wgpu::util::BufferInitDescriptor {
-                            label: Some("runmat-numeric-upload-buffer"),
-                            contents,
-                            usage: wgpu::BufferUsages::STORAGE
-                                | wgpu::BufferUsages::COPY_DST
-                                | wgpu::BufferUsages::COPY_SRC,
-                        },
-                    ))
+            let buffer = if len == 0 {
+                self.create_storage_buffer(emission, 0, "runmat-numeric-upload-empty")?
+            } else {
+                let contents = match host.data {
+                    HostNumericDataView::F64(values) => cast_slice(values),
+                    HostNumericDataView::F32(values) => cast_slice(values),
+                    HostNumericDataView::I8(_)
+                    | HostNumericDataView::I16(_)
+                    | HostNumericDataView::I32(_)
+                    | HostNumericDataView::I64(_)
+                    | HostNumericDataView::U8(_)
+                    | HostNumericDataView::U16(_)
+                    | HostNumericDataView::U32(_)
+                    | HostNumericDataView::U64(_) => cast_slice(
+                        integer_words
+                            .as_ref()
+                            .expect("integer numeric upload words"),
+                    ),
                 };
+                runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some("runmat-numeric-upload-buffer"),
+                        contents,
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_DST
+                            | wgpu::BufferUsages::COPY_SRC,
+                    },
+                ))
+            };
+            on_buffer_created()?;
             Ok(buffer)
         })??;
         self.telemetry.record_upload_bytes(bytes);
@@ -659,6 +686,26 @@ impl WgpuProvider {
     }
 
     pub(crate) async fn download_exec(&self, handle: &GpuTensorHandle) -> Result<HostTensorOwned> {
+        self.download_exec_observing(handle, None).await
+    }
+
+    pub(crate) async fn download_power_probe_observed_exec(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> Result<(HostTensorOwned, power_probe::PowerProbeReadbackObserved)> {
+        let mut observed = power_probe::PowerProbeReadbackObserved::default();
+        let host = self
+            .download_exec_observing(handle, Some(&mut observed))
+            .await?;
+        observed.require_scalar(handle.view_identity())?;
+        Ok((host, observed))
+    }
+
+    async fn download_exec_observing(
+        &self,
+        handle: &GpuTensorHandle,
+        mut probe_observed: Option<&mut power_probe::PowerProbeReadbackObserved>,
+    ) -> Result<HostTensorOwned> {
         let span = info_span!(
             "gpu.transfer.download",
             shape = ?handle.shape(),
@@ -698,6 +745,10 @@ impl WgpuProvider {
             entry.storage
         };
         if entry.len == 0 {
+            ensure!(
+                probe_observed.is_none(),
+                "POWER scalar readback cannot be empty"
+            );
             return Ok(HostTensorOwned {
                 data: Vec::new(),
                 shape: handle.shape().to_vec(),
@@ -771,25 +822,58 @@ impl WgpuProvider {
             handle.buffer_id(),
             size_bytes
         );
-        let staging = self.with_emission(|emission, pending| -> Result<_> {
-            let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
-                label: Some("runmat-download-staging"),
-                size: size_bytes,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let mut encoder =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-download-encoder"),
-                    });
-            encoder.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, &staging, 0, size_bytes);
-            self.submit(emission, pending, encoder)?;
-            Ok(staging)
-        })??;
+        let (staging, copy_submission_id, copy_fence_requested_bytes, copy_ticket) = self
+            .with_emission(|emission, pending| -> Result<_> {
+                let buffer = emission.device().create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("runmat-download-staging"),
+                    size: size_bytes,
+                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                let resource_ticket = if probe_observed.is_some() {
+                    runmat_accelerate_api::observation::current_provider_resource_scope()
+                        .map(|scope| scope.issue_resource_ticket(buffer.size()))
+                        .transpose()?
+                } else {
+                    None
+                };
+                let staging = ProbeStaging::new(buffer, resource_ticket);
+                let mut encoder =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-download-encoder"),
+                        });
+                encoder.copy_buffer_to_buffer(
+                    entry.buffer.as_ref(),
+                    0,
+                    &staging.buffer,
+                    0,
+                    size_bytes,
+                );
+                let ticket = probe_observed
+                    .is_some()
+                    .then(|| pending.arm_probe_completion());
+                let submission_id = self.submit(emission, pending, encoder)?;
+                Ok((
+                    staging,
+                    submission_id,
+                    pending.last_fence_requested_bytes(),
+                    ticket,
+                ))
+            })??;
+        if let Some(observed) = probe_observed.as_deref_mut() {
+            observed.input_view = Some(handle.view_identity());
+            observed.copied_bytes = Some(size_bytes);
+            observed.staging_buffer_bytes = Some(staging.requested_bytes());
+            observed.copy_submission_id = Some(copy_submission_id);
+            observed.copy_fence_requested_bytes = copy_fence_requested_bytes;
+            observed.copy_ticket = copy_ticket;
+        }
+        let mapped_bytes = std::sync::atomic::AtomicU64::new(0);
         let out = self
             .map_readback_with(staging, "download", |data| {
+                mapped_bytes.store(data.len() as u64, std::sync::atomic::Ordering::Relaxed);
                 let mut out = vec![0.0f64; entry.len];
                 match entry.precision {
                     NumericPrecision::F64 => out.copy_from_slice(cast_slice(data)),
@@ -803,6 +887,9 @@ impl WgpuProvider {
                 Ok(out)
             })
             .await?;
+        if let Some(observed) = probe_observed {
+            observed.mapped_bytes = Some(mapped_bytes.load(std::sync::atomic::Ordering::Relaxed));
+        }
         finish_readback(out)
     }
 
@@ -925,6 +1012,8 @@ mod tests {
                 region: None,
                 operation: "empty_download".into(),
                 runtime_facts: digest,
+                provider_provenance: None,
+                graph_output_authority: None,
                 revision: PlacementRevision {
                     program: None,
                     catalog: digest,

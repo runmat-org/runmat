@@ -6,8 +6,9 @@ use runmat_accelerate::fusion::FusionStoreMaterialization;
 use runmat_accelerate::fusion_exec::{
     execute_centered_gram_placed, execute_elementwise_placed, execute_explained_variance_placed,
     execute_image_normalize_placed, execute_matmul_epilogue_placed,
-    execute_power_step_normalize_placed, execute_reduction_with_shape_placed,
-    FusionExecutionOutcome, FusionExecutionRequest,
+    execute_power_step_normalize_placed, execute_reduction_with_shape_placed_async,
+    execute_reduction_with_shape_placed_async_vm, FusionExecutionOutcome, FusionExecutionRequest,
+    FusionProviderCompletion,
 };
 use runmat_accelerate::placement::{
     record_event, PlacementCorrelationId, PlacementEventKind, PlacementVariant,
@@ -130,6 +131,7 @@ pub fn fusion_span_has_vm_barrier(instructions: &[Instr], span: &InstrSpan) -> b
 #[path = "fusion/final_only_stores.rs"]
 mod final_only_stores;
 pub use final_only_stores::final_only_span_requires_ordinary_stores;
+pub(crate) use final_only_stores::final_only_span_requires_ordinary_stores_with_private;
 
 pub struct StackSliceGuard<'a> {
     stack: *mut Vec<Value>,
@@ -499,6 +501,7 @@ pub enum FusionAttemptError {
 pub struct FusionVmResult {
     pub final_value: Value,
     pub ordered_stores: Vec<(FusionStoreMaterialization, Value)>,
+    pub completion: Option<FusionProviderCompletion>,
 }
 
 fn without_intermediate_stores(
@@ -509,6 +512,7 @@ fn without_intermediate_stores(
             FusionExecutionOutcome::Executed(FusionVmResult {
                 final_value,
                 ordered_stores: Vec::new(),
+                completion: None,
             })
         }
         FusionExecutionOutcome::SharedRuntime(observation) => {
@@ -564,6 +568,7 @@ pub async fn execute_fusion_elementwise(
             Ok(FusionExecutionOutcome::Executed(FusionVmResult {
                 final_value: result.final_value,
                 ordered_stores: result.materialized_stores,
+                completion: None,
             }))
         }
         Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
@@ -620,11 +625,12 @@ pub async fn execute_fusion_special_kind(
 mod reduction_geometry;
 pub use reduction_geometry::{resolve_reduction_geometry, ReductionGeometry};
 
-pub fn execute_fusion_reduction(
+pub async fn execute_fusion_reduction(
     plan: &runmat_accelerate::FusionGroupPlan,
     request: FusionExecutionRequest<'_>,
     stack_guard: StackSliceGuard<'_>,
-) -> Result<FusionExecutionOutcome<Value>, FusionAttemptError> {
+    right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
     let geom = match resolve_reduction_geometry(plan, &request) {
         Ok(geom) => geom,
         Err(error) => {
@@ -646,16 +652,50 @@ pub fn execute_fusion_reduction(
         plan: &resolved_plan,
         ..request
     };
-    finish_provider_execution(
-        execute_reduction_with_shape_placed(
+    if let Some(right) = right {
+        match execute_reduction_with_shape_placed_async_vm(
             request,
             geom.reduce_len,
             geom.num_slices,
             &geom.output_shape,
             256u32,
-        ),
-        stack_guard,
-    )
+            right,
+        )
+        .await
+        {
+            Ok(FusionExecutionOutcome::Executed(result)) => {
+                stack_guard.commit();
+                Ok(FusionExecutionOutcome::Executed(FusionVmResult {
+                    final_value: result.value,
+                    ordered_stores: Vec::new(),
+                    completion: result.completion,
+                }))
+            }
+            Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
+                Ok(FusionExecutionOutcome::SharedRuntime(observation))
+            }
+            Err(error) => {
+                let classified = classify_provider_error(error);
+                if matches!(&classified, FusionAttemptError::Terminal(_)) {
+                    stack_guard.commit();
+                }
+                Err(classified)
+            }
+        }
+    } else {
+        finish_provider_execution(
+            execute_reduction_with_shape_placed_async(
+                request,
+                geom.reduce_len,
+                geom.num_slices,
+                &geom.output_shape,
+                256u32,
+            )
+            .await,
+            stack_guard,
+        )
+        .map(without_intermediate_stores)
+    }
 }
 
 pub async fn try_execute_fusion_group(
@@ -665,6 +705,7 @@ pub async fn try_execute_fusion_group(
     vars: &mut [Value],
     context: &mut ExecutionContext,
     placement: Option<PlacementCorrelationId>,
+    right: Option<runmat_runtime::context::VmFusionCompletionRight>,
 ) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
     let (stack_guard, request, _consumed_inputs) =
         gather_fusion_inputs(plan, graph, stack, vars, context, placement)
@@ -686,7 +727,7 @@ pub async fn try_execute_fusion_group(
     if plan.group.kind.is_elementwise() {
         execute_fusion_elementwise(request, stack_guard).await
     } else if plan.group.kind.is_reduction() {
-        execute_fusion_reduction(plan, request, stack_guard).map(without_intermediate_stores)
+        execute_fusion_reduction(plan, request, stack_guard, right).await
     } else {
         execute_fusion_special_kind(plan.group.kind.clone(), &plan.inputs, request, stack_guard)
             .await
@@ -708,7 +749,7 @@ mod tests {
     use runmat_value::Value;
 
     #[test]
-    fn fused_reduction_domain_defers_multi_axis_and_nd_work_to_provider_paths() {
+    fn fused_reduction_domain_defers_multi_axis_but_admits_single_nd_axis() {
         use runmat_accelerate::ReductionAxes;
 
         assert!(validate_fused_reduction_domain(
@@ -722,7 +763,7 @@ mod tests {
             Some(&[2, 4, 5]),
             false,
         )
-        .is_err());
+        .is_ok());
         assert!(
             validate_fused_reduction_domain(Some(&ReductionAxes::All), Some(&[2, 4, 5]), true,)
                 .is_ok()

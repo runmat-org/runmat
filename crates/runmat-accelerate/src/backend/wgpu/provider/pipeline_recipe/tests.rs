@@ -54,7 +54,8 @@ fn cast_recipe_distinguishes_both_physical_precisions_and_workgroup() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn integer_sum_conversion_recipe_matches_the_execution_shader_identity() {
     for workgroup in [64, 256, 512] {
         let recipe = PipelineRecipe::integer_sum_cast(workgroup);
@@ -72,6 +73,32 @@ fn integer_sum_conversion_recipe_matches_the_execution_shader_identity() {
             recipe.key(),
             PipelineRecipe::floating_cast(NumericPrecision::F32, NumericPrecision::F64, workgroup)
                 .key()
+        );
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn selected_dimension_n_sum_recipe_validates_and_keys_exact_source() {
+    use crate::backend::wgpu::shaders::validation_tests::{validate_generated, RequiredCaps};
+    for workgroup in [64, 128, 256] {
+        let recipe = PipelineRecipe::dimension_n_sum_f64(workgroup);
+        assert_eq!(recipe.layout, "runmat-nd-sum-f64-bgl");
+        assert_eq!(recipe.workgroup, workgroup);
+        assert_eq!(
+            recipe.key(),
+            key::compute_pipeline_hash_bytes(
+                recipe.shader.as_bytes(),
+                "runmat-nd-sum-f64-bgl",
+                Some(workgroup),
+            ),
+        );
+        validate_generated(
+            &format!("selected-nd-sum-f64-wg{workgroup}"),
+            &recipe.shader,
+            workgroup,
+            8,
+            RequiredCaps::Float64,
         );
     }
 }

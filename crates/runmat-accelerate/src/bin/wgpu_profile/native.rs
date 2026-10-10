@@ -558,6 +558,7 @@ async fn run_fused_wgsl_case(
         let compute_start = Instant::now();
         let _ = provider.fused_reduction(
             &shader,
+            runmat_accelerate_api::ProviderShaderRequirements::Basic,
             std::slice::from_ref(&handle_matrix),
             &[cols],
             rows,
@@ -698,9 +699,14 @@ async fn run_elementwise_case(
         vec![matrix_a, matrix_b],
         iterations,
         VALUE_TOLERANCE,
-        move |prov, handles| match op {
-            ElementwiseOp::Add => prov.elem_add(&handles[0], &handles[1]),
-            ElementwiseOp::Mul => prov.elem_mul(&handles[0], &handles[1]),
+        move |prov, handles| {
+            Box::pin(async move {
+                match op {
+                    ElementwiseOp::Add => prov.elem_add(&handles[0], &handles[1]).await,
+                    ElementwiseOp::Mul => prov.elem_mul(&handles[0], &handles[1]).await,
+                }
+                .map_err(anyhow::Error::new)
+            })
         },
         move |inputs| cpu_elementwise(&inputs[0], &inputs[1], op),
     )
@@ -840,6 +846,7 @@ async fn run_reduction_sweep_case(
         let compute_start = Instant::now();
         let _ = provider.fused_reduction(
             &shader,
+            runmat_accelerate_api::ProviderShaderRequirements::Basic,
             std::slice::from_ref(&handle_matrix),
             &[cols],
             rows,

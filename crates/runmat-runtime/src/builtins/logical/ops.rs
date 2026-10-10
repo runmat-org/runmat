@@ -296,8 +296,7 @@ async fn provider_input_contains_nan(
     }
     let maximum = match provider.reduce_max(&mask).await {
         Ok(maximum) => maximum,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
-        Err(error) => return Err(logical_provider_error(error.into())),
+        Err(error) => return Err(logical_provider_error(error.after_effect())),
     };
     if maximum.shares_allocation_with(source)
         || maximum.shares_allocation_with(&mask)
@@ -433,8 +432,9 @@ async fn try_gpu_cast(
     }
     let output = match provider.elem_ne(input, &zeros).await {
         Ok(output) => output,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
-        Err(error) => return Err(logical_provider_error(error.into())),
+        // The zero operand was already materialized. A later Unsupported is
+        // terminal for this route; it cannot authorize a host replay.
+        Err(error) => return Err(logical_provider_error(error.after_effect())),
     };
     if !valid_logical_gpu_output(&output, input, provider) || output.shares_allocation_with(&zeros)
     {

@@ -18,6 +18,21 @@ impl ProviderObservationClock for TestClock {
     }
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn only_default_clock_receipts_certify_the_outer_prelude() {
+    let outer = runmat_time::Instant::now();
+    let default = ProviderOperationReceipt::new();
+    assert!(default.default_clock_prelude_since(outer).is_some());
+    let budget = Arc::new(ProviderObservationBudget::new(
+        std::num::NonZeroU32::new(1).unwrap(),
+    ));
+    let budgeted = ProviderOperationReceipt::with_budget(budget);
+    assert!(budgeted.default_clock_prelude_since(outer).is_some());
+    let custom = ProviderOperationReceipt::with_clock(Arc::new(TestClock::default()));
+    assert!(custom.default_clock_prelude_since(outer).is_none());
+}
+
 #[test]
 fn completion_and_publication_both_required_total_excludes_drain_delay() {
     let clock = Arc::new(TestClock::default());
@@ -538,7 +553,9 @@ fn outstanding_callback_does_not_keep_progress_sender_alive() {
     let budget = Arc::new(ProviderObservationBudget::new(
         std::num::NonZeroU32::new(1).unwrap(),
     ));
+    let outer = runmat_time::Instant::now();
     let receipt = ProviderOperationReceipt::with_wgpu_progress(budget, driver.clone());
+    assert!(receipt.default_clock_prelude_since(outer).is_some());
     let callback = receipt.recorder().submission().unwrap();
     drop(receipt);
     drop(driver);

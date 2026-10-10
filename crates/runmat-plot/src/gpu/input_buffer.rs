@@ -1,17 +1,16 @@
 use runmat_accelerate_api::{WgpuAccessError, WgpuBufferRef, WgpuEmission};
-use std::sync::Arc;
 
 /// A renderer-owned buffer or an authenticated provider export.
 /// Clones of a provider input retain its physical allocation authority, including
 /// a distinct allocation created when the provider materializes a lazy view.
 #[derive(Clone)]
 pub enum GpuInputBuffer {
-    Renderer(Arc<wgpu::Buffer>),
+    Renderer(runmat_accelerate_api::WgpuBufferOwner),
     Exported(WgpuBufferRef),
 }
 
-impl From<Arc<wgpu::Buffer>> for GpuInputBuffer {
-    fn from(buffer: Arc<wgpu::Buffer>) -> Self {
+impl From<runmat_accelerate_api::WgpuBufferOwner> for GpuInputBuffer {
+    fn from(buffer: runmat_accelerate_api::WgpuBufferOwner) -> Self {
         Self::Renderer(buffer)
     }
 }

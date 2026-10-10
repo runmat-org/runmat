@@ -48,6 +48,9 @@ const FUSION_SEMANTICS: crate::builtins::common::spec::FusionSemanticDeclaration
         },
         revision: 1,
         admit: None,
+        admit_static: None,
+        required_real_unary: None,
+        required_arithmetic: None,
         helpers: &[crate::builtins::common::spec::FusionMathHelper::FloatingRemainder],
         scalar_operation: None,
     };
@@ -237,11 +240,12 @@ async fn rem_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
                     error
                 });
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(error) if error.is_unsupported() => {}
             Err(error) => {
-                return Err(rem_error_with_detail(
-                    &REM_ERROR_INTERNAL,
-                    error.to_string(),
+                let mut diagnostic = rem_error_with_detail(&REM_ERROR_INTERNAL, error.to_string());
+                diagnostic.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    diagnostic, error,
                 ));
             }
         }

@@ -4,7 +4,6 @@ use crate::gpu::scatter2::{ScatterAttributeBuffer, ScatterColorBuffer};
 use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
 use glam::Vec4;
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 /// Inputs required to pack scatter3 vertices directly on the GPU.
@@ -159,25 +158,29 @@ pub fn pack_vertices_from_xyz(
     let lod_stride = params.lod_stride.max(1);
     let max_points = inputs.len.div_ceil(lod_stride);
     let output_size = max_points as u64 * 6 * std::mem::size_of::<Vertex>() as u64;
-    let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("scatter3-gpu-vertices"),
-        size: output_size,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::VERTEX
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("scatter3-gpu-vertices"),
+            size: output_size,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
 
-    let indirect_args = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("scatter3-gpu-indirect-args"),
-        size: std::mem::size_of::<DrawIndirectArgsRaw>() as u64,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::INDIRECT
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    }));
+    let indirect_args = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some("scatter3-gpu-indirect-args"),
+            size: std::mem::size_of::<DrawIndirectArgsRaw>() as u64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::INDIRECT
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    ));
     let init = DrawIndirectArgsRaw {
         vertex_count: 0,
         instance_count: 1,
@@ -290,44 +293,44 @@ fn prepare_size_buffer(
 ) -> (crate::gpu::GpuInputBuffer, bool) {
     match &params.sizes {
         ScatterAttributeBuffer::None => (
-            Arc::new(
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
                     label: Some("scatter3-size-fallback"),
                     contents: bytemuck::cast_slice(&[0.0f32]),
                     usage: wgpu::BufferUsages::STORAGE
                         | wgpu::BufferUsages::COPY_DST
                         | wgpu::BufferUsages::COPY_SRC,
-                }),
-            )
+                },
+            ))
             .into(),
             false,
         ),
         ScatterAttributeBuffer::Host(data) => {
             if data.is_empty() {
                 (
-                    Arc::new(
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+                        &wgpu::util::BufferInitDescriptor {
                             label: Some("scatter3-size-fallback"),
                             contents: bytemuck::cast_slice(&[0.0f32]),
                             usage: wgpu::BufferUsages::STORAGE
                                 | wgpu::BufferUsages::COPY_DST
                                 | wgpu::BufferUsages::COPY_SRC,
-                        }),
-                    )
+                        },
+                    ))
                     .into(),
                     false,
                 )
             } else {
                 (
-                    Arc::new(
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+                        &wgpu::util::BufferInitDescriptor {
                             label: Some("scatter3-size-host"),
                             contents: bytemuck::cast_slice(data.as_slice()),
                             usage: wgpu::BufferUsages::STORAGE
                                 | wgpu::BufferUsages::COPY_DST
                                 | wgpu::BufferUsages::COPY_SRC,
-                        }),
-                    )
+                        },
+                    ))
                     .into(),
                     true,
                 )
@@ -343,8 +346,8 @@ fn prepare_color_buffer(
 ) -> (crate::gpu::GpuInputBuffer, bool, u32) {
     match &params.colors {
         ScatterColorBuffer::None => (
-            Arc::new(
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
                     label: Some("scatter3-color-fallback"),
                     contents: bytemuck::cast_slice(&[
                         params.color.x,
@@ -355,8 +358,8 @@ fn prepare_color_buffer(
                     usage: wgpu::BufferUsages::STORAGE
                         | wgpu::BufferUsages::COPY_DST
                         | wgpu::BufferUsages::COPY_SRC,
-                }),
-            )
+                },
+            ))
             .into(),
             false,
             4,
@@ -364,8 +367,8 @@ fn prepare_color_buffer(
         ScatterColorBuffer::Host(colors) => {
             if colors.is_empty() {
                 (
-                    Arc::new(
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+                        &wgpu::util::BufferInitDescriptor {
                             label: Some("scatter3-color-fallback"),
                             contents: bytemuck::cast_slice(&[
                                 params.color.x,
@@ -376,23 +379,23 @@ fn prepare_color_buffer(
                             usage: wgpu::BufferUsages::STORAGE
                                 | wgpu::BufferUsages::COPY_DST
                                 | wgpu::BufferUsages::COPY_SRC,
-                        }),
-                    )
+                        },
+                    ))
                     .into(),
                     false,
                     4,
                 )
             } else {
                 (
-                    Arc::new(
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+                        &wgpu::util::BufferInitDescriptor {
                             label: Some("scatter3-color-host"),
                             contents: bytemuck::cast_slice(colors.as_slice()),
                             usage: wgpu::BufferUsages::STORAGE
                                 | wgpu::BufferUsages::COPY_DST
                                 | wgpu::BufferUsages::COPY_SRC,
-                        }),
-                    )
+                        },
+                    ))
                     .into(),
                     true,
                     4,
@@ -466,7 +469,7 @@ mod stress_tests {
         let z: Vec<f32> = x.iter().map(|v| v.sin()).collect();
 
         let make_buffer = |label: &str, data: &[f32]| {
-            Arc::new(
+            runmat_accelerate_api::WgpuBufferOwner::new(
                 access
                     .with_shared(|emission| {
                         emission

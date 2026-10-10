@@ -10,7 +10,7 @@ mod drain;
 #[path = "moments_cache/reuse.rs"]
 mod reuse;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, ensure, Result};
 use runmat_accelerate_api::allocation::{GpuTensorHandle, WeakGpuTensorHandle};
 
 use super::WgpuProvider;
@@ -33,6 +33,50 @@ impl CacheBudget {
 }
 
 impl WgpuProvider {
+    /// Return the exact strong pair already held under this source view and
+    /// dimension key. Unlike a warm boolean, the returned allocation leases
+    /// remain valid if a later insertion evicts the cache entry before the
+    /// selected stage actually consumes its mean.
+    pub(super) fn reserve_cached_mean_nd_exec(
+        &self,
+        source: &GpuTensorHandle,
+        dims: &[usize],
+    ) -> Result<Option<runmat_accelerate_api::ProviderPinnedNdMean>> {
+        let entry = self.real_floating_entry(source)?;
+        if entry.storage != runmat_accelerate_api::GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_is_logical(source)
+        {
+            return Ok(None);
+        }
+        // Selected warm and cold receipts use the same canonical axis order;
+        // ordinary direct reductions may still use their original cache key.
+        if dims.is_empty()
+            || dims.iter().any(|&axis| axis >= entry.shape.len())
+            || dims.windows(2).any(|pair| pair[0] >= pair[1])
+        {
+            return Ok(None);
+        }
+        let Some((mean, ex2)) = self.cached_moment_pair(source, dims)? else {
+            return Ok(None);
+        };
+        let mean_bytes = self.get_entry_raw(&mean)?.buffer.size();
+        let ex2_bytes = if mean.allocation_identity() == ex2.allocation_identity() {
+            0
+        } else {
+            self.get_entry_raw(&ex2)?.buffer.size()
+        };
+        let pair_bytes = mean_bytes
+            .checked_add(ex2_bytes)
+            .ok_or_else(|| anyhow!("WGPU pinned moments byte count overflow"))?;
+        Ok(Some(runmat_accelerate_api::ProviderPinnedNdMean::new(
+            source.clone(),
+            dims.to_vec(),
+            mean,
+            ex2,
+            pair_bytes,
+        )))
+    }
+
     /// Prune dead exact source views without acquiring an allocation owner
     /// under the cache mutex. A sibling physical view cannot reuse their key.
     fn prune_dead_moment_sources(&self) -> Result<()> {
@@ -79,6 +123,19 @@ impl WgpuProvider {
         square: &GpuTensorHandle,
         base: &GpuTensorHandle,
     ) -> Result<()> {
+        let square_entry = self.real_floating_entry(square)?;
+        let base_entry = self.real_floating_entry(base)?;
+        ensure!(
+            square_entry.precision == base_entry.precision
+                && square_entry.shape == base_entry.shape,
+            "square provenance must preserve its source class and shape"
+        );
+        if square_entry.precision != self.precision {
+            // The alternate F32 shader computed a real square, but the native
+            // square-to-ex2 substitution has no cross-precision certificate.
+            // Provenance reuse is optional; the produced square remains valid.
+            return Ok(());
+        }
         self.get_entry(square)?;
         self.get_entry(base)?;
         match self.reduction_reuse.lock() {
@@ -97,7 +154,7 @@ impl WgpuProvider {
         source: &GpuTensorHandle,
         dims: &[usize],
     ) -> Result<Option<(GpuTensorHandle, GpuTensorHandle)>> {
-        self.get_entry(source)?;
+        self.real_floating_entry(source)?;
         let pair = match self.reduction_reuse.lock() {
             Ok(mut cache) => cache.moment_pair(&(source.view_identity(), dims.to_vec())),
             Err(_) => {
@@ -106,8 +163,7 @@ impl WgpuProvider {
             }
         };
         if let Some((mean, ex2)) = &pair {
-            self.get_entry_raw(mean)?;
-            self.get_entry_raw(ex2)?;
+            self.validate_nd_moment_pair(source, dims, mean, ex2)?;
         }
         Ok(pair)
     }
@@ -119,7 +175,7 @@ impl WgpuProvider {
         mean: &GpuTensorHandle,
         ex2: &GpuTensorHandle,
     ) -> Result<()> {
-        self.get_entry(source)?;
+        self.validate_nd_moment_pair(source, dims, mean, ex2)?;
         self.prune_dead_moment_sources()?;
         let mean_bytes = self.get_entry_raw(mean)?.allocated_bytes;
         let ex2_bytes = self.get_entry_raw(ex2)?.allocated_bytes;

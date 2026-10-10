@@ -29,7 +29,7 @@ fn failed_retirement_retains_payload_and_failure_record_without_reviving_view() 
     gc_test_context(|| {
         let _lock = accel_test_lock();
         ensure_provider_registered();
-        let provider = PROVIDER.get().unwrap();
+        let provider = registered_provider().unwrap();
         let owned = provider.push(vec![11.0], vec![1, 1]);
         runmat_accelerate::fusion_residency::mark(&owned);
         provider
@@ -92,7 +92,7 @@ fn borrowed_initial_workspace_survives_error_and_retires_only_after_replacement(
     gc_test_context(|| {
         let _lock = accel_test_lock();
         ensure_provider_registered();
-        let provider = PROVIDER.get().unwrap();
+        let provider = registered_provider().unwrap();
         for (source, fails, preserves) in [
             ("x = 3; error('ownership witness');", true, true),
             ("alias = x; x = 3;", false, true),
@@ -141,7 +141,7 @@ fn completed_builtin_calls_release_consumed_intermediates_and_adopt_aliases() {
     gc_test_context(|| {
         let _lock = accel_test_lock();
         ensure_provider_registered();
-        let provider = PROVIDER.get().unwrap();
+        let provider = registered_provider().unwrap();
         let baseline = provider
             .buffers
             .lock()
@@ -267,7 +267,7 @@ fn overwritten_fusion_stores_preserve_older_nested_alias_and_retire_once() {
     gc_test_context(|| {
         let _lock = accel_test_lock();
         ensure_provider_registered();
-        let provider = PROVIDER.get().unwrap();
+        let provider = registered_provider().unwrap();
         let borrowed = provider.push(vec![7.0], vec![1, 1]);
         let caller = runmat_gc::gc_register_value_root(Box::new(runmat_gc::GlobalRoot::new(
             vec![Value::Cell(

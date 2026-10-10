@@ -111,3 +111,26 @@ fn digit_estimator_empty_cold_path_allocates_only_output_without_kernel_or_unifo
         assert_eq!(cost.source, EstimateSource::StaticPrior);
     }
 }
+
+#[test]
+fn digit_estimator_uses_provider_frozen_launch_for_queue_and_uniform_work() {
+    let provider = crate::simple_provider::InProcessProvider::new();
+    let query = query();
+    let default = crate::backend::wgpu::pipelines::FrozenLinearLaunch::new(512, 65_535).unwrap();
+    let selected = crate::backend::wgpu::pipelines::FrozenLinearLaunch::new(256, 65_535).unwrap();
+    let baseline = wgpu_cost_estimate_with_geometry(&provider, &query, default).cost;
+    let narrow = wgpu_cost_estimate_with_geometry(&provider, &query, selected).cost;
+    assert_eq!(baseline.components.queue_ns, 20_000);
+    assert_eq!(narrow.components.queue_ns, 30_000);
+    assert_eq!(
+        baseline.components.upload_ns,
+        transfer_prior_ns(268_431_400)
+    );
+    assert_eq!(narrow.components.upload_ns, transfer_prior_ns(268_431_416));
+    assert_eq!(
+        baseline.components.execution_ns,
+        narrow.components.execution_ns
+    );
+    assert_eq!(baseline.source, narrow.source);
+    assert_eq!(baseline.confidence, narrow.confidence);
+}

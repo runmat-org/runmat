@@ -29,11 +29,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let out = provider
         .fused_elementwise(
             shader,
+            runmat_accelerate_api::ProviderShaderRequirements::Basic,
             std::slice::from_ref(&handle),
             shape,
             len,
             runmat_accelerate_api::ProviderElementType::F32,
         )
+        .await
         .expect("fused_elementwise");
     let host = provider.download(&out).await.expect("download");
     assert_eq!(host.data.len(), len);

@@ -117,7 +117,7 @@ When execution exposes more than one candidate region, placement evaluates the r
 
 ## Barriers and Fallbacks
 
-Fusion is not required for correctness. If a group has a barrier, stack mismatch, unsupported shape, provider error, unavailable device, exhausted planning budget, or resource-admission failure, execution falls back to ordinary VM bytecode. Automatic provider candidates must stage results transactionally: the VM restores its original operands on a pre-commit failure and publishes stack or workspace results only after provider execution succeeds, so fallback never replays a committed effect. Sink operations can gather values immediately when runtime semantics require host materialization.
+Fusion groups rejected before provider effects—because of a barrier, stack mismatch, unsupported shape, unavailable device, exhausted planning budget or resource limit—execute as ordinary VM bytecode. A provider's certified pre-effect unsupported response can also take that route. Provider failures with unknown or completed effects remain execution errors; restoring the VM stack does not make provider work safe to replay. Automatic candidates stage their results and publish stack or workspace values only after successful execution. Sink operations can gather values when their language contract requires host materialization.
 
 Provider feasibility is checked without executing a candidate. Unsupported operation identities, element types, storage/layout combinations, ranks, shapes, and resource requirements produce structured rejection codes. Placement diagnostics retain bounded, correlated events with stable reason tokens so these fallbacks can be inspected without recording source text or runtime values.
 

@@ -1,11 +1,70 @@
 use super::*;
 use runmat_accelerate_api::{
-    test_support::TestAllocationOwner, AccelDownloadFuture, AccelProviderFuture, GpuTensorStorage,
-    HostTensorOwned, HostTensorView, NumericElementType, ReduceDimResult, ThreadProviderGuard,
+    test_support::TestAllocationOwner, AccelDownloadFuture, GpuTensorStorage, HostTensorOwned,
+    HostTensorView, NumericElementType, ReduceDimResult, ThreadProviderGuard,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-#[test]
+struct SelectedExtremaPlacement {
+    selections: AtomicUsize,
+    feedback: std::cell::RefCell<Vec<runmat_execution::PlacementFeedback>>,
+}
+
+impl crate::context::RuntimePlacementService for SelectedExtremaPlacement {
+    fn whole_work_revision(
+        &self,
+        program: Option<runmat_execution::ProgramRevision>,
+        provider: runmat_execution::Digest,
+    ) -> Option<runmat_execution::PlacementRevision> {
+        let revision = runmat_execution::Digest::sha256(b"selected-extrema-submission");
+        Some(runmat_execution::PlacementRevision {
+            program,
+            catalog: revision,
+            compiler: revision,
+            authority: runmat_execution::PlacementExecutionAuthorityRevision::Provider(provider),
+            policy: revision,
+        })
+    }
+
+    fn select_whole_work(
+        &self,
+        request: runmat_execution::WholeWorkPlacementRequest,
+    ) -> Result<crate::context::RuntimeWholeWorkSelection, crate::RuntimeError> {
+        request.validate().expect("typed extrema placement request");
+        let candidate = request.candidates.first().expect("one provider candidate");
+        self.selections.fetch_add(1, Ordering::SeqCst);
+        Ok(crate::context::RuntimeWholeWorkSelection {
+            decision: runmat_execution::WholeWorkDecision {
+                signature: request.signature.clone(),
+                selected: candidate.selected(&request.signature.operation),
+                kind: runmat_execution::WholeWorkDecisionKind::Unmeasured,
+                predicted_total_ns: None,
+            },
+            probe: None,
+            observation_permit: None,
+        })
+    }
+
+    fn plan(
+        &self,
+        _: runmat_execution::PlacementPlanRequest,
+    ) -> Result<runmat_execution::PlacementDecision, crate::RuntimeError> {
+        panic!("selected extrema uses whole-work placement")
+    }
+
+    fn observe(
+        &self,
+        feedback: runmat_execution::PlacementFeedback,
+    ) -> Result<(), crate::RuntimeError> {
+        self.feedback.borrow_mut().push(feedback);
+        Ok(())
+    }
+
+    fn invalidate(&self, _: runmat_execution::PlacementInvalidation) {}
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn scalar_extrema_use_native_single_storage_selection() {
     use runmat_value::{ComplexStorage, ComplexTensor, NumericStorage};
 
@@ -62,6 +121,7 @@ fn scalar_extrema_use_native_single_storage_selection() {
 enum Fault {
     Execution,
     Unsupported,
+    UnsupportedAfterSubmission,
     Download,
 }
 
@@ -73,6 +133,17 @@ struct Provider {
 }
 
 impl Provider {
+    fn reject_execution<T>(&self) -> runmat_accelerate_api::ProviderExecutionResult<T> {
+        self.reject().map_err(|error| {
+            let error = runmat_accelerate_api::ProviderExecutionError::from(error);
+            if matches!(self.fault, Fault::UnsupportedAfterSubmission) {
+                error.after_effect()
+            } else {
+                error
+            }
+        })
+    }
+
     fn reject<T>(&self) -> anyhow::Result<T> {
         self.reductions.fetch_add(1, Ordering::SeqCst);
         match self.fault {
@@ -81,6 +152,16 @@ impl Provider {
                 "unsupported transport state is not a capability rejection",
             )
             .into()),
+            Fault::UnsupportedAfterSubmission => {
+                runmat_accelerate_api::observation::current_provider_observation()
+                    .expect("selected extrema observation")
+                    .submission()
+                    .expect("selected provider submission")
+                    .complete();
+                Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "dimensional reduction failed after a native submission",
+                ))
+            }
             Fault::Unsupported | Fault::Download => {
                 Err(runmat_accelerate_api::unsupported_provider_operation(
                     "dimensional reduction unavailable",
@@ -91,6 +172,64 @@ impl Provider {
 }
 
 impl AccelProvider for Provider {
+    fn query_feasibility(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::ProviderFeasibility {
+        if matches!(self.fault, Fault::UnsupportedAfterSubmission)
+            && query.workload.extrema.is_some()
+        {
+            return runmat_accelerate_api::ProviderFeasibility::supported(
+                runmat_accelerate_api::ProviderResourceEstimate {
+                    transient_bytes: Some(64),
+                    output_bytes: Some(24),
+                    dispatches: Some(1),
+                },
+            );
+        }
+        runmat_accelerate_api::ProviderFeasibility::rejected(
+            runmat_accelerate_api::ProviderRejectionCode::UnsupportedOperation,
+            "fixture.unselected_route",
+        )
+    }
+
+    fn operation_observation_capability(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::observation::ProviderObservationCapability {
+        use runmat_accelerate_api::observation::{
+            ProviderObservationCapability, ProviderObservationOverhead,
+        };
+        if matches!(self.fault, Fault::UnsupportedAfterSubmission)
+            && query.workload.extrema.is_some()
+        {
+            ProviderObservationCapability::Supported(ProviderObservationOverhead {
+                submissions: 1,
+                requested_peak_buffer_bytes: 0,
+                clear_commands: 0,
+                map_callbacks: 0,
+            })
+        } else {
+            ProviderObservationCapability::Unsupported
+        }
+    }
+
+    fn begin_operation_observation(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::observation::ProviderObservationSupport {
+        use runmat_accelerate_api::observation::{
+            ProviderObservationSupport, ProviderOperationReceipt,
+        };
+        if matches!(self.fault, Fault::UnsupportedAfterSubmission)
+            && query.workload.extrema.is_some()
+        {
+            ProviderObservationSupport::Observed(ProviderOperationReceipt::new())
+        } else {
+            ProviderObservationSupport::Unsupported
+        }
+    }
+
     fn device_id(&self) -> u32 {
         self.owner.device_id()
     }
@@ -123,30 +262,30 @@ impl AccelProvider for Provider {
         &'a self,
         _: &'a GpuTensorHandle,
         _: usize,
-    ) -> AccelProviderFuture<'a, ReduceDimResult> {
-        Box::pin(async move { self.reject() })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ReduceDimResult> {
+        Box::pin(async move { self.reject_execution() })
     }
     fn reduce_max_dim<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
         _: usize,
-    ) -> AccelProviderFuture<'a, ReduceDimResult> {
-        Box::pin(async move { self.reject() })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ReduceDimResult> {
+        Box::pin(async move { self.reject_execution() })
     }
 
     fn elem_min<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.reject() })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.reject_execution() })
     }
     fn elem_max<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.reject() })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.reject_execution() })
     }
     fn fill_like(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
         self.reject()
@@ -159,7 +298,8 @@ impl AccelProvider for Provider {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn dimensional_extrema_only_gather_after_typed_unsupported() {
     for name in ["min", "max"] {
         for fault in [Fault::Execution, Fault::Unsupported, Fault::Download] {
@@ -181,7 +321,7 @@ fn dimensional_extrema_only_gather_after_typed_unsupported() {
             assert_eq!(provider.reductions.load(Ordering::SeqCst), 1);
             match fault {
                 Fault::Unsupported => assert_eq!(result.unwrap(), Value::Num(0.0)),
-                Fault::Execution | Fault::Download => {
+                Fault::Execution | Fault::Download | Fault::UnsupportedAfterSubmission => {
                     let error = result.unwrap_err();
                     assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
                     let mut source = std::error::Error::source(&error);
@@ -215,7 +355,72 @@ fn dimensional_extrema_only_gather_after_typed_unsupported() {
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn selected_extrema_unsupported_after_submission_retains_cause_without_retry() {
+    use std::rc::Rc;
+
+    let provider = Box::leak(Box::new(Provider {
+        owner: TestAllocationOwner::new(),
+        fault: Fault::UnsupportedAfterSubmission,
+        reductions: AtomicUsize::new(0),
+        downloads: AtomicUsize::new(0),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let placement = Rc::new(SelectedExtremaPlacement {
+        selections: AtomicUsize::new(0),
+        feedback: std::cell::RefCell::new(Vec::new()),
+    });
+    let runtime = crate::context::RuntimeContext::new(Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        crate::context::RuntimeServicePorts::default().with_placement(placement.clone()),
+    );
+    let input = provider
+        .owner
+        .allocate_zeroed(vec![2, 3], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let error = match futures::executor::block_on(ExtremaKind::Min.reduce_dim(
+        Some(&runtime),
+        &input.handle,
+        0,
+        ExtremaDemand::ValuesOnly,
+    )) {
+        Err(error) => error,
+        Ok(_) => panic!("submission cannot be retried as an unsupported capability"),
+    };
+    assert_eq!(placement.selections.load(Ordering::SeqCst), 1);
+    let feedback = placement.feedback.borrow();
+    assert_eq!(feedback.len(), 1);
+    assert!(!feedback[0].succeeded);
+    assert_eq!(provider.reductions.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        error.identifier(),
+        runmat_builtins::MIN_ERROR_INTERNAL.identifier
+    );
+    assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
+    let retained = std::error::Error::source(&error)
+        .and_then(|source| source.downcast_ref::<runmat_accelerate_api::ProviderExecutionError>())
+        .expect("post-submission error retains typed provider execution owner");
+    assert!(!retained.is_unsupported());
+    let mut source = std::error::Error::source(retained);
+    let mut original = false;
+    while let Some(cause) = source {
+        original |= cause.is::<runmat_accelerate_api::UnsupportedProviderOperation>();
+        source = cause.source();
+    }
+    assert!(
+        original,
+        "the original typed unsupported marker remains nested"
+    );
+    input.handle.allocation_lease().validate_live().unwrap();
+    assert_eq!(input.probe.retirements(), 0);
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn dimensional_extrema_never_dispatch_unregistered_input_to_selected_provider() {
     let selected = Box::leak(Box::new(Provider {
         owner: TestAllocationOwner::new(),
@@ -243,7 +448,8 @@ fn dimensional_extrema_never_dispatch_unregistered_input_to_selected_provider() 
     assert_eq!(input.probe.retirements(), 1);
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn elementwise_extrema_propagate_execution_failure_and_keep_capability_fallback() {
     for name in ["min", "max"] {
         for form in 0..3 {
@@ -321,10 +527,12 @@ async fn call_extrema_owner(name: &str, args: &[Value]) -> crate::BuiltinResult<
     let (value, rest) = args.split_first().expect("extrema data operand");
     match name {
         "min" => {
-            crate::builtins::math::reduction::min::min_builtin(value.clone(), rest.to_vec()).await
+            crate::builtins::math::reduction::min::min_builtin(None, value.clone(), rest.to_vec())
+                .await
         }
         "max" => {
-            crate::builtins::math::reduction::max::max_builtin(value.clone(), rest.to_vec()).await
+            crate::builtins::math::reduction::max::max_builtin(None, value.clone(), rest.to_vec())
+                .await
         }
         _ => unreachable!("fixture covers min and max"),
     }

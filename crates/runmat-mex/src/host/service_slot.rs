@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use super::async_request::new_async_result;
 use crate::{
-    MexAsyncHostServices, MexAsyncOperation, MexAsyncResult,
-    MexAsyncResultHandle, MexBoundaryHostServices, MexDiagnostic, MexEngineCompletion, MxArray,
+    MexAsyncHostServices, MexAsyncOperation, MexAsyncResult, MexAsyncResultHandle,
+    MexBoundaryHostServices, MexDiagnostic, MexEngineCompletion, MxArray,
 };
 
 pub trait ConcurrentMexBoundaryHostServices:

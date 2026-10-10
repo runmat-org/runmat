@@ -594,7 +594,6 @@ impl Line3Plot {
 mod tests {
     use super::*;
     use pollster::FutureExt;
-    use std::sync::Arc;
     use wgpu::util::DeviceExt;
 
     fn maybe_device() -> Option<runmat_accelerate_api::WgpuDeviceAccess> {
@@ -664,7 +663,7 @@ mod tests {
         let Some(access) = maybe_device() else {
             return;
         };
-        let x_buffer = Arc::new(
+        let x_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
             access
                 .with_shared(|emission| {
                     emission
@@ -677,7 +676,7 @@ mod tests {
                 })
                 .expect("test device access"),
         );
-        let y_buffer = Arc::new(
+        let y_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
             access
                 .with_shared(|emission| {
                     emission
@@ -690,7 +689,7 @@ mod tests {
                 })
                 .expect("test device access"),
         );
-        let z_buffer = Arc::new(
+        let z_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
             access
                 .with_shared(|emission| {
                     emission

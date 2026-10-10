@@ -15,6 +15,10 @@ pub enum RoundDigitsMode {
 pub enum NumericalDomainEvidence {
     #[default]
     Unknown,
+    /// A selected real operation proves every element is nonnegative (either
+    /// signed zero included) or NaN. This is request evidence, not a claim of
+    /// provider arithmetic equivalence.
+    NonnegativeOrNaN,
     RealPower(PowerResultDomain),
     RealUnary {
         predicate: RealUnaryPredicate,

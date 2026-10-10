@@ -41,8 +41,7 @@ impl WgpuProvider {
             "feed-forward anchor differs from provider-owned descriptor"
         );
         if entry.storage != GpuTensorStorage::Real
-            || entry.logical
-            || entry.integer_type().is_some()
+            || !input_admission::classify_native_real_input(self, anchor, &entry)?.is_ready()
         {
             return Ok(C::UnsupportedOperation);
         }
@@ -99,6 +98,27 @@ impl WgpuProvider {
         }
         if !self.within_binding_limit(input_count) || !self.within_binding_limit(output_count) {
             return C::ResourceLimit;
+        }
+        if let S::SoftmaxRows { rows, columns } = stage {
+            if rows != 0 && columns != 0 {
+                let Some(bytes) = u64::try_from(input_count)
+                    .ok()
+                    .and_then(|count| count.checked_mul(self.element_size as u64))
+                else {
+                    return C::ResourceLimit;
+                };
+                if softmax_validated::check_softmax_limits(
+                    &self.adapter_limits,
+                    bytes,
+                    bytes,
+                    self.workgroup_config.scalar,
+                    self.element_size,
+                )
+                .is_err()
+                {
+                    return C::ResourceLimit;
+                }
+            }
         }
         C::Ready
     }

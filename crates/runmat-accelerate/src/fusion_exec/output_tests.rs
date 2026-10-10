@@ -1,8 +1,8 @@
 use super::*;
 use runmat_accelerate_api::{
     test_support::{TestAllocation, TestAllocationOwner},
-    AccelDownloadFuture, GpuTensorLayout, GpuTensorView, HostTensorView, ThreadProviderGuard,
-    TransposeInfo,
+    AccelDownloadFuture, GpuTensorLayout, GpuTensorView, HostNumericDataView,
+    HostNumericTensorView, HostTensorView, ThreadProviderGuard, TransposeInfo,
 };
 use std::future::Future;
 use std::sync::Mutex;
@@ -10,20 +10,56 @@ use std::task::{Context, Poll};
 
 struct Owner {
     allocations: TestAllocationOwner,
-    upload_result: Mutex<Option<WeakGpuTensorHandle>>,
+    precision: ProviderPrecision,
+    upload_result: Mutex<Option<GpuTensorHandle>>,
+    upload_failure: Mutex<Option<&'static str>>,
+    uploads: Mutex<Vec<UploadCall>>,
+}
+#[derive(Debug, PartialEq, Eq)]
+struct UploadCall {
+    shape: Vec<usize>,
+    storage: GpuTensorStorage,
+    payload: UploadPayload,
+}
+#[derive(Debug, PartialEq, Eq)]
+enum UploadPayload {
+    F32(Vec<u32>),
+    F64(Vec<u64>),
+    Other(NumericElementType),
+}
+#[derive(Debug)]
+struct UploadFailure(&'static str);
+impl std::fmt::Display for UploadFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.0)
+    }
+}
+impl std::error::Error for UploadFailure {}
+
+fn owner_with_precision(precision: ProviderPrecision) -> Owner {
+    Owner {
+        allocations: TestAllocationOwner::new(),
+        precision,
+        upload_result: Mutex::new(None),
+        upload_failure: Mutex::new(None),
+        uploads: Mutex::new(Vec::new()),
+    }
+}
+fn owner() -> Owner {
+    owner_with_precision(ProviderPrecision::F64)
 }
 fn new_owner() -> &'static Owner {
-    Box::leak(Box::new(Owner {
-        allocations: TestAllocationOwner::new(),
-        upload_result: Mutex::new(None),
-    }))
+    Box::leak(Box::new(owner()))
+}
+fn new_owner_with_precision(precision: ProviderPrecision) -> &'static Owner {
+    Box::leak(Box::new(owner_with_precision(precision)))
 }
 impl AccelProvider for Owner {
     fn device_id(&self) -> u32 {
         self.allocations.device_id()
     }
     fn precision(&self) -> ProviderPrecision {
-        ProviderPrecision::F64
+        self.precision
     }
     fn device_info(&self) -> String {
         "fusion-output-owner".into()
@@ -33,20 +69,31 @@ impl AccelProvider for Owner {
     }
     fn upload_numeric_raw(
         &self,
-        _: &runmat_accelerate_api::HostNumericTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        let weak = self
+        host: &runmat_accelerate_api::HostNumericTensorView<'_>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        let payload = match host.data {
+            runmat_accelerate_api::HostNumericDataView::F32(data) => {
+                UploadPayload::F32(data.iter().map(|value| value.to_bits()).collect())
+            }
+            runmat_accelerate_api::HostNumericDataView::F64(data) => {
+                UploadPayload::F64(data.iter().map(|value| value.to_bits()).collect())
+            }
+            other => UploadPayload::Other(other.element_type()),
+        };
+        self.uploads.lock().unwrap().push(UploadCall {
+            shape: host.shape.to_vec(),
+            storage: host.storage,
+            payload,
+        });
+        if let Some(message) = self.upload_failure.lock().unwrap().take() {
+            return Err(ProviderExecutionError::from_source(UploadFailure(message)));
+        }
+        Ok(self
             .upload_result
             .lock()
             .unwrap()
-            .clone()
-            .expect("configured upload");
-        // Every configured upload in this fixture retains its strong handle
-        // through this synchronous call. Expiry is a fixture invariant failure,
-        // not a simulated provider error to erase into anyhow on WASM.
-        Ok(weak
-            .acquire()
-            .expect("configured upload retains a live owner"))
+            .take()
+            .expect("configured upload"))
     }
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         unreachable!()
@@ -57,6 +104,81 @@ fn allocation(owner: &Owner) -> TestAllocation {
         .allocations
         .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap()
+}
+
+// The registered inner provider and this facade have the same data address
+// and namespace, but distinct trait-object vtables. Output admission must
+// use the registry's facade identity rather than trait-object pointer equality.
+#[repr(C)]
+struct OwnerFacade {
+    owner: Owner,
+    reported_device: u32,
+}
+
+fn new_facade(reported_device: Option<u32>) -> &'static OwnerFacade {
+    let owner = owner();
+    let device = reported_device.unwrap_or_else(|| owner.device_id());
+    Box::leak(Box::new(OwnerFacade {
+        owner,
+        reported_device: device,
+    }))
+}
+
+impl AccelProvider for OwnerFacade {
+    fn device_id(&self) -> u32 {
+        self.reported_device
+    }
+    fn precision(&self) -> ProviderPrecision {
+        ProviderPrecision::F64
+    }
+    fn device_info(&self) -> String {
+        "fusion-output-facade".into()
+    }
+    fn upload(&self, _: &HostTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
+        unreachable!()
+    }
+    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        unreachable!()
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn output_admission_accepts_same_facade_across_vtables_but_not_distinct_facades() {
+    let facade = new_facade(None);
+    let owner: &'static dyn AccelProvider = &facade.owner;
+    let selected: &'static dyn AccelProvider = facade;
+    assert!(std::ptr::addr_eq(owner, selected));
+    assert!(!std::ptr::eq(owner, selected));
+    assert!(runmat_accelerate_api::same_provider_instance(
+        owner, selected
+    ));
+    let _selected = ThreadProviderGuard::set(Some(owner));
+
+    let mut admission = FusionOutputAdmission::new(&[]);
+    let accepted = allocation(&facade.owner);
+    let output = admission
+        .admit(accepted.handle, selected, &[1, 2], ProviderPrecision::F64)
+        .expect("same retained facade must be admitted despite vtable difference");
+    assert_eq!(accepted.probe.retirements(), 0);
+    drop(output);
+    assert_eq!(accepted.probe.retirements(), 1);
+
+    let distinct = new_facade(Some(facade.device_id()));
+    assert!(!runmat_accelerate_api::same_provider_instance(
+        owner, distinct
+    ));
+    let rejected = allocation(&facade.owner);
+    assert!(admission
+        .admit(rejected.handle, distinct, &[1, 2], ProviderPrecision::F64,)
+        .is_err());
+    assert_eq!(rejected.probe.retirements(), 1);
+
+    let wrong_namespace = new_facade(Some(facade.device_id()));
+    let inner: &dyn AccelProvider = &wrong_namespace.owner;
+    let outer: &dyn AccelProvider = wrong_namespace;
+    assert!(std::ptr::addr_eq(inner, outer));
+    assert!(!runmat_accelerate_api::same_provider_instance(inner, outer));
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
@@ -115,6 +237,10 @@ fn explained_results_reject_wrong_class_and_retain_cleanup_failure() {
     )
     .unwrap_err();
     assert!(std::error::Error::source(&error).is_some());
+    assert!(
+        !error.is_unsupported(),
+        "retired outputs never authorize replay"
+    );
     assert_eq!(allocation.probe.retirements(), 1);
     drop(error);
     assert_eq!(allocation.probe.retirements(), 1);
@@ -255,7 +381,7 @@ fn upload_rejection_protects_originals_and_live_staging_with_immutable_facts() {
         .unwrap();
     for protected in [&borrowed.handle, &staged_handle] {
         let before = facts(protected);
-        *owner.upload_result.lock().unwrap() = Some(protected.downgrade());
+        *owner.upload_result.lock().unwrap() = Some(protected.clone());
         let error = admission.upload(owner, &[1.0, 2.0], &[1, 2]).unwrap_err();
         assert!(runmat_accelerate_api::is_invalid_numeric_upload_result(
             &error
@@ -287,7 +413,7 @@ fn expired_produced_weak_views_do_not_retain_or_block_later_uploads() {
     assert_eq!(previous.probe.retirements(), 1);
 
     let next = allocation(owner);
-    *owner.upload_result.lock().unwrap() = Some(next.handle.downgrade());
+    *owner.upload_result.lock().unwrap() = Some(next.handle.clone());
     let uploaded = admission.upload(owner, &[0.0, 0.0], &[1, 2]).unwrap();
     assert!(uploaded.shares_allocation_with(&next.handle));
     drop(next.handle);
@@ -347,3 +473,6 @@ fn admission_rejects_actual_wrong_owner_class_shape_and_layout() {
         .is_err());
     assert_eq!(allocation.probe.retirements(), 1);
 }
+
+#[path = "outputs/typed_upload_tests.rs"]
+mod typed_upload_tests;

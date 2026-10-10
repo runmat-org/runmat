@@ -1,5 +1,12 @@
 use super::{AllocationIdentity, GpuPhysicalDescriptor, WeakAllocationLease};
 
+/// Exact provider allocation authority: worker-local in browsers, thread-safe
+/// on native targets. It is captured by leases and failed-retirement records.
+#[cfg(not(target_arch = "wasm32"))]
+pub type AllocationOwnerHandle = std::sync::Arc<dyn AllocationOwner>;
+#[cfg(target_arch = "wasm32")]
+pub type AllocationOwnerHandle = std::rc::Rc<dyn AllocationOwner>;
+
 /// Registration fails without granting a second lifetime authority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AllocationRegistrationError {

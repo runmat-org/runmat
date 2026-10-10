@@ -8,8 +8,8 @@ pub enum WgpuScopeErrorKind {
 }
 
 /// Original WGPU errors are retained, not reduced to strings or relabeled as
-/// DeviceLost. Native WGPU 0.19 errors are Send but not Sync; the mutex permits
-/// this carrier to pass through the existing native provider error boundary.
+/// DeviceLost. A mutex protects inspection of retained backend errors across
+/// the existing native provider error boundary.
 /// Inspect original error/source chains with with_errors. They cannot be lent
 /// through std::error::Error::source across the inspection lock's lifetime.
 #[derive(Debug)]
@@ -24,7 +24,6 @@ impl WgpuScopeErrors {
             .map(|error| match error {
                 wgpu::Error::Validation { .. } => WgpuScopeErrorKind::Validation,
                 wgpu::Error::OutOfMemory { .. } => WgpuScopeErrorKind::OutOfMemory,
-                #[cfg(target_arch = "wasm32")]
                 wgpu::Error::Internal { .. } => WgpuScopeErrorKind::Internal,
             })
             .collect();

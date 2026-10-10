@@ -28,9 +28,12 @@ impl AccelProvider for Provider {
     fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         panic!("typed upload required")
     }
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let HostNumericDataView::F64(data) = host.data else {
-            anyhow::bail!("F64 expected")
+            return Err(anyhow::anyhow!("F64 expected").into());
         };
         let allocation = self.owner.allocate_numeric(HostNumericTensorOwned {
             data: HostNumericDataOwned::F64(data.to_vec()),

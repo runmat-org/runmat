@@ -42,8 +42,10 @@ use serde::{Deserialize, Serialize};
 
 mod builtin_call;
 mod calibration_cleanup;
+mod host_route;
 mod state;
 pub use builtin_call::{install_preparation_service, AdmittedAcceleration};
+pub use host_route::promote_binary_in_context;
 pub use state::AutoOffloadHandle;
 
 const DEFAULT_CPU_ELEM_PER_ELEM: f64 = 1.0e-7;
@@ -1314,6 +1316,12 @@ impl NativeAutoOffload {
             LocalPlacementRequest {
                 operation,
                 semantic_identity: None,
+                observation_contract: if planning.prepared_authority.is_some() {
+                    crate::placement::TotalCandidateObservationContract::FullCall
+                } else {
+                    crate::placement::TotalCandidateObservationContract::PreparationBodyCleanup
+                },
+                prepared_authority: planning.prepared_authority,
                 family,
                 provider_kind,
                 inputs: values,
@@ -1327,6 +1335,7 @@ impl NativeAutoOffload {
                     CandidatePreparationState::Warm
                 },
                 preparation_program: planning.preparation_program,
+                shader_requirements: None,
                 cpu,
                 provider_fallback,
                 required_upload_bytes: None,
@@ -1361,6 +1370,7 @@ impl NativeAutoOffload {
                 feedback,
                 provider_query,
                 provider_observation,
+                ..
             }) => {
                 evaluation.recommend_gpu = selected.kind.is_provider();
                 evaluation.reason = DecisionReason::CostModel;

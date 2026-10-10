@@ -135,6 +135,9 @@ fn placement_derives_route_only_from_admitted_program_not_legacy_workload() {
             LocalPlacementRequest {
                 operation: SINGLE_CATALOG_ENTRY.identity.name,
                 semantic_identity: None,
+                observation_contract:
+                    crate::placement::TotalCandidateObservationContract::PreparationBodyCleanup,
+                prepared_authority: None,
                 family: ProviderOperationFamily::Elementwise,
                 provider_kind: ExecutionCandidateKind::ProviderOperation,
                 inputs: &[&input],
@@ -146,6 +149,7 @@ fn placement_derives_route_only_from_admitted_program_not_legacy_workload() {
                 },
                 preparation: CandidatePreparationState::Ready,
                 preparation_program: program,
+                shader_requirements: None,
                 cpu: ExecutionCandidateDescriptor {
                     identity: "cpu".into(),
                     region: None,

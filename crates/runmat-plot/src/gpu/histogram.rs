@@ -36,7 +36,7 @@ pub struct HistogramGpuParams {
 }
 
 pub struct HistogramGpuOutput {
-    pub values_buffer: Arc<wgpu::Buffer>,
+    pub values_buffer: runmat_accelerate_api::WgpuBufferOwner,
     pub total_weight: f32,
 }
 
@@ -75,15 +75,15 @@ struct HistogramPassInputs<'a> {
     sample_count: u32,
     sample_scalar: ScalarType,
     params: &'a HistogramGpuParams,
-    counts_buffer: &'a Arc<wgpu::Buffer>,
-    total_weight_buffer: &'a Arc<wgpu::Buffer>,
+    counts_buffer: &'a runmat_accelerate_api::WgpuBufferOwner,
+    total_weight_buffer: &'a runmat_accelerate_api::WgpuBufferOwner,
 }
 
 struct HistogramBindGroupInputs<'a> {
     device: &'a wgpu::Device,
     samples: &'a wgpu::Buffer,
-    counts_buffer: &'a Arc<wgpu::Buffer>,
-    total_weight_buffer: &'a Arc<wgpu::Buffer>,
+    counts_buffer: &'a runmat_accelerate_api::WgpuBufferOwner,
+    total_weight_buffer: &'a runmat_accelerate_api::WgpuBufferOwner,
     params: &'a HistogramGpuParams,
     sample_count: u32,
     accumulate_total: bool,
@@ -121,23 +121,23 @@ pub async fn histogram_values_buffer(
             let device = emission.device();
             let queue = emission.queue();
             let zero_counts = vec![0u32; bin_count_usize];
-            let counts_buffer = Arc::new(device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
+            let counts_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("histogram-counts"),
                     contents: bytemuck::cast_slice(&zero_counts),
                     usage: wgpu::BufferUsages::STORAGE
                         | wgpu::BufferUsages::COPY_DST
                         | wgpu::BufferUsages::COPY_SRC,
-                },
-            ));
+                }),
+            );
 
-            let total_weight_buffer = Arc::new(device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
+            let total_weight_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("histogram-total-weight"),
                     contents: bytemuck::cast_slice(&[0u32]),
                     usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::MAP_READ,
-                },
-            ));
+                }),
+            );
 
             let materialized = materialize_weights(device, &weights)?;
             let samples = samples
@@ -192,15 +192,17 @@ pub async fn histogram_values_buffer(
         .with_shared(|emission| {
             let device = emission.device();
             let queue = emission.queue();
-            let values_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("histogram-counts-f32"),
-                size: (bin_count_usize * std::mem::size_of::<f32>()) as u64,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_DST
-                    | wgpu::BufferUsages::COPY_SRC
-                    | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            }));
+            let values_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
+                &wgpu::BufferDescriptor {
+                    label: Some("histogram-counts-f32"),
+                    size: (bin_count_usize * std::mem::size_of::<f32>()) as u64,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_DST
+                        | wgpu::BufferUsages::COPY_SRC
+                        | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                },
+            ));
 
             run_convert_pass(
                 device,
@@ -232,13 +234,13 @@ fn materialize_weights(
             accumulate_total: false,
         }),
         HistogramGpuWeights::HostF32 { data, total_weight } => {
-            let buffer = Arc::new(
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            let buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
                     label: Some("histogram-weights-host-f32"),
                     contents: bytemuck::cast_slice(data),
                     usage: wgpu::BufferUsages::STORAGE,
-                }),
-            );
+                },
+            ));
             Ok(MaterializedWeights {
                 mode: WeightMode::F32,
                 buffer: Some(buffer.into()),
@@ -247,13 +249,13 @@ fn materialize_weights(
             })
         }
         HistogramGpuWeights::HostF64 { data, total_weight } => {
-            let buffer = Arc::new(
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            let buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
                     label: Some("histogram-weights-host-f64"),
                     contents: bytemuck::cast_slice(data),
                     usage: wgpu::BufferUsages::STORAGE,
-                }),
-            );
+                },
+            ));
             Ok(MaterializedWeights {
                 mode: WeightMode::F64,
                 buffer: Some(buffer.into()),
@@ -512,8 +514,8 @@ fn run_convert_pass(
     queue: &wgpu::Queue,
     bin_count: u32,
     normalization_scale: f32,
-    counts_buffer: &Arc<wgpu::Buffer>,
-    values_buffer: &Arc<wgpu::Buffer>,
+    counts_buffer: &runmat_accelerate_api::WgpuBufferOwner,
+    values_buffer: &runmat_accelerate_api::WgpuBufferOwner,
 ) -> Result<(), String> {
     let workgroup_size = tuning::effective_workgroup_size();
     let shader = compile_convert_shader(device, workgroup_size);

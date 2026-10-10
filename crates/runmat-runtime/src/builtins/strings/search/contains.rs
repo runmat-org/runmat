@@ -427,6 +427,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_numeric_ignore_case_is_gated_in_matlab_mode() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -476,6 +477,7 @@ pub(crate) mod tests {
             .contains("expected a value after 'IgnoreCase'"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_validates_malformed_options_before_extension_gates() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -518,6 +520,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_distinguishes_positional_and_numeric_extension_gates() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -559,6 +562,22 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn contains_positional_ignore_case_is_admitted_in_runmat_mode() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        for (flag, expected) in [(true, true), (false, false)] {
+            let result = run_contains(
+                Value::String("RunMat".into()),
+                Value::String("run".into()),
+                vec![Value::Bool(flag)],
+            )
+            .expect("RunMat positional IgnoreCase");
+            assert_eq!(result, Value::Bool(expected));
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_rejects_nested_resident_numeric_text_before_provider_access() {
         let resident = Value::GpuTensor(
@@ -651,6 +670,7 @@ pub(crate) mod tests {
         assert_eq!(result, Value::Bool(false));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_accepts_pattern_object() {
         let pattern = crate::builtins::strings::core::compat::pattern_object(r"\d+");

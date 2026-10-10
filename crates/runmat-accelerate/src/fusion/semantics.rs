@@ -1,7 +1,7 @@
 //! Request-local type resolution. Cached structural plans never own runtime
 //! facts or evidence about the contents of a different invocation's operands.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::precision::PrecisionPolicy;
 use anyhow::{anyhow, Result};
@@ -9,11 +9,14 @@ use runmat_accelerate_api::ProviderPrecision;
 use runmat_builtins::infer_catalog_call;
 use runmat_builtins::BuiltinBindingIdentity;
 use runmat_execution::Digest;
-use runmat_runtime::builtins::common::spec::{CanonicalFusionDeclaration, FusionAdmissionContext};
+use runmat_runtime::builtins::common::spec::{
+    CanonicalFusionDeclaration, FusionAdmissionContext, FusionArithmeticEvidence,
+    FusionPowerArithmeticReceipt,
+};
 use runmat_runtime::value_fact::value_fact;
 use runmat_types::{
-    infer_binary, infer_unary, CallRequest, LiteralContext, NumericClass, NumericDomain,
-    OperatorKind, OutputSelection, ValueFact,
+    infer_binary, infer_unary, CallRequest, NumericClass, NumericDomain, OperatorKind,
+    OutputSelection, ValueFact,
 };
 use runmat_value::Value;
 use serde::Serialize;
@@ -22,8 +25,81 @@ use super::semantic_bindings::{self, SemanticBinding};
 use super::{FusionGroupPlan, FusionOp};
 use crate::graph::{FusionCallOrigin, PrimitiveOp, ValueId};
 
+fn exact_scalar_control(
+    value: Option<&Value>,
+) -> Option<runmat_runtime::builtins::common::spec::FusionScalarControl> {
+    use runmat_runtime::builtins::common::spec::FusionScalarControl;
+    use runmat_value::NumericScalar;
+    match value? {
+        Value::Num(value) => Some(FusionScalarControl::DoubleBits(value.to_bits())),
+        Value::Tensor(tensor) if tensor.len() == 1 => match tensor.numeric_value_at(0)? {
+            NumericScalar::F32(value) => Some(FusionScalarControl::SingleBits(value.to_bits())),
+            NumericScalar::F64(value) => Some(FusionScalarControl::DoubleBits(value.to_bits())),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 #[path = "semantics/constant_identity.rs"]
 mod constant_identity;
+pub(crate) use constant_identity::exact_constant_digest;
+#[path = "semantics/invocation_leaves.rs"]
+pub(super) mod invocation_leaves;
+use invocation_leaves::FusionInvocationLeaves;
+#[path = "semantics/assembly.rs"]
+mod assembly;
+#[path = "semantics/request_literals.rs"]
+mod request_literals;
+#[path = "semantics/sign.rs"]
+mod sign;
+#[path = "semantics/sign_reduction.rs"]
+mod sign_reduction;
+#[path = "semantics/static_resolution.rs"]
+mod static_resolution;
+use assembly::{inferred_operation, record_operation, selected_values, source_assembly};
+
+fn validate_arithmetic(
+    declaration: CanonicalFusionDeclaration,
+    input_ids: &[ValueId],
+    arguments: &[ValueFact],
+    output_fact: &ValueFact,
+    values: &[Option<&Value>],
+    admitted: Option<FusionArithmeticEvidence>,
+) -> Result<Option<FusionArithmeticEvidence>> {
+    let semantic = declaration
+        .semantics
+        .ok_or_else(|| anyhow!("arithmetic admission lacks selected semantics"))?;
+    if admitted.map(|evidence| evidence.kind()) != semantic.required_arithmetic {
+        return Err(anyhow!("selected arithmetic authority kind mismatch"));
+    }
+    if let Some(FusionArithmeticEvidence::RealPower(receipt)) = admitted {
+        let [base_id, exponent_id] = input_ids else {
+            return Err(anyhow!(
+                "power arithmetic receipt has invalid operand topology"
+            ));
+        };
+        if receipt.binding != declaration.binding
+            || receipt.revision != semantic.revision
+            || (receipt.base_id, receipt.exponent_id) != (*base_id, *exponent_id)
+            || arguments[0].numeric().map(|numeric| numeric.class) != Some(receipt.base_class)
+            || arguments[1].numeric().map(|numeric| numeric.class) != Some(receipt.exponent_class)
+            || output_fact.numeric().map(|numeric| numeric.class) != Some(receipt.output_class)
+            || receipt.exponent_scalar != exact_scalar_control(values[1])
+            || Some(receipt.mode)
+                != runmat_accelerate_api::RealPowerArithmeticMode::for_classes(
+                    receipt.base_class,
+                    receipt.exponent_class,
+                )
+            || receipt.output_class != receipt.mode.output_class()
+        {
+            return Err(anyhow!(
+                "power arithmetic receipt differs from selected source"
+            ));
+        }
+    }
+    Ok(admitted)
+}
 
 fn source_constants(plan: &FusionGroupPlan) -> Result<Vec<(ValueId, Digest)>> {
     let mut constants = plan
@@ -48,6 +124,10 @@ fn source_slot_constants(plan: &FusionGroupPlan) -> Result<Vec<(usize, Digest)>>
     constants.sort_unstable_by_key(|(slot, _)| *slot);
     Ok(constants)
 }
+
+#[path = "semantics/source_plan_identity.rs"]
+mod source_plan_identity;
+pub use source_plan_identity::exact_source_plan_identity;
 
 /// Ordered source topology after the canonical binding capture. Public names
 /// never become a second execution identity after this boundary.
@@ -103,6 +183,7 @@ fn source_operations(
 pub(crate) struct ResolvedProgram {
     source_operations: Vec<SourceOperationIdentity>,
     source_input_ids: Vec<ValueId>,
+    source_input_set: HashSet<ValueId>,
     source_constants: Vec<(ValueId, Digest)>,
     source_slot_constants: Vec<(usize, Digest)>,
     source_root: Option<ValueId>,
@@ -115,12 +196,63 @@ pub(crate) struct ResolvedProgram {
     binding_contracts: Vec<SemanticBinding>,
     declarations: HashMap<ValueId, SemanticBinding>,
     evidence: BTreeMap<ValueId, runmat_accelerate_api::NumericalDomainEvidence>,
+    sign: BTreeMap<ValueId, runmat_runtime::builtins::common::spec::FusionSignEvidence>,
+    arithmetic: BTreeMap<ValueId, FusionArithmeticEvidence>,
     admission_work: BTreeMap<ValueId, runmat_runtime::builtins::common::spec::FusionAdmissionWork>,
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("fusion operation admission failed: {0}")]
-pub(crate) struct FusionAdmissionFailure(pub anyhow::Error);
+#[derive(Debug)]
+pub(crate) enum FusionResolveFailure {
+    Structural(anyhow::Error),
+    Admission(anyhow::Error),
+    Runtime(Box<runmat_runtime::RuntimeError>),
+}
+
+impl std::fmt::Display for FusionResolveFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Structural(error) | Self::Admission(error) => {
+                std::fmt::Display::fmt(error, formatter)
+            }
+            Self::Runtime(error) => std::fmt::Display::fmt(error, formatter),
+        }
+    }
+}
+
+impl std::error::Error for FusionResolveFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Structural(error) | Self::Admission(error) => Some(error.as_ref()),
+            Self::Runtime(error) => Some(error.as_ref()),
+        }
+    }
+}
+
+impl From<anyhow::Error> for FusionResolveFailure {
+    fn from(error: anyhow::Error) -> Self {
+        Self::Structural(error)
+    }
+}
+
+impl From<runmat_runtime::RuntimeError> for FusionResolveFailure {
+    fn from(error: runmat_runtime::RuntimeError) -> Self {
+        Self::Runtime(Box::new(error))
+    }
+}
+
+impl FusionResolveFailure {
+    pub(crate) fn into_execution_or_structural(
+        self,
+    ) -> std::result::Result<anyhow::Error, runmat_accelerate_api::ProviderExecutionError> {
+        match self {
+            Self::Structural(error) => Ok(error),
+            Self::Admission(error) => Err(error.into()),
+            Self::Runtime(error) => Err(
+                runmat_accelerate_api::ProviderExecutionError::from_source(*error),
+            ),
+        }
+    }
+}
 
 impl ResolvedProgram {
     pub async fn resolve(
@@ -128,7 +260,7 @@ impl ResolvedProgram {
         inputs: &[Value],
         provider_precision: ProviderPrecision,
         correlation: Option<crate::placement::PlacementCorrelationId>,
-    ) -> Result<Self> {
+    ) -> std::result::Result<Self, FusionResolveFailure> {
         let inputs: Vec<_> = inputs.iter().collect();
         Self::resolve_borrowed(plan, &inputs, provider_precision, correlation).await
     }
@@ -138,7 +270,7 @@ impl ResolvedProgram {
         inputs: &[&Value],
         provider_precision: ProviderPrecision,
         correlation: Option<crate::placement::PlacementCorrelationId>,
-    ) -> Result<Self> {
+    ) -> std::result::Result<Self, FusionResolveFailure> {
         let bindings = semantic_bindings::capture(plan)?;
         Self::resolve_captured(plan, inputs, provider_precision, correlation, &bindings).await
     }
@@ -149,7 +281,7 @@ impl ResolvedProgram {
         provider_precision: ProviderPrecision,
         correlation: Option<crate::placement::PlacementCorrelationId>,
         bindings: &[Option<SemanticBinding>],
-    ) -> Result<Self> {
+    ) -> std::result::Result<Self, FusionResolveFailure> {
         Self::resolve_observed(
             plan,
             inputs,
@@ -167,7 +299,7 @@ impl ResolvedProgram {
         inputs: &[Value],
         provider_precision: ProviderPrecision,
         precision_policy: PrecisionPolicy,
-    ) -> Result<Self> {
+    ) -> std::result::Result<Self, FusionResolveFailure> {
         let inputs: Vec<_> = inputs.iter().collect();
         let bindings = semantic_bindings::capture(plan)?;
         Self::resolve_observed(
@@ -188,143 +320,187 @@ impl ResolvedProgram {
         precision_policy: PrecisionPolicy,
         correlation: Option<crate::placement::PlacementCorrelationId>,
         snapshots: &[Option<SemanticBinding>],
-    ) -> Result<Self> {
-        if inputs.len() != plan.inputs.len() || snapshots.len() != plan.operations.len() {
-            return Err(anyhow!("fusion operand count does not match the plan"));
-        }
-        if !plan
-            .operations
-            .iter()
-            .zip(snapshots)
-            .all(|(operation, snapshot)| semantic_bindings::matches(operation, *snapshot))
-        {
-            return Err(anyhow!(
-                "captured fusion binding does not match the operation"
-            ));
-        }
-        let source_operations = source_operations(plan, snapshots)?;
-        let source_constants = source_constants(plan)?;
-        let source_slot_constants = source_slot_constants(plan)?;
-        let source_inputs: Vec<_> = inputs.iter().map(|value| value_fact(value)).collect();
-        let effective_input = |mut fact: ValueFact| {
-            if precision_policy.permits_double_to_single()
-                && provider_precision == ProviderPrecision::F32
-            {
-                if let runmat_types::ValueKindFact::Numeric(ref mut numeric) = fact.kind {
-                    if numeric.class == NumericClass::Double {
-                        numeric.class = NumericClass::Single;
-                    }
-                }
-            }
-            fact
-        };
-        let mut facts: HashMap<_, _> = plan
-            .inputs
-            .iter()
-            .copied()
-            .zip(source_inputs.iter().cloned().map(effective_input))
-            .collect();
-        for (id, value) in &plan.const_values {
-            facts.insert(*id, effective_input(value_fact(value)));
-        }
-        let mut binding_contracts = Vec::new();
-        let mut declarations = HashMap::new();
-        let mut evidence = BTreeMap::new();
-        let mut admission_work = BTreeMap::new();
-        for (operation, snapshot) in plan.operations.iter().zip(snapshots) {
-            let (input_ids, output) = match operation {
-                FusionOp::Primitive { inputs, output, .. }
-                | FusionOp::Builtin { inputs, output, .. } => (inputs, output),
-            };
-            let arguments = input_ids
-                .iter()
-                .map(|id| {
-                    facts
-                        .get(id)
-                        .cloned()
-                        .ok_or_else(|| anyhow!("missing fusion operand fact {id}"))
-                })
-                .collect::<Result<Vec<_>>>()?;
-            let fact = if let Some(snapshot) = snapshot {
-                let entry = snapshot.entry;
-                let declaration = snapshot.declaration;
-                binding_contracts.push(*snapshot);
-                let inference = infer_catalog_call(
-                    entry,
-                    &CallRequest {
-                        arguments: arguments.clone(),
-                        // Do not manufacture literal proofs from computed
-                        // intermediates. Unknown controls stay unknown.
-                        literals: LiteralContext::default(),
-                        outputs: OutputSelection::default(),
-                    },
-                );
-                if !inference.diagnostics.is_empty() || inference.outputs.len() != 1 {
-                    return Err(anyhow!("fusion call does not have one admitted output"));
-                }
-                let mut fact = inference.outputs.into_iter().next().unwrap();
-                if let Some(output) = output {
-                    if let Some(admit) = declaration.semantics.and_then(|semantics| semantics.admit)
-                    {
-                        let values: Vec<_> = input_ids
-                            .iter()
-                            .map(|id| {
-                                plan.inputs
-                                    .iter()
-                                    .position(|input| input == id)
-                                    .and_then(|index| inputs.get(index).copied())
-                                    .or_else(|| plan.const_values.get(id))
-                            })
-                            .collect();
-                        let mut observed = super::admission::AdmissionObservation::new(correlation);
-                        let admitted = admit(FusionAdmissionContext {
-                            operands: &values,
-                            facts: &arguments,
-                            work: &mut observed.work,
-                        })
-                        .await
-                        .map_err(FusionAdmissionFailure)?;
-                        admission_work.insert(*output, observed.completed());
-                        let admitted = admitted.ok_or_else(|| {
-                            anyhow!("fusion operation requires unavailable domain evidence")
-                        })?;
-                        fact.kind = admitted.output_kind;
-                        evidence.insert(*output, admitted.numerical_domain);
-                    }
-                    declarations.insert(*output, *snapshot);
-                }
-                fact
-            } else {
-                let FusionOp::Primitive { op, .. } = operation else {
-                    return Err(anyhow!("fusion builtin has no selected binding"));
-                };
-                primitive_fact(*op, &arguments)?
-            };
-            if let Some(output) = output {
-                facts.insert(*output, fact);
-            }
-        }
-        Ok(Self {
-            source_operations,
-            source_input_ids: plan.inputs.clone(),
-            source_constants,
-            source_slot_constants,
-            source_root: plan.output,
-            facts,
-            binding_contracts,
-            source_inputs,
-            precision_policy,
+    ) -> std::result::Result<Self, FusionResolveFailure> {
+        let (mut program, invocation_leaves) = source_assembly(
+            plan,
+            inputs,
             provider_precision,
-            declarations,
-            evidence,
-            admission_work,
-        })
+            precision_policy,
+            correlation,
+            snapshots,
+        )?;
+        let mut real_ranges = None;
+        let mut real_range_index_reported = false;
+        for (operation, snapshot) in plan.operations.iter().zip(snapshots) {
+            let inferred = inferred_operation(&program, operation, *snapshot, &invocation_leaves)?;
+            let values = selected_values(&invocation_leaves, inferred.input_ids);
+            let admitted = if let (Some(output), Some(snapshot)) = (inferred.output, snapshot) {
+                if let Some(admit) = snapshot
+                    .declaration
+                    .semantics
+                    .and_then(|semantics| semantics.admit)
+                {
+                    let mut observed = super::admission::AdmissionObservation::new(correlation);
+                    let mut operand_evidence = inferred
+                        .input_ids
+                        .iter()
+                        .map(|id| {
+                            let numerical_domain = program.evidence.get(id).copied();
+                            let sign = program.sign.get(id).copied();
+                            if numerical_domain.is_some() || sign.is_some() {
+                                Some(
+                            runmat_runtime::builtins::common::spec::FusionOperandDomainEvidence {
+                                value_id: *id,
+                                numerical_domain: numerical_domain.unwrap_or(runmat_accelerate_api::NumericalDomainEvidence::Unknown),
+                                sign,
+                            }
+                                )
+                            } else { None }
+                        })
+                        .collect::<Vec<_>>();
+                    if let Some((predicate, internal_error)) = snapshot
+                        .declaration
+                        .semantics
+                        .and_then(|semantics| semantics.required_real_unary)
+                    {
+                        if real_ranges.is_none() {
+                            real_ranges = Some(super::real_domain::RealRangeResolver::new(
+                                plan,
+                                &invocation_leaves,
+                            ));
+                        }
+                        let resolver = real_ranges.as_mut().expect("just initialized");
+                        if !real_range_index_reported {
+                            resolver.report_index(
+                                &mut observed.work,
+                                snapshot.declaration.binding,
+                                provider_precision,
+                            );
+                            real_range_index_reported = true;
+                        }
+                        if !resolver.is_valid() {
+                            return Err(anyhow!(
+                                "fusion graph has invalid or duplicate value producers"
+                            )
+                            .into());
+                        }
+                        let [operand_id] = inferred.input_ids else {
+                            return Err(
+                                anyhow!("real unary fusion declaration has invalid arity").into()
+                            );
+                        };
+                        let prior_sign = operand_evidence[0].and_then(|evidence| evidence.sign);
+                        operand_evidence[0] = super::real_domain::prove(
+                            super::real_domain::RealDomainProofContext {
+                                plan,
+                                snapshots,
+                                facts: &program.facts,
+                                binding: snapshot.declaration.binding,
+                                internal_error,
+                                provider_precision,
+                            },
+                            resolver,
+                            *operand_id,
+                            predicate,
+                            &mut observed.work,
+                        )
+                        .await?
+                        .map(|mut evidence| {
+                            evidence.sign = prior_sign;
+                            evidence
+                        });
+                    }
+                    let context = FusionAdmissionContext::new(
+                        inferred.input_ids,
+                        &values,
+                        &inferred.arguments,
+                        &operand_evidence,
+                        &mut observed.work,
+                    )
+                    .ok_or_else(|| anyhow!("fusion operand evidence identity mismatch"))?
+                    .with_output_fact(&inferred.fact);
+                    let result = admit(context)
+                        .await
+                        .map_err(FusionResolveFailure::Admission)?;
+                    let work = observed.completed();
+                    let evidence = result.ok_or_else(|| anyhow!(
+                        "fusion operation requires unavailable domain evidence: binding={:?}, output={output:?}, inputs={:?}, represented_operands={:?}",
+                        snapshot.declaration.binding, inferred.input_ids,
+                        values.iter().map(Option::is_some).collect::<Vec<_>>()
+                    ))?;
+                    Some((evidence, work))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            let output = inferred.output;
+            let reduction_refinement = if output.is_some()
+                && snapshot.is_some_and(|binding| binding.declaration.reduction.is_some())
+                && inferred
+                    .input_ids
+                    .first()
+                    .is_some_and(|id| program.sign.contains_key(id))
+            {
+                let mut observed = super::admission::AdmissionObservation::new(correlation);
+                let result = sign_reduction::resolved_sign(
+                    &program,
+                    &inferred,
+                    &values,
+                    *snapshot,
+                    &mut observed.work,
+                )
+                .await?;
+                let work = observed.completed();
+                result.map(|result| (result, work))
+            } else {
+                None
+            };
+            let add_refinement = if output.is_some() && sign::applies(operation, *snapshot) {
+                let mut observed = super::admission::AdmissionObservation::new(correlation);
+                let result = sign::add_sign(
+                    &program,
+                    operation,
+                    &inferred,
+                    &values,
+                    *snapshot,
+                    &mut observed.work,
+                )?;
+                let work = observed.completed();
+                result.map(|result| (result, work))
+            } else {
+                None
+            };
+            record_operation(&mut program, inferred, *snapshot, &values, admitted)?;
+            if let Some(output) = output {
+                if let Some(((sign, kind, storage), work)) = reduction_refinement {
+                    assembly::record_sign_refinement(
+                        &mut program,
+                        output,
+                        sign,
+                        kind,
+                        Some(storage),
+                        work,
+                    )?;
+                }
+                if let Some(((sign, kind), work)) = add_refinement {
+                    assembly::record_sign_refinement(&mut program, output, sign, kind, None, work)?;
+                }
+            }
+        }
+        invocation_leaves.require_live_resident_inputs()?;
+        Ok(program)
     }
 
     pub fn fact(&self, id: ValueId) -> Result<&ValueFact> {
         self.facts
             .get(&id)
             .ok_or_else(|| anyhow!("missing fusion value fact {id}"))
+    }
+
+    pub(crate) fn is_invocation_input(&self, id: ValueId) -> bool {
+        self.source_input_set.contains(&id)
     }
 
     pub fn uses_implicit_downcast(&self) -> bool {
@@ -340,6 +516,32 @@ impl ResolvedProgram {
         self.declarations
             .get(&id)
             .map(|snapshot| snapshot.declaration)
+    }
+    pub fn power_arithmetic(&self, id: ValueId) -> Option<FusionPowerArithmeticReceipt> {
+        match self.arithmetic.get(&id).copied()? {
+            FusionArithmeticEvidence::RealPower(receipt) => Some(receipt),
+        }
+    }
+    pub fn require_ordinary_arithmetic(
+        &self,
+        id: ValueId,
+        precision: ProviderPrecision,
+    ) -> Result<()> {
+        match self.arithmetic.get(&id) {
+            Some(FusionArithmeticEvidence::RealPower(receipt))
+                if matches!(
+                    receipt.mode,
+                    runmat_accelerate_api::RealPowerArithmeticMode::MixedDoubleThenSingle { .. }
+                ) || (precision == ProviderPrecision::F32
+                    && receipt.mode
+                        == runmat_accelerate_api::RealPowerArithmeticMode::NativeDouble) =>
+            {
+                Err(anyhow!(
+                    "ordinary fusion cannot execute selected POWER arithmetic"
+                ))
+            }
+            _ => Ok(()),
+        }
     }
     pub fn catalog_entry(
         &self,
@@ -385,15 +587,33 @@ impl ResolvedProgram {
             .map(|(id, declaration)| {
                 (
                     *id,
-                    declaration
-                        .declaration
-                        .semantics
-                        .map(|semantics| (semantics.revision, semantics.helpers)),
+                    (
+                        declaration.declaration.semantics.map(|semantics| {
+                            (
+                                semantics.revision,
+                                semantics.helpers,
+                                semantics.required_arithmetic,
+                            )
+                        }),
+                        declaration
+                            .declaration
+                            .reduction
+                            .map(|reduction| reduction.revision),
+                    ),
                 )
             })
             .collect();
+        #[derive(serde::Serialize)]
+        struct AdmissionIdentity<'a> {
+            domains: &'a BTreeMap<ValueId, runmat_accelerate_api::NumericalDomainEvidence>,
+            signs:
+                &'a BTreeMap<ValueId, runmat_runtime::builtins::common::spec::FusionSignEvidence>,
+            arithmetic: &'a BTreeMap<ValueId, FusionArithmeticEvidence>,
+            work:
+                &'a BTreeMap<ValueId, runmat_runtime::builtins::common::spec::FusionAdmissionWork>,
+        }
         Ok(Digest::sha256(serde_json::to_vec(&(
-            "typed-fusion-v2",
+            "typed-fusion-v5",
             runmat_builtins::BUILTIN_CATALOG_SCHEMA_VERSION,
             &self.source_operations,
             &self.source_input_ids,
@@ -406,8 +626,12 @@ impl ResolvedProgram {
             self.precision_policy,
             self.provider_precision,
             revisions,
-            &self.evidence,
-            &self.admission_work,
+            AdmissionIdentity {
+                domains: &self.evidence,
+                signs: &self.sign,
+                arithmetic: &self.arithmetic,
+                work: &self.admission_work,
+            },
         ))?))
     }
 
@@ -420,6 +644,37 @@ impl ResolvedProgram {
             return Err(anyhow!(
                 "fusion source topology differs from admitted program"
             ));
+        }
+        for (operation, snapshot) in plan.operations.iter().zip(&snapshots) {
+            let output = match operation {
+                FusionOp::Primitive { output, .. } | FusionOp::Builtin { output, .. } => output,
+            };
+            if let Some(output) = output {
+                if let Some(admitted) = self.declarations.get(output) {
+                    let selected = snapshot
+                        .ok_or_else(|| anyhow!("fusion selected declaration disappeared"))?;
+                    if admitted.declaration.binding != selected.declaration.binding
+                        || admitted
+                            .declaration
+                            .semantics
+                            .map(|semantic| semantic.revision)
+                            != selected
+                                .declaration
+                                .semantics
+                                .map(|semantic| semantic.revision)
+                        || admitted
+                            .declaration
+                            .reduction
+                            .map(|reduction| reduction.revision)
+                            != selected
+                                .declaration
+                                .reduction
+                                .map(|reduction| reduction.revision)
+                    {
+                        return Err(anyhow!("fusion selected declaration revision changed"));
+                    }
+                }
+            }
         }
         if source_constants(plan)? != self.source_constants {
             return Err(anyhow!(

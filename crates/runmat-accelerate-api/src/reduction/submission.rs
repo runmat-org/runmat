@@ -7,15 +7,15 @@ use anyhow::{ensure, Result};
 use runmat_execution::Digest;
 use serde::Serialize;
 
-/// The existing provider tuning owner chooses this once. The packet does not
-/// choose a strategy or alter chunk sizes; costing and execution share it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// The provider enumerates executable strategies; canonical placement chooses
+/// one. Costing and execution retain that same immutable selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub enum ReductionStrategy {
     SinglePass,
     TwoPass,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct SelectedReductionWork {
     pub output_requested_bytes: u64,
     pub partial_requested_bytes: u64,
@@ -33,6 +33,16 @@ pub struct ReductionSelection<'a> {
     identity: Digest,
     work: SelectedReductionWork,
 }
+impl std::fmt::Debug for ReductionSelection<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReductionSelection")
+            .field("recipe", &self.recipe.identity())
+            .field("strategy", &self.strategy)
+            .field("identity", &self.identity)
+            .field("work", &self.work)
+            .finish()
+    }
+}
 impl<'a> ReductionSelection<'a> {
     pub fn new(recipe: &'a ProviderReductionRecipe, strategy: ReductionStrategy) -> Result<Self> {
         let w = &recipe.descriptor().work;
@@ -40,6 +50,24 @@ impl<'a> ReductionSelection<'a> {
             ReductionStrategy::SinglePass => (0, w.single_dispatches),
             ReductionStrategy::TwoPass => (w.partial_requested_bytes, w.two_pass_dispatches),
         };
+        if strategy == ReductionStrategy::TwoPass {
+            ensure!(
+                partial_requested_bytes <= recipe.descriptor().config.max_storage_binding_bytes,
+                "selected reduction partial storage binding limit"
+            );
+            ensure!(
+                recipe
+                    .descriptor()
+                    .geometry
+                    .pass1
+                    .workgroups
+                    .iter()
+                    .all(|&dimension| {
+                        dimension <= recipe.descriptor().config.max_dispatch_dimension
+                    }),
+                "selected reduction pass1 dispatch dimension limit"
+            );
+        }
         let work = SelectedReductionWork {
             output_requested_bytes: w.output_requested_bytes,
             partial_requested_bytes,

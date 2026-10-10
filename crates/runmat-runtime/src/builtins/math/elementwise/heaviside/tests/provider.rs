@@ -50,7 +50,7 @@ impl AccelProvider for FallbackProvider {
     fn upload_numeric_raw(
         &self,
         host: &HostNumericTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.transfers.fetch_add(1, Ordering::SeqCst);
         self.inner.upload_numeric_raw(host)
     }

@@ -115,6 +115,18 @@ impl From<anyhow::Error> for AttemptError {
         }
     }
 }
+impl From<runmat_accelerate_api::ProviderExecutionError> for AttemptError {
+    fn from(error: runmat_accelerate_api::ProviderExecutionError) -> Self {
+        if error.is_unsupported() {
+            Self::Unsupported
+        } else {
+            let contextual = pol2cart_error(&ERROR_INTERNAL, error.to_string());
+            Self::Failure(Box::new(
+                crate::runtime_error::with_provider_execution_source(contextual, error),
+            ))
+        }
+    }
+}
 impl From<RuntimeError> for AttemptError {
     fn from(error: RuntimeError) -> Self {
         Self::Failure(Box::new(error))

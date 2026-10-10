@@ -22,7 +22,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
             "Automatic placement of host floating arrays is available for values proven to remain in the real domain. Arrays outside that domain or containing NaN retain the host route. Automatic residency does not impose gpuArray-specific compatibility restrictions: an automatically resident input that needs complex output returns the host complex result. The owner-preserving GPU behavior below applies to explicitly resident input.",
             "A provider can execute real floating input directly when domain inspection proves that every value is at least one. Provider output is validated before it becomes the result.",
             "Input that requires a complex result gathers through its owning provider, computes the principal result on the host, and restores the result to that same owner. A provider operation falls back only when it reports that the operation is unsupported; other provider failures remain errors.",
-            "The value-dependent real-to-complex boundary prevents `acosh` from participating in ordinary real elementwise fusion. This avoids replacing required complex results with device NaNs for values below one.",
+            "Selected elementwise fusion is limited to requests with exact real-domain evidence before shader execution. Unproved input remains on the ordinary runtime path, preserving complex promotion below one.",
         ],
     },
 ];
@@ -131,7 +131,7 @@ const FAQS: &[BuiltinDocumentationFaq] = &[
     },
     BuiltinDocumentationFaq {
         question: "Does acosh participate in elementwise fusion?",
-        answer: "No. Real input can require complex promotion based on its values, so an ordinary real fused kernel cannot represent the complete contract safely.",
+        answer: "Only when request-local evidence proves every represented input is at least one. Otherwise the ordinary runtime path retains complex promotion and provider fallback behavior.",
     },
     BuiltinDocumentationFaq {
         question: "Does domain inspection use a tolerance?",

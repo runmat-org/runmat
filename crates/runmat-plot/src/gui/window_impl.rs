@@ -19,7 +19,67 @@ use std::sync::Arc;
 #[cfg(feature = "gui")]
 use tracing::{debug, warn};
 #[cfg(feature = "gui")]
-use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop, window::WindowBuilder};
+use winit::{
+    application::ApplicationHandler,
+    dpi::PhysicalSize,
+    event::{Event, WindowEvent},
+    event_loop::{ActiveEventLoop, EventLoop},
+    platform::pump_events::{EventLoopExtPumpEvents, PumpStatus},
+    window::{Window, WindowAttributes, WindowId},
+};
+#[cfg(feature = "gui")]
+struct WindowBootstrap {
+    attributes: Option<WindowAttributes>,
+    window: Option<Arc<Window>>,
+    error: Option<winit::error::OsError>,
+}
+#[cfg(feature = "gui")]
+impl ApplicationHandler for WindowBootstrap {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(attributes) = self.attributes.take() {
+            match event_loop.create_window(attributes) {
+                Ok(window) => self.window = Some(Arc::new(window)),
+                Err(error) => self.error = Some(error),
+            }
+        }
+    }
+
+    fn window_event(&mut self, _event_loop: &ActiveEventLoop, _id: WindowId, _event: WindowEvent) {}
+}
+#[cfg(feature = "gui")]
+struct WindowRunner<'a, 'window> {
+    plot: &'a mut PlotWindow<'window>,
+    last_render_time: Instant,
+    close_signal: Option<Arc<AtomicBool>>,
+    modifiers: winit::keyboard::ModifiersState,
+}
+#[cfg(feature = "gui")]
+impl ApplicationHandler for WindowRunner<'_, '_> {
+    fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        self.plot.handle_event(
+            Event::WindowEvent {
+                window_id: id,
+                event,
+            },
+            event_loop,
+            &mut self.last_render_time,
+            &self.close_signal,
+            &mut self.modifiers,
+        );
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.plot.handle_event(
+            Event::AboutToWait,
+            event_loop,
+            &mut self.last_render_time,
+            &self.close_signal,
+            &mut self.modifiers,
+        );
+    }
+}
 #[cfg(feature = "gui")]
 #[derive(Debug, thiserror::Error)]
 enum WindowRenderError {
@@ -63,15 +123,25 @@ impl<'window> PlotWindow<'window> {
     /// Create a new interactive plot window
     pub async fn new(config: WindowConfig) -> Result<Self, Box<dyn std::error::Error>> {
         // Create a new EventLoop (assumes this is the only EventLoop creation)
-        let event_loop =
+        let mut event_loop =
             EventLoop::new().map_err(|e| format!("Failed to create EventLoop: {e}"))?;
-        let window = WindowBuilder::new()
+        let attributes = Window::default_attributes()
             .with_title(&config.title)
             .with_inner_size(PhysicalSize::new(config.width, config.height))
             .with_resizable(config.resizable)
-            .with_maximized(config.maximized)
-            .build(&event_loop)?;
-        let window = Arc::new(window);
+            .with_maximized(config.maximized);
+        let mut bootstrap = WindowBootstrap {
+            attributes: Some(attributes),
+            window: None,
+            error: None,
+        };
+        event_loop.pump_app_events(Some(std::time::Duration::ZERO), &mut bootstrap);
+        if let Some(error) = bootstrap.error {
+            return Err(error.into());
+        }
+        let window = bootstrap
+            .window
+            .ok_or("Winit did not resume the plot window during initialization")?;
 
         // Reuse shared context when available; fall back to creating a dedicated device otherwise.
         let shared_ctx = crate::context::shared_wgpu_context();
@@ -181,6 +251,7 @@ impl<'window> PlotWindow<'window> {
             &window,
             Some(window.scale_factor() as f32),
             None,
+            None,
         );
 
         let egui_renderer = access.with_shared(|emission| {
@@ -211,6 +282,7 @@ impl<'window> PlotWindow<'window> {
             mouse_left_down: false,
             active_drag_axes: None,
             close_signal: None,
+            presentation_count: Default::default(),
         })
     }
 
@@ -294,27 +366,62 @@ impl<'window> PlotWindow<'window> {
         self.close_signal = Some(signal);
     }
 
+    /// A read-only witness that can be observed while `run` owns this window.
+    pub fn presentation_count(&self) -> super::window::PresentationCount {
+        self.presentation_count.clone()
+    }
+
     /// Run the interactive plot window event loop
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let event_loop = self
+        let mut event_loop = self
             .event_loop
             .take()
             .ok_or("Event loop already consumed")?;
-        let window = self.window.clone();
-        let mut last_render_time = Instant::now();
-        let close_signal = self.close_signal.clone();
+        let mut runner = WindowRunner {
+            close_signal: self.close_signal.clone(),
+            last_render_time: Instant::now(),
+            modifiers: winit::keyboard::ModifiersState::empty(),
+            plot: self,
+        };
+        // Initialization already entered this event loop to create the window.
+        // Continue that same application with the pumping API: switching to
+        // run_app would start it again while macOS still considers it running.
+        // Handle redraws synchronously in the callbacks and bound idle waits
+        // so an external close signal does not depend on another window event.
+        loop {
+            match event_loop
+                .pump_app_events(Some(std::time::Duration::from_millis(16)), &mut runner)
+            {
+                PumpStatus::Continue => {}
+                PumpStatus::Exit(0) => break,
+                PumpStatus::Exit(code) => {
+                    return Err(std::io::Error::other(format!(
+                        "Plot event loop exited with status {code}"
+                    ))
+                    .into());
+                }
+            }
+        }
+        Ok(())
+    }
 
-        event_loop.run(move |event, target| {
+    fn handle_event(
+        &mut self,
+        event: Event<()>,
+        target: &ActiveEventLoop,
+        last_render_time: &mut Instant,
+        close_signal: &Option<Arc<AtomicBool>>,
+        modifiers: &mut winit::keyboard::ModifiersState,
+    ) {
+        let window = self.window.clone();
+        {
             if let Some(signal) = close_signal.as_ref() {
                 if signal.load(Ordering::Relaxed) {
                     target.exit();
                     return;
                 }
             }
-            target.set_control_flow(winit::event_loop::ControlFlow::Poll);
-
-            // Track current modifiers for Command/Ctrl shortcuts
-            static mut MODIFIERS: Option<winit::keyboard::ModifiersState> = None;
+            target.set_control_flow(winit::event_loop::ControlFlow::Wait);
 
             // Handle egui events and record consumption
             let mut repaint = false;
@@ -332,9 +439,7 @@ impl<'window> PlotWindow<'window> {
                 winit::event::Event::WindowEvent {
                     window_id,
                     event: winit::event::WindowEvent::ModifiersChanged(mods),
-                } if window_id == window.id() => unsafe {
-                    MODIFIERS = Some(mods.state());
-                },
+                } if window_id == window.id() => *modifiers = mods.state(),
                 winit::event::Event::WindowEvent {
                     window_id,
                     event: winit::event::WindowEvent::CloseRequested,
@@ -357,8 +462,8 @@ impl<'window> PlotWindow<'window> {
                     event: winit::event::WindowEvent::RedrawRequested,
                 } if window_id == window.id() => {
                     let now = Instant::now();
-                    let dt = now - last_render_time;
-                    last_render_time = now;
+                    let dt = now - *last_render_time;
+                    *last_render_time = now;
 
                     match self.render(dt) {
                         Ok(_) => {}
@@ -395,10 +500,7 @@ impl<'window> PlotWindow<'window> {
                         if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyQ) =
                             key_event.physical_key
                         {
-                            let mods = unsafe {
-                                MODIFIERS.unwrap_or_else(winit::keyboard::ModifiersState::empty)
-                            };
-                            if mods.super_key() || mods.control_key() {
+                            if modifiers.super_key() || modifiers.control_key() {
                                 target.exit();
                             }
                         }
@@ -516,9 +618,7 @@ impl<'window> PlotWindow<'window> {
 
                 _ => {}
             }
-        })?;
-
-        Ok(())
+        }
     }
 
     /// Handle window resize
@@ -799,7 +899,7 @@ impl<'window> PlotWindow<'window> {
             );
         }
 
-        self.egui_renderer.update_buffers(
+        let egui_prepare_commands = self.egui_renderer.update_buffers(
             emission.device(),
             emission.queue(),
             &mut encoder,
@@ -1012,20 +1112,22 @@ impl<'window> PlotWindow<'window> {
 
         // Then render the UI overlay on top (legend, labels, etc.)
         {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Egui Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                occlusion_query_set: None,
-                timestamp_writes: None,
-            });
+            let mut render_pass = encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Egui Render Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    occlusion_query_set: None,
+                    timestamp_writes: None,
+                })
+                .forget_lifetime();
             self.egui_renderer.render(
                 &mut render_pass,
                 &tris,
@@ -1041,8 +1143,13 @@ impl<'window> PlotWindow<'window> {
         }
 
         // Submit commands
-        emission.queue().submit(std::iter::once(encoder.finish()));
+        emission.queue().submit(
+            egui_prepare_commands
+                .into_iter()
+                .chain(std::iter::once(encoder.finish())),
+        );
         output.present();
+        self.presentation_count.record();
 
         Ok(())
     }

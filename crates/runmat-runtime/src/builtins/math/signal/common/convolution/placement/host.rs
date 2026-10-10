@@ -169,6 +169,8 @@ fn select_host_admission(
             ))
             .expect("typed host convolution route serializes"),
         ),
+        provider_provenance: None,
+        graph_output_authority: None,
         revision,
     };
     let device_id = provider.device_id();

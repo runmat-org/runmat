@@ -128,11 +128,15 @@ impl AccelProvider for RacingReluProvider {
     fn upload_numeric_raw(
         &self,
         host: &HostNumericTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let data = match host.data {
             HostNumericDataView::F32(values) => HostNumericDataOwned::F32(values.to_vec()),
             HostNumericDataView::F64(values) => HostNumericDataOwned::F64(values.to_vec()),
-            _ => anyhow::bail!("the selected ReLU fixture requires floating input"),
+            _ => {
+                return Err(
+                    anyhow::anyhow!("the selected ReLU fixture requires floating input").into(),
+                )
+            }
         };
         Ok(self
             .owner

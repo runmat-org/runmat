@@ -138,7 +138,7 @@ impl WgpuDeviceAccess {
         })
     }
 
-    /// Capture validation/OOM (and browser Internal) errors for this exclusive
+    /// Capture validation, out-of-memory and internal errors for this exclusive
     /// synchronous transaction. Do fallible semantic preflight before entering;
     /// do not publish created resources into caches/registries in the closure.
     /// They become available only after the detached receipt resolves. Native

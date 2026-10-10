@@ -3,6 +3,8 @@ mod artifact;
 mod multi_store;
 #[cfg(feature = "native-accel")]
 mod fusion_stage;
+#[cfg(feature = "native-accel")]
+pub(crate) mod fusion_private_temp;
 pub mod compile;
 pub mod instr;
 mod parallel;
@@ -28,6 +30,8 @@ pub use compile::{
     compile_with_analysis,
 };
 #[cfg(feature = "native-accel")]
+pub(crate) use fusion_stage::FusionStageSelectionOrigin;
+#[cfg(feature = "native-accel")]
 pub use fusion_stage::{CompiledFusionStageStatement, FusionStageProjection};
 pub use instr::{
     AggregateElementSpec, BytecodeCodistributedOverload, BytecodeCollectiveOp,
@@ -36,7 +40,9 @@ pub use instr::{
 };
 #[cfg(feature = "native-accel")]
 pub use multi_store::{
-    ProspectiveMultiStoreRegion, ProspectiveSemanticMultiStoreRegion, ProspectiveStore,
+    ImageCheckpoint, ImageLiveOut, ImageLiveOutSource, ImageNormalizePublicationJoin,
+    ImageRegionStore, ImageStoreDestination, ImageStoreOrdinal, ProspectiveMultiStoreRegion,
+    ProspectiveSemanticMultiStoreRegion, ProspectiveStore,
 };
 pub use parallel::{BytecodeParallelVariable, BytecodeParforRegion, BytecodeSpmdRegion};
 pub use program::{

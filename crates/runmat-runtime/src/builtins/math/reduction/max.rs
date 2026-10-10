@@ -25,6 +25,8 @@ pub(crate) use specs::{
 };
 #[path = "max/fusion_contract.rs"]
 mod fusion_contract;
+#[path = "max/fusion_pairwise.rs"]
+mod fusion_pairwise;
 
 mod output;
 pub use output::MaxEvaluation;
@@ -33,14 +35,19 @@ use output::{builtin_demand, evaluation_to_value, reject_pairwise_multiple_outpu
 #[runtime_builtin(
     name = "max",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::reduction::max"
 )]
-pub(super) async fn max_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn max_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     if let Some(eval) = crate::builtins::table::categorical_max_evaluate(&value, &rest).await {
         return crate::builtins::table::categorical_extrema_to_value(eval?);
     }
     reject_pairwise_multiple_outputs(&rest)?;
-    let eval = evaluate_for_demand(value, &rest, builtin_demand()).await?;
+    let eval = evaluate_for_demand(runtime.as_ref(), value, &rest, builtin_demand()).await?;
     evaluation_to_value(eval)
 }
 
@@ -53,6 +60,7 @@ use nanmax::nanmax_builtin;
 /// Evaluate the builtin once and expose both outputs (value + indices).
 pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MaxEvaluation> {
     let evaluated = evaluate_for_demand(
+        None,
         value,
         rest,
         super::extrema_provider::ExtremaDemand::ValuesAndIndices,
@@ -63,6 +71,7 @@ pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MaxEvaluati
 }
 
 async fn evaluate_for_demand(
+    runtime: Option<&crate::context::RuntimeContext>,
     value: Value,
     rest: &[Value],
     demand: super::extrema_provider::ExtremaDemand,
@@ -88,7 +97,7 @@ async fn evaluate_for_demand(
     }
     match parsed {
         ParsedCall::Elementwise(args) => elementwise_max(value, args, demand).await,
-        ParsedCall::Reduction(args) => reduction_max(value, args, demand).await,
+        ParsedCall::Reduction(args) => reduction_max(runtime, value, args, demand).await,
     }
 }
 mod options;

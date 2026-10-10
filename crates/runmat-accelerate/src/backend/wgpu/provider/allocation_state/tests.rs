@@ -1,3 +1,4 @@
+use super::super::owner_shared::OwnerShared;
 use super::*;
 use runmat_accelerate_api::allocation::{
     AllocationAcquisitionError, AllocationIdentity, AllocationOwner, GpuPhysicalDescriptor,
@@ -9,22 +10,78 @@ fn empty_state() -> AllocationState {
         1,
         1024,
         Arc::new(BindGroupCache::new()),
-        Weak::new(),
+        OwnerWeak::new(),
     )
 }
 
+#[cfg(all(not(target_arch = "wasm32"), target_pointer_width = "64"))]
 #[test]
+#[ignore = "requires a WGPU adapter and RUNMAT_WGPU_FORCE_PRECISION=f32"]
+fn overflowing_pool_acquisition_rejects_before_buffer_or_pool_state_changes() {
+    use crate::backend::wgpu::provider::{WgpuProvider, WgpuProviderOptions};
+    use runmat_accelerate_api::{GpuTensorStorage, HostNumericDataView, HostNumericTensorView};
+
+    let provider = WgpuProvider::new(WgpuProviderOptions::default())
+        .expect("qualification requires a real WGPU adapter");
+    assert_eq!(
+        provider.precision,
+        crate::backend::wgpu::types::NumericPrecision::F32
+    );
+    let input = provider
+        .upload_numeric_exec(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1.0, 2.0]),
+            shape: &[1, 2],
+            storage: GpuTensorStorage::Real,
+        })
+        .expect("borrowed source witness");
+    let before_records = provider.allocations.record_count().unwrap();
+    let before_pool_bytes = provider.allocations.pooled_bytes(provider.element_size);
+    let weak = input.downgrade();
+    let rejected = provider
+        .with_emission(|emission, _| {
+            provider.allocations.acquire(
+                emission,
+                BufferUsageClass::FusionOut,
+                usize::MAX,
+                8,
+                "overflowing-pool-witness",
+            )
+        })
+        .expect("shared emission access remains valid");
+    assert!(rejected.is_err());
+    let rejected_public_owner = provider
+        .with_emission(|emission, _| {
+            provider.create_storage_buffer_for_usage(
+                emission,
+                BufferUsageClass::FusionOut,
+                usize::MAX,
+                "overflowing-provider-witness",
+            )
+        })
+        .expect("shared emission access remains valid");
+    assert!(rejected_public_owner.is_err());
+    assert_eq!(provider.allocations.record_count().unwrap(), before_records);
+    assert_eq!(
+        provider.allocations.pooled_bytes(provider.element_size),
+        before_pool_bytes
+    );
+    input.allocation_lease().validate_live().unwrap();
+    assert!(weak.acquire().is_ok());
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn allocation_state_does_not_strongly_retain_handle_provenance_owner() {
     let cache = Arc::new(BindGroupCache::new());
-    let resources = Arc::new(KernelResourceRegistry::new());
-    let state = Arc::new(AllocationState::new(
+    let resources = OwnerShared::new(KernelResourceRegistry::new());
+    let state = OwnerShared::new(AllocationState::new(
         runmat_accelerate_api::next_device_id(),
         1,
         1024,
         cache.clone(),
-        Arc::downgrade(&resources),
+        OwnerShared::downgrade(&resources),
     ));
-    assert_eq!(Arc::strong_count(&resources), 1);
+    assert_eq!(OwnerShared::strong_count(&resources), 1);
     assert_eq!(Arc::strong_count(&cache), 2);
     drop(resources);
     assert!(state.kernel_resources.upgrade().is_none());
@@ -82,6 +139,7 @@ fn nonowning_identifiers_cannot_acquire_or_validate_unpublished_records() {
                 retained_bytes: 11,
                 physical,
                 lease: None,
+                resource_ticket: None,
                 logical_producer: false,
             },
         );

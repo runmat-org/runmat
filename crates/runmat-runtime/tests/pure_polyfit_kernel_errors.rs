@@ -34,7 +34,8 @@ impl AccelProvider for SolverProvider {
     fn upload_numeric_raw(
         &self,
         view: &HostNumericTensorView,
-    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<runmat_accelerate_api::GpuTensorHandle>
+    {
         self.inner.upload_numeric_raw(view)
     }
     fn download<'a>(

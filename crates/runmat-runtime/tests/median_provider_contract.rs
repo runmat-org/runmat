@@ -99,17 +99,17 @@ impl Provider {
         }
         let len = shape.iter().product();
         let output = match self.mode {
-            Mode::Complex => self.inner.upload_numeric_raw(&HostNumericTensorView {
+            Mode::Complex => self.inner.upload_numeric_host(&HostNumericTensorView {
                 data: HostNumericDataView::F64(&vec![0.; len * 2]),
                 shape: &shape,
                 storage: GpuTensorStorage::ComplexInterleaved,
             })?,
-            Mode::Integer => self.inner.upload_numeric_raw(&HostNumericTensorView {
+            Mode::Integer => self.inner.upload_numeric_host(&HostNumericTensorView {
                 data: HostNumericDataView::I32(&vec![0; len]),
                 shape: &shape,
                 storage: GpuTensorStorage::Real,
             })?,
-            Mode::Class => self.inner.upload_numeric_raw(&HostNumericTensorView {
+            Mode::Class => self.inner.upload_numeric_host(&HostNumericTensorView {
                 data: HostNumericDataView::F32(&vec![0.; len]),
                 shape: &shape,
                 storage: GpuTensorStorage::Real,
@@ -153,18 +153,24 @@ impl AccelProvider for Provider {
     fn upload_numeric_raw(
         &self,
         host: &HostNumericTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::SeqCst);
         if matches!(self.mode, Mode::RestoreUnsupported | Mode::RestoreFailure) {
             assert_eq!(host.shape, &[1, 3]);
             assert!(
                 matches!(host.data, HostNumericDataView::F64(values) if values.len() == 3 && values.iter().all(|value| value.is_nan()))
             );
-            return Err(if matches!(self.mode, Mode::RestoreUnsupported) {
-                unsupported_provider_operation("fixture cannot restore Double empty median")
+            return if matches!(self.mode, Mode::RestoreUnsupported) {
+                Err(
+                    unsupported_provider_operation("fixture cannot restore Double empty median")
+                        .into(),
+                )
             } else {
-                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "restoration failed").into()
-            });
+                Err(
+                    std::io::Error::new(std::io::ErrorKind::BrokenPipe, "restoration failed")
+                        .into(),
+                )
+            };
         }
         self.inner.upload_numeric_raw(host)
     }

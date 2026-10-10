@@ -69,6 +69,10 @@ impl WgpuProvider {
             "interp1: query/output length mismatch"
         );
 
+        if output_len != 0 {
+            self.require_ieee_words(self.precision)?;
+        }
+
         let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
             let out_buffer =
                 self.create_storage_buffer_checked(emission, output_len, "runmat-interp1-out")?;

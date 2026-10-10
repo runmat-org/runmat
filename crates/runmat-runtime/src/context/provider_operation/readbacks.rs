@@ -2,6 +2,7 @@
 
 use super::types::{
     ExactConditionalProviderUpload, ExactProviderOperation, ExactProviderReadbackPhase,
+    PreparedProducedReadback,
 };
 use crate::context::host_presentation::combine_host_scratch;
 use crate::{build_runtime_error, BuiltinResult};
@@ -28,10 +29,12 @@ pub(super) struct PreparedReadbacks {
     pub(super) conditional_readback_host_workspace: ResourceByteBound,
     pub(super) host_scratch: ResourceByteBound,
     pub(super) conditional_provider_upload: Option<ExactConditionalProviderUpload>,
+    pub(super) produced_readback: Option<PreparedProducedReadback>,
 }
 
 pub(super) fn prepare_readbacks(
     request: &ExactProviderOperation<'_>,
+    provider_output_bytes: Option<u64>,
     parallel_memory_available_bytes: Option<u64>,
 ) -> BuiltinResult<Option<PreparedReadbacks>> {
     let provider = request.provider;
@@ -163,10 +166,51 @@ pub(super) fn prepare_readbacks(
             })?,
         )
     };
+    let produced_readback = if let Some(spec) = request.produced_readback {
+        let Some(output) = request.query.outputs.get(spec.output_index) else {
+            return Err(
+                build_runtime_error("provider-produced readback output index is invalid")
+                    .with_identifier("RunMat:Placement:InvalidReadbackOutput")
+                    .build(),
+            );
+        };
+        let Some(evidence) = provider.produced_numeric_readback_evidence(output) else {
+            return Ok(None);
+        };
+        if output.checked_byte_len() != Some(evidence.source_requested_bytes)
+            || evidence.transfer_bytes != evidence.source_requested_bytes
+            || evidence.queue_slots == 0
+            || provider_output_bytes.is_none()
+        {
+            return Err(build_runtime_error(
+                "provider-produced readback has no exact physical result",
+            )
+            .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+            .build());
+        }
+        Some(PreparedProducedReadback {
+            output: output.clone(),
+            evidence,
+            public_host_bytes: spec.public_host_bytes,
+        })
+    } else {
+        None
+    };
     let prefix_host_workspace =
         combine_host_scratch(request.host_scratch, preparation_host_workspace)?;
-    let direct_host_peak =
-        combine_host_scratch(prefix_host_workspace, request.provider_host_scratch)?;
+    let direct_host_peak = combine_host_scratch(
+        combine_host_scratch(prefix_host_workspace, request.provider_host_scratch)?,
+        match produced_readback.as_ref() {
+            Some(readback) => combine_host_scratch(
+                readback.evidence.host_workspace_bytes,
+                request
+                    .produced_readback
+                    .expect("prepared readback has a request")
+                    .conversion_host_workspace,
+            )?,
+            None => ResourceByteBound::Known(0),
+        },
+    )?;
     let host_scratch = if request.conditional_host_fallback.is_some() {
         let fallback = combine_host_scratch(
             combine_host_scratch(prefix_host_workspace, conditional_readback_host_workspace)?,
@@ -196,6 +240,7 @@ pub(super) fn prepare_readbacks(
         conditional_readback_host_workspace,
         host_scratch,
         conditional_provider_upload,
+        produced_readback,
     }))
 }
 

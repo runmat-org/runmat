@@ -5,7 +5,6 @@ use runmat_accelerate_api::{
     WgpuBufferRef,
 };
 use std::error::Error;
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 #[test]
@@ -73,12 +72,14 @@ fn empty_export_authenticates_device_and_live_allocation_before_success() {
         .expect("empty contiguous allocation");
     let buffer = access
         .with_shared(|emission| {
-            Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
-                label: Some("empty-plot-export-authentication"),
-                size: 4,
-                usage: wgpu::BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            }))
+            runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(
+                &wgpu::BufferDescriptor {
+                    label: Some("empty-plot-export-authentication"),
+                    size: 4,
+                    usage: wgpu::BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                },
+            ))
         })
         .expect("create source on exact device");
     let export =

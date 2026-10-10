@@ -1,16 +1,16 @@
 use super::shared::{Shared, WeakShared};
 use super::{
-    catch_allocation_cleanup_unwind, AllocationIdentity, AllocationOwner,
+    catch_allocation_cleanup_unwind, AllocationIdentity, AllocationOwnerHandle,
     AllocationRegistrationError, AllocationReleaseError, AllocationReleaseOutcome,
     AllocationRetirementOutcome, GpuPhysicalDescriptor, GpuViewError,
 };
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 struct LeaseInner {
     identity: AllocationIdentity,
-    owner: Arc<dyn AllocationOwner>,
+    owner: AllocationOwnerHandle,
     armed: AtomicBool,
     physical: OnceLock<GpuPhysicalDescriptor>,
     next_view: AtomicU64,
@@ -61,7 +61,7 @@ impl AllocationLease {
     /// and reject duplicate registration through its own allocation map.
     pub fn register(
         identity: AllocationIdentity,
-        owner: Arc<dyn AllocationOwner>,
+        owner: AllocationOwnerHandle,
     ) -> Result<Self, AllocationRegistrationError> {
         let lease = Self {
             inner: Shared::new(LeaseInner {

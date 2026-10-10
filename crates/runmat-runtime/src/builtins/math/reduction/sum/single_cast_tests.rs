@@ -5,8 +5,8 @@ use super::*;
 use futures::executor::block_on;
 use runmat_accelerate_api::{
     test_support::{RetirementProbe, TestAllocationOwner},
-    AccelDownloadFuture, AccelNumericDownloadFuture, AccelProviderFuture, GpuTensorStorage,
-    HostTensorView, NumericElementType, ThreadProviderGuard,
+    AccelDownloadFuture, AccelNumericDownloadFuture, GpuTensorStorage, HostTensorView,
+    NumericElementType, ThreadProviderGuard,
 };
 use runmat_value::IntValue;
 use std::{
@@ -126,7 +126,7 @@ impl AccelProvider for StageProvider {
     fn unary_single<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             self.cast_calls.fetch_add(1, Ordering::SeqCst);
             match self.cast_outcome {
@@ -136,7 +136,8 @@ impl AccelProvider for StageProvider {
                 CastOutcome::OperationalFailure => Err(anyhow::Error::new(std::io::Error::new(
                     std::io::ErrorKind::BrokenPipe,
                     "single cast failed",
-                ))),
+                ))
+                .into()),
                 CastOutcome::WrongPhysicalClass | CastOutcome::CleanupFailure => {
                     Ok(self.output(input.shape().to_vec(), NumericElementType::F64, true))
                 }

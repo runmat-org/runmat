@@ -185,6 +185,8 @@ pub(crate) fn select_exact_host_sink_with_readbacks(
             ))
             .expect("typed host-sink facts serialize"),
         ),
+        provider_provenance: None,
+        graph_output_authority: None,
         revision,
     };
     let candidate = WholeWorkCandidate {

@@ -25,9 +25,12 @@ pub fn clear_identity(identity: GpuHandleIdentity) -> Result<(), ResidencyCleanu
 
 // Both preparation callers consume the runtime's structured error directly;
 // boxing here would erase that shared contract or require immediate unboxing.
-#[expect(
-    clippy::result_large_err,
-    reason = "preserve the runtime error contract"
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    expect(
+        clippy::result_large_err,
+        reason = "preserve the runtime error contract"
+    )
 )]
 pub fn clear_inputs(
     values: &[runmat_value::Value],

@@ -65,6 +65,57 @@ pub struct ActiveTryHandler {
     pub catch_var: Option<usize>,
 }
 
+#[cfg(all(
+    test,
+    not(target_arch = "wasm32"),
+    feature = "native-accel",
+    feature = "wgpu"
+))]
+#[derive(Debug)]
+pub(crate) enum VmFusionPublicationFaultRoute {
+    AnySelected,
+    SharedRuntime,
+}
+
+#[cfg(all(
+    test,
+    not(target_arch = "wasm32"),
+    feature = "native-accel",
+    feature = "wgpu"
+))]
+#[derive(Debug)]
+pub(crate) enum VmFusionPublicationFault {
+    /// Corrupt the pending stack value at the real checked VM StoreVar so the
+    /// ordinary dispatch rejects publication and follows its catch path.
+    Reject(
+        VmFusionPublicationFaultRoute,
+        std::rc::Rc<std::cell::Cell<bool>>,
+    ),
+    Cancel(
+        VmFusionPublicationFaultRoute,
+        runmat_execution::cancellation::CancellationSource,
+        std::rc::Rc<std::cell::Cell<bool>>,
+    ),
+    Suspend(
+        VmFusionPublicationFaultRoute,
+        std::rc::Rc<std::cell::Cell<bool>>,
+    ),
+}
+
+#[cfg(all(
+    test,
+    not(target_arch = "wasm32"),
+    feature = "native-accel",
+    feature = "wgpu"
+))]
+impl VmFusionPublicationFault {
+    pub(crate) fn route(&self) -> &VmFusionPublicationFaultRoute {
+        match self {
+            Self::Reject(route, _) | Self::Cancel(route, _, _) | Self::Suspend(route, _) => route,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct InterpreterState {
     pub bytecode: Bytecode,
@@ -86,6 +137,15 @@ pub struct InterpreterState {
     pub fusion_plan: Option<FusionPlanRef>,
     #[cfg(feature = "native-accel")]
     pub fusion_accel_graph: Option<AccelGraph>,
+    #[cfg(feature = "native-accel")]
+    pub(crate) fusion_installation: Option<crate::bytecode::program::VmFusionPlanInstallation>,
+    #[cfg(all(
+        test,
+        not(target_arch = "wasm32"),
+        feature = "native-accel",
+        feature = "wgpu"
+    ))]
+    pub(crate) fusion_publication_fault: Option<VmFusionPublicationFault>,
 }
 
 impl InterpreterState {
@@ -129,7 +189,8 @@ impl InterpreterState {
             );
         }
         #[cfg(feature = "native-accel")]
-        let (fusion_plan, fusion_accel_graph) = bytecode.prepare_vm_fusion_plan();
+        let (fusion_plan, fusion_accel_graph, fusion_installation) =
+            bytecode.prepare_vm_fusion_plan_with_installation(&runtime);
         Self {
             stack: Vec::new(),
             context: ExecutionContext {
@@ -156,6 +217,15 @@ impl InterpreterState {
             fusion_plan,
             #[cfg(feature = "native-accel")]
             fusion_accel_graph,
+            #[cfg(feature = "native-accel")]
+            fusion_installation,
+            #[cfg(all(
+                test,
+                not(target_arch = "wasm32"),
+                feature = "native-accel",
+                feature = "wgpu"
+            ))]
+            fusion_publication_fault: None,
             bytecode,
         }
     }

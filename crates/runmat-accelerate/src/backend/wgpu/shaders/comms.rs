@@ -13,7 +13,7 @@ pub(crate) fn modulate_constellation_shader(
         NumericPrecision::F64 => "1.7976931348623157e308",
         NumericPrecision::F32 => "3.4028234663852886e38",
     };
-    format!(
+    let source = format!(
         r#"
 struct Tensor {{
     data: array<{ty}>,
@@ -39,8 +39,10 @@ struct Params {{
 const ORDER: u32 = {order}u;
 const MAX_FINITE: {ty} = {ty}({max_val});
 
+fn isFinite(value: {ty}) -> bool {{ @IEEE_FINITE_PREDICATE@ }}
+
 fn isfinite_scalar(x: {ty}) -> bool {{
-    return (x == x) && (abs(x) < MAX_FINITE);
+    return isFinite(x) && (abs(x) < MAX_FINITE);
 }}
 
 fn set_error(code: u32, index: u32) {{
@@ -99,7 +101,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         order = order,
         max_val = max_val,
         workgroup_size = workgroup_size,
-    )
+    );
+    super::nan_predicate::inject_finite(&source, precision)
 }
 
 pub(crate) fn modulate_bits_constellation_shader(
@@ -115,7 +118,7 @@ pub(crate) fn modulate_bits_constellation_shader(
         NumericPrecision::F64 => "1.7976931348623157e308",
         NumericPrecision::F32 => "3.4028234663852886e38",
     };
-    format!(
+    let source = format!(
         r#"
 struct Tensor {{
     data: array<{ty}>,
@@ -144,8 +147,10 @@ struct Params {{
 const ORDER: u32 = {order}u;
 const MAX_FINITE: {ty} = {ty}({max_val});
 
+fn isFinite(value: {ty}) -> bool {{ @IEEE_FINITE_PREDICATE@ }}
+
 fn isfinite_scalar(x: {ty}) -> bool {{
-    return (x == x) && (abs(x) < MAX_FINITE);
+    return isFinite(x) && (abs(x) < MAX_FINITE);
 }}
 
 fn set_error(code: u32, index: u32) {{
@@ -191,7 +196,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         order = order,
         max_val = max_val,
         workgroup_size = workgroup_size,
-    )
+    );
+    super::nan_predicate::inject_finite(&source, precision)
 }
 
 #[cfg(test)]

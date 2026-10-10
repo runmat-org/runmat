@@ -34,6 +34,8 @@ mod state;
 mod timing;
 mod timer;
 mod tcp;
+mod vm_fusion_completion;
+mod vm_fusion_host_route;
 #[cfg(test)]
 mod cancellation_tests;
 
@@ -96,6 +98,7 @@ pub use services::{
     RuntimeCallService, RuntimeCollectiveService, RuntimeDistributedCallRequest,
     RuntimeDistributedInvocation, RuntimeDistributedRetirement, RuntimeDistributedService,
     RuntimeDistributedSnapshot, RuntimeErrorService, RuntimeForeignService,
+    RuntimeGraphObservationPermit, RuntimeGraphPlacementSelection,
     RuntimeHostEffectResourceService, RuntimeHostService, RuntimeHttpService,
     RuntimeManagedWholeWorkSelection, RuntimeNativeService, RuntimeObjectService,
     RuntimeParallelResources, RuntimeParallelService, RuntimePlacementFeedbackSource,
@@ -121,3 +124,9 @@ pub use user_path::{
     RuntimeUserPathService, UserPathMutation, UserPathServiceError, UserPathSetting,
     UserPathSnapshot,
 };
+pub use vm_fusion_completion::{
+    RuntimeVmFusionGenerationPermit, VmFusionCompletionRight, VmFusionFeedbackLease,
+    VmFusionInstalledRegion, VmFusionRegionRegistration, VmFusionSemanticIdentity,
+    VmFusionSessionRegistration,
+};
+pub use vm_fusion_host_route::{VmFusionHostInstruction, VmFusionHostRoute};

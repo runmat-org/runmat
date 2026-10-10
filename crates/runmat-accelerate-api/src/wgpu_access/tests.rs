@@ -181,10 +181,7 @@ fn detach_pops_every_scope_before_the_receipt_is_polled() {
         })
         .unwrap();
     assert!(driver.stack.lock().unwrap().is_empty());
-    assert_eq!(
-        driver.popped.load(Ordering::SeqCst),
-        if cfg!(target_arch = "wasm32") { 3 } else { 2 }
-    );
+    assert_eq!(driver.popped.load(Ordering::SeqCst), 3);
     gate.shared(|| driver.emit(42)).unwrap();
     let mut result = Box::pin(receipt.resolve());
     assert_eq!(poll_once(result.as_mut()), Poll::Ready(Err(vec![vec![31]])));
@@ -192,13 +189,56 @@ fn detach_pops_every_scope_before_the_receipt_is_polled() {
 }
 
 struct Retained(Arc<AtomicUsize>);
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn scope_error_kinds_preserve_every_original_backend_cause() {
+    #[derive(Debug)]
+    struct OriginalCause;
+    impl fmt::Display for OriginalCause {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("original backend cause")
+        }
+    }
+    impl Error for OriginalCause {}
+
+    let errors = WgpuScopeErrors::new(vec![
+        wgpu::Error::Validation {
+            source: Box::new(OriginalCause),
+            description: "validation".into(),
+        },
+        wgpu::Error::OutOfMemory {
+            source: Box::new(OriginalCause),
+        },
+        wgpu::Error::Internal {
+            source: Box::new(OriginalCause),
+            description: "internal".into(),
+        },
+    ]);
+    assert_eq!(
+        errors.kinds(),
+        &[
+            WgpuScopeErrorKind::Validation,
+            WgpuScopeErrorKind::OutOfMemory,
+            WgpuScopeErrorKind::Internal,
+        ]
+    );
+    errors.with_errors(|original| {
+        assert_eq!(original.len(), 3);
+        for error in original {
+            assert!(error.source().unwrap().is::<OriginalCause>());
+        }
+    });
+}
+
 impl Drop for Retained {
     fn drop(&mut self) {
         self.0.fetch_add(1, Ordering::SeqCst);
     }
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn cancelling_detached_error_wait_releases_unpublished_work_without_scopes() {
     struct PendingDriver(AtomicUsize);
     impl ScopeDriver for PendingDriver {

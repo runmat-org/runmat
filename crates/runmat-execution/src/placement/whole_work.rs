@@ -89,6 +89,15 @@ impl WholeWorkCandidate {
                 encoded.update(&[2]);
                 encoded.update(&device_id.to_le_bytes());
             }
+            CandidateOutputResidency::ProviderAndHost {
+                device_id,
+                host_bytes,
+            } => {
+                encoded.update(&[5]);
+                encoded.update(&device_id.to_le_bytes());
+                serde_json::to_writer(&mut encoded, &host_bytes)
+                    .expect("typed host bound serializes");
+            }
             CandidateOutputResidency::Unknown => encoded.update(&[3]),
             CandidateOutputResidency::ConditionalHostOrProvider {
                 device_id,
@@ -128,6 +137,9 @@ impl WholeWorkCandidate {
                 },
                 CandidateOutputResidency::Provider { device_id: output }
                 | CandidateOutputResidency::Mirrored { device_id: output }
+                | CandidateOutputResidency::ProviderAndHost {
+                    device_id: output, ..
+                }
                 | CandidateOutputResidency::ConditionalHostOrProvider {
                     device_id: output, ..
                 },
@@ -287,6 +299,8 @@ mod tests {
             region: None,
             operation: "whole-network".into(),
             runtime_facts: Digest::sha256(b"admitted-workload"),
+            provider_provenance: None,
+            graph_output_authority: None,
             revision: PlacementRevision {
                 program: None::<ProgramRevision>,
                 catalog: Digest::sha256(b"catalog"),
@@ -377,6 +391,14 @@ mod tests {
             CandidateOutputResidency::Mirrored { device_id } => {
                 legacy.push(2);
                 legacy.extend_from_slice(&device_id.to_le_bytes());
+            }
+            CandidateOutputResidency::ProviderAndHost {
+                device_id,
+                host_bytes,
+            } => {
+                legacy.push(5);
+                legacy.extend_from_slice(&device_id.to_le_bytes());
+                legacy.extend_from_slice(&serde_json::to_vec(&host_bytes).unwrap());
             }
             CandidateOutputResidency::Unknown => legacy.push(3),
             CandidateOutputResidency::ConditionalHostOrProvider {

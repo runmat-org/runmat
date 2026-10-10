@@ -61,11 +61,15 @@ impl AccelProvider for UnsupportedImfilter {
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         self.0.download(handle)
     }
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         if self.3.swap(false, Ordering::SeqCst) {
             return Err(runmat_accelerate_api::unsupported_provider_operation(
                 "fixture: H preparation unavailable",
-            ));
+            )
+            .into());
         }
         self.0.upload_numeric_raw(host)
     }

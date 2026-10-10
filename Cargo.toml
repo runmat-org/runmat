@@ -77,6 +77,7 @@ resolver = "2"
 
 [workspace.dependencies]
 # External dependencies used across multiple crates
+wgpu = "24.0.0"
 inventory = "0.1"
 syn = { version = "1", features = ["full"] }
 quote = "1"

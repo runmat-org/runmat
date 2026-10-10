@@ -11,6 +11,74 @@ use runmat_value::{
     Tensor, Value,
 };
 
+fn admit_binary_provider_result(
+    mut output: runmat_accelerate_api::GpuTensorHandle,
+    left: &runmat_accelerate_api::GpuTensorHandle,
+    right: &runmat_accelerate_api::GpuTensorHandle,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    operation: &'static str,
+) -> crate::BuiltinResult<Value> {
+    use crate::builtins::common::{broadcast::BroadcastPlan, gpu_helpers};
+    use runmat_accelerate_api::{GpuTensorStorage, ProviderPrecision};
+    let shape = BroadcastPlan::new(left.shape(), right.shape())
+        .map_err(|error| {
+            crate::build_runtime_error(format!("{operation}: {error}"))
+                .with_builtin(operation)
+                .build()
+        })?
+        .output_shape()
+        .to_vec();
+    let left_integer = runmat_accelerate_api::handle_integer_type(left);
+    let right_integer = runmat_accelerate_api::handle_integer_type(right);
+    let integer = if left_integer == right_integer {
+        left_integer
+    } else {
+        None
+    };
+    let precision = if integer.is_some() {
+        None
+    } else {
+        match (
+            runmat_accelerate_api::handle_precision(left),
+            runmat_accelerate_api::handle_precision(right),
+        ) {
+            (Some(ProviderPrecision::F32), Some(_)) | (Some(_), Some(ProviderPrecision::F32)) => {
+                Some(ProviderPrecision::F32)
+            }
+            (Some(ProviderPrecision::F64), Some(ProviderPrecision::F64)) => {
+                Some(ProviderPrecision::F64)
+            }
+            _ => None,
+        }
+    };
+    let storage = if [left, right].iter().any(|handle| {
+        runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::ComplexInterleaved
+    }) {
+        GpuTensorStorage::ComplexInterleaved
+    } else {
+        GpuTensorStorage::Real
+    };
+    let contract = gpu_helpers::BinaryGpuOutputContract {
+        shape,
+        storage,
+        precision,
+        integer,
+        logical: false,
+        alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+    };
+    if !gpu_helpers::binary_gpu_output_matches(&output, left, right, provider, &contract) {
+        let error = crate::build_runtime_error(format!(
+            "{operation}: provider returned invalid binary output"
+        ))
+        .with_builtin(operation)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build();
+        return Err(gpu_helpers::reject_gpu_output(output, error));
+    }
+    gpu_helpers::propagate_output_provenance(&mut output, [left, right])?;
+    gpu_helpers::resident_gpu_value(output)
+}
+
 fn complex_pow_scalar(base_re: f64, base_im: f64, exp_re: f64, exp_im: f64) -> (f64, f64) {
     if base_re == 0.0 && base_im == 0.0 && exp_re == 0.0 && exp_im == 0.0 {
         return (1.0, 0.0);
@@ -223,7 +291,7 @@ fn negate_integer_storage(storage: &IntegerStorage) -> IntegerStorage {
 /// Element-wise multiplication: A .* B
 /// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
 #[async_recursion::async_recursion(?Send)]
-pub async fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
+pub async fn elementwise_mul(a: &Value, b: &Value) -> crate::BuiltinResult<Value> {
     // GPU+scalar: keep on device if provider supports scalar mul
     if let Some(p) = runmat_accelerate_api::provider() {
         match (a, b) {
@@ -256,17 +324,31 @@ pub async fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
         let bh = to_host_value(b).await?;
         return elementwise_mul(&ah, &bh).await;
     }
-    if let Some(p) = runmat_accelerate_api::provider() {
-        if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
-            if let Ok(hc) = p.elem_mul(ha, hb).await {
-                return Ok(Value::GpuTensor(hc));
+    if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
+        if let Ok(p) =
+            crate::builtins::common::gpu_helpers::exact_provider_for_binary_inputs(ha, hb)
+        {
+            match p.elem_mul(ha, hb).await {
+                Ok(hc) => return admit_binary_provider_result(hc, ha, hb, p, "times"),
+                Err(error) if error.is_unsupported() => {}
+                Err(error) => {
+                    let diagnostic = crate::build_runtime_error(format!(
+                        "times: provider execution failed: {error}"
+                    ))
+                    .with_builtin("times")
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .build();
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        diagnostic, error,
+                    ));
+                }
             }
         }
     }
     if let Some(result) = try_integer_binary(a, b, IntegerBinaryOp::Multiply, "times")? {
         return Ok(result);
     }
-    match (a, b) {
+    let host: Result<Value, String> = match (a, b) {
         // Complex scalars
         (Value::Complex(ar, ai), Value::Complex(br, bi)) => {
             Ok(Value::Complex(ar * br - ai * bi, ar * bi + ai * br))
@@ -289,7 +371,8 @@ pub async fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
                     m1.cols(),
                     m2.rows(),
                     m2.cols()
-                ));
+                )
+                .into());
             }
             multiply_real_tensors(m1, m2)
         }
@@ -303,7 +386,8 @@ pub async fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
                     m1.cols(),
                     m2.rows(),
                     m2.cols()
-                ));
+                )
+                .into());
             }
             multiply_complex_tensors(m1, m2)
         }
@@ -313,7 +397,8 @@ pub async fn elementwise_mul(a: &Value, b: &Value) -> Result<Value, String> {
         _ => Err(format!(
             "Element-wise multiplication not supported for types: {a:?} .* {b:?}"
         )),
-    }
+    };
+    host.map_err(Into::into)
 }
 
 fn multiply_real_tensor_scalar(tensor: &Tensor, scalar: f64) -> Result<Value, String> {
@@ -479,7 +564,7 @@ fn multiply_promoted_complex_tensor_scalar(
 /// Element-wise division: A ./ B
 /// Supports matrix-matrix, matrix-scalar, and scalar-matrix operations
 #[async_recursion::async_recursion(?Send)]
-pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
+pub async fn elementwise_div(a: &Value, b: &Value) -> crate::BuiltinResult<Value> {
     // GPU+scalar: use scalar div when form is G ./ s or left-scalar s ./ G
     if let Some(p) = runmat_accelerate_api::provider() {
         match (a, b) {
@@ -511,17 +596,31 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
         let bh = to_host_value(b).await?;
         return elementwise_div(&ah, &bh).await;
     }
-    if let Some(p) = runmat_accelerate_api::provider() {
-        if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
-            if let Ok(hc) = p.elem_div(ha, hb).await {
-                return Ok(Value::GpuTensor(hc));
+    if let (Value::GpuTensor(ha), Value::GpuTensor(hb)) = (a, b) {
+        if let Ok(p) =
+            crate::builtins::common::gpu_helpers::exact_provider_for_binary_inputs(ha, hb)
+        {
+            match p.elem_div(ha, hb).await {
+                Ok(hc) => return admit_binary_provider_result(hc, ha, hb, p, "rdivide"),
+                Err(error) if error.is_unsupported() => {}
+                Err(error) => {
+                    let diagnostic = crate::build_runtime_error(format!(
+                        "rdivide: provider execution failed: {error}"
+                    ))
+                    .with_builtin("rdivide")
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .build();
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        diagnostic, error,
+                    ));
+                }
             }
         }
     }
     if let Some(result) = try_integer_binary(a, b, IntegerBinaryOp::Divide, "rdivide")? {
         return Ok(result);
     }
-    match (a, b) {
+    let host: Result<Value, String> = match (a, b) {
         // Complex scalars
         (Value::Complex(ar, ai), Value::Complex(br, bi)) => {
             let denom = br * br + bi * bi;
@@ -562,7 +661,8 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
                     m1.cols(),
                     m2.rows(),
                     m2.cols()
-                ));
+                )
+                .into());
             }
             divide_real_tensors(m1, m2)
         }
@@ -576,7 +676,8 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
                     m1.cols(),
                     m2.rows(),
                     m2.cols()
-                ));
+                )
+                .into());
             }
             divide_complex_tensors(m1, m2)
         }
@@ -586,7 +687,8 @@ pub async fn elementwise_div(a: &Value, b: &Value) -> Result<Value, String> {
         _ => Err(format!(
             "Element-wise division not supported for types: {a:?} ./ {b:?}"
         )),
-    }
+    };
+    host.map_err(Into::into)
 }
 
 fn divide_real_tensor_scalar(tensor: &Tensor, scalar: f64) -> Result<Value, String> {
@@ -1253,6 +1355,120 @@ fn power_scalar_promoted_complex_tensor(
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, AccelDownloadFuture, AccelProvider, GpuTensorHandle,
+        GpuTensorStorage, HostTensorView, NumericElementType, ProviderExecutionError,
+        ProviderExecutionFuture, ThreadProviderGuard,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Debug)]
+    struct BinaryDeviceFailure;
+    impl std::fmt::Display for BinaryDeviceFailure {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("binary execution device failure")
+        }
+    }
+    impl std::error::Error for BinaryDeviceFailure {}
+
+    struct BinaryProvider {
+        owner: TestAllocationOwner,
+        calls: AtomicUsize,
+        alias: bool,
+    }
+    impl AccelProvider for BinaryProvider {
+        fn device_id(&self) -> u32 {
+            self.owner.device_id()
+        }
+        fn device_info(&self) -> String {
+            "typed direct elementwise fixture".into()
+        }
+        fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            panic!("resident operands do not upload again")
+        }
+        fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            panic!("terminal binary failure does not gather")
+        }
+        fn elem_mul<'a>(
+            &'a self,
+            left: &'a GpuTensorHandle,
+            _: &'a GpuTensorHandle,
+        ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+            Box::pin(async move {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                if self.alias {
+                    Ok(left.clone())
+                } else {
+                    Err(ProviderExecutionError::from_source(BinaryDeviceFailure).after_effect())
+                }
+            })
+        }
+        fn elem_div<'a>(
+            &'a self,
+            left: &'a GpuTensorHandle,
+            right: &'a GpuTensorHandle,
+        ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+            self.elem_mul(left, right)
+        }
+    }
+
+    #[test]
+    fn direct_binary_helpers_preserve_typed_terminal_error_and_reject_alias() {
+        for alias in [false, true] {
+            for operation in ["times", "rdivide"] {
+                let provider = Box::leak(Box::new(BinaryProvider {
+                    owner: TestAllocationOwner::new(),
+                    calls: AtomicUsize::new(0),
+                    alias,
+                }));
+                let _selected = ThreadProviderGuard::set(Some(provider));
+                let left = provider
+                    .owner
+                    .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+                    .unwrap();
+                let right = provider
+                    .owner
+                    .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+                    .unwrap();
+                let original = [
+                    left.handle.wire_descriptor(),
+                    right.handle.wire_descriptor(),
+                ];
+                let args = [
+                    Value::GpuTensor(left.handle.clone()),
+                    Value::GpuTensor(right.handle.clone()),
+                ];
+                let error = match operation {
+                    "times" => block_on(elementwise_mul(&args[0], &args[1])),
+                    _ => block_on(elementwise_div(&args[0], &args[1])),
+                }
+                .expect_err("terminal provider failure or invalid alias");
+                assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+                assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+                if !alias {
+                    let mut cause: &(dyn std::error::Error + 'static) = &error;
+                    while !cause.is::<BinaryDeviceFailure>() {
+                        cause = cause
+                            .source()
+                            .expect("original typed binary cause retained");
+                    }
+                } else {
+                    assert!(error.message().contains("invalid binary output"));
+                }
+                assert_eq!(
+                    [
+                        left.handle.wire_descriptor(),
+                        right.handle.wire_descriptor()
+                    ],
+                    original
+                );
+                left.handle.allocation_lease().validate_live().unwrap();
+                right.handle.allocation_lease().validate_live().unwrap();
+                assert_eq!(left.probe.retirements(), 0);
+                assert_eq!(right.probe.retirements(), 0);
+            }
+        }
+    }
 
     #[test]
     fn matrix_power_typed_exponent_parser_is_exact() {

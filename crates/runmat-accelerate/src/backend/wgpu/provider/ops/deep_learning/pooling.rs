@@ -192,6 +192,9 @@ impl WgpuProvider {
         if !self.supports_native_real_element_type(element_type) {
             return Ok(DeepLearningPool1DCapability::UnsupportedOperation);
         }
+        if output_count != 0 && !self.ieee_words_available(self.precision) {
+            return Ok(DeepLearningPool1DCapability::UnsupportedOperation);
+        }
         if total > u32::MAX as usize
             || pool_size > u32::MAX as usize
             || stride > u32::MAX as usize
@@ -259,6 +262,8 @@ impl WgpuProvider {
                 GpuTensorStorage::Real,
             );
         }
+
+        self.require_ieee_words(self.precision)?;
 
         // The kernel uses physical column-major offsets. A lazy transpose
         // must be materialized by its owner before reading the backing buffer.

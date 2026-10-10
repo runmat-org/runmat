@@ -66,7 +66,7 @@ impl DialogProvider {
                 &JsValue::from_f64(1.0),
             )
             .expect("set open filter index");
-            Promise::resolve(selection.as_ref()).into()
+            Promise::resolve::<JsValue>(selection.as_ref()).into()
         }) as Box<dyn FnMut(JsValue) -> JsValue>);
 
         let save_count = save_calls.clone();
@@ -87,7 +87,7 @@ impl DialogProvider {
                 &JsValue::from_f64(1.0),
             )
             .expect("set save filter index");
-            Promise::resolve(selection.as_ref()).into()
+            Promise::resolve::<JsValue>(selection.as_ref()).into()
         }) as Box<dyn FnMut(JsValue) -> JsValue>);
 
         Reflect::set(

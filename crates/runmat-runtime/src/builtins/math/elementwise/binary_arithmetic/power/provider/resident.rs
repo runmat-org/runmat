@@ -1,17 +1,18 @@
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
-use runmat_value::Value;
+use runmat_value::{NumericScalar, Value};
 
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin};
 use crate::BuiltinResult;
 
-use super::super::super::provider_support::{host_real_scalar, valid_real_binary_output};
+use super::super::super::provider_support::host_real_scalar;
+use super::super::super::provider_support::HostFallbackAdmission;
 use super::super::{builtin_error, power_host, BUILTIN_NAME};
 use super::conversion::{
     gather_value, is_complex, is_integer, tensor_matches_handle, value_to_real_tensor,
 };
 
 #[derive(Clone, Copy)]
-enum ResidentOperand {
+pub(super) enum ResidentOperand {
     Base,
     Exponent,
 }
@@ -43,9 +44,9 @@ async fn power_gpu_host(
     }
 
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&resident) {
-        if let Some(scalar) = host_real_scalar(&host) {
+        if host_real_scalar(&host).is_some() {
             if let Some(output) =
-                try_resident_scalar(provider, &resident, scalar, resident_operand).await?
+                try_resident_scalar(provider, &resident, &host, resident_operand).await?
             {
                 return Ok(output);
             }
@@ -62,9 +63,24 @@ async fn power_gpu_host(
                 let result = resident_operand
                     .typed_power(provider, &resident, uploaded)
                     .await;
-                if let Some(output) = result? {
+                let result = result.map_err(|error| {
+                    crate::runtime_error::with_provider_execution_source(
+                        builtin_error("power: uploaded pair failed after operand materialization"),
+                        runmat_accelerate_api::ProviderExecutionError::from_source(error)
+                            .after_effect(),
+                    )
+                })?;
+                if let Some(output) = result {
                     return Ok(output);
                 }
+                return Err(super::pair::typed_provider_error(
+                    "uploaded pair admission",
+                    runmat_accelerate_api::ProviderExecutionError::from(
+                        runmat_accelerate_api::unsupported_provider_operation(
+                            "POWER pair declined after host operand upload",
+                        ),
+                    ),
+                ));
             }
         }
     }
@@ -75,77 +91,59 @@ async fn power_gpu_host(
 async fn try_resident_scalar(
     provider: &'static dyn AccelProvider,
     resident: &GpuTensorHandle,
-    scalar: f64,
+    host: &Value,
     resident_operand: ResidentOperand,
 ) -> BuiltinResult<Option<Value>> {
-    if provider.precision() == runmat_accelerate_api::ProviderPrecision::F32
-        && !scalar.is_nan()
-        && f64::from(scalar as f32) != scalar
-    {
-        // Mixed single/double power evaluates the original scalar before
-        // rounding the output. A rounded upload is not the same operand.
-        return Ok(None);
-    }
-
-    let fill_result = {
-        let _metadata = gpu_helpers::ResidencyRestoreGuard::new(resident);
-        provider.fill_like(resident, scalar)
+    use runmat_accelerate_api::power_service::{
+        execute_resident_scalar_power, prepare_resident_scalar_power,
     };
-    let filled = match fill_result {
-        Ok(handle) => handle,
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
-        Err(error) => return Err(builtin_error(format!("power: {error}"))),
+    use runmat_accelerate_api::{
+        PowerResultDomain, PowerScalarControl, ProviderOperationIdentity, RealPowerOperand,
     };
-    let filled_owner = filled;
-    let filled = &filled_owner;
-    if !valid_real_binary_output(filled, resident, None, provider, resident.shape()) {
-        return Err(builtin_error(
-            "power: provider returned invalid scalar-fill metadata",
-        ));
-    }
-    if let Some(output) = resident_operand
-        .typed_power(provider, resident, filled)
-        .await?
-    {
-        return Ok(Some(output));
-    }
-    if !resident_operand.proves_legacy_real_power(scalar) {
-        return Ok(None);
-    }
-    accept_result(
-        resident_operand.elem_pow(provider, resident, filled).await,
+    let (control, host_shape) = match host {
+        Value::Num(value) => (PowerScalarControl::DoubleBits(value.to_bits()), &[1, 1][..]),
+        Value::Tensor(tensor) if tensor.integer_storage().is_none() => {
+            let control = match tensor.numeric_value_at(0) {
+                Some(NumericScalar::F32(value)) => PowerScalarControl::SingleBits(value.to_bits()),
+                Some(NumericScalar::F64(value)) => PowerScalarControl::DoubleBits(value.to_bits()),
+                _ => return Ok(None),
+            };
+            (control, tensor.shape())
+        }
+        _ => return Ok(None),
+    };
+    let role = match resident_operand {
+        ResidentOperand::Base => RealPowerOperand::Base,
+        ResidentOperand::Exponent => RealPowerOperand::Exponent,
+    };
+    let prepared = prepare_resident_scalar_power(
         provider,
         resident,
-        Some(filled),
+        control,
+        role,
+        host_shape,
+        ProviderOperationIdentity::new(runmat_builtins::POWER_CATALOG_ENTRY.identity.name),
     )
-    .and_then(|output| output.map(gpu_helpers::resident_gpu_value).transpose())
+    .map_err(|error| service_error("scalar preparation", error))?;
+    if let Some(prepared) = prepared {
+        let executed = execute_resident_scalar_power(prepared)
+            .await
+            .map_err(|error| service_error("scalar execution", error))?;
+        return if executed.domain == PowerResultDomain::Complex {
+            gpu_helpers::complex_gpu_value(executed.handle).map(Some)
+        } else {
+            gpu_helpers::resident_gpu_value(executed.handle).map(Some)
+        };
+    }
+    Ok(None)
 }
 
-fn accept_result(
-    result: anyhow::Result<GpuTensorHandle>,
-    provider: &dyn AccelProvider,
-    class_source: &GpuTensorHandle,
-    other_source: Option<&GpuTensorHandle>,
-) -> BuiltinResult<Option<GpuTensorHandle>> {
-    match result {
-        Ok(output)
-            if valid_real_binary_output(
-                &output,
-                class_source,
-                other_source,
-                provider,
-                class_source.shape(),
-            ) =>
-        {
-            Ok(Some(output))
-        }
-        Ok(output) => Err(gpu_helpers::reject_gpu_output(
-            output,
-            builtin_error("power: provider returned an invalid element-wise power result"),
-        )),
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
-        Err(error) => Err(builtin_error(format!("power: {error}"))),
-    }
+fn service_error(
+    stage: &str,
+    error: runmat_accelerate_api::power_service::PowerServiceError,
+) -> crate::RuntimeError {
+    let diagnostic = builtin_error(format!("power: {stage} failed: {error}"));
+    crate::runtime_error::with_provider_execution_source(diagnostic, error.into_execution_error())
 }
 
 async fn gather_and_evaluate(
@@ -153,14 +151,27 @@ async fn gather_and_evaluate(
     host: Value,
     resident_operand: ResidentOperand,
 ) -> BuiltinResult<Value> {
+    let fallback = match resident_operand {
+        ResidentOperand::Base => HostFallbackAdmission::new(
+            &runmat_builtins::POWER_CATALOG_ENTRY,
+            &Value::GpuTensor(resident.clone()),
+            &host,
+        )?,
+        ResidentOperand::Exponent => HostFallbackAdmission::new(
+            &runmat_builtins::POWER_CATALOG_ENTRY,
+            &host,
+            &Value::GpuTensor(resident.clone()),
+        )?,
+    };
     let resident = gpu_helpers::gather_tensor_async(&resident)
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     let host = gather_value(host).await?;
-    match resident_operand {
+    let output = match resident_operand {
         ResidentOperand::Base => power_host(Value::Tensor(resident), host),
         ResidentOperand::Exponent => power_host(host, Value::Tensor(resident)),
-    }
+    }?;
+    fallback.finish(output)
 }
 
 impl ResidentOperand {
@@ -175,25 +186,34 @@ impl ResidentOperand {
             Self::Exponent => super::pair::try_real_pair(provider, host, resident).await,
         }
     }
+}
 
-    fn proves_legacy_real_power(self, host: f64) -> bool {
-        match self {
-            Self::Base => host.is_finite() && host != 0.0 && host.fract() == 0.0,
-            Self::Exponent => host.is_finite() && host > 0.0 && host != 1.0,
-        }
-    }
+#[cfg(test)]
+mod error_tests {
+    use super::*;
 
-    async fn elem_pow(
-        self,
-        provider: &dyn AccelProvider,
-        resident: &GpuTensorHandle,
-        host: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        let _resident = gpu_helpers::ResidencyRestoreGuard::new(resident);
-        let _host = gpu_helpers::ResidencyRestoreGuard::new(host);
-        match self {
-            Self::Base => provider.elem_pow(resident, host).await,
-            Self::Exponent => provider.elem_pow(host, resident).await,
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn mixed_publication_failure_retains_typed_cause_and_forbids_replay() {
+        let source = runmat_accelerate_api::ProviderExecutionError::from_source(
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "cast publication failed"),
+        )
+        .after_effect();
+        let error = service_error(
+            "mixed Single publication",
+            runmat_accelerate_api::power_service::PowerServiceError(source),
+        );
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert!(!runmat_accelerate_api::is_unsupported_provider_error(
+            &error
+        ));
+        let mut source: &(dyn std::error::Error + 'static) = &error;
+        loop {
+            if let Some(error) = source.downcast_ref::<std::io::Error>() {
+                assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+                break;
+            }
+            source = source.source().expect("typed provider cause retained");
         }
     }
 }

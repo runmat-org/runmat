@@ -52,15 +52,16 @@ pub(super) async fn cast_gpu_value(
             ),
         )),
 
-        Err(error)
-            if crate::builtins::common::gpu_helpers::provider_hook_is_unsupported(&error) =>
-        {
+        Err(error) if error.is_unsupported() => {
             fallback_through_owner(provider, &handle, target).await
         }
         Err(error) => {
-            let mut contextual = crate::build_runtime_error(error.to_string()).build();
-            contextual.source = Some(error.into_boxed_dyn_error());
-            Err(retained_error(contextual))
+            let contextual = crate::build_runtime_error(error.to_string())
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build();
+            Err(retained_error(
+                crate::runtime_error::with_provider_execution_source(contextual, error),
+            ))
         }
     }
 }

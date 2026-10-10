@@ -1,13 +1,22 @@
 use crate::backend::wgpu::bindings::{storage_read_entry, storage_read_write_entry, uniform_entry};
 use crate::backend::wgpu::types::NumericPrecision;
+pub(super) use crate::wgsl::substitute_tokens;
 use std::borrow::Cow;
 use std::sync::OnceLock;
 
+#[path = "pipelines/scalar_recipe.rs"]
+mod scalar_recipe;
+pub(crate) use scalar_recipe::ScalarLaunchRecipe;
+#[path = "pipelines/linear_launch.rs"]
+mod linear_launch;
+pub(crate) use linear_launch::FrozenLinearLaunch;
+pub(crate) use linear_launch::FrozenShaderTokens;
+#[path = "pipelines/global_reduction_launch.rs"]
+mod global_reduction_launch;
+pub(crate) use global_reduction_launch::FrozenGlobalReductionLaunch;
+
 // Shader aliases
-const BINARY_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::BINARY_SHADER_F64;
 const BINARY_SHADER_F32: &str = crate::backend::wgpu::shaders::elementwise::BINARY_SHADER_F32;
-const BINARY_BROADCAST_SHADER_F64: &str =
-    crate::backend::wgpu::shaders::elementwise::BINARY_BROADCAST_SHADER_F64;
 const BINARY_BROADCAST_SHADER_F32: &str =
     crate::backend::wgpu::shaders::elementwise::BINARY_BROADCAST_SHADER_F32;
 const SCALAR_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::SCALAR_SHADER_F64;
@@ -102,10 +111,6 @@ const MOVING_WINDOW_SHADER_F64: &str =
     crate::backend::wgpu::shaders::moving_window::MOVING_WINDOW_SHADER_F64;
 const MOVING_WINDOW_SHADER_F32: &str =
     crate::backend::wgpu::shaders::moving_window::MOVING_WINDOW_SHADER_F32;
-const REDUCE_GLOBAL_SHADER_F64: &str =
-    crate::backend::wgpu::shaders::reduction::REDUCE_GLOBAL_SHADER_F64;
-const REDUCE_GLOBAL_SHADER_F32: &str =
-    crate::backend::wgpu::shaders::reduction::REDUCE_GLOBAL_SHADER_F32;
 const REDUCE_DIM_SHADER_F64: &str = crate::backend::wgpu::shaders::reduction::REDUCE_DIM_SHADER_F64;
 const REDUCE_DIM_SHADER_F32: &str = crate::backend::wgpu::shaders::reduction::REDUCE_DIM_SHADER_F32;
 const REDUCE_DIM_MINMAX_SHADER_F64: &str =
@@ -166,12 +171,6 @@ const TRIU_SHADER_F64: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F
 const TRIU_SHADER_F32: &str = crate::backend::wgpu::shaders::triu::TRIU_SHADER_F32;
 const INTERP1_SHADER_F64: &str = crate::backend::wgpu::shaders::interp1::INTERP1_SHADER_F64;
 const INTERP1_SHADER_F32: &str = crate::backend::wgpu::shaders::interp1::INTERP1_SHADER_F32;
-#[cfg(not(target_os = "windows"))]
-const IMAGE_NORMALIZE_SHADER_F64: &str =
-    crate::backend::wgpu::shaders::image_normalize::IMAGE_NORMALIZE_SHADER_F64;
-#[cfg(not(target_os = "windows"))]
-const IMAGE_NORMALIZE_SHADER_F32: &str =
-    crate::backend::wgpu::shaders::image_normalize::IMAGE_NORMALIZE_SHADER_F32;
 #[cfg(target_os = "windows")]
 use crate::backend::wgpu::shaders::image_normalize_stub::{
     IMAGE_NORMALIZE_STUB_SHADER_F32, IMAGE_NORMALIZE_STUB_SHADER_F64,
@@ -221,6 +220,9 @@ pub struct CompiledPipelineBundle {
 /// starting. Each operation now pays its compilation cost only when it is first
 /// invoked, and [`OnceLock`] coalesces concurrent first use.
 pub struct PipelineBundle {
+    scalar_launch: Option<ScalarLaunchRecipe>,
+    linear_launch: Option<FrozenLinearLaunch>,
+    frozen_reduction_shader_workgroup: Option<u32>,
     compiled: OnceLock<CompiledPipelineBundle>,
     access: runmat_accelerate_api::WgpuDeviceAccess,
     layout_label: &'static str,
@@ -228,9 +230,102 @@ pub struct PipelineBundle {
     pipeline_label: &'static str,
     entries: Vec<wgpu::BindGroupLayoutEntry>,
     shader_source: Cow<'static, str>,
+    required_features: wgpu::Features,
 }
 
 impl PipelineBundle {
+    /// Constructor-frozen source is the one authority for migrated scoped
+    /// preparation; the legacy bundle retains its existing consumers.
+    pub(crate) fn frozen_shader_source(&self) -> &str {
+        self.shader_source.as_ref()
+    }
+
+    fn with_frozen_reduction_shader(mut self, workgroup: u32) -> Self {
+        // Dimensional reduction's shader and dispatch use the same
+        // constructor-frozen workgroup size.
+        self.shader_source =
+            Cow::Owned(freeze_dim_reduction_source(&self.shader_source, workgroup));
+        self.frozen_reduction_shader_workgroup = Some(workgroup);
+        self
+    }
+
+    pub(crate) fn frozen_reduction_source(&self) -> Option<(&str, u32)> {
+        self.frozen_reduction_shader_workgroup
+            .map(|workgroup| (self.shader_source.as_ref(), workgroup))
+    }
+
+    fn with_linear_launch(mut self, tokens: FrozenShaderTokens) -> Self {
+        self.shader_source = Cow::Owned(tokens.substitute(&self.shader_source));
+        self.linear_launch = Some(tokens.linear());
+        self
+    }
+
+    pub(crate) fn linear_launch(&self) -> Option<FrozenLinearLaunch> {
+        self.linear_launch
+    }
+
+    pub(crate) fn linear_dispatch_groups(&self, elements: usize) -> anyhow::Result<u32> {
+        self.linear_launch
+            .and_then(|launch| launch.dispatch_groups(elements))
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "{}: linear dispatch exceeds its frozen device limits",
+                    self.pipeline_label
+                )
+            })
+    }
+
+    fn with_scalar_launch(
+        mut self,
+        precision: NumericPrecision,
+        launch: FrozenLinearLaunch,
+    ) -> Self {
+        let recipe = ScalarLaunchRecipe::new(precision, launch, self.layout_label);
+        self.shader_source = Cow::Owned(recipe.shader().to_owned());
+        self.scalar_launch = Some(recipe);
+        self
+    }
+
+    pub(crate) fn scalar_launch(&self) -> Option<&ScalarLaunchRecipe> {
+        self.scalar_launch.as_ref()
+    }
+    fn with_scalar_max_launch(
+        mut self,
+        precision: NumericPrecision,
+        launch: FrozenLinearLaunch,
+    ) -> Self {
+        let recipe = ScalarLaunchRecipe::new_max(
+            precision,
+            launch,
+            self.layout_label,
+            crate::backend::wgpu::shaders::real_max::RealMaxPolicy::IncludeNaNPreferPositiveZero,
+        );
+        self.shader_source = Cow::Owned(recipe.shader().to_owned());
+        self.scalar_launch = Some(recipe);
+        self.required_features = ieee_word_features(precision);
+        self
+    }
+    fn requiring(mut self, features: wgpu::Features) -> Self {
+        self.required_features = features;
+        self
+    }
+
+    fn validate_features(&self, enabled: wgpu::Features) -> anyhow::Result<()> {
+        if !required_features_enabled(self.required_features, enabled) {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "selected WGPU shader requires unavailable device features",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Check the selected physical shader before output allocation or submission.
+    pub(crate) fn preflight(&self) -> anyhow::Result<()> {
+        self.access
+            .with_shared(|emission| self.validate_features(emission.device().features()))??;
+        Ok(())
+    }
+
     /// Inspect compilation state without compiling a shader or accessing the device.
     pub(crate) fn is_initialized(&self) -> bool {
         self.compiled.get().is_some()
@@ -241,6 +336,7 @@ impl PipelineBundle {
         emission: &runmat_accelerate_api::WgpuEmission<'_>,
     ) -> anyhow::Result<&CompiledPipelineBundle> {
         emission.ensure_device(&self.access)?;
+        self.validate_features(emission.device().features())?;
         Ok(crate::backend::wgpu::cache::scope::get_or_init(
             &self.compiled,
             emission.mode(),
@@ -258,6 +354,25 @@ impl PipelineBundle {
     }
 }
 
+fn freeze_dim_reduction_source(source: &str, workgroup: u32) -> String {
+    source.replace("@WG@", &workgroup.to_string())
+}
+
+#[cfg(test)]
+#[path = "pipelines/dim_reduction_tests.rs"]
+mod dim_reduction_tests;
+
+fn required_features_enabled(required: wgpu::Features, enabled: wgpu::Features) -> bool {
+    enabled.contains(required)
+}
+
+fn ieee_word_features(precision: NumericPrecision) -> wgpu::Features {
+    match precision {
+        NumericPrecision::F32 => wgpu::Features::empty(),
+        NumericPrecision::F64 => wgpu::Features::SHADER_F64 | wgpu::Features::SHADER_INT64,
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct ImageNormalizeBootstrap {
     pub batch_tile: u32,
@@ -269,8 +384,13 @@ pub struct ImageNormalizeBootstrap {
 pub struct WgpuPipelines {
     pub binary: PipelineBundle,
     pub binary_broadcast: PipelineBundle,
+    pub binary_max: PipelineBundle,
+    pub binary_broadcast_max: PipelineBundle,
+    pub binary_atan2: Option<PipelineBundle>,
+    pub binary_broadcast_atan2: Option<PipelineBundle>,
     pub unary: PipelineBundle,
     pub scalar: PipelineBundle,
+    pub scalar_max: PipelineBundle,
     pub transpose: PipelineBundle,
     pub permute: PipelineBundle,
     pub integer_permute: PipelineBundle,
@@ -312,7 +432,6 @@ pub struct WgpuPipelines {
     pub matmul_vec4: PipelineBundle,
     pub matmul_smallk: PipelineBundle,
     pub matmul_tall_skinny: PipelineBundle,
-    pub matmul_epilogue: PipelineBundle,
     pub centered_gram: PipelineBundle,
     pub qr_power_iter: PipelineBundle,
     pub syrk: PipelineBundle,
@@ -355,16 +474,26 @@ pub struct WgpuPipelines {
     pub reduce_nd_moments: PipelineBundle,
 }
 
+#[path = "pipelines/real_floating.rs"]
+mod real_floating;
+pub(crate) use real_floating::F32RealElementwisePipelines;
+
+#[path = "pipelines/ordered_real_mean.rs"]
+mod ordered_real_mean;
+pub(crate) use ordered_real_mean::OrderedRealMeanPipelines;
+
 impl WgpuPipelines {
-    pub fn new(
+    pub(crate) fn new(
         access: &runmat_accelerate_api::WgpuDeviceAccess,
         precision: NumericPrecision,
         image_norm_bootstrap: ImageNormalizeBootstrap,
-        scalar_workgroup: u32,
+        linear_launch: FrozenLinearLaunch,
+        global_reduction_launch: FrozenGlobalReductionLaunch,
         matmul_tile: u32,
     ) -> Self {
         #[cfg(target_os = "windows")]
         let _ = &image_norm_bootstrap;
+        let linear_tokens = FrozenShaderTokens::new(linear_launch, matmul_tile);
         let binary = create_pipeline(
             access,
             "runmat-binary-layout",
@@ -377,8 +506,13 @@ impl WgpuPipelines {
                 uniform_entry(3),
             ],
             match precision {
-                NumericPrecision::F64 => BINARY_SHADER_F64,
-                NumericPrecision::F32 => BINARY_SHADER_F32,
+                NumericPrecision::F64 => {
+                    crate::backend::wgpu::shaders::elementwise::binary_shader_f64(
+                        crate::backend::wgpu::shaders::elementwise::RealBinaryShaderKind::General,
+                        false,
+                    )
+                }
+                NumericPrecision::F32 => BINARY_SHADER_F32.to_owned(),
             },
         );
 
@@ -394,10 +528,91 @@ impl WgpuPipelines {
                 uniform_entry(3),
             ],
             match precision {
-                NumericPrecision::F64 => BINARY_BROADCAST_SHADER_F64,
-                NumericPrecision::F32 => BINARY_BROADCAST_SHADER_F32,
+                NumericPrecision::F64 => {
+                    crate::backend::wgpu::shaders::elementwise::binary_shader_f64(
+                        crate::backend::wgpu::shaders::elementwise::RealBinaryShaderKind::General,
+                        true,
+                    )
+                }
+                NumericPrecision::F32 => BINARY_BROADCAST_SHADER_F32.to_owned(),
             },
         );
+
+        let binary_max = create_pipeline(
+            access,
+            "runmat-binary-max-layout",
+            "runmat-binary-max-shader",
+            "runmat-binary-max-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            crate::backend::wgpu::shaders::real_max::binary_shader(
+                precision,
+                false,
+                crate::backend::wgpu::shaders::real_max::RealMaxPolicy::IncludeNaNPreferPositiveZero,
+            ),
+        )
+        .requiring(ieee_word_features(precision));
+        let binary_broadcast_max = create_pipeline(
+            access,
+            "runmat-binary-max-broadcast-layout",
+            "runmat-binary-max-broadcast-shader",
+            "runmat-binary-max-broadcast-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            crate::backend::wgpu::shaders::real_max::binary_shader(
+                precision,
+                true,
+                crate::backend::wgpu::shaders::real_max::RealMaxPolicy::IncludeNaNPreferPositiveZero,
+            ),
+        )
+        .requiring(ieee_word_features(precision));
+
+        let binary_atan2 = (precision == NumericPrecision::F64).then(|| {
+            create_pipeline(
+                access,
+                "runmat-binary-atan2-layout",
+                "runmat-binary-atan2-shader",
+                "runmat-binary-atan2-pipeline",
+                vec![
+                    storage_read_entry(0),
+                    storage_read_entry(1),
+                    storage_read_write_entry(2),
+                    uniform_entry(3),
+                ],
+                crate::backend::wgpu::shaders::elementwise::binary_shader_f64(
+                    crate::backend::wgpu::shaders::elementwise::RealBinaryShaderKind::SignedZeroAtan2,
+                    false,
+                ),
+            )
+            .requiring(ieee_word_features(precision))
+        });
+        let binary_broadcast_atan2 = (precision == NumericPrecision::F64).then(|| {
+            create_pipeline(
+                access,
+                "runmat-binary-atan2-broadcast-layout",
+                "runmat-binary-atan2-broadcast-shader",
+                "runmat-binary-atan2-broadcast-pipeline",
+                vec![
+                    storage_read_entry(0),
+                    storage_read_entry(1),
+                    storage_read_write_entry(2),
+                    uniform_entry(3),
+                ],
+                crate::backend::wgpu::shaders::elementwise::binary_shader_f64(
+                    crate::backend::wgpu::shaders::elementwise::RealBinaryShaderKind::SignedZeroAtan2,
+                    true,
+                ),
+            )
+            .requiring(ieee_word_features(precision))
+        });
 
         // `round(..., digits)` shares this three-binding layout. Real unary execution itself uses
         // operation-specific fused shaders so Metal never compiles the oversized legacy template.
@@ -432,7 +647,22 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => SCALAR_SHADER_F64,
                 NumericPrecision::F32 => SCALAR_SHADER_F32,
             },
-        );
+        )
+        .with_scalar_launch(precision, linear_launch);
+
+        let scalar_max = create_pipeline(
+            access,
+            "runmat-scalar-max-layout",
+            "runmat-scalar-max-shader",
+            "runmat-scalar-max-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            SCALAR_SHADER_F32,
+        )
+        .with_scalar_max_launch(precision, linear_launch);
 
         let transpose = create_pipeline(
             access,
@@ -464,7 +694,7 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => PERMUTE_SHADER_F64,
                 NumericPrecision::F32 => PERMUTE_SHADER_F32,
             }
-            .replace("@WG@", &scalar_workgroup.to_string()),
+            .replace("@WG@", &linear_launch.workgroup().to_string()),
         );
         let integer_permute_shader = crate::backend::wgpu::shaders::permute::permute_shader_u32();
         let integer_permute = create_pipeline(
@@ -477,7 +707,7 @@ impl WgpuPipelines {
                 storage_read_write_entry(1),
                 uniform_entry(2),
             ],
-            integer_permute_shader.replace("@WG@", &scalar_workgroup.to_string()),
+            integer_permute_shader.replace("@WG@", &linear_launch.workgroup().to_string()),
         );
 
         let flip = create_pipeline(
@@ -494,7 +724,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => FLIP_SHADER_F64,
                 NumericPrecision::F32 => FLIP_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
         let integer_flip_shader = crate::backend::wgpu::shaders::flip::flip_shader_u32();
         let integer_flip = create_pipeline(
             access,
@@ -507,7 +738,8 @@ impl WgpuPipelines {
                 uniform_entry(2),
             ],
             integer_flip_shader,
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let conv1d = create_pipeline(
             access,
@@ -545,7 +777,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => crate::backend::wgpu::shaders::filter::FILTER_SHADER_F64,
                 NumericPrecision::F32 => crate::backend::wgpu::shaders::filter::FILTER_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let moving_window = create_pipeline(
             access,
@@ -558,10 +791,13 @@ impl WgpuPipelines {
                 uniform_entry(2),
             ],
             match precision {
-                NumericPrecision::F64 => MOVING_WINDOW_SHADER_F64,
-                NumericPrecision::F32 => MOVING_WINDOW_SHADER_F32,
+                NumericPrecision::F64 => {
+                    crate::backend::wgpu::shaders::ieee_words::inject(MOVING_WINDOW_SHADER_F64)
+                }
+                NumericPrecision::F32 => MOVING_WINDOW_SHADER_F32.to_owned(),
             },
-        );
+        )
+        .requiring(ieee_word_features(precision));
 
         let diff = create_pipeline(
             access,
@@ -577,7 +813,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => DIFF_SHADER_F64,
                 NumericPrecision::F32 => DIFF_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let gradient = create_pipeline(
             access,
@@ -593,7 +830,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => GRADIENT_SHADER_F64,
                 NumericPrecision::F32 => GRADIENT_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let gradient_coordinates = create_pipeline(
             access,
@@ -610,7 +848,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => GRADIENT_COORDINATES_SHADER_F64,
                 NumericPrecision::F32 => GRADIENT_COORDINATES_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let cumsum = create_pipeline(
             access,
@@ -622,11 +861,16 @@ impl WgpuPipelines {
                 storage_read_write_entry(1),
                 uniform_entry(2),
             ],
-            match precision {
-                NumericPrecision::F64 => CUMSUM_SHADER_F64,
-                NumericPrecision::F32 => CUMSUM_SHADER_F32,
-            },
-        );
+            crate::backend::wgpu::shaders::nan_predicate::inject(
+                match precision {
+                    NumericPrecision::F64 => CUMSUM_SHADER_F64,
+                    NumericPrecision::F32 => CUMSUM_SHADER_F32,
+                },
+                precision,
+            ),
+        )
+        .with_linear_launch(linear_tokens)
+        .requiring(ieee_word_features(precision));
 
         let trapezoid = create_pipeline(
             access,
@@ -643,7 +887,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => TRAPEZOID_SHADER_F64,
                 NumericPrecision::F32 => TRAPEZOID_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let cumprod = create_pipeline(
             access,
@@ -655,11 +900,16 @@ impl WgpuPipelines {
                 storage_read_write_entry(1),
                 uniform_entry(2),
             ],
-            match precision {
-                NumericPrecision::F64 => CUMPROD_SHADER_F64,
-                NumericPrecision::F32 => CUMPROD_SHADER_F32,
-            },
-        );
+            crate::backend::wgpu::shaders::nan_predicate::inject(
+                match precision {
+                    NumericPrecision::F64 => CUMPROD_SHADER_F64,
+                    NumericPrecision::F32 => CUMPROD_SHADER_F32,
+                },
+                precision,
+            ),
+        )
+        .with_linear_launch(linear_tokens)
+        .requiring(ieee_word_features(precision));
 
         let cummin = create_pipeline(
             access,
@@ -672,11 +922,16 @@ impl WgpuPipelines {
                 storage_read_write_entry(2),
                 uniform_entry(3),
             ],
-            match precision {
-                NumericPrecision::F64 => CUMMIN_SHADER_F64,
-                NumericPrecision::F32 => CUMMIN_SHADER_F32,
-            },
-        );
+            crate::backend::wgpu::shaders::nan_predicate::inject(
+                match precision {
+                    NumericPrecision::F64 => CUMMIN_SHADER_F64,
+                    NumericPrecision::F32 => CUMMIN_SHADER_F32,
+                },
+                precision,
+            ),
+        )
+        .with_linear_launch(linear_tokens)
+        .requiring(ieee_word_features(precision));
 
         let cummax = create_pipeline(
             access,
@@ -689,11 +944,16 @@ impl WgpuPipelines {
                 storage_read_write_entry(2),
                 uniform_entry(3),
             ],
-            match precision {
-                NumericPrecision::F64 => CUMMAX_SHADER_F64,
-                NumericPrecision::F32 => CUMMAX_SHADER_F32,
-            },
-        );
+            crate::backend::wgpu::shaders::nan_predicate::inject(
+                match precision {
+                    NumericPrecision::F64 => CUMMAX_SHADER_F64,
+                    NumericPrecision::F32 => CUMMAX_SHADER_F32,
+                },
+                precision,
+            ),
+        )
+        .with_linear_launch(linear_tokens)
+        .requiring(ieee_word_features(precision));
 
         let tril = create_pipeline(
             access,
@@ -709,7 +969,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => TRIL_SHADER_F64,
                 NumericPrecision::F32 => TRIL_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let triu = create_pipeline(
             access,
@@ -725,7 +986,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => TRIU_SHADER_F64,
                 NumericPrecision::F32 => TRIU_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let circshift = create_pipeline(
             access,
@@ -741,7 +1003,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => CIRCSHIFT_SHADER_F64,
                 NumericPrecision::F32 => CIRCSHIFT_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
         let integer_circshift_shader =
             crate::backend::wgpu::shaders::circshift::circshift_shader_u32();
         let integer_circshift = create_pipeline(
@@ -755,7 +1018,8 @@ impl WgpuPipelines {
                 uniform_entry(2),
             ],
             integer_circshift_shader,
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let fft_init = create_pipeline(
             access,
@@ -1000,7 +1264,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => REPMAT_SHADER_F64,
                 NumericPrecision::F32 => REPMAT_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
         let integer_repmat_shader = crate::backend::wgpu::shaders::repmat::repmat_shader_u32();
         let integer_repmat = create_pipeline(
             access,
@@ -1013,7 +1278,8 @@ impl WgpuPipelines {
                 uniform_entry(2),
             ],
             integer_repmat_shader,
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let kron = create_pipeline(
             access,
@@ -1030,7 +1296,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => KRON_SHADER_F64,
                 NumericPrecision::F32 => KRON_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let matmul = create_pipeline(
             access,
@@ -1100,29 +1367,6 @@ impl WgpuPipelines {
             },
         );
 
-        let matmul_epilogue = create_pipeline(
-            access,
-            "runmat-matmul-epilogue-layout",
-            "runmat-matmul-epilogue-shader",
-            "runmat-matmul-epilogue-pipeline",
-            vec![
-                storage_read_entry(0),
-                storage_read_entry(1),
-                storage_read_write_entry(2),
-                uniform_entry(3),
-                storage_read_entry(4),
-                storage_read_entry(5),
-                uniform_entry(6),
-            ],
-            crate::backend::wgpu::shaders::matmul::epilogue_shader(
-                match precision {
-                    NumericPrecision::F64 => runmat_accelerate_api::ProviderPrecision::F64,
-                    NumericPrecision::F32 => runmat_accelerate_api::ProviderPrecision::F32,
-                },
-                matmul_tile,
-            ),
-        );
-
         let centered_gram = create_pipeline(
             access,
             "runmat-centered-gram-layout",
@@ -1180,11 +1424,10 @@ impl WgpuPipelines {
                 storage_read_write_entry(1),
                 uniform_entry(2),
             ],
-            match precision {
-                NumericPrecision::F64 => REDUCE_GLOBAL_SHADER_F64,
-                NumericPrecision::F32 => REDUCE_GLOBAL_SHADER_F32,
-            },
-        );
+            crate::backend::wgpu::shaders::reduction::global_source(precision)
+                .replace("@WG@", &global_reduction_launch.workgroup().to_string()),
+        )
+        .requiring(ieee_word_features(precision));
 
         let reduce_dim_sum_mean = create_pipeline(
             access,
@@ -1196,11 +1439,16 @@ impl WgpuPipelines {
                 storage_read_write_entry(1),
                 uniform_entry(2),
             ],
-            match precision {
-                NumericPrecision::F64 => REDUCE_DIM_SHADER_F64,
-                NumericPrecision::F32 => REDUCE_DIM_SHADER_F32,
-            },
-        );
+            crate::backend::wgpu::shaders::nan_predicate::inject(
+                match precision {
+                    NumericPrecision::F64 => REDUCE_DIM_SHADER_F64,
+                    NumericPrecision::F32 => REDUCE_DIM_SHADER_F32,
+                },
+                precision,
+            ),
+        )
+        .requiring(ieee_word_features(precision))
+        .with_frozen_reduction_shader(linear_launch.workgroup());
 
         let reduce_dim_minmax = create_pipeline(
             access,
@@ -1214,11 +1462,15 @@ impl WgpuPipelines {
                 uniform_entry(3),
             ],
             match precision {
-                NumericPrecision::F64 => REDUCE_DIM_MINMAX_SHADER_F64,
-                NumericPrecision::F32 => REDUCE_DIM_MINMAX_SHADER_F32,
-            }
-            .replace("@WG@", &scalar_workgroup.to_string()),
-        );
+                NumericPrecision::F64 => crate::backend::wgpu::shaders::ieee_words::inject(
+                    &REDUCE_DIM_MINMAX_SHADER_F64
+                        .replace("@WG@", &linear_launch.workgroup().to_string()),
+                ),
+                NumericPrecision::F32 => REDUCE_DIM_MINMAX_SHADER_F32
+                    .replace("@WG@", &linear_launch.workgroup().to_string()),
+            },
+        )
+        .requiring(ieee_word_features(precision));
 
         let eye = create_pipeline(
             access,
@@ -1427,25 +1679,16 @@ impl WgpuPipelines {
             NumericPrecision::F32 => IMAGE_NORMALIZE_STUB_SHADER_F32,
         });
         #[cfg(not(target_os = "windows"))]
-        let image_norm_source: Cow<'static, str> = {
-            let image_norm_template = match precision {
-                NumericPrecision::F64 => IMAGE_NORMALIZE_SHADER_F64,
-                NumericPrecision::F32 => IMAGE_NORMALIZE_SHADER_F32,
-            };
-            let image_norm_vec_width = match precision {
-                NumericPrecision::F64 => 2,
-                NumericPrecision::F32 => 4,
-            }
-            .to_string();
-            Cow::Owned(
-                image_norm_template
-                    .replace("@BT@", &image_norm_bootstrap.batch_tile.to_string())
-                    .replace("@VP@", &image_norm_bootstrap.values_per_thread.to_string())
-                    .replace("@WG@", &image_norm_bootstrap.lane_count.to_string())
-                    .replace("@BV@", &image_norm_vec_width)
-                    .replace("@ST@", &image_norm_bootstrap.spatial_tile.to_string()),
-            )
-        };
+        let image_norm_source: Cow<'static, str> =
+            Cow::Owned(crate::backend::wgpu::shaders::image_normalize::materialize(
+                precision,
+                crate::backend::wgpu::shaders::image_normalize::ImageNormalizeShaderGeometry {
+                    batch_tile: image_norm_bootstrap.batch_tile,
+                    values_per_thread: image_norm_bootstrap.values_per_thread,
+                    lane_count: image_norm_bootstrap.lane_count,
+                    spatial_tile: image_norm_bootstrap.spatial_tile,
+                },
+            ));
 
         let image_normalize = create_pipeline(
             access,
@@ -1525,7 +1768,7 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => DIAG_FROM_VECTOR_SHADER_F64,
                 NumericPrecision::F32 => DIAG_FROM_VECTOR_SHADER_F32,
             }
-            .replace("@WG@", &scalar_workgroup.to_string()),
+            .replace("@WG@", &linear_launch.workgroup().to_string()),
         );
 
         let diag_extract = create_pipeline(
@@ -1543,7 +1786,7 @@ impl WgpuPipelines {
                     NumericPrecision::F64 => runmat_accelerate_api::ProviderPrecision::F64,
                     NumericPrecision::F32 => runmat_accelerate_api::ProviderPrecision::F32,
                 },
-                scalar_workgroup,
+                linear_launch.workgroup(),
             ),
         );
 
@@ -1559,11 +1802,15 @@ impl WgpuPipelines {
                 storage_read_write_entry(3),
                 uniform_entry(4),
             ],
-            match precision {
-                NumericPrecision::F64 => INTERP1_SHADER_F64,
-                NumericPrecision::F32 => INTERP1_SHADER_F32,
-            },
-        );
+            crate::backend::wgpu::shaders::nan_predicate::inject(
+                match precision {
+                    NumericPrecision::F64 => INTERP1_SHADER_F64,
+                    NumericPrecision::F32 => INTERP1_SHADER_F32,
+                },
+                precision,
+            ),
+        )
+        .requiring(ieee_word_features(precision));
 
         let gather_linear = create_pipeline(
             access,
@@ -1580,7 +1827,7 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => LINEAR_GATHER_SHADER_F64,
                 NumericPrecision::F32 => LINEAR_GATHER_SHADER_F32,
             }
-            .replace("@WG@", &scalar_workgroup.to_string()),
+            .replace("@WG@", &linear_launch.workgroup().to_string()),
         );
 
         let scatter_linear = create_pipeline(
@@ -1598,7 +1845,7 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => LINEAR_SCATTER_SHADER_F64,
                 NumericPrecision::F32 => LINEAR_SCATTER_SHADER_F32,
             }
-            .replace("@WG@", &scalar_workgroup.to_string()),
+            .replace("@WG@", &linear_launch.workgroup().to_string()),
         );
 
         let find = create_pipeline(
@@ -1647,11 +1894,15 @@ impl WgpuPipelines {
                 storage_read_write_entry(1),
                 uniform_entry(2),
             ],
-            match precision {
-                NumericPrecision::F64 => SYMMETRY_SHADER_F64,
-                NumericPrecision::F32 => SYMMETRY_SHADER_F32,
-            },
-        );
+            crate::backend::wgpu::shaders::nan_predicate::inject(
+                match precision {
+                    NumericPrecision::F64 => SYMMETRY_SHADER_F64,
+                    NumericPrecision::F32 => SYMMETRY_SHADER_F32,
+                },
+                precision,
+            ),
+        )
+        .requiring(ieee_word_features(precision));
 
         let reduce_nd_mean = create_pipeline(
             access,
@@ -1680,7 +1931,8 @@ impl WgpuPipelines {
                 uniform_entry(2),
             ],
             crate::backend::wgpu::shaders::deep_learning::stable_pool_1d(precision),
-        );
+        )
+        .requiring(ieee_word_features(precision));
 
         let deep_learning_layer_norm_statistics = create_pipeline(
             access,
@@ -1693,7 +1945,8 @@ impl WgpuPipelines {
                 uniform_entry(2),
             ],
             crate::backend::wgpu::shaders::deep_learning_normalization::statistics(precision),
-        );
+        )
+        .requiring(ieee_word_features(precision));
         let deep_learning_layer_norm_affine = create_pipeline(
             access,
             "runmat-layer-norm-affine-layout",
@@ -1708,7 +1961,8 @@ impl WgpuPipelines {
                 uniform_entry(5),
             ],
             crate::backend::wgpu::shaders::deep_learning_normalization::affine(precision),
-        );
+        )
+        .requiring(ieee_word_features(precision));
 
         let reduce_nd_moments = create_pipeline(
             access,
@@ -1730,8 +1984,13 @@ impl WgpuPipelines {
         Self {
             binary,
             binary_broadcast,
+            binary_max,
+            binary_broadcast_max,
+            binary_atan2,
+            binary_broadcast_atan2,
             unary,
             scalar,
+            scalar_max,
             transpose,
             permute,
             integer_permute,
@@ -1773,7 +2032,6 @@ impl WgpuPipelines {
             matmul_vec4,
             matmul_smallk,
             matmul_tall_skinny,
-            matmul_epilogue,
             centered_gram,
             qr_power_iter,
             syrk,
@@ -1818,17 +2076,6 @@ impl WgpuPipelines {
     }
 }
 
-pub(super) fn substitute_tokens(src: &str, wg: u32, tile: u32) -> Cow<'_, str> {
-    if src.contains("@WG@") || src.contains("@MT@") {
-        let mut s = src.to_string();
-        s = s.replace("@WG@", &wg.to_string());
-        s = s.replace("@MT@", &tile.to_string());
-        Cow::Owned(s)
-    } else {
-        Cow::Borrowed(src)
-    }
-}
-
 fn create_pipeline(
     access: &runmat_accelerate_api::WgpuDeviceAccess,
     layout_label: &'static str,
@@ -1838,6 +2085,9 @@ fn create_pipeline(
     shader_source: impl Into<Cow<'static, str>>,
 ) -> PipelineBundle {
     PipelineBundle {
+        scalar_launch: None,
+        linear_launch: None,
+        frozen_reduction_shader_workgroup: None,
         compiled: OnceLock::new(),
         access: access.clone(),
         layout_label,
@@ -1845,6 +2095,7 @@ fn create_pipeline(
         pipeline_label,
         entries,
         shader_source: shader_source.into(),
+        required_features: wgpu::Features::empty(),
     }
 }
 
@@ -1861,9 +2112,15 @@ fn compile_pipeline(
         label: Some(layout_label),
         entries,
     });
-    let wg = crate::backend::wgpu::config::effective_workgroup_size();
-    let mt = crate::backend::wgpu::config::effective_matmul_tile();
-    let patched = substitute_tokens(shader_source, wg, mt);
+    let patched = if shader_source.contains("@WG@") || shader_source.contains("@MT@") {
+        substitute_tokens(
+            shader_source,
+            crate::backend::wgpu::config::effective_workgroup_size(),
+            crate::backend::wgpu::config::effective_matmul_tile(),
+        )
+    } else {
+        Cow::Borrowed(shader_source)
+    };
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(shader_label),
         source: wgpu::ShaderSource::Wgsl(patched),
@@ -1893,9 +2150,15 @@ pub fn create_shader_module(
     wgsl: &str,
 ) -> wgpu::ShaderModule {
     let device = emission.device();
-    let wg = crate::backend::wgpu::config::effective_workgroup_size();
-    let mt = crate::backend::wgpu::config::effective_matmul_tile();
-    let patched = substitute_tokens(wgsl, wg, mt);
+    let patched = if wgsl.contains("@WG@") || wgsl.contains("@MT@") {
+        substitute_tokens(
+            wgsl,
+            crate::backend::wgpu::config::effective_workgroup_size(),
+            crate::backend::wgpu::config::effective_matmul_tile(),
+        )
+    } else {
+        Cow::Borrowed(wgsl)
+    };
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(label),
         source: wgpu::ShaderSource::Wgsl(patched),
@@ -1915,6 +2178,9 @@ pub fn create_pipeline_layout(
     })
 }
 
+#[cfg(test)]
+#[path = "pipelines/feature_tests.rs"]
+mod feature_tests;
 #[cfg(test)]
 #[path = "pipelines/frozen_matmul_geometry_tests.rs"]
 mod frozen_matmul_geometry_tests;

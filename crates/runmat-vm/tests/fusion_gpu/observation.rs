@@ -399,10 +399,20 @@ impl runmat_runtime::context::RuntimePlacementService for CancelOnCpuFusionSelec
         &self,
         request: runmat_execution::PlacementPlanRequest,
     ) -> Result<runmat_execution::PlacementDecision, RuntimeError> {
-        let decision = runmat_runtime::context::RuntimePlacementService::plan(
-            self.placement.as_ref(),
-            request,
-        )?;
+        self.plan_with_observation_permit(request)
+            .map(|selected| selected.decision)
+    }
+
+    fn plan_with_observation_permit(
+        &self,
+        request: runmat_execution::PlacementPlanRequest,
+    ) -> Result<runmat_runtime::context::RuntimeGraphPlacementSelection, RuntimeError> {
+        let selection =
+            runmat_runtime::context::RuntimePlacementService::plan_with_observation_permit(
+                self.placement.as_ref(),
+                request,
+            )?;
+        let decision = &selection.decision;
         if decision.signature.operation == "fusion.elementwise"
             && decision.selections.iter().any(|selection| {
                 selection.kind == runmat_execution::ExecutionCandidateKind::SharedRuntime
@@ -413,7 +423,7 @@ impl runmat_runtime::context::RuntimePlacementService for CancelOnCpuFusionSelec
             self.cancellation
                 .cancel(runmat_execution::CancellationReason::User);
         }
-        Ok(decision)
+        Ok(selection)
     }
 
     fn observe(&self, feedback: runmat_execution::PlacementFeedback) -> Result<(), RuntimeError> {
@@ -443,7 +453,7 @@ fn cancellation_after_cpu_fusion_selection(reject_provider: bool) {
         let _guard = accel_test_lock();
         ensure_provider_registered();
         runmat_accelerate::placement::reset();
-        let provider = PROVIDER.get().expect("test provider");
+        let provider = registered_provider().expect("test provider");
         provider
             .reject_fusion
             .store(reject_provider, Ordering::Relaxed);

@@ -19,6 +19,8 @@ fn selected() -> RuntimeWholeWorkSelection {
                 region: None,
                 operation: "gray2rgb".into(),
                 runtime_facts: digest,
+                provider_provenance: None,
+                graph_output_authority: None,
                 revision: PlacementRevision {
                     program: None,
                     catalog: digest,

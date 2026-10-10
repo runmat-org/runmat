@@ -2,9 +2,10 @@
 use runmat_accelerate_api::ProviderPrecision;
 
 pub(super) fn functions(precision: ProviderPrecision) -> String {
-    let (ty, maximum, subnormal, normalization, minimum, classify, normalize, pack, negative, overflow) = match precision {
+    let (ty, maximum, subnormal, normalization, normalization_log, minimum, classify, normalize, pack, negative, overflow) = match precision {
         ProviderPrecision::F32 => (
-            "f32", 38, 45, "8388608.0", "1.1754943508222875e-38",
+            // Nearest Single representation of ln(2^23).
+            "f32", 38, 45, "8388608.0", "f32(15.942384719848633)", "1.1754943508222875e-38",
             "let bits = bitcast<u32>(a); let exponent = bits & 0x7f800000u; let fraction = bits & 0x007fffffu; let special = exponent == 0x7f800000u; let zero = exponent == 0u && fraction == 0u; let tiny = exponent == 0u;",
             "f32(fraction) * f32(MINIMUM)",
             "return bitcast<f32>(u32(units) | (bitcast<u32>(a) & 0x80000000u));",
@@ -12,12 +13,14 @@ pub(super) fn functions(precision: ProviderPrecision) -> String {
             "(bitcast<u32>(scaled) & 0x7f800000u) == 0x7f800000u",
         ),
         ProviderPrecision::F64 => (
-            "f64", 308, 324, "4503599627370496.0", "2.2250738585072014e-308",
-            "let bits = bitcast<vec2<u32>>(a); let exponent = bits.y & 0x7ff00000u; let fraction_high = bits.y & 0x000fffffu; let special = exponent == 0x7ff00000u; let zero = exponent == 0u && fraction_high == 0u && bits.x == 0u; let tiny = exponent == 0u;",
-            "(f64(fraction_high) * f64(4294967296.0) + f64(bits.x)) * f64(MINIMUM)",
-            "let upper = u32(floor(units / f64(4294967296.0))); let lower = u32(units - f64(upper) * f64(4294967296.0)); return bitcast<f64>(vec2<u32>(lower, upper | (bitcast<vec2<u32>>(a).y & 0x80000000u)));",
-            "(bits.y & 0x80000000u) != 0u",
-            "(bitcast<vec2<u32>>(scaled).y & 0x7ff00000u) == 0x7ff00000u",
+            // Nearest Double representation of ln(2^52); Naga cannot
+            // evaluate the equivalent constant f64 log expression.
+            "f64", 308, 324, "4503599627370496.0", "f64(36.04365338911715)", "2.2250738585072014e-308",
+            "let low = runmat_f64_low(a); let high = runmat_f64_high(a); let exponent = high & 0x7ff00000u; let fraction_high = high & 0x000fffffu; let special = exponent == 0x7ff00000u; let zero = exponent == 0u && fraction_high == 0u && low == 0u; let tiny = exponent == 0u;",
+            "(f64(fraction_high) * f64(4294967296.0) + f64(low)) * f64(MINIMUM)",
+            "let upper = u32(floor(units / f64(4294967296.0))); let lower = u32(units - f64(upper) * f64(4294967296.0)); return runmat_f64_from_words(lower, upper | (runmat_f64_high(a) & 0x80000000u));",
+            "(high & 0x80000000u) != 0u",
+            "(runmat_f64_high(scaled) & 0x7ff00000u) == 0x7ff00000u",
         ),
     };
     let normalize = normalize.replace("MINIMUM", minimum);
@@ -57,7 +60,8 @@ fn rm_round_digits_{ty}(a: {ty}, requested: i32, significant: bool) -> {ty} {{
     var magnitude = abs(a);
     if tiny {{ magnitude = {normalize}; }}
     var order = floor(log(magnitude) * {ty}(0.43429448190325182765));
-    if tiny {{ order = floor(log(magnitude) * {ty}(0.43429448190325182765) - log({ty}({normalization})) * {ty}(0.43429448190325182765)); }}
+    let LN_NORMALIZATION: {ty} = {normalization_log};
+    if tiny {{ order = floor(log(magnitude) * {ty}(0.43429448190325182765) - LN_NORMALIZATION * {ty}(0.43429448190325182765)); }}
     var digits = requested;
     if significant {{
         // Bound the control before subtraction, including for i32::MAX.
@@ -92,4 +96,27 @@ fn rm_round_digits_{ty}(a: {ty}, requested: i32, significant: bool) -> {ty} {{
 }}
 "#
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalization_logs_keep_the_represented_inputs_and_order_formula() {
+        let single = functions(ProviderPrecision::F32);
+        let double = functions(ProviderPrecision::F64);
+        assert_eq!(15.942_385_f32.to_bits(), 0x417f1402);
+        assert_eq!(36.04365338911715_f64.to_bits(), 0x404205966f2b4f12);
+        assert!((15.942_385_f32 - (2.0_f32.powi(23)).ln()).abs() <= 8.0 * f32::EPSILON);
+        assert!((36.04365338911715_f64 - (2.0_f64.powi(52)).ln()).abs() <= 32.0 * f64::EPSILON);
+        for (source, ty, typed_constant) in [
+            (&single, "f32", "f32(15.942384719848633)"),
+            (&double, "f64", "f64(36.04365338911715)"),
+        ] {
+            assert!(source.contains(&format!("let LN_NORMALIZATION: {ty} = {typed_constant};")));
+            assert!(source.contains("- LN_NORMALIZATION *"));
+            assert!(!source.contains("log(f64(4503599627370496.0))"));
+        }
+    }
 }

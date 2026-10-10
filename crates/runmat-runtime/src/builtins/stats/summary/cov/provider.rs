@@ -86,31 +86,50 @@ pub(super) async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> 
         .await
     {
         Ok(result) => {
-            let Some(mut result) = precision
+            let result = precision
                 .align_provider(
                     provider,
                     result,
-                    &[columns, columns],
-                    &borrowed,
+                    CovarianceAlignmentContract {
+                        expected_shape: &[columns, columns],
+                        protected: &borrowed,
+                        builtin: NAME,
+                    },
                     |reason| cov_internal_error(format!("cov: {reason}")),
                     cov_provider_error,
                 )
-                .await?
-            else {
-                return Ok(None);
-            };
-            gpu_helpers::propagate_output_provenance(&mut result, borrowed).map_err(|error| {
-                cov_provider_error(runmat_accelerate_api::ProviderExecutionError::from_source(
-                    error,
-                ))
-            })?;
-            gpu_helpers::resident_gpu_value(result)
-                .map(Some)
-                .map_err(|error| {
-                    cov_provider_error(runmat_accelerate_api::ProviderExecutionError::from_source(
-                        error,
-                    ))
-                })
+                .await?;
+            match result {
+                AlignedCovarianceOutput::Resident(mut result) => {
+                    gpu_helpers::propagate_output_provenance(&mut result, borrowed).map_err(
+                        |error| {
+                            cov_provider_error(
+                                runmat_accelerate_api::ProviderExecutionError::from_source(error),
+                            )
+                        },
+                    )?;
+                    gpu_helpers::resident_gpu_value(result)
+                        .map(Some)
+                        .map_err(|error| {
+                            cov_provider_error(
+                                runmat_accelerate_api::ProviderExecutionError::from_source(error),
+                            )
+                        })
+                }
+                AlignedCovarianceOutput::Materialized(value) => {
+                    gpu_helpers::restore_class_preserving_value_protecting(
+                        first_handle,
+                        value,
+                        NAME,
+                        &borrowed,
+                    )
+                    .map(Some)
+                    .map_err(|mut error| {
+                        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                        error
+                    })
+                }
+            }
         }
         Err(error) => {
             if error.is_unsupported() {
@@ -190,7 +209,7 @@ async fn materialize_gpu_weight_vector(
             ) {
                 Ok(handle) => handle,
                 Err(runmat_accelerate_api::NumericUploadError::Provider(error))
-                    if gpu_helpers::provider_hook_is_unsupported(&error) =>
+                    if error.is_unsupported() =>
                 {
                     return Ok(None)
                 }

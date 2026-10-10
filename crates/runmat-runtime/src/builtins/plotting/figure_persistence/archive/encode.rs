@@ -1,5 +1,5 @@
 use super::*;
-use crate::execution::staged_file::{StagedCpuCooperation, StagedWriteCooperation};
+use crate::execution::staged_file::StagedCpuCooperation;
 use flate2::{write::ZlibEncoder, Compression};
 use std::io::Write;
 

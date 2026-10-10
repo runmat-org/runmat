@@ -11,7 +11,9 @@ use crate::placement::{begin_trace, LocalPlacementFeedback};
 use runmat_execution::{
     Digest, PlacementFeedback, PlacementPlanRequest, PlacementRevision, PlacementSignature,
 };
-use runmat_runtime::context::{RuntimePlacementService, RuntimeServicePorts};
+use runmat_runtime::context::{
+    RuntimeGraphObservationPermit, RuntimePlacementService, RuntimeServicePorts,
+};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -99,7 +101,43 @@ struct Probe {
     requests: RefCell<Vec<PlacementPlanRequest>>,
     feedback: RefCell<Vec<PlacementFeedback>>,
 }
+
+#[derive(Debug)]
+struct LifecycleFixturePermit {
+    signature: Digest,
+    candidate: String,
+    kind: runmat_execution::ExecutionCandidateKind,
+}
+
+impl RuntimeGraphObservationPermit for LifecycleFixturePermit {
+    fn authorizes(
+        &self,
+        signature: &PlacementSignature,
+        candidate: &str,
+        kind: runmat_execution::ExecutionCandidateKind,
+    ) -> bool {
+        self.signature == signature.cache_key() && self.candidate == candidate && self.kind == kind
+    }
+}
 impl RuntimePlacementService for Probe {
+    fn plan_with_observation_permit(
+        &self,
+        request: PlacementPlanRequest,
+    ) -> Result<runmat_runtime::context::RuntimeGraphPlacementSelection, RuntimeError> {
+        let decision = self.plan(request)?;
+        let selected = &decision.selections[0];
+        let observation_permit = Some(std::sync::Arc::new(LifecycleFixturePermit {
+            signature: decision.signature.cache_key(),
+            candidate: selected.candidate.clone(),
+            kind: selected.kind,
+        })
+            as std::sync::Arc<dyn RuntimeGraphObservationPermit>);
+        Ok(runmat_runtime::context::RuntimeGraphPlacementSelection {
+            decision,
+            observation_permit,
+        })
+    }
+
     fn plan(
         &self,
         request: PlacementPlanRequest,
@@ -135,7 +173,7 @@ fn runtime(probe: &Rc<Probe>) -> RuntimeContext {
 }
 fn observed(probe: &Rc<Probe>, provider: bool, args: Vec<Value>) -> PreparedBuiltinCall {
     let digest = || Digest::sha256(b"builtin-lifecycle-test");
-    let feedback = LocalPlacementFeedback {
+    let mut feedback = LocalPlacementFeedback {
         runtime: runtime(probe),
         candidate: if provider { "provider" } else { "cpu" }.into(),
         kind: if provider {
@@ -147,6 +185,8 @@ fn observed(probe: &Rc<Probe>, provider: bool, args: Vec<Value>) -> PreparedBuil
             operation: "test".into(),
             region: None,
             runtime_facts: digest(),
+            provider_provenance: None,
+            graph_output_authority: None,
             revision: PlacementRevision {
                 program: None,
                 catalog: digest(),
@@ -155,7 +195,13 @@ fn observed(probe: &Rc<Probe>, provider: bool, args: Vec<Value>) -> PreparedBuil
                 policy: digest(),
             },
         },
+        permit: None,
     };
+    feedback.permit = Some(std::sync::Arc::new(LifecycleFixturePermit {
+        signature: feedback.signature.cache_key(),
+        candidate: feedback.candidate.clone(),
+        kind: feedback.kind,
+    }));
     let observation = BuiltinCallObservation::new(
         Some(Box::new(feedback)),
         begin_trace("test", None),
@@ -181,7 +227,7 @@ fn cpu_call_is_observed_only_once_after_its_result() {
 }
 
 #[test]
-fn errors_abandonment_and_cancelled_call_futures_report_failure() {
+fn completed_error_reports_failure_but_abandoned_futures_do_not() {
     let probe = Rc::new(Probe::default());
     let prepared = observed(&probe, false, vec![]);
     prepared
@@ -198,7 +244,7 @@ fn errors_abandonment_and_cancelled_call_futures_report_failure() {
     };
     drop(future);
     // Retaining prepared arguments must not retain a cancelled call's ticket.
-    assert_eq!(probe.feedback.borrow().len(), 3);
+    assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(probe
         .feedback
         .borrow()
@@ -289,7 +335,7 @@ fn cancellation_flag_prevents_a_success_sample() {
         .1
         .finish(&Ok(Value::Num(1.)))
         .unwrap();
-    assert!(!probe.feedback.borrow()[0].succeeded);
+    assert!(probe.feedback.borrow().is_empty());
 }
 
 #[test]

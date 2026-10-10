@@ -32,25 +32,33 @@ pub fn mean_dim_shader(workgroup_size: u32) -> String {
     INTEGER_MEAN_DIM_SHADER.replace("@WG@", &workgroup_size.to_string())
 }
 
-pub fn cast_shader(scalar_type: &str, workgroup_size: u32) -> String {
-    let read_float = if scalar_type == "f64" {
-        r#"
+pub fn cast_shader(
+    precision: crate::backend::wgpu::types::NumericPrecision,
+    workgroup_size: u32,
+) -> String {
+    use crate::backend::wgpu::types::NumericPrecision;
+    let read_float = match precision {
+        NumericPrecision::F64 => {
+            r#"
 fn read_float_cast(logical_index: u32) -> f64 {
     let lane = logical_index * 2u;
-    return bitcast<f64>(vec2<u32>(InBuf.data[lane], InBuf.data[lane + 1u]));
+    return runmat_f64_from_words(InBuf.data[lane], InBuf.data[lane + 1u]);
 }
 "#
-    } else {
-        r#"
+        }
+        NumericPrecision::F32 => {
+            r#"
 fn read_float_cast(logical_index: u32) -> f32 {
     return bitcast<f32>(InBuf.data[logical_index]);
 }
 "#
+        }
     };
-    INTEGER_CAST_SHADER
-        .replace("$SCALAR", scalar_type)
+    let source = INTEGER_CAST_SHADER
+        .replace("$SCALAR", precision.as_str())
         .replace("$READ_FLOAT", read_float)
-        .replace("@WG@", &workgroup_size.to_string())
+        .replace("@WG@", &workgroup_size.to_string());
+    crate::backend::wgpu::shaders::nan_predicate::inject(&source, precision)
 }
 
 pub fn floating_sum_cast_shader(workgroup_size: u32) -> String {
@@ -68,7 +76,7 @@ struct Params { len: u32, offset: u32, source_type: u32, _pad: u32 };
 @group(0) @binding(2) var<uniform> params: Params;
 
 fn wide_unsigned(low: u32, high: u32) -> f64 {
-    return f64(high) * 4294967296.0 + f64(low);
+    return f64(high) * f64(4294967296.0) + f64(low);
 }
 
 fn signed_word(word: u32, shift: u32) -> f64 {
@@ -96,7 +104,7 @@ fn integer_as_double(index: u32) -> f64 {
         case 5u: { return f64(low & 0xffffu); }
         case 6u: { return f64(low); }
         case 7u: { return wide_unsigned(low, input.data[lane + 1u]); }
-        default: { return 0.0; }
+        default: { return f64(0.0); }
     }
 }
 
@@ -244,7 +252,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (local >= params.len) { return; }
     let index = params.offset + local;
     if (index >= params.total) { return; }
-    Out.data[index] = select(0.0, 1.0, compare_result(compare_words(index)));
+    Out.data[index] = select($SCALAR(0.0), $SCALAR(1.0), compare_result(compare_words(index)));
 }
 "#;
 
@@ -1797,8 +1805,10 @@ fn read_signed_cast(logical_index: u32) -> SignedWideCast {
 
 $READ_FLOAT
 
+fn isNan(value: $SCALAR) -> bool { @IEEE_NAN_PREDICATE@ }
+
 fn rounded_float_cast(value: $SCALAR) -> $SCALAR {
-    if (value != value) {
+    if (isNan(value)) {
         return $SCALAR(0.0);
     }
     if (value >= $SCALAR(0.0)) {
@@ -1811,7 +1821,7 @@ fn float_to_wide_cast(value: $SCALAR) -> SignedWideCast {
     let rounded = rounded_float_cast(value);
     let negative = rounded < $SCALAR(0.0);
     var magnitude = select(rounded, -rounded, negative);
-    if (magnitude != magnitude || magnitude <= $SCALAR(0.0)) {
+    if (isNan(magnitude) || magnitude <= $SCALAR(0.0)) {
         return SignedWideCast(wide_cast_zero(), false);
     }
     let two32 = $SCALAR(4294967296.0);
@@ -2015,6 +2025,7 @@ mod tests {
     use super::{
         arithmetic_shader, cast_shader, comparison_shader, extrema_dim_shader, minmax_shader,
     };
+    use crate::backend::wgpu::types::NumericPrecision;
 
     #[test]
     fn comparison_shader_substitutes_precision_and_workgroup_size() {
@@ -2052,15 +2063,23 @@ mod tests {
 
     #[test]
     fn cast_shader_uses_portable_packed_words_for_wide_integers() {
-        for scalar in ["f32", "f64"] {
-            let shader = cast_shader(scalar, 128);
+        for precision in [NumericPrecision::F32, NumericPrecision::F64] {
+            let shader = cast_shader(precision, 128);
             assert!(shader.contains("struct WideCast"));
             assert!(shader.contains("@workgroup_size(128)"));
             assert!(!shader.contains("i64"));
-            assert!(!shader.contains("u64"));
+            assert!(!shader.contains("array<u64>"));
+            assert!(shader.contains("OutBuf.data[lane + 1u] = bits.high"));
+            assert!(shader.contains("WideCast(low, InBuf.data[lane + 1u])"));
+            if precision == NumericPrecision::F64 {
+                assert!(shader
+                    .contains("runmat_f64_from_words(InBuf.data[lane], InBuf.data[lane + 1u])"));
+            }
             assert!(!shader.contains("$SCALAR"));
             assert!(!shader.contains("$READ_FLOAT"));
             assert!(!shader.contains("@WG@"));
+            assert!(!shader.contains("value != value"));
+            assert!(!shader.contains("magnitude != magnitude"));
         }
     }
 }

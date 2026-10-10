@@ -1,7 +1,6 @@
 use anyhow::{anyhow, ensure, Result};
 use bytemuck::{cast_slice, Pod, Zeroable};
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView};
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 use super::backend_shared::gpu_per_buffer_limit_error;
@@ -12,6 +11,14 @@ use crate::backend::wgpu::shaders::comms::{
 use crate::backend::wgpu::types::NumericPrecision;
 
 const CPU_COMMS_FAST_PATH_MAX_LOGICAL_LEN: usize = 4096;
+
+#[path = "comms/planned_input.rs"]
+mod planned_input;
+#[path = "comms/validated_route.rs"]
+mod validated_route;
+#[cfg(test)]
+#[path = "comms/validated_tests.rs"]
+mod validated_tests;
 
 impl WgpuProvider {
     fn upload_complex_interleaved_exec(
@@ -35,26 +42,30 @@ impl WgpuProvider {
                 self.create_storage_buffer(emission, 0, label)?
             } else {
                 match self.precision {
-                    NumericPrecision::F64 => Arc::new(emission.device().create_buffer_init(
-                        &wgpu::util::BufferInitDescriptor {
-                            label: Some(label),
-                            contents: cast_slice(data),
-                            usage: wgpu::BufferUsages::STORAGE
-                                | wgpu::BufferUsages::COPY_DST
-                                | wgpu::BufferUsages::COPY_SRC,
-                        },
-                    )),
-                    NumericPrecision::F32 => {
-                        let data_f32: Vec<f32> = data.iter().map(|value| *value as f32).collect();
-                        Arc::new(emission.device().create_buffer_init(
-                            &wgpu::util::BufferInitDescriptor {
+                    NumericPrecision::F64 => runmat_accelerate_api::WgpuBufferOwner::new(
+                        emission
+                            .device()
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                                 label: Some(label),
-                                contents: cast_slice(&data_f32),
+                                contents: cast_slice(data),
                                 usage: wgpu::BufferUsages::STORAGE
                                     | wgpu::BufferUsages::COPY_DST
                                     | wgpu::BufferUsages::COPY_SRC,
-                            },
-                        ))
+                            }),
+                    ),
+                    NumericPrecision::F32 => {
+                        let data_f32: Vec<f32> = data.iter().map(|value| *value as f32).collect();
+                        runmat_accelerate_api::WgpuBufferOwner::new(
+                            emission.device().create_buffer_init(
+                                &wgpu::util::BufferInitDescriptor {
+                                    label: Some(label),
+                                    contents: cast_slice(&data_f32),
+                                    usage: wgpu::BufferUsages::STORAGE
+                                        | wgpu::BufferUsages::COPY_DST
+                                        | wgpu::BufferUsages::COPY_SRC,
+                                },
+                            ),
+                        )
                     }
                 }
             };
@@ -72,97 +83,114 @@ impl WgpuProvider {
     pub(crate) async fn modulate_constellation_exec(
         &self,
         request: &runmat_accelerate_api::ProviderModulationRequest<'_>,
-    ) -> Result<GpuTensorHandle> {
-        ensure!(
-            runmat_accelerate_api::handle_storage(request.input) == GpuTensorStorage::Real,
-            "modulate_constellation requires a real-valued symbol input"
-        );
-        ensure!(
-            !request.constellation.is_empty() && request.constellation.len().is_multiple_of(2),
-            "modulate_constellation requires interleaved real/imag constellation pairs"
-        );
-        let order = request.constellation.len() / 2;
-        ensure!(
-            order <= u32::MAX as usize,
-            "modulate_constellation: constellation too large"
-        );
-        let entry = self.get_entry(request.input)?;
-        ensure!(
-            entry.storage == GpuTensorStorage::Real && entry.precision == self.precision,
-            "modulate_constellation: input storage does not match provider precision"
-        );
-        let logical_len = entry
-            .shape
-            .iter()
-            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
-            .ok_or_else(|| anyhow!("modulate_constellation: input shape overflow"))?;
-        ensure!(
-            logical_len == entry.len,
-            "modulate_constellation: input data length does not match shape"
-        );
-        ensure!(
-            logical_len <= u32::MAX as usize,
-            "modulate_constellation: input too large"
-        );
-        let out_len = logical_len
-            .checked_mul(2)
-            .ok_or_else(|| anyhow!("modulate_constellation: output length overflow"))?;
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        let planned_input::SymbolPlan {
+            entry,
+            logical_len,
+            out_len,
+            order,
+        } = planned_input::SymbolPlan::new(self, request)?;
         if out_len == 0 {
-            let buffer = self.with_emission(|emission, _| {
-                self.create_storage_buffer(emission, 0, "runmat-modulate-constellation-empty")
-            })??;
-            let handle = self.register_existing_buffer_with_storage(
-                buffer,
-                entry.shape,
-                0,
-                GpuTensorStorage::ComplexInterleaved,
-            )?;
-            return Ok(handle);
+            return (|| -> Result<_> {
+                let buffer = self.with_emission(|emission, _| {
+                    self.create_storage_buffer(emission, 0, "runmat-modulate-constellation-empty")
+                })??;
+                let handle = self.register_existing_buffer_with_storage(
+                    buffer,
+                    entry.shape,
+                    0,
+                    GpuTensorStorage::ComplexInterleaved,
+                )?;
+                Ok(handle)
+            })()
+            .map_err(planned_input::unproven);
         }
 
         if logical_len <= CPU_COMMS_FAST_PATH_MAX_LOGICAL_LEN
             && runmat_accelerate_api::handle_transpose_info(request.input).is_none()
             && std::env::var_os("RUNMAT_WGPU_COMMS_SHADER").is_none()
         {
-            let host = self.download_exec(request.input).await?;
-            ensure!(
-                host.data.len() == logical_len,
-                "modulate_constellation: input data length does not match shape"
-            );
-            let mut out = Vec::with_capacity(out_len);
-            for value in host.data {
+            let host = self
+                .download_exec(request.input)
+                .await
+                .map_err(planned_input::unproven)?;
+            return (|| -> Result<_> {
                 ensure!(
-                    value.is_finite(),
-                    "modulate_constellation: symbols must be finite integers"
+                    host.data.len() == logical_len,
+                    "modulate_constellation: input data length does not match shape"
                 );
-                ensure!(
-                    value >= 0.0 && value.fract() == 0.0,
-                    "modulate_constellation: symbols must be nonnegative integers"
-                );
-                let symbol = value as usize;
-                ensure!(
-                    symbol < order,
-                    "modulate_constellation: symbols must be in range"
-                );
-                let point = symbol * 2;
-                out.push(request.constellation[point]);
-                out.push(request.constellation[point + 1]);
-            }
-            return self.upload_complex_interleaved_exec(
-                &out,
-                entry.shape.clone(),
-                "runmat-modulate-constellation-cpu-fast-path",
-            );
+                let mut out = Vec::with_capacity(out_len);
+                for value in host.data {
+                    ensure!(
+                        value.is_finite(),
+                        "modulate_constellation: symbols must be finite integers"
+                    );
+                    ensure!(
+                        value >= 0.0 && value.fract() == 0.0,
+                        "modulate_constellation: symbols must be nonnegative integers"
+                    );
+                    let symbol = value as usize;
+                    ensure!(
+                        symbol < order,
+                        "modulate_constellation: symbols must be in range"
+                    );
+                    let point = symbol * 2;
+                    out.push(request.constellation[point]);
+                    out.push(request.constellation[point + 1]);
+                }
+                self.upload_complex_interleaved_exec(
+                    &out,
+                    entry.shape.clone(),
+                    "runmat-modulate-constellation-cpu-fast-path",
+                )
+            })()
+            .map_err(planned_input::unproven);
         }
 
+        self.require_ieee_words(self.precision)?;
+        let workgroup_size = self.workgroup_config.scalar;
+        let recipe = self.plan_modulation_pipeline(
+            modulate_constellation_shader(self.precision, order, workgroup_size),
+            validated_route::ModulationWork {
+                input: &entry,
+                table_words: request.constellation.len(),
+                output_words: out_len,
+                dispatch_len: logical_len,
+                workgroup: workgroup_size,
+            },
+        )?;
+        let validated = self
+            .prepare_validated_modulation_pipeline(
+                &recipe,
+                "runmat-modulate-constellation-pipeline",
+            )
+            .await?;
+        validated
+            .require_modulation(&recipe)
+            .map_err(planned_input::unproven)?;
+        let live = self
+            .get_entry(request.input)
+            .map_err(planned_input::unproven)?;
+        if !runmat_accelerate_api::WgpuBufferOwner::ptr_eq(&live.buffer, &entry.buffer) {
+            return Err(planned_input::unproven(anyhow!(
+                "modulate_constellation: input changed during preparation"
+            )));
+        }
         let table_shape = [request.constellation.len(), 1usize];
-        let table = self.upload_exec(&HostTensorView {
-            data: request.constellation,
-            shape: &table_shape,
-        })?;
-        let table_entry = self.get_entry(&table)?;
-        let (output, staging, error_size) =
-            self.with_emission(|emission, pending| -> Result<_> {
+        let table = self
+            .upload_exec(&HostTensorView {
+                data: request.constellation,
+                shape: &table_shape,
+            })
+            .map_err(planned_input::unproven)?;
+        let table_entry = self.get_entry(&table).map_err(planned_input::unproven)?;
+        let (output, staging) = self
+            .with_emission(|emission, pending| -> Result<_> {
+                let live = self.get_entry(request.input)?;
+                ensure!(
+                    runmat_accelerate_api::WgpuBufferOwner::ptr_eq(&live.buffer, &entry.buffer),
+                    "modulate_constellation: input changed before emission"
+                );
                 let output = self.create_storage_buffer_checked(
                     emission,
                     out_len,
@@ -170,48 +198,20 @@ impl WgpuProvider {
                 )?;
                 let error_words = [u32::MAX, 0, 0, 0];
                 let error_bytes = cast_slice(&error_words);
-                let error_buffer = Arc::new(emission.device().create_buffer_init(
-                    &wgpu::util::BufferInitDescriptor {
-                        label: Some("runmat-modulate-constellation-error"),
-                        contents: error_bytes,
-                        usage: wgpu::BufferUsages::STORAGE
-                            | wgpu::BufferUsages::COPY_SRC
-                            | wgpu::BufferUsages::COPY_DST,
-                    },
-                ));
+                let error_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("runmat-modulate-constellation-error"),
+                            contents: error_bytes,
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_SRC
+                                | wgpu::BufferUsages::COPY_DST,
+                        }),
+                );
 
-                let workgroup_size = self.workgroup_config.scalar;
-                let shader = modulate_constellation_shader(self.precision, order, workgroup_size);
-                let bgl = crate::backend::wgpu::bindings::build_bgl_for_layout_tag(
-                    emission,
-                    "runmat-modulate-constellation-layout",
-                )
-                .ok_or_else(|| anyhow!("modulate_constellation: missing bind group layout"))?;
-                let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-                    emission,
-                    "runmat-modulate-constellation-pipeline-layout",
-                    &bgl,
-                );
-                let module = crate::backend::wgpu::pipelines::create_shader_module(
-                    emission,
-                    "runmat-modulate-constellation-shader",
-                    &shader,
-                );
-                let shader_hash = self.compute_pipeline_hash_bytes(
-                    shader.as_bytes(),
-                    "runmat-modulate-constellation-layout",
-                    Some(workgroup_size),
-                );
-                let pipeline = self.get_or_create_pipeline(
-                    emission,
-                    shader_hash,
-                    &pipeline_layout,
-                    &module,
-                    "runmat-modulate-constellation-pipeline",
-                    Some(shader.as_bytes()),
-                    Some("runmat-modulate-constellation-layout"),
-                    Some(workgroup_size),
-                )?;
+                let bgl = validated.layout.clone();
+                let pipeline = validated.pipeline.clone();
 
                 #[repr(C)]
                 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -286,188 +286,179 @@ impl WgpuProvider {
                 }
                 encoder.copy_buffer_to_buffer(error_buffer.as_ref(), 0, &staging, 0, error_size);
                 self.submit(emission, pending, encoder)?;
-                Ok((output, staging, error_size))
-            })??;
+                Ok((output, staging))
+            })
+            .map_err(planned_input::unproven)?
+            .map_err(planned_input::unproven)?;
 
-        let bytes_result =
-            self.map_readback_bytes_sync(staging, error_size, "modulate_constellation");
-        let bytes = bytes_result?;
-        let words: &[u32] = cast_slice(&bytes);
-        let code = match words.first().copied().unwrap_or(u32::MAX) {
-            u32::MAX => 0,
-            packed => packed >> 30,
-        };
-        match code {
-            0 => {}
-            1 => {
-                return Err(anyhow!(
-                    "modulate_constellation: symbols must be finite integers"
-                ))
+        let code = self
+            .map_readback_with(
+                staging,
+                "modulate_constellation",
+                validated_route::decode_error_code,
+            )
+            .await
+            .map_err(planned_input::unproven)?;
+        (|| -> Result<_> {
+            match code {
+                0 => {}
+                1 => {
+                    return Err(anyhow!(
+                        "modulate_constellation: symbols must be finite integers"
+                    ))
+                }
+                2 => return Err(anyhow!("modulate_constellation: symbols must be in range")),
+                3 => {
+                    return Err(anyhow!(
+                        "modulate_constellation: symbols must be nonnegative integers"
+                    ));
+                }
+                code => {
+                    return Err(anyhow!(
+                        "modulate_constellation: GPU validation error {code}"
+                    ))
+                }
             }
-            2 => return Err(anyhow!("modulate_constellation: symbols must be in range")),
-            3 => {
-                return Err(anyhow!(
-                    "modulate_constellation: symbols must be nonnegative integers"
-                ));
-            }
-            code => {
-                return Err(anyhow!(
-                    "modulate_constellation: GPU validation error {code}"
-                ))
-            }
-        }
 
-        let handle = self.register_existing_buffer_with_storage(
-            output,
-            entry.shape,
-            out_len,
-            GpuTensorStorage::ComplexInterleaved,
-        )?;
-        Ok(handle)
+            let handle = self.register_existing_buffer_with_storage(
+                output,
+                entry.shape,
+                out_len,
+                GpuTensorStorage::ComplexInterleaved,
+            )?;
+            Ok(handle)
+        })()
+        .map_err(planned_input::unproven)
     }
 
     pub(crate) async fn modulate_bits_constellation_exec(
         &self,
         request: &runmat_accelerate_api::ProviderBitModulationRequest<'_>,
-    ) -> Result<GpuTensorHandle> {
-        ensure!(
-            runmat_accelerate_api::handle_storage(request.input) == GpuTensorStorage::Real,
-            "modulate_bits_constellation requires a real-valued bit input"
-        );
-        ensure!(
-            !request.constellation.is_empty() && request.constellation.len().is_multiple_of(2),
-            "modulate_bits_constellation requires interleaved real/imag constellation pairs"
-        );
-        ensure!(
-            request.input_rows > 0 && request.bits_per_symbol > 0,
-            "modulate_bits_constellation: invalid bit grouping"
-        );
-        ensure!(
-            request.input_rows.is_multiple_of(request.bits_per_symbol),
-            "modulate_bits_constellation: bit rows must be a multiple of bits_per_symbol"
-        );
-        let order = request.constellation.len() / 2;
-        ensure!(
-            request.constellation.len() <= u32::MAX as usize && order <= u32::MAX as usize,
-            "modulate_bits_constellation: constellation too large"
-        );
-        ensure!(
-            request.input_rows <= u32::MAX as usize && request.bits_per_symbol <= u32::MAX as usize,
-            "modulate_bits_constellation: input too large"
-        );
-        let entry = self.get_entry(request.input)?;
-        ensure!(
-            entry.storage == GpuTensorStorage::Real && entry.precision == self.precision,
-            "modulate_bits_constellation: input storage does not match provider precision"
-        );
-        let logical_len = entry
-            .shape
-            .iter()
-            .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
-            .ok_or_else(|| anyhow!("modulate_bits_constellation: input shape overflow"))?;
-        ensure!(
-            logical_len == entry.len,
-            "modulate_bits_constellation: input data length does not match shape"
-        );
-        ensure!(
-            entry.shape.first().copied() == Some(request.input_rows),
-            "modulate_bits_constellation: input_rows must match the input leading dimension"
-        );
-        ensure!(
-            logical_len <= u32::MAX as usize,
-            "modulate_bits_constellation: input too large"
-        );
-        ensure!(
-            logical_len.is_multiple_of(request.input_rows),
-            "modulate_bits_constellation: bit input shape is inconsistent"
-        );
-        let output_rows = request.input_rows / request.bits_per_symbol;
-        let channels = logical_len / request.input_rows;
-        let output_logical_len = output_rows
-            .checked_mul(channels)
-            .ok_or_else(|| anyhow!("modulate_bits_constellation: output shape overflow"))?;
-        ensure!(
-            output_logical_len <= u32::MAX as usize,
-            "modulate_bits_constellation: output too large"
-        );
-        let mut output_shape = entry.shape.clone();
-        if output_shape.is_empty() {
-            output_shape.push(output_rows);
-            output_shape.push(1);
-        } else {
-            output_shape[0] = output_rows;
-        }
-        let out_len = output_logical_len
-            .checked_mul(2)
-            .ok_or_else(|| anyhow!("modulate_bits_constellation: output length overflow"))?;
-        ensure!(
-            out_len <= u32::MAX as usize,
-            "modulate_bits_constellation: output too large"
-        );
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        let planned_input::BitPlan {
+            entry,
+            logical_len,
+            output_logical_len,
+            output_shape,
+            out_len,
+            order,
+            output_rows,
+            channels,
+        } = planned_input::BitPlan::new(self, request)?;
+        validated_route::validate_bit_group_width(request.bits_per_symbol)?;
         if out_len == 0 {
-            let buffer = self.with_emission(|emission, _| {
-                self.create_storage_buffer(emission, 0, "runmat-modulate-bits-constellation-empty")
-            })??;
-            let handle = self.register_existing_buffer_with_storage(
-                buffer,
-                output_shape,
-                0,
-                GpuTensorStorage::ComplexInterleaved,
-            )?;
-            return Ok(handle);
+            return (|| -> Result<_> {
+                let buffer = self.with_emission(|emission, _| {
+                    self.create_storage_buffer(
+                        emission,
+                        0,
+                        "runmat-modulate-bits-constellation-empty",
+                    )
+                })??;
+                let handle = self.register_existing_buffer_with_storage(
+                    buffer,
+                    output_shape,
+                    0,
+                    GpuTensorStorage::ComplexInterleaved,
+                )?;
+                Ok(handle)
+            })()
+            .map_err(planned_input::unproven);
         }
 
         if logical_len <= CPU_COMMS_FAST_PATH_MAX_LOGICAL_LEN
             && runmat_accelerate_api::handle_transpose_info(request.input).is_none()
             && std::env::var_os("RUNMAT_WGPU_COMMS_SHADER").is_none()
         {
-            let host = self.download_exec(request.input).await?;
-            ensure!(
-                host.data.len() == logical_len,
-                "modulate_bits_constellation: input data length does not match shape"
-            );
-            let mut out = Vec::with_capacity(out_len);
-            for channel in 0..channels {
-                let channel_offset = channel * request.input_rows;
-                for group in 0..output_rows {
-                    let mut symbol = 0usize;
-                    for bit_idx in 0..request.bits_per_symbol {
-                        let value =
-                            host.data[channel_offset + group * request.bits_per_symbol + bit_idx];
+            let host = self
+                .download_exec(request.input)
+                .await
+                .map_err(planned_input::unproven)?;
+            return (|| -> Result<_> {
+                ensure!(
+                    host.data.len() == logical_len,
+                    "modulate_bits_constellation: input data length does not match shape"
+                );
+                let mut out = Vec::with_capacity(out_len);
+                for channel in 0..channels {
+                    let channel_offset = channel * request.input_rows;
+                    for group in 0..output_rows {
+                        let mut symbol = 0usize;
+                        for bit_idx in 0..request.bits_per_symbol {
+                            let value = host.data
+                                [channel_offset + group * request.bits_per_symbol + bit_idx];
+                            ensure!(
+                                value.is_finite(),
+                                "modulate_bits_constellation: bits must be finite"
+                            );
+                            ensure!(
+                                value == 0.0 || value == 1.0,
+                                "modulate_bits_constellation: bits must be 0 or 1"
+                            );
+                            symbol = (symbol << 1) | value as usize;
+                        }
                         ensure!(
-                            value.is_finite(),
-                            "modulate_bits_constellation: bits must be finite"
+                            symbol < order,
+                            "modulate_bits_constellation: symbols must be in range"
                         );
-                        ensure!(
-                            value == 0.0 || value == 1.0,
-                            "modulate_bits_constellation: bits must be 0 or 1"
-                        );
-                        symbol = (symbol << 1) | value as usize;
+                        let point = symbol * 2;
+                        out.push(request.constellation[point]);
+                        out.push(request.constellation[point + 1]);
                     }
-                    ensure!(
-                        symbol < order,
-                        "modulate_bits_constellation: symbols must be in range"
-                    );
-                    let point = symbol * 2;
-                    out.push(request.constellation[point]);
-                    out.push(request.constellation[point + 1]);
                 }
-            }
-            return self.upload_complex_interleaved_exec(
-                &out,
-                output_shape.clone(),
-                "runmat-modulate-bits-constellation-cpu-fast-path",
-            );
+                self.upload_complex_interleaved_exec(
+                    &out,
+                    output_shape.clone(),
+                    "runmat-modulate-bits-constellation-cpu-fast-path",
+                )
+            })()
+            .map_err(planned_input::unproven);
         }
 
+        self.require_ieee_words(self.precision)?;
+        let workgroup_size = self.workgroup_config.scalar;
+        let recipe = self.plan_modulation_pipeline(
+            modulate_bits_constellation_shader(self.precision, order, workgroup_size),
+            validated_route::ModulationWork {
+                input: &entry,
+                table_words: request.constellation.len(),
+                output_words: out_len,
+                dispatch_len: output_logical_len,
+                workgroup: workgroup_size,
+            },
+        )?;
+        let validated = self
+            .prepare_validated_modulation_pipeline(
+                &recipe,
+                "runmat-modulate-bits-constellation-pipeline",
+            )
+            .await?;
+        validated
+            .require_modulation(&recipe)
+            .map_err(planned_input::unproven)?;
+        let live = self
+            .get_entry(request.input)
+            .map_err(planned_input::unproven)?;
+        if !runmat_accelerate_api::WgpuBufferOwner::ptr_eq(&live.buffer, &entry.buffer) {
+            return Err(planned_input::unproven(anyhow!(
+                "modulate_bits_constellation: input changed during preparation"
+            )));
+        }
         let table_shape = [request.constellation.len(), 1usize];
-        let table = self.upload_exec(&HostTensorView {
-            data: request.constellation,
-            shape: &table_shape,
-        })?;
-        let table_entry = self.get_entry(&table)?;
-        let (output, staging, error_size) =
-            self.with_emission(|emission, pending| -> Result<_> {
+        let table = self
+            .upload_exec(&HostTensorView {
+                data: request.constellation,
+                shape: &table_shape,
+            })
+            .map_err(planned_input::unproven)?;
+        let table_entry = self.get_entry(&table).map_err(planned_input::unproven)?;
+        let (output, staging) = self
+            .with_emission(|emission, pending| -> Result<_> {
+                let live = self.get_entry(request.input)?;
+                ensure!(
+                    runmat_accelerate_api::WgpuBufferOwner::ptr_eq(&live.buffer, &entry.buffer),
+                    "modulate_bits_constellation: input changed before emission"
+                );
                 let output = self.create_storage_buffer_checked(
                     emission,
                     out_len,
@@ -475,49 +466,20 @@ impl WgpuProvider {
                 )?;
                 let error_words = [u32::MAX, 0, 0, 0];
                 let error_bytes = cast_slice(&error_words);
-                let error_buffer = Arc::new(emission.device().create_buffer_init(
-                    &wgpu::util::BufferInitDescriptor {
-                        label: Some("runmat-modulate-bits-constellation-error"),
-                        contents: error_bytes,
-                        usage: wgpu::BufferUsages::STORAGE
-                            | wgpu::BufferUsages::COPY_SRC
-                            | wgpu::BufferUsages::COPY_DST,
-                    },
-                ));
+                let error_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("runmat-modulate-bits-constellation-error"),
+                            contents: error_bytes,
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_SRC
+                                | wgpu::BufferUsages::COPY_DST,
+                        }),
+                );
 
-                let workgroup_size = self.workgroup_config.scalar;
-                let shader =
-                    modulate_bits_constellation_shader(self.precision, order, workgroup_size);
-                let bgl = crate::backend::wgpu::bindings::build_bgl_for_layout_tag(
-                    emission,
-                    "runmat-modulate-constellation-layout",
-                )
-                .ok_or_else(|| anyhow!("modulate_bits_constellation: missing bind group layout"))?;
-                let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-                    emission,
-                    "runmat-modulate-bits-constellation-pipeline-layout",
-                    &bgl,
-                );
-                let module = crate::backend::wgpu::pipelines::create_shader_module(
-                    emission,
-                    "runmat-modulate-bits-constellation-shader",
-                    &shader,
-                );
-                let shader_hash = self.compute_pipeline_hash_bytes(
-                    shader.as_bytes(),
-                    "runmat-modulate-constellation-layout",
-                    Some(workgroup_size),
-                );
-                let pipeline = self.get_or_create_pipeline(
-                    emission,
-                    shader_hash,
-                    &pipeline_layout,
-                    &module,
-                    "runmat-modulate-bits-constellation-pipeline",
-                    Some(shader.as_bytes()),
-                    Some("runmat-modulate-constellation-layout"),
-                    Some(workgroup_size),
-                )?;
+                let bgl = validated.layout.clone();
+                let pipeline = validated.pipeline.clone();
 
                 #[repr(C)]
                 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -595,40 +557,45 @@ impl WgpuProvider {
                 }
                 encoder.copy_buffer_to_buffer(error_buffer.as_ref(), 0, &staging, 0, error_size);
                 self.submit(emission, pending, encoder)?;
-                Ok((output, staging, error_size))
-            })??;
+                Ok((output, staging))
+            })
+            .map_err(planned_input::unproven)?
+            .map_err(planned_input::unproven)?;
 
-        let bytes_result =
-            self.map_readback_bytes_sync(staging, error_size, "modulate_bits_constellation");
-        let bytes = bytes_result?;
-        let words: &[u32] = cast_slice(&bytes);
-        let code = match words.first().copied().unwrap_or(u32::MAX) {
-            u32::MAX => 0,
-            packed => packed >> 30,
-        };
-        match code {
-            0 => {}
-            1 => return Err(anyhow!("modulate_bits_constellation: bits must be finite")),
-            2 => return Err(anyhow!("modulate_bits_constellation: bits must be 0 or 1")),
-            3 => {
-                return Err(anyhow!(
-                    "modulate_bits_constellation: symbols must be in range"
-                ))
+        let code = self
+            .map_readback_with(
+                staging,
+                "modulate_bits_constellation",
+                validated_route::decode_error_code,
+            )
+            .await
+            .map_err(planned_input::unproven)?;
+        (|| -> Result<_> {
+            match code {
+                0 => {}
+                1 => return Err(anyhow!("modulate_bits_constellation: bits must be finite")),
+                2 => return Err(anyhow!("modulate_bits_constellation: bits must be 0 or 1")),
+                3 => {
+                    return Err(anyhow!(
+                        "modulate_bits_constellation: symbols must be in range"
+                    ))
+                }
+                code => {
+                    return Err(anyhow!(
+                        "modulate_bits_constellation: GPU validation error {code}"
+                    ))
+                }
             }
-            code => {
-                return Err(anyhow!(
-                    "modulate_bits_constellation: GPU validation error {code}"
-                ))
-            }
-        }
 
-        let handle = self.register_existing_buffer_with_storage(
-            output,
-            output_shape,
-            out_len,
-            GpuTensorStorage::ComplexInterleaved,
-        )?;
-        Ok(handle)
+            let handle = self.register_existing_buffer_with_storage(
+                output,
+                output_shape,
+                out_len,
+                GpuTensorStorage::ComplexInterleaved,
+            )?;
+            Ok(handle)
+        })()
+        .map_err(planned_input::unproven)
     }
 }
 

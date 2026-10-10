@@ -3,8 +3,13 @@
 //! materialization of GPU inputs; an unsupported hook preserves that admitted
 //! boundary, while an execution failure remains visible.
 mod numerics;
+mod progress;
 mod reduction;
 mod rmse;
+#[cfg(test)]
+mod progress_tests;
+
+use progress::{ObserveResidentHook, ResidentStageProgress};
 
 pub(super) use rmse::try_rmse;
 
@@ -159,35 +164,33 @@ async fn usable_scale(
     provider: &'static dyn AccelProvider,
     input: &GpuTensorHandle,
     scale: GpuTensorHandle,
+    progress: &mut ResidentStageProgress,
 ) -> Result<GpuTensorHandle, Failure> {
-    let precision = runmat_accelerate_api::handle_precision(input).ok_or(Failure::Unsupported)?;
+    let precision = runmat_accelerate_api::handle_precision(input)
+        .ok_or_else(|| progress.unavailable(kind, "resident scale has no floating precision"))?;
     let scale_shape = scale.shape().to_vec();
     let scale = admitted_real(kind, provider, input, scale, &scale_shape, precision)?;
-    let finite = provider
-        .logical_isfinite(&scale)
-        .map_err(|source| provider_failure(kind, source))?;
+    let finite = provider.logical_isfinite(&scale).observe(progress, kind)?;
     let finite = admitted_mask(kind, provider, input, finite, scale.shape())?;
     let zero = provider
         .zeros_like(&scale, scale.shape())
-        .map_err(|source| provider_failure(kind, source))?;
+        .observe(progress, kind)?;
     let zero = admitted_real(kind, provider, input, zero, scale.shape(), precision)?;
     let nonzero = provider
         .elem_ne(&scale, &zero)
         .await
-        .map_err(|source| provider_failure(kind, source))?;
+        .observe(progress, kind)?;
     let nonzero = admitted_mask(kind, provider, input, nonzero, scale.shape())?;
     let usable = provider
         .logical_and(&finite, &nonzero)
-        .map_err(|source| provider_failure(kind, source))?;
+        .observe(progress, kind)?;
     let usable = admitted_mask(kind, provider, input, usable, scale.shape())?;
-    let one = provider
-        .ones_like(&scale)
-        .map_err(|source| provider_failure(kind, source))?;
+    let one = provider.ones_like(&scale).observe(progress, kind)?;
     let one = admitted_real(kind, provider, input, one, scale.shape(), precision)?;
     let result = provider
         .select(&usable, &scale, &one)
         .await
-        .map_err(|source| provider_failure(kind, source))?;
+        .observe(progress, kind)?;
     if result.shares_allocation_with(&scale) || result.shares_allocation_with(&one) {
         return Err(reject_output(
             kind,
@@ -215,7 +218,8 @@ pub(super) async fn try_reduce(
             "resident input has no exact owner",
         ));
     };
-    let outcome = numerics::run(kind, provider, input, options).await;
+    let mut progress = ResidentStageProgress::default();
+    let outcome = numerics::run(kind, provider, input, options, &mut progress).await;
     match outcome {
         Ok(mut output) => {
             let precision = runmat_accelerate_api::handle_precision(input).ok_or_else(|| {

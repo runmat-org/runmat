@@ -39,7 +39,9 @@ impl ExtremaKind {
                     .map(Some);
             }
         }
-        let expanded_left = if repeats_left.iter().any(|repeat| *repeat != 1) {
+        let left_was_expanded = repeats_left.iter().any(|repeat| *repeat != 1);
+        let right_was_expanded = repeats_right.iter().any(|repeat| *repeat != 1);
+        let expanded_left = if left_was_expanded {
             let Some(output) = self.optional("repmat", provider.repmat(left, &repeats_left))?
             else {
                 return Ok(None);
@@ -54,8 +56,13 @@ impl ExtremaKind {
         } else {
             left.clone()
         };
-        let expanded_right = if repeats_right.iter().any(|repeat| *repeat != 1) {
-            let Some(output) = self.optional("repmat", provider.repmat(right, &repeats_right))?
+        let expanded_right = if right_was_expanded {
+            let repeat = provider.repmat(right, &repeats_right);
+            let Some(output) = (if left_was_expanded {
+                self.optional_after_effect("repmat", repeat)
+            } else {
+                self.optional("repmat", repeat)
+            })?
             else {
                 return Ok(None);
             };
@@ -73,7 +80,12 @@ impl ExtremaKind {
             Self::Min => provider.elem_min(&expanded_left, &expanded_right).await,
             Self::Max => provider.elem_max(&expanded_left, &expanded_right).await,
         };
-        if let Some(output) = self.optional("elementwise extrema", result)? {
+        let result = if left_was_expanded || right_was_expanded {
+            self.optional_after_effect("elementwise extrema", result)?
+        } else {
+            self.optional("elementwise extrema", result)?
+        };
+        if let Some(output) = result {
             return self
                 .admit_output(provider, left, right, &contract, output)
                 .map(Some);
@@ -150,7 +162,7 @@ impl ExtremaKind {
                 } else {
                     provider.elem_max(input, &fill).await
                 };
-                match self.optional("elem_max", result)? {
+                match self.optional_after_effect("elem_max", result)? {
                     Some(output) => Some(output),
                     None => self.optional("scalar_max", provider.scalar_max(input, scalar))?,
                 }

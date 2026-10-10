@@ -157,7 +157,7 @@ fn common(precision: super::super::types::NumericPrecision, binding: u32) -> Str
         super::super::types::NumericPrecision::F32 => (
             "f32",
             "return bitcast<f32>(params.epsilon_low);",
-            "return bitcast<f32>(0x7fc00000u);",
+            "let nan_bits: u32 = 0x7fc00000u; return bitcast<f32>(nan_bits);",
             "return (bitcast<u32>(value) & 0x7f800000u) == 0x7f800000u;",
             r#"let exponent = i32((bitcast<u32>(divisor) >> 23u) & 0xffu) - 127;
   let half = exponent / 2;
@@ -166,13 +166,13 @@ fn common(precision: super::super::types::NumericPrecision, binding: u32) -> Str
         ),
         super::super::types::NumericPrecision::F64 => (
             "f64",
-            "return bitcast<f64>(vec2<u32>(params.epsilon_low, params.epsilon_high));",
-            "return bitcast<f64>(vec2<u32>(0u, 0x7ff80000u));",
-            "return (bitcast<vec2<u32>>(value).y & 0x7ff00000u) == 0x7ff00000u;",
-            r#"let exponent = i32((bitcast<vec2<u32>>(divisor).y >> 20u) & 0x7ffu) - 1023;
+            "return runmat_f64_from_words(params.epsilon_low, params.epsilon_high);",
+            "return runmat_f64_from_words(0u, 0x7ff80000u);",
+            "return (runmat_f64_high(value) & 0x7ff00000u) == 0x7ff00000u;",
+            r#"let exponent = i32((runmat_f64_high(divisor) >> 20u) & 0x7ffu) - 1023;
   let half = exponent / 2;
-  let first = bitcast<f64>(vec2<u32>(0u, u32(1023 - half) << 20u));
-  let second = bitcast<f64>(vec2<u32>(0u, u32(1023 - (exponent - half)) << 20u));"#,
+  let first = runmat_f64_from_words(0u, u32(1023 - half) << 20u);
+  let second = runmat_f64_from_words(0u, u32(1023 - (exponent - half)) << 20u);"#,
         ),
     };
     COMMON
@@ -185,17 +185,27 @@ fn common(precision: super::super::types::NumericPrecision, binding: u32) -> Str
 }
 
 pub fn statistics(precision: super::super::types::NumericPrecision) -> String {
-    STATISTICS
+    let source = STATISTICS
         .replace("$COMMON$", &common(precision, 2))
         .replace("$SCALAR$", precision_scalar(precision))
-        .replace("$WG$", &NORMALIZATION_WORKGROUP_SIZE.to_string())
+        .replace("$WG$", &NORMALIZATION_WORKGROUP_SIZE.to_string());
+    if precision == super::super::types::NumericPrecision::F64 {
+        super::ieee_words::inject(&source)
+    } else {
+        source
+    }
 }
 
 pub fn affine(precision: super::super::types::NumericPrecision) -> String {
-    AFFINE
+    let source = AFFINE
         .replace("$COMMON$", &common(precision, 5))
         .replace("$SCALAR$", precision_scalar(precision))
-        .replace("$WG$", &NORMALIZATION_WORKGROUP_SIZE.to_string())
+        .replace("$WG$", &NORMALIZATION_WORKGROUP_SIZE.to_string());
+    if precision == super::super::types::NumericPrecision::F64 {
+        super::ieee_words::inject(&source)
+    } else {
+        source
+    }
 }
 
 fn precision_scalar(precision: super::super::types::NumericPrecision) -> &'static str {

@@ -51,7 +51,8 @@ pub(super) fn prepare(
         .into());
     }
     if handle.device_id() != provider.device_id()
-        || !exact_provider_for_handle(&handle).is_some_and(|owner| std::ptr::eq(owner, provider))
+        || !exact_provider_for_handle(&handle)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
     {
         return Err(
             anyhow::anyhow!("explained variance input belongs to a different provider").into(),

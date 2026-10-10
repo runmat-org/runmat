@@ -3,11 +3,17 @@
 //! unrelated entrypoint or assembled from test-only graph guesses.
 
 use super::{derive_semantic_fusion_instruction_windows, derive_semantic_fusion_metadata};
-use crate::bytecode::{program::FunctionFusionScaffold, Instr};
+use crate::bytecode::{
+    program::{FunctionFusionScaffold, FunctionPrivateSlotLayout},
+    Instr,
+};
 
 pub(super) fn derive_function_scaffold(
     mir: &runmat_mir::MirAssembly,
     function: runmat_hir::FunctionId,
+    layout: &crate::layout::VmFunctionLayout,
+    resume_points: &std::collections::BTreeMap<runmat_types::ProgramPointId, usize>,
+    projection: &crate::bytecode::FusionStageProjection,
     instructions: &[Instr],
     instr_spans: &[runmat_hir::Span],
 ) -> Option<FunctionFusionScaffold> {
@@ -25,6 +31,11 @@ pub(super) fn derive_function_scaffold(
         signal_count: metadata.mir_fusion_signal_count,
         candidates: metadata.mir_fusion_candidate_groups,
         windows,
+        private_layout: FunctionPrivateSlotLayout::from_compiler(
+            layout,
+            resume_points,
+            projection.portable_origin,
+        ),
     };
     scaffold
         .valid_for(function, instructions, instr_spans)
@@ -49,6 +60,10 @@ mod tests {
             .fusion_scaffold
             .as_ref()
             .expect("function-owned MIR candidates");
+        assert!(
+            scaffold.private_layout.is_some(),
+            "compiler-owned function slots"
+        );
         assert!(scaffold.valid_for(function, &body.instructions, &body.instr_spans));
         body.validate_fusion_scaffold()
             .expect("selected statement admission");
@@ -58,6 +73,7 @@ mod tests {
             executable.fusion_metadata.mir_fusion_candidate_group_count,
             scaffold.candidates.len()
         );
+        assert_eq!(executable.function_private_layout, scaffold.private_layout);
         assert!(executable
             .fusion_metadata
             .instruction_windows

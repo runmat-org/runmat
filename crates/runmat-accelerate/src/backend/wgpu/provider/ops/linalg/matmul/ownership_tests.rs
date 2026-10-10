@@ -37,7 +37,7 @@ fn published_syrk_result_survives_repeated_calls_and_retires_with_last_alias() {
     assert_eq!(download(&provider, &first), [5.0, 11.0, 11.0, 25.0]);
     let second = provider.syrk_exec(&b).unwrap();
     assert!(!first.shares_allocation_with(&second));
-    assert!(!Arc::ptr_eq(
+    assert!(!runmat_accelerate_api::WgpuBufferOwner::ptr_eq(
         &provider.get_entry_raw(&first).unwrap().buffer,
         &provider.get_entry_raw(&second).unwrap().buffer,
     ));

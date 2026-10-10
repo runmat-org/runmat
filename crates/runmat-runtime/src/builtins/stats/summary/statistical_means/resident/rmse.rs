@@ -1,8 +1,8 @@
 //! Resident RMSE scales both operands before subtraction. Forming a raw
 //! residual first can overflow even when the final root mean square is finite.
 use super::{
-    admitted_real, contract_failure, equivalent_shape, expected_shape, numerics, provider_failure,
-    reduction, reject_output, usable_scale, Failure,
+    admitted_real, contract_failure, equivalent_shape, expected_shape, numerics, reduction,
+    reject_output, usable_scale, Failure, ObserveResidentHook, ResidentStageProgress,
 };
 use crate::builtins::common::{broadcast::BroadcastPlan, gpu_helpers};
 use crate::builtins::stats::summary::statistical_means::options::{
@@ -16,29 +16,21 @@ async fn absolute_components(
     provider: &'static dyn AccelProvider,
     input: &GpuTensorHandle,
     precision: ProviderPrecision,
+    progress: &mut ResidentStageProgress,
 ) -> Result<(GpuTensorHandle, GpuTensorHandle, Option<GpuTensorHandle>), Failure> {
     let kind = ReductionKind::RootMeanSquaredError;
     let (real, imaginary) = match runmat_accelerate_api::handle_storage(input) {
         GpuTensorStorage::Real => (input.clone(), None),
         GpuTensorStorage::ComplexInterleaved => {
-            let real = provider
-                .unary_real(input)
-                .await
-                .map_err(|e| provider_failure(kind, e))?;
-            let imaginary = provider
-                .unary_imag(input)
-                .await
-                .map_err(|e| provider_failure(kind, e))?;
+            let real = provider.unary_real(input).await.observe(progress, kind)?;
+            let imaginary = provider.unary_imag(input).await.observe(progress, kind)?;
             let real = admitted_real(kind, provider, input, real, input.shape(), precision)?;
             let imaginary =
                 admitted_real(kind, provider, input, imaginary, input.shape(), precision)?;
             (real, Some(imaginary))
         }
     };
-    let absolute_real = provider
-        .unary_abs(&real)
-        .await
-        .map_err(|e| provider_failure(kind, e))?;
+    let absolute_real = provider.unary_abs(&real).await.observe(progress, kind)?;
     let absolute_real = admitted_real(
         kind,
         provider,
@@ -51,7 +43,7 @@ async fn absolute_components(
         let absolute_imaginary = provider
             .unary_abs(imaginary)
             .await
-            .map_err(|e| provider_failure(kind, e))?;
+            .observe(progress, kind)?;
         let absolute_imaginary = admitted_real(
             kind,
             provider,
@@ -63,7 +55,7 @@ async fn absolute_components(
         provider
             .elem_max(&absolute_real, &absolute_imaginary)
             .await
-            .map_err(|e| provider_failure(kind, e))?
+            .observe(progress, kind)?
     } else {
         absolute_real
     };
@@ -78,16 +70,17 @@ async fn normalized_component(
     scale: &GpuTensorHandle,
     output_shape: &[usize],
     precision: ProviderPrecision,
+    progress: &mut ResidentStageProgress,
 ) -> Result<GpuTensorHandle, Failure> {
     let kind = ReductionKind::RootMeanSquaredError;
     let left_normalized = provider
         .elem_div(left, scale)
         .await
-        .map_err(|e| provider_failure(kind, e))?;
+        .observe(progress, kind)?;
     let right_normalized = provider
         .elem_div(right, scale)
         .await
-        .map_err(|e| provider_failure(kind, e))?;
+        .observe(progress, kind)?;
     let left_shape = BroadcastPlan::new(left.shape(), scale.shape())
         .map_err(|source| contract_failure(kind, source.to_string()))?;
     let right_shape = BroadcastPlan::new(right.shape(), scale.shape())
@@ -111,7 +104,7 @@ async fn normalized_component(
     let residual = provider
         .elem_sub(&left_normalized, &right_normalized)
         .await
-        .map_err(|e| provider_failure(kind, e))?;
+        .observe(progress, kind)?;
     admitted_real(kind, provider, left, residual, output_shape, precision)
 }
 
@@ -122,29 +115,28 @@ async fn run(
     options: &Options,
     precision: ProviderPrecision,
     plan: &BroadcastPlan,
+    progress: &mut ResidentStageProgress,
 ) -> Result<GpuTensorHandle, Failure> {
     let kind = ReductionKind::RootMeanSquaredError;
     let output_shape = plan.output_shape();
     let (forecast_abs, forecast_real, forecast_imaginary) =
-        absolute_components(provider, forecast, precision).await?;
+        absolute_components(provider, forecast, precision, progress).await?;
     let (actual_abs, actual_real, actual_imaginary) =
-        absolute_components(provider, actual, precision).await?;
+        absolute_components(provider, actual, precision, progress).await?;
     let scale = provider
         .elem_max(&forecast_abs, &actual_abs)
         .await
-        .map_err(|e| provider_failure(kind, e))?;
+        .observe(progress, kind)?;
     let mut scale = admitted_real(kind, provider, forecast, scale, output_shape, precision)?;
     if options.missing == super::super::options::MissingMode::Omit {
-        scale = provider
-            .map_nan_to_zero(&scale)
-            .map_err(|e| provider_failure(kind, e))?;
+        scale = provider.map_nan_to_zero(&scale).observe(progress, kind)?;
         scale = admitted_real(kind, provider, forecast, scale, output_shape, precision)?;
     }
     for axis in reduction::selected_axes(output_shape, &options.axes) {
         let next = provider
             .reduce_max_dim(&scale, axis)
             .await
-            .map_err(|e| provider_failure(kind, e))?
+            .observe(progress, kind)?
             .values;
         let expected = expected_shape(
             scale.shape(),
@@ -152,7 +144,7 @@ async fn run(
         );
         scale = admitted_real(kind, provider, forecast, next, &expected, precision)?;
     }
-    let scale = usable_scale(kind, provider, forecast, scale).await?;
+    let scale = usable_scale(kind, provider, forecast, scale, progress).await?;
     let scale = admitted_real(
         kind,
         provider,
@@ -168,6 +160,7 @@ async fn run(
         &scale,
         output_shape,
         precision,
+        progress,
     )
     .await?;
     let normalized = if let (Some(forecast_imaginary), Some(actual_imaginary)) =
@@ -180,12 +173,13 @@ async fn run(
             &scale,
             output_shape,
             precision,
+            progress,
         )
         .await?;
         let complex = provider
             .complex_from_real_imag(&real, &imaginary)
             .await
-            .map_err(|e| provider_failure(kind, e))?;
+            .observe(progress, kind)?;
         if !equivalent_shape(complex.shape(), output_shape)
             || complex.allocation_lease().validate_live().is_err()
             || runmat_accelerate_api::handle_storage(&complex)
@@ -205,7 +199,7 @@ async fn run(
     } else {
         real
     };
-    let rooted = numerics::run(kind, provider, &normalized, options).await?;
+    let rooted = numerics::run(kind, provider, &normalized, options, progress).await?;
     let rooted = admitted_real(
         kind,
         provider,
@@ -217,7 +211,7 @@ async fn run(
     let result = provider
         .elem_mul(&rooted, &scale)
         .await
-        .map_err(|e| provider_failure(kind, e))?;
+        .observe(progress, kind)?;
     admitted_real(
         kind,
         provider,
@@ -263,6 +257,7 @@ pub(in crate::builtins::stats::summary::statistical_means) async fn try_rmse(
     }
     let plan = BroadcastPlan::new(forecast.shape(), actual.shape())
         .map_err(|source| invalid(kind, &source.to_string()))?;
+    let mut progress = ResidentStageProgress::default();
     let outcome = run(
         provider,
         forecast,
@@ -270,6 +265,7 @@ pub(in crate::builtins::stats::summary::statistical_means) async fn try_rmse(
         options,
         precision.expect("checked above"),
         &plan,
+        &mut progress,
     )
     .await;
     match outcome {

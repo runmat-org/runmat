@@ -563,7 +563,7 @@ impl WgpuProvider {
     #[allow(clippy::too_many_arguments)]
     async fn try_fft_dim_exec_native_bluestein(
         &self,
-        in_buffer: Arc<wgpu::Buffer>,
+        in_buffer: runmat_accelerate_api::WgpuBufferOwner,
         shape: Vec<usize>,
         dim: usize,
         origin_rank: usize,
@@ -936,7 +936,7 @@ impl WgpuProvider {
     #[allow(clippy::too_many_arguments)]
     async fn try_fft_dim_exec_native_mixed(
         &self,
-        in_buffer: Arc<wgpu::Buffer>,
+        in_buffer: runmat_accelerate_api::WgpuBufferOwner,
         mut shape: Vec<usize>,
         dim: usize,
         origin_rank: usize,
@@ -1293,7 +1293,7 @@ impl WgpuProvider {
     #[allow(clippy::too_many_arguments)]
     async fn try_fft_dim_exec_native_radix3(
         &self,
-        in_buffer: Arc<wgpu::Buffer>,
+        in_buffer: runmat_accelerate_api::WgpuBufferOwner,
         mut shape: Vec<usize>,
         dim: usize,
         origin_rank: usize,
@@ -1521,7 +1521,7 @@ impl WgpuProvider {
     #[allow(clippy::too_many_arguments)]
     async fn try_fft_dim_exec_native_radix5(
         &self,
-        in_buffer: Arc<wgpu::Buffer>,
+        in_buffer: runmat_accelerate_api::WgpuBufferOwner,
         mut shape: Vec<usize>,
         dim: usize,
         origin_rank: usize,

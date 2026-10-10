@@ -983,6 +983,7 @@ fn parse_toggle(value: Option<&Value>) -> Option<bool> {
 pub(crate) mod tests {
     use super::*;
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_descriptor_signatures_cover_core_forms() {
         let labels: Vec<&str> = REGEXPREP_DESCRIPTOR
@@ -1102,6 +1103,41 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn regexprep_single_occurrence_is_not_a_toggle_value() {
+        let single = |value| Value::Tensor(Tensor::from_f32(vec![value], vec![1, 1]).unwrap());
+        for flag in ["lineanchors", "dotall"] {
+            assert_eq!(
+                run_regexprep(
+                    Value::String("a a".into()),
+                    Value::String("a".into()),
+                    Value::String("X".into()),
+                    vec![Value::String(flag.into()), single(2.0)],
+                )
+                .expect("single N after a flag"),
+                Value::String("a X".into()),
+            );
+        }
+        let error = run_regexprep(
+            Value::String("a a".into()),
+            Value::String("a".into()),
+            Value::String("X".into()),
+            vec![Value::String("preservecase".into()), single(1.0)],
+        )
+        .expect_err("single is not a preservecase toggle");
+        assert!(error.message().contains("expected logical or 'on'/'off'"));
+        let error = run_regexprep(
+            Value::String("a a".into()),
+            Value::String("a".into()),
+            Value::String("X".into()),
+            vec![Value::String("dotall".into()), single(0.0)],
+        )
+        .expect_err("zero single N is not a toggle");
+        assert!(error.message().contains("positive integer scalar"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_integer_occurrence_option_is_exact_and_class_complete() {
         for occurrence in [
@@ -1138,6 +1174,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_rejects_invalid_integer_occurrence_options() {
         for occurrence in [
@@ -1159,11 +1196,26 @@ pub(crate) mod tests {
                 Value::String("a a".into()),
                 Value::String("a".into()),
                 Value::String("X".into()),
-                vec![Value::Int(IntValue::U64(u64::MAX))],
+                vec![Value::Int(IntValue::U64(u64::from(u32::MAX)))],
             )
             .expect("valid occurrence beyond available matches"),
             Value::String("a a".into())
         );
+        let widest_occurrence = run_regexprep(
+            Value::String("a a".into()),
+            Value::String("a".into()),
+            Value::String("X".into()),
+            vec![Value::Int(IntValue::U64(u64::MAX))],
+        );
+        if usize::BITS == 64 {
+            assert_eq!(
+                widest_occurrence.expect("valid native index beyond available matches"),
+                Value::String("a a".into())
+            );
+        } else {
+            let error = widest_occurrence.expect_err("occurrence exceeds the platform index range");
+            assert!(error.message().contains("positive integer scalar"));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

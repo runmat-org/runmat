@@ -387,7 +387,7 @@ impl RuntimeGraphicsCallbackQueue {
                     .build(),
             );
         };
-        if !crate::builtins::plotting::state::graphics_receiver_valid(receiver) {
+        if !crate::plotting_hooks::graphics_receiver_valid(receiver) {
             return Err(build_runtime_error("graphics callback source is retired")
                 .with_identifier("RunMat:graphics:CallbackSourceRetired")
                 .build());
@@ -506,7 +506,7 @@ impl RuntimeGraphicsCallbackQueue {
                 .collect::<Vec<_>>()
         };
         for (receiver, kind) in candidates {
-            if !crate::builtins::plotting::state::graphics_receiver_valid(&receiver) {
+            if !crate::plotting_hooks::graphics_receiver_valid(&receiver) {
                 self.clear_graphics_property_response(&receiver, kind);
             }
         }
@@ -642,7 +642,7 @@ impl RuntimeGraphicsCallbackQueue {
                         .then_some(registration)
                         .filter(|registration| {
                             registration.receiver.as_ref().is_none_or(|receiver| {
-                                crate::builtins::plotting::state::graphics_receiver_valid(receiver)
+                                crate::plotting_hooks::graphics_receiver_valid(receiver)
                             })
                         })
                         .map(|registration| {

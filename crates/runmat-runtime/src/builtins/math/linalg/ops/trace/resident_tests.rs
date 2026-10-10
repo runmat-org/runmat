@@ -3,15 +3,16 @@ use super::*;
 use futures::executor::block_on;
 use runmat_accelerate_api::{
     test_support::TestAllocationOwner, AccelDownloadFuture, AccelNumericDownloadFuture,
-    AccelProvider, AccelProviderFuture, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned,
-    HostNumericTensorOwned, HostTensorView, NumericElementType, ProviderExecutionFuture,
-    ProviderPrecision, ThreadProviderGuard,
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned, HostNumericTensorOwned,
+    HostTensorView, NumericElementType, ProviderExecutionFuture, ProviderPrecision,
+    ThreadProviderGuard,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn trace_restore_failure_keeps_retry_span_context_and_typed_cause() {
     let source = build_runtime_error("provider upload failed")
         .with_identifier("RunMat:gpu:UploadFailed")
@@ -52,6 +53,7 @@ struct ComplexTraceProvider {
     diagonals: AtomicUsize,
     sums: AtomicUsize,
     casts: AtomicUsize,
+    reject_cast: bool,
     downloads: AtomicUsize,
     values: Mutex<HashMap<u64, HostNumericTensorOwned>>,
 }
@@ -168,17 +170,25 @@ impl AccelProvider for ComplexTraceProvider {
     fn unary_single<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            self.casts.fetch_add(1, Ordering::SeqCst);
-            let payload = self.payload(input)?;
-            let HostNumericDataOwned::F64(data) = payload.data else {
-                anyhow::bail!("double result required before single cast")
+            let evaluate = || -> anyhow::Result<GpuTensorHandle> {
+                self.casts.fetch_add(1, Ordering::SeqCst);
+                if self.reject_cast {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "fixture rejects Single adaptation",
+                    ));
+                }
+                let payload = self.payload(input)?;
+                let HostNumericDataOwned::F64(data) = payload.data else {
+                    anyhow::bail!("double result required before single cast")
+                };
+                Ok(self.allocate(
+                    vec![1, 1],
+                    HostNumericDataOwned::F32(data.into_iter().map(|value| value as f32).collect()),
+                ))
             };
-            Ok(self.allocate(
-                vec![1, 1],
-                HostNumericDataOwned::F32(data.into_iter().map(|value| value as f32).collect()),
-            ))
+            evaluate().map_err(Into::into)
         })
     }
 }
@@ -191,6 +201,7 @@ fn complex_diagonal_and_sum_remain_resident_for_capable_provider() {
             diagonals: AtomicUsize::new(0),
             sums: AtomicUsize::new(0),
             casts: AtomicUsize::new(0),
+            reject_cast: false,
             downloads: AtomicUsize::new(0),
             values: Mutex::new(HashMap::new()),
         }));
@@ -235,6 +246,40 @@ fn complex_diagonal_and_sum_remain_resident_for_capable_provider() {
     }
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn completed_trace_reduction_does_not_replay_after_single_cast_unsupported() {
+    let provider: &'static ComplexTraceProvider = Box::leak(Box::new(ComplexTraceProvider {
+        owner: TestAllocationOwner::new(),
+        diagonals: AtomicUsize::new(0),
+        sums: AtomicUsize::new(0),
+        casts: AtomicUsize::new(0),
+        reject_cast: true,
+        downloads: AtomicUsize::new(0),
+        values: Mutex::new(HashMap::new()),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let input = provider.allocate(
+        vec![2, 2],
+        HostNumericDataOwned::F32(vec![1.0, 2.0, 100.0, 200.0, -50.0, -60.0, 7.0, 8.0]),
+    );
+    let error = block_on(super::trace_builtin(Value::GpuTensor(input.clone())))
+        .expect_err("post-reduction Unsupported must remain terminal");
+    assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    assert!(error.source.is_some(), "typed provider cause must survive");
+    let mut cause: &(dyn std::error::Error + 'static) = &error;
+    while !cause.is::<runmat_accelerate_api::UnsupportedProviderOperation>() {
+        cause = cause
+            .source()
+            .expect("original typed cast rejection retained");
+    }
+    assert_eq!(provider.diagonals.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.sums.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.casts.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    input.allocation_lease().validate_live().unwrap();
+}
+
 #[test]
 fn scalar_complex_diagonal_and_sum_may_keep_the_input_allocation() {
     let provider: &'static ComplexTraceProvider = Box::leak(Box::new(ComplexTraceProvider {
@@ -242,6 +287,7 @@ fn scalar_complex_diagonal_and_sum_may_keep_the_input_allocation() {
         diagonals: AtomicUsize::new(0),
         sums: AtomicUsize::new(0),
         casts: AtomicUsize::new(0),
+        reject_cast: false,
         downloads: AtomicUsize::new(0),
         values: Mutex::new(HashMap::new()),
     }));

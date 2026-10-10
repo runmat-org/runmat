@@ -17,6 +17,21 @@ pub const BUILTIN_CATALOG_SCHEMA: u32 = BUILTIN_CATALOG_SCHEMA_VERSION;
 /// is not executable and the latter is host-specific. Runtime release
 /// compatibility is represented by the separate runtime fingerprint.
 pub fn builtin_catalog_fingerprint() -> [u8; 32] {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        static FINGERPRINT: std::sync::OnceLock<[u8; 32]> = std::sync::OnceLock::new();
+        *FINGERPRINT.get_or_init(compute_builtin_catalog_fingerprint)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        // The browser registry accepts later submissions; it cannot use the
+        // native immutable-inventory cache.
+        compute_builtin_catalog_fingerprint()
+    }
+}
+
+fn compute_builtin_catalog_fingerprint() -> [u8; 32] {
     let mut functions = builtin_functions();
     functions.sort_unstable_by_key(|function| function.name);
 
@@ -276,6 +291,8 @@ fn field(hash: &mut Sha256, value: &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
+    use crate::legacy_index::INVENTORY_TRAVERSALS;
 
     #[test]
     fn catalog_fingerprint_is_stable_for_one_process() {
@@ -283,5 +300,32 @@ mod tests {
         let second = builtin_catalog_fingerprint();
         assert_eq!(first, second);
         assert_ne!(first, [0; 32]);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_cached_fingerprint_does_not_repeat_inventory_traversal() {
+        let cached = builtin_catalog_fingerprint();
+        let after_initialization = INVENTORY_TRAVERSALS.with(std::cell::Cell::get);
+        for _ in 0..4 {
+            assert_eq!(builtin_catalog_fingerprint(), cached);
+        }
+        assert_eq!(
+            INVENTORY_TRAVERSALS.with(std::cell::Cell::get),
+            after_initialization
+        );
+
+        // The independent uncached computation still traverses the same
+        // inventory and must produce exactly the public native bytes.
+        assert_eq!(compute_builtin_catalog_fingerprint(), cached);
+        assert_eq!(
+            INVENTORY_TRAVERSALS.with(std::cell::Cell::get),
+            after_initialization + 1
+        );
+        assert_eq!(builtin_catalog_fingerprint(), cached);
+        assert_eq!(
+            INVENTORY_TRAVERSALS.with(std::cell::Cell::get),
+            after_initialization + 1
+        );
     }
 }

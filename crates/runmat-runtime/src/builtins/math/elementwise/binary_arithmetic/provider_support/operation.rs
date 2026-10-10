@@ -54,7 +54,7 @@ impl ArithmeticProviderOperation {
         provider: &dyn AccelProvider,
         left: &GpuTensorHandle,
         right: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         let _left = crate::builtins::common::gpu_helpers::ResidencyRestoreGuard::new(left);
         let _right = crate::builtins::common::gpu_helpers::ResidencyRestoreGuard::new(right);
         match self {

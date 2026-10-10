@@ -144,23 +144,26 @@ impl AccelProvider for Provider {
     fn reduce_min<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             self.state.lock().unwrap().calls += 1;
             match self.fault {
                 Fault::PendingReduction => return std::future::pending().await,
                 Fault::Alias => return input.with_view(input.view().clone()).map_err(Into::into),
                 Fault::WrongStorage => {
-                    return self.allocate(
-                        vec![1.0, 0.0],
-                        vec![1, 1],
-                        GpuTensorStorage::ComplexInterleaved,
-                    )
+                    return self
+                        .allocate(
+                            vec![1.0, 0.0],
+                            vec![1, 1],
+                            GpuTensorStorage::ComplexInterleaved,
+                        )
+                        .map_err(Into::into)
                 }
                 _ => {}
             }
             let minimum = self.read(input)?.data.into_iter().reduce(f64::min).unwrap();
             self.allocate(vec![minimum], vec![1, 1], GpuTensorStorage::Real)
+                .map_err(Into::into)
         })
     }
     fn download<'a>(&'a self, input: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {

@@ -9,6 +9,7 @@ use runmat_types::NumericClass;
 
 pub(super) const DECLARATION: FusionReductionDeclaration = FusionReductionDeclaration {
     revision: 3,
+    operation: FusionReductionOperation::Sum,
     prepare,
 };
 fn prepare(controls: FusionReductionControls<'_>) -> FusionReductionPrepareFuture<'_> {
@@ -107,13 +108,14 @@ mod tests {
         assert_eq!(base.axes, vec![0]);
         assert_eq!(base.output_shape, vec![1, 1]);
         assert_eq!(
-            futures::executor::block_on(sum_builtin(input.clone(), vec![])).unwrap(),
+            futures::executor::block_on(sum_builtin(None, input.clone(), vec![])).unwrap(),
             single(vec![16_777_216.0], vec![1, 1])
         );
         let double = receipt(&input, &[Value::String("double".into())]).unwrap();
         assert_eq!(double.output_class, NumericClass::Double);
         assert_eq!(
             futures::executor::block_on(sum_builtin(
+                None,
                 input.clone(),
                 vec![Value::String("double".into())]
             ))
@@ -135,8 +137,12 @@ mod tests {
         assert_eq!(omitted.empty, FusionReductionEmpty::PositiveZero);
         assert_eq!(omitted.nan_mode, ReductionNaN::Omit);
         assert_eq!(
-            futures::executor::block_on(sum_builtin(nan, vec![Value::String("omitnan".into())]))
-                .unwrap(),
+            futures::executor::block_on(sum_builtin(
+                None,
+                nan,
+                vec![Value::String("omitnan".into())]
+            ))
+            .unwrap(),
             single(vec![0.0], vec![1, 1])
         );
         let fact = value_fact(&input);

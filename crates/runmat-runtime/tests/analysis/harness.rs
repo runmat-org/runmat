@@ -4,8 +4,7 @@ use futures::FutureExt;
 struct HarnessProvider;
 
 fn harness_owner() -> &'static runmat_accelerate::simple_provider::InProcessProvider {
-    static OWNER: OnceLock<runmat_accelerate::simple_provider::InProcessProvider> = OnceLock::new();
-    OWNER.get_or_init(runmat_accelerate::simple_provider::InProcessProvider::new)
+    crate::retained_provider::retained_test_provider!(OWNER: runmat_accelerate::simple_provider::InProcessProvider = runmat_accelerate::simple_provider::InProcessProvider::new())
 }
 
 fn store_get(handle: &GpuTensorHandle) -> anyhow::Result<HostTensorOwned> {
@@ -80,24 +79,24 @@ impl AccelProvider for HarnessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { elementwise_binary(a, b, |x, y| x + y) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { elementwise_binary(a, b, |x, y| x + y).map_err(Into::into) })
     }
 
     fn elem_sub<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { elementwise_binary(a, b, |x, y| x - y) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { elementwise_binary(a, b, |x, y| x - y).map_err(Into::into) })
     }
 
     fn elem_mul<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { elementwise_binary(a, b, |x, y| x * y) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { elementwise_binary(a, b, |x, y| x * y).map_err(Into::into) })
     }
 
     fn scalar_mul(&self, a: &GpuTensorHandle, scalar: f64) -> anyhow::Result<GpuTensorHandle> {

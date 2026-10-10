@@ -33,11 +33,15 @@ mod function_fusion;
 #[cfg(feature = "native-accel")]
 pub use function_fusion::FunctionFusionScaffold;
 #[cfg(feature = "native-accel")]
+pub(crate) use function_fusion::FunctionPrivateSlotLayout;
+#[cfg(feature = "native-accel")]
 #[path = "program/vm_fusion_plan.rs"]
 mod vm_fusion_plan;
 pub use function_remap::{
     rebind_session_source, remap_session_entrypoint, remap_session_function, SessionCallableBinding,
 };
+#[cfg(feature = "native-accel")]
+pub(crate) use vm_fusion_plan::VmFusionPlanInstallation;
 #[path = "program/retained_artifacts.rs"]
 pub(crate) mod retained_artifacts;
 #[path = "program/semantic_fingerprint.rs"]
@@ -232,6 +236,7 @@ impl FunctionBytecode {
         {
             bytecode.fusion_metadata.stage_projection = self.fusion_stage_projection.clone();
             if let Some(scaffold) = registry.admitted_fusion_scaffold(self) {
+                bytecode.function_private_layout = scaffold.private_layout.clone();
                 bytecode.fusion_metadata.mir_fusion_signal_count = scaffold.signal_count;
                 bytecode.fusion_metadata.mir_fusion_candidate_group_count =
                     scaffold.candidates.len();
@@ -292,6 +297,9 @@ impl FunctionBytecode {
         if let Some(scaffold) = &mut self.fusion_scaffold {
             for candidate in &mut scaffold.candidates {
                 candidate.function = function;
+            }
+            if let Some(layout) = &mut scaffold.private_layout {
+                layout.rebind(function, program_function);
             }
         }
         self.resume_points = std::mem::take(&mut self.resume_points)
@@ -1329,6 +1337,11 @@ pub struct Bytecode {
     pub initially_unassigned_slots: HashSet<usize>,
     #[serde(default)]
     pub layout: Option<VmAssemblyLayout>,
+    /// Only the exact admitted function body can carry this compiler layout
+    /// into an ordinary function call. It is never serialized as bytecode.
+    #[cfg(feature = "native-accel")]
+    #[serde(skip)]
+    pub(crate) function_private_layout: Option<FunctionPrivateSlotLayout>,
     #[serde(default)]
     pub async_metadata: AsyncMetadata,
     /// Canonical region identities mapped onto function-local bytecode PCs.
@@ -1515,6 +1528,8 @@ impl Bytecode {
             var_names: HashMap::new(),
             initially_unassigned_slots: HashSet::new(),
             layout: None,
+            #[cfg(feature = "native-accel")]
+            function_private_layout: None,
             async_metadata: AsyncMetadata::default(),
             regions: Vec::new(),
             parfor_regions: Vec::new(),
@@ -1556,9 +1571,31 @@ impl Bytecode {
     pub fn for_function(
         function: &FunctionBytecode,
         registry: FunctionRegistry,
-        layout: VmAssemblyLayout,
+        mut layout: VmAssemblyLayout,
     ) -> Self {
+        // `derive_layout` has semantic slots but no emitted instruction PCs.
+        // Only the exact selected compiled body may bind those PCs; an existing
+        // conflicting map is never replaced by a coincident function ID.
+        let exact_selected_body = registry
+            .get(function.function)
+            .is_some_and(|selected| std::ptr::eq(selected, function));
+        if exact_selected_body {
+            if let Some(selected_layout) = layout.functions.get_mut(&function.function) {
+                if selected_layout.function == function.function
+                    && selected_layout.local_count == function.var_count
+                    && selected_layout.resume_points.is_empty()
+                {
+                    selected_layout.resume_points = function.resume_points.clone();
+                }
+            }
+        }
         let mut bytecode = function.execution_bytecode(&registry);
+        #[cfg(feature = "native-accel")]
+        if !exact_selected_body || function.validate_fusion_stage_projection().is_err() {
+            // A detached same-ID body may execute normally, but cannot borrow
+            // the registry's selected MIR/portable-origin proposal authority.
+            bytecode.fusion_metadata.stage_projection = None;
+        }
         bytecode.var_types = vec![Type::Unknown; function.var_count];
         bytecode.layout = Some(layout);
         bytecode
@@ -1581,7 +1618,8 @@ impl Bytecode {
         {
             return Vec::new();
         }
-        self.fusion_metadata
+        let mut groups: Vec<FusionGroup> = self
+            .fusion_metadata
             .instruction_windows
             .iter()
             .enumerate()
@@ -1604,7 +1642,12 @@ impl Bytecode {
                 pattern: None,
                 stack_layout: None,
             })
-            .collect()
+            .collect();
+        super::fusion_private_temp::coalesce_reduction_groups(
+            &mut groups,
+            &super::fusion_private_temp::bridges(self),
+        );
+        groups
     }
 
     #[cfg(feature = "native-accel")]

@@ -186,8 +186,7 @@ fn nansum_admitted_identity_and_abandonment_use_the_same_session_owner() {
     assert_eq!(probe.requests.borrow()[0].signature.operation, "nansum");
     assert!(probe.feedback.borrow().is_empty());
     drop(prepared.execute(|_| async { Ok(Value::Num(4.0)) }));
-    assert_eq!(probe.feedback.borrow().len(), 1);
-    assert!(!probe.feedback.borrow()[0].succeeded);
+    assert!(probe.feedback.borrow().is_empty());
 }
 
 #[test]
@@ -265,8 +264,7 @@ fn rejected_provider_unpolled_body_aborts_once_without_success_observation() {
         super::super::admitted::prepare_with(&auto, &context, logical_request()).unwrap();
     drop(prepared.execute(|_| async { Ok(Value::Bool(true)) }));
     let feedback = probe.feedback.borrow();
-    assert_eq!(feedback.len(), 1);
-    assert!(!feedback[0].succeeded);
+    assert!(feedback.is_empty());
 }
 
 #[test]
@@ -284,8 +282,7 @@ fn rejected_provider_cancelled_body_never_reports_cpu_success() {
     source.cancel(runmat_execution::CancellationReason::User);
     let _ = futures::executor::block_on(prepared.execute(|_| async { Ok(Value::Bool(true)) }));
     let feedback = probe.feedback.borrow();
-    assert_eq!(feedback.len(), 1);
-    assert!(!feedback[0].succeeded);
+    assert!(feedback.is_empty());
 }
 
 #[test]
@@ -306,8 +303,7 @@ fn admitted_unpolled_future_and_panicking_body_abort_once() {
         } else {
             drop(prepared.execute(|_| async { Ok(Value::Bool(true)) }));
         }
-        assert_eq!(probe.feedback.borrow().len(), 1);
-        assert!(!probe.feedback.borrow()[0].succeeded);
+        assert!(probe.feedback.borrow().is_empty());
     }
 }
 

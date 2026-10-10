@@ -14,6 +14,64 @@ use runmat_accelerate_api::{
 use runmat_execution::{CandidatePreparationState, Digest};
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+enum DynamicPipeline {
+    Legacy(u64),
+    Validated(u64),
+}
+
+impl DynamicPipeline {
+    fn is_warm<L, V>(
+        self,
+        legacy: Option<&std::collections::HashMap<u64, L>>,
+        validated: Option<&std::collections::HashMap<u64, V>>,
+    ) -> Option<bool> {
+        match self {
+            Self::Legacy(key) => legacy.map(|cache| cache.contains_key(&key)),
+            Self::Validated(key) => validated.map(|cache| cache.contains_key(&key)),
+        }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn dynamic_pipeline_warmth_uses_its_typed_cache_owner() {
+    let legacy = std::collections::HashMap::from([(7u64, ())]);
+    let validated = std::collections::HashMap::from([(8u64, ())]);
+    assert_eq!(
+        DynamicPipeline::Legacy(7)
+            .is_warm(Some(&legacy), None::<&std::collections::HashMap<u64, ()>>),
+        Some(true)
+    );
+    assert_eq!(
+        DynamicPipeline::Validated(7).is_warm(
+            None::<&std::collections::HashMap<u64, ()>>,
+            Some(&validated)
+        ),
+        Some(false)
+    );
+    assert_eq!(
+        DynamicPipeline::Validated(8).is_warm(
+            None::<&std::collections::HashMap<u64, ()>>,
+            Some(&validated)
+        ),
+        Some(true)
+    );
+    assert_eq!(
+        DynamicPipeline::Legacy(8)
+            .is_warm(Some(&legacy), None::<&std::collections::HashMap<u64, ()>>),
+        Some(false)
+    );
+    assert_eq!(
+        DynamicPipeline::Legacy(7).is_warm(
+            None::<&std::collections::HashMap<u64, ()>>,
+            Some(&validated)
+        ),
+        None
+    );
+}
+
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 enum FixedPipeline {
     Fill,
     Scalar,
@@ -180,7 +238,7 @@ impl WgpuProvider {
                     DeepLearningFeedForwardStage::Relu { .. } => {}
                     DeepLearningFeedForwardStage::Elu { elements } if *elements != 0 => {
                         fixed.push(FixedPipeline::Fill);
-                        dynamic.push(
+                        dynamic.push(DynamicPipeline::Legacy(
                             PipelineRecipe::fusion(
                                 super::deep_learning::elu_shader(self.precision),
                                 2,
@@ -188,14 +246,17 @@ impl WgpuProvider {
                                 self.workgroup_config.scalar,
                             )
                             .key(),
-                        );
+                        ));
                     }
                     DeepLearningFeedForwardStage::Elu { .. } => {}
                     DeepLearningFeedForwardStage::SoftmaxRows { rows, columns }
                         if *rows != 0 && *columns != 0 =>
                     {
-                        dynamic.push(super::deep_learning::softmax_rows_pipeline_key(
-                            self.precision,
+                        dynamic.push(DynamicPipeline::Validated(
+                            super::deep_learning::softmax_rows_pipeline_key(
+                                self.precision,
+                                self.workgroup_config.scalar,
+                            ),
                         ));
                     }
                     DeepLearningFeedForwardStage::SoftmaxRows { .. } => {}
@@ -241,7 +302,12 @@ impl WgpuProvider {
         });
         bytes.extend_from_slice(&self.workgroup_config.scalar.to_le_bytes());
         bytes.extend(fixed.iter().map(|pipeline| pipeline.tag()));
-        for key in &dynamic {
+        for pipeline in &dynamic {
+            let (key, validated) = match pipeline {
+                DynamicPipeline::Legacy(key) => (key, false),
+                DynamicPipeline::Validated(key) => (key, true),
+            };
+            bytes.push(u8::from(validated));
             bytes.extend_from_slice(&key.to_le_bytes());
         }
         let identity = Digest::sha256(bytes);
@@ -252,18 +318,31 @@ impl WgpuProvider {
         let fixed_warm = fixed.len().checked_sub(fixed_cold)?;
         let (state, cold_pipelines, warm_pipelines) = if dynamic.is_empty() {
             (Some(()), fixed_cold, fixed_warm)
-        } else if let Ok(cache) = self.fused_pipeline_cache.try_lock() {
-            let dynamic_cold = dynamic
-                .iter()
-                .filter(|key| !cache.contains_key(*key))
-                .count();
-            (
-                Some(()),
-                fixed_cold.checked_add(dynamic_cold)?,
-                fixed_warm.checked_add(dynamic.len().checked_sub(dynamic_cold)?)?,
-            )
         } else {
-            (None, 0, 0)
+            let legacy = dynamic
+                .iter()
+                .any(|pipeline| matches!(pipeline, DynamicPipeline::Legacy(_)))
+                .then(|| self.fused_pipeline_cache.try_lock().ok())
+                .flatten();
+            let validated = dynamic
+                .iter()
+                .any(|pipeline| matches!(pipeline, DynamicPipeline::Validated(_)))
+                .then(|| self.validated_fusion_cache.try_lock().ok())
+                .flatten();
+            let dynamic_cold = dynamic.iter().try_fold(0usize, |cold, pipeline| {
+                Some(
+                    cold + usize::from(!pipeline.is_warm(legacy.as_deref(), validated.as_deref())?),
+                )
+            });
+            if let Some(dynamic_cold) = dynamic_cold {
+                (
+                    Some(()),
+                    fixed_cold.checked_add(dynamic_cold)?,
+                    fixed_warm.checked_add(dynamic.len().checked_sub(dynamic_cold)?)?,
+                )
+            } else {
+                (None, 0, 0)
+            }
         };
         Some(ProviderPreparationSnapshot {
             identity,

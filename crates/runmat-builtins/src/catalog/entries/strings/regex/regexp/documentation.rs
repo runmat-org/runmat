@@ -4,7 +4,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
         "Single character vectors and string scalars return a numeric row vector of 1-based match start indices by default.",
         "String arrays and cell arrays always produce cell outputs that mirror the input shape, with each cell holding the result for the corresponding element.",
-        "`'match'` returns matched substrings, `'tokens'` returns nested cells of capture-group substrings, `'tokenExtents'` returns `n × 2` double matrices with start/end indices for each token, `'names'` returns scalar struct values keyed by named tokens, and `'split'` yields the text segments between matches.",
+        "`'match'` returns matched substrings, `'tokens'` returns nested cells of capture-group substrings, `'tokenExtents'` returns `n × 2` double matrices with start/end indices for each token, `'names'` returns a cell of scalar structs keyed by named tokens for scalar text (or one struct with `'once'`), and `'split'` yields the text segments between matches. Array subjects add an outer cell matching the input shape.",
         "`'once'` stops after the first match (per element), and every requested output honours that limit.",
         "Zero-length matches are omitted by default. Pass `'emptymatch'` to include them, or `'noemptymatch'` to restore the default. RunMat also accepts its older `'emptymatch','allow'/'remove'` form.",
         "`'forceCellOutput'` forces cell-array containers even for scalar inputs so downstream code can rely on uniform dimensions. MATLAB-compatible `'warnings','on'/'off'` flags are accepted but currently informational only.",
@@ -37,7 +37,7 @@ const EXAMPLES: &[BuiltinExample] = &[
     },
     BuiltinExample {
         id: "example-3", title: "Extract capture tokens",
-        program: "tokens = regexp('2024-03-14', '(\\d{4})-(\\d{2})-(\\d{2})', 'tokens');\nyear = tokens{1}{1};\nmonth = tokens{1}{2};\nday = tokens{1}{3}", display_output: Some("year =\n    '2024'\nmonth =\n    '03'\nday =\n    '14'"),
+        program: "tokens = regexp('2024-03-14', '(\\d{4})-(\\d{2})-(\\d{2})', 'tokens');\nyear = tokens{1}{1}\nmonth = tokens{1}{2}\nday = tokens{1}{3}", display_output: Some("year =\n    '2024'\nmonth =\n    '03'\nday =\n    '14'"),
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,

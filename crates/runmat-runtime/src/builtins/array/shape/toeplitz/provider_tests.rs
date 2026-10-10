@@ -37,18 +37,18 @@ impl AccelProvider for Provider {
     fn upload_numeric_raw(
         &self,
         host: &runmat_accelerate_api::HostNumericTensorView,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         match &*self.result.lock().unwrap() {
             Injection::Borrowed(handle) => {
                 return Ok(handle.acquire().expect("live fixture input"))
             }
-            Injection::FreshMalformed => return self.allocate(vec![0.0], vec![1, 1]),
+            Injection::FreshMalformed => return Ok(self.allocate(vec![0.0], vec![1, 1])?),
             Injection::None => {}
         }
         let HostNumericDataView::F64(data) = host.data else {
-            anyhow::bail!("fixture accepts F64 payloads only");
+            return Err(anyhow::anyhow!("fixture accepts F64 payloads only").into());
         };
-        self.allocate(data.to_vec(), host.shape.to_vec())
+        Ok(self.allocate(data.to_vec(), host.shape.to_vec())?)
     }
     fn download<'a>(
         &'a self,

@@ -140,6 +140,8 @@ fn receipt_owner(
                 region: None,
                 operation: "imhist".into(),
                 runtime_facts: digest,
+                provider_provenance: None,
+                graph_output_authority: None,
                 revision: PlacementRevision {
                     program: None,
                     catalog: digest,

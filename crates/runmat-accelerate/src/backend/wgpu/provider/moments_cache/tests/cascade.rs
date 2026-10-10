@@ -1,3 +1,4 @@
+use super::super::super::owner_shared::OwnerShared;
 use super::*;
 use runmat_accelerate_api::allocation::{
     AllocationAcquisitionError, AllocationIdentity, AllocationLease, AllocationOwner,
@@ -100,7 +101,7 @@ fn captured_allocation_retirement_callback_cascade_drains_iteratively() {
     let mut next = None;
     for id in (1..=CHAIN as u64).rev() {
         let identity = AllocationIdentity::new(1, id, 1);
-        let owner = Arc::new(CascadeOwner {
+        let owner = OwnerShared::new(CascadeOwner {
             identity,
             lease: Mutex::new(None),
             payload: Mutex::new(Some(vec![id as u8].into_boxed_slice())),

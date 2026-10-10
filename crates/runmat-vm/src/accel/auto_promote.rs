@@ -14,20 +14,24 @@ pub enum AutoUnaryOp {
 
 #[cfg(feature = "native-accel")]
 pub async fn accel_promote_binary(
+    runtime: &runmat_runtime::context::RuntimeContext,
     op: AutoBinaryOp,
     a: &Value,
     b: &Value,
 ) -> Result<(Value, Value), RuntimeError> {
-    use runmat_accelerate::{promote_binary, BinaryOp};
+    use runmat_accelerate::{promote_binary_in_context, BinaryOp};
     let mapped = match op {
         AutoBinaryOp::Elementwise => BinaryOp::Elementwise,
         AutoBinaryOp::MatMul => BinaryOp::MatMul,
     };
-    promote_binary(mapped, a, b).await.map_err(promotion_error)
+    promote_binary_in_context(runtime, mapped, a, b)
+        .await
+        .map_err(promotion_error)
 }
 
 #[cfg(not(feature = "native-accel"))]
 pub async fn accel_promote_binary(
+    _runtime: &runmat_runtime::context::RuntimeContext,
     _op: AutoBinaryOp,
     a: &Value,
     b: &Value,

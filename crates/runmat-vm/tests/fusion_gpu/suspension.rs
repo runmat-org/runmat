@@ -171,7 +171,7 @@ fn stochastic_witness(resident: bool, cancel: bool) {
     gc_test_context(|| {
         let _lock = accel_test_lock();
         ensure_provider_registered();
-        let provider = PROVIDER.get().unwrap();
+        let provider = registered_provider().unwrap();
         let bytecode = compile_semantic("M = 2; S = [1;2]; drift = 0.1; scale = 0.2; for t = 1:3; Z = randn(M,1); S = S .* exp(drift + scale .* Z); end");
         assert!(bytecode
             .instructions
@@ -309,7 +309,7 @@ fn borrowed_initial_workspace_survives_pending_cancel_and_drop() {
         gc_test_context(|| {
             let _lock = accel_test_lock();
             ensure_provider_registered();
-            let provider = PROVIDER.get().unwrap();
+            let provider = registered_provider().unwrap();
             let bytecode = consumed_values::compile_borrowed_x("y = single(sin(x).*x+2);");
             assert!(bytecode
                 .runtime_fusion_groups()
@@ -405,7 +405,7 @@ fn typed_fusion_single_restoration_completes_with_exact_single_output() {
         let _scope = Scope;
         let _lock = accel_test_lock();
         ensure_provider_registered();
-        let provider = PROVIDER.get().unwrap();
+        let provider = registered_provider().unwrap();
         let dispatches = provider.fused_dispatches.load(Ordering::Relaxed);
         let baseline = provider.buffers.lock().unwrap().clone();
         let bytecode = compile_semantic("x = 1:4096; y = single(sin(x) .* x + 2);");
@@ -491,7 +491,7 @@ fn witness(resident: bool, cancel: bool) {
         PROVIDER_ERROR.with(|slot| slot.replace(None));
         let _lock = accel_test_lock();
         ensure_provider_registered();
-        let provider = PROVIDER.get().unwrap();
+        let provider = registered_provider().unwrap();
         let dispatches = provider.fused_dispatches.load(Ordering::Relaxed);
         // The semantic compiler admits elementwise windows, not CenteredGram
         // windows. Single output restoration is an actual awaited provider

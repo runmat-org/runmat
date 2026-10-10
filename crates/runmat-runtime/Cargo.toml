@@ -129,7 +129,7 @@ getrandom = { version = "0.2", features = ["js"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 tokio = { version = "1.36", default-features = false, features = ["macros", "rt"] }
-wgpu = "24.0.0"
+wgpu = { workspace = true }
 runmat-accelerate = { workspace = true, features = ["wgpu"] }
 
 [[bin]]
@@ -191,7 +191,7 @@ wasm-bindgen-test = "0.3"
 axum = "0.7"
 tokio = { version = "1.36", features = ["macros", "rt-multi-thread"] }
 runmat-accelerate = { workspace = true, features = ["wgpu"] }
-wgpu = "0.19"
+wgpu = { workspace = true }
 
 [dependencies.serde_json]
 version = "1.0"

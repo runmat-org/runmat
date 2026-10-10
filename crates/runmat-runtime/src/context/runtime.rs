@@ -119,6 +119,10 @@ pub struct RuntimeContext {
     state: Rc<RuntimeContextState>,
     invocation_language_policy: Option<Rc<Cell<RuntimeLanguagePolicy>>>,
     invocation_arity: Option<RuntimeInvocationArity>,
+    // VM-owned, poll-local execution evidence. Clones may carry it only within
+    // the selected instruction; nested invocations explicitly clear it.
+    vm_fusion_host_route: Option<super::VmFusionHostRoute>,
+    vm_fusion_selected_binding: Option<runmat_builtins::BuiltinBindingIdentity>,
     // Invocation-scoped, unlike shared session language state. Scoped guards
     // affect this invocation's clones, never an earlier/later generation.
     cancellation: Rc<RefCell<CancellationToken>>,
@@ -163,6 +167,8 @@ impl RuntimeContext {
             state,
             invocation_language_policy: None,
             invocation_arity: None,
+            vm_fusion_host_route: None,
+            vm_fusion_selected_binding: None,
             cancellation: Rc::new(RefCell::new(cancellation)),
         };
         {
@@ -237,6 +243,7 @@ impl RuntimeContext {
         Arc::downgrade(&self.state.session_lease)
     }
 
+    #[cfg(feature = "plot-core")]
     pub(crate) fn retain_plot_callback(
         &self,
         slot: u64,
@@ -247,17 +254,19 @@ impl RuntimeContext {
         callbacks.insert(slot, root);
     }
 
+    #[cfg(feature = "plot-core")]
     pub(crate) fn plot_callback(&self, slot: u64) -> Option<runmat_value::Value> {
         let mut callbacks = self.state.plot_callbacks.borrow_mut();
         callbacks.retain(|_, root| root.live.load(Ordering::Acquire));
         callbacks.get(&slot).map(|root| root.value.clone())
     }
 
+    #[cfg(feature = "plot-core")]
     pub(crate) fn release_plot_callback(&self, slot: u64) {
         self.state.plot_callbacks.borrow_mut().remove(&slot);
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "plot-core"))]
     pub(crate) fn plot_callback_root_count(&self) -> usize {
         let mut callbacks = self.state.plot_callbacks.borrow_mut();
         callbacks.retain(|_, root| root.live.load(Ordering::Acquire));
@@ -317,7 +326,48 @@ impl RuntimeContext {
     /// their own invocation generation.
     pub fn with_cancellation_token(mut self, cancellation: CancellationToken) -> Self {
         self.cancellation = Rc::new(RefCell::new(cancellation));
+        self.vm_fusion_host_route = None;
+        self.vm_fusion_selected_binding = None;
         self
+    }
+
+    /// Install an exact VM-selected host route on one instruction's context.
+    /// It never changes provider availability or a separate invocation.
+    pub fn with_vm_fusion_host_route(mut self, route: Option<super::VmFusionHostRoute>) -> Self {
+        self.vm_fusion_host_route = route;
+        self.vm_fusion_selected_binding = None;
+        self
+    }
+
+    pub fn without_vm_fusion_host_route(mut self) -> Self {
+        self.vm_fusion_host_route = None;
+        self.vm_fusion_selected_binding = None;
+        self
+    }
+
+    pub fn vm_fusion_host_route(&self) -> Option<&super::VmFusionHostRoute> {
+        self.vm_fusion_host_route.as_ref()
+    }
+
+    /// The dispatcher projects its actual selected canonical binding into
+    /// the call context. Legacy invocations never inherit a sibling identity.
+    pub(crate) fn with_vm_fusion_selected_binding(
+        mut self,
+        binding: Option<runmat_builtins::BuiltinBindingIdentity>,
+    ) -> Self {
+        if self.vm_fusion_selected_binding.is_some() {
+            // An inner canonical invocation may select the same binding, but
+            // it cannot certify the enclosing VM instruction's host branch.
+            self.vm_fusion_host_route = None;
+        }
+        self.vm_fusion_selected_binding = binding;
+        self
+    }
+
+    pub(crate) fn vm_fusion_selected_binding(
+        &self,
+    ) -> Option<runmat_builtins::BuiltinBindingIdentity> {
+        self.vm_fusion_selected_binding
     }
 
     pub(crate) fn replace_cancellation_token(

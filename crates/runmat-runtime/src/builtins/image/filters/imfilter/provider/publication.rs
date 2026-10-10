@@ -63,11 +63,7 @@ pub(super) fn upload_kernel(
         &protected,
     ) {
         Ok(output) => Ok(Some(output)),
-        Err(NumericUploadError::Provider(error))
-            if gpu_helpers::provider_hook_is_unsupported(&error) =>
-        {
-            Ok(None)
-        }
+        Err(NumericUploadError::Provider(error)) if error.is_unsupported() => Ok(None),
         Err(error) => Err(crate::runtime_error::with_provider_execution_source(
             imfilter_error_with_detail(
                 &IMFILTER_ERROR_INTERNAL,

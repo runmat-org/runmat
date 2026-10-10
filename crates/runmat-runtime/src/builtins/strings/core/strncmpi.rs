@@ -6,6 +6,9 @@ use runmat_value::{NumericScalar, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
+use crate::builtins::strings::core::comparison_observation::{
+    host_string_lengths, ComparisonMode, PrefixCarrier, PrefixFacts, ScalarComparisonWorkload,
+};
 use crate::builtins::strings::core::compat::{
     broadcast_flat_index, broadcast_shape, compat_error, logical_value, TextList,
 };
@@ -14,9 +17,17 @@ use crate::{gather_if_needed_async, BuiltinResult};
 #[runtime_builtin(
     name = "strncmpi",
     binding_variant = "default",
-    builtin_path = "crate::builtins::strings::core::strncmpi"
+    builtin_path = "crate::builtins::strings::core::strncmpi",
+    requested_outputs = true,
+    call_observation = true
 )]
-pub(crate) async fn strncmpi_builtin(a: Value, b: Value, n: Value) -> BuiltinResult<Value> {
+pub(crate) async fn strncmpi_builtin(
+    requested_outputs: Option<usize>,
+    observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
+    a: Value,
+    b: Value,
+    n: Value,
+) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &STRNCMPI_DESCRIPTOR,
         &STRNCMPI_ERROR_TOO_MANY_OUTPUTS,
@@ -25,6 +36,8 @@ pub(crate) async fn strncmpi_builtin(a: Value, b: Value, n: Value) -> BuiltinRes
     if contains_numeric_or_resident_text_input(&a) || contains_numeric_or_resident_text_input(&b) {
         return Ok(Value::Bool(false));
     }
+    let host_lengths = host_string_lengths(&a, &b);
+    let prefix_carrier = PrefixCarrier::immediate(&n);
     let a = gather_if_needed_async(&a)
         .await
         .map_err(|err| map_control_flow_with_builtin(err, "strncmpi"))?;
@@ -39,6 +52,22 @@ pub(crate) async fn strncmpi_builtin(a: Value, b: Value, n: Value) -> BuiltinRes
     let right = TextList::from_value(b, "strncmpi")?;
     let shape = broadcast_shape(&left.shape, &right.shape, "strncmpi")?;
     let total: usize = shape.iter().product();
+    if total == 1 && left.shape == [1, 1] && right.shape == [1, 1] {
+        if let (Some((left_utf8_bytes, right_utf8_bytes)), Some(carrier), Some(observation)) =
+            (host_lengths, prefix_carrier, observation)
+        {
+            observation.admit(ScalarComparisonWorkload {
+                left_utf8_bytes,
+                right_utf8_bytes,
+                mode: ComparisonMode::PrefixInsensitive,
+                prefix: Some(PrefixFacts {
+                    limit_chars: n,
+                    carrier,
+                }),
+                requested_outputs,
+            });
+        }
+    }
     let mut out = Vec::with_capacity(total);
     for idx in 0..total {
         let li = broadcast_flat_index(idx, &shape, &left.shape);

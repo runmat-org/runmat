@@ -17,6 +17,10 @@ fn compiled_script_retains_exact_selected_statement_projection() {
         .as_ref()
         .expect("selected MIR statement facts");
     assert_eq!(
+        projection.selection_origin,
+        Some(FusionStageSelectionOrigin::EntrypointStream)
+    );
+    assert_eq!(
         projection.statements.len(),
         bytecode.statement_pc_ranges().unwrap().len()
     );
@@ -33,6 +37,28 @@ fn compiled_script_retains_exact_selected_statement_projection() {
         restored.fusion_metadata.stage_projection,
         bytecode.fusion_metadata.stage_projection
     );
+}
+
+#[test]
+fn legacy_missing_selection_origin_retains_old_seal_without_image_authority() {
+    let mut bytecode = compile_source(
+        "imgs=ones(2,4,5,'single'); mu=single(mean(imgs,[2 3],'native')); sigma=single(sqrt(mean((imgs-mu).^2,[2 3],'native')+single(1e-6))); out=single(((imgs-mu)./sigma).^single(1.8));",
+    );
+    assert!(!bytecode
+        .prospective_image_normalize_publications()
+        .is_empty());
+    std::sync::Arc::make_mut(bytecode.fusion_metadata.stage_projection.as_mut().unwrap())
+        .selection_origin = None;
+    bytecode.reseal_fusion_stage_after_owned_remap();
+    assert!(bytecode.validate_fusion_stage_projection().is_ok());
+    let projection = bytecode.fusion_metadata.stage_projection.as_ref().unwrap();
+    let wire = serde_json::to_value(projection).unwrap();
+    assert!(wire.get("selection_origin").is_none());
+    let restored: FusionStageProjection = serde_json::from_value(wire).unwrap();
+    assert_eq!(restored.selection_origin, None);
+    assert!(bytecode
+        .prospective_image_normalize_publications()
+        .is_empty());
 }
 
 #[test]
@@ -73,6 +99,10 @@ fn possibly_unassigned_branch_input_remains_unknown_in_compiled_function() {
         .find(|function| function.fusion_stage_projection.is_some())
         .expect("selected function MIR facts");
     let projection = function.fusion_stage_projection.as_ref().unwrap();
+    assert_eq!(
+        projection.selection_origin,
+        Some(FusionStageSelectionOrigin::FunctionBody)
+    );
     assert!(function.validate_fusion_stage_projection().is_ok());
     assert!(projection.statements.iter().any(|statement| {
         statement.contract.status == runmat_mir::analysis::FusionStageFactStatus::UnknownInputs
@@ -107,6 +137,14 @@ fn selected_function_stage_owner_tracks_session_and_closed_unit_rebinding() {
         .iter()
         .all(|row| row.contract.point.function == ProgramFunctionId(901)));
     assert_eq!(session.portable_function, original.portable_function);
+    assert_eq!(
+        session
+            .fusion_stage_projection
+            .as_ref()
+            .unwrap()
+            .selection_origin,
+        Some(FusionStageSelectionOrigin::FunctionBody)
+    );
     assert_eq!(
         session
             .fusion_stage_projection

@@ -36,6 +36,64 @@ fn catalog_call(name: &str) -> MirCall {
         semantic_kind: semantics.semantic_kind,
     }
 }
+#[test]
+fn empty_private_axis_placeholder_keeps_authentic_reduction_candidate() {
+    let ast = runmat_parser::parse("x = 1; y = min(x + x, [], 2);").expect("parse");
+    let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty()).expect("HIR");
+    let mut mir = runmat_mir::lowering::lower_assembly(&hir.assembly).expect("MIR");
+    let entrypoint = hir.assembly.entrypoints[0].id;
+    let target = hir.assembly.entrypoints[0].target;
+    let (_, groups) = super::derive_semantic_fusion_candidate_groups(&mir, Some(target));
+    assert!(
+        groups.iter().any(|group| group.signal_count == 2),
+        "the Add and selected minimum must remain one MIR candidate across []"
+    );
+    let bytecode = super::compile(&hir.assembly, &mir, entrypoint).expect("compile");
+    assert!(
+        bytecode
+            .runtime_accel_graph_for_fusion(&bytecode.runtime_fusion_groups())
+            .is_some(),
+        "the admitted candidate must materialize an authoritative runtime graph"
+    );
+
+    let body = mir.bodies.get_mut(&target).expect("entrypoint body");
+    let empty_local = body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .find_map(|statement| match &statement.kind {
+            runmat_mir::MirStmtKind::Assign {
+                place: runmat_mir::MirPlace::Local(local),
+                value:
+                    runmat_mir::MirRvalue::Aggregate {
+                        kind: runmat_mir::MirAggregateKind::Tensor,
+                        elements,
+                        ..
+                    },
+            } if elements.is_empty() => Some(*local),
+            _ => None,
+        })
+        .expect("compiler-owned [] control");
+    body.locals[empty_local.0].kind = runmat_mir::MirLocalKind::Binding;
+    let (_, forged) = super::derive_semantic_fusion_candidate_groups(&mir, Some(target));
+    assert!(
+        forged.is_empty(),
+        "a bound/user-visible empty tensor must break this candidate"
+    );
+}
+
+#[test]
+fn nonempty_literal_control_is_not_a_transparent_candidate_bridge() {
+    let ast = runmat_parser::parse("x = 1; y = min(x + x, [1], 2);").expect("parse");
+    let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty()).expect("HIR");
+    let mir = runmat_mir::lowering::lower_assembly(&hir.assembly).expect("MIR");
+    let target = hir.assembly.entrypoints[0].target;
+    let (_, groups) = super::derive_semantic_fusion_candidate_groups(&mir, Some(target));
+    assert!(
+        groups.is_empty(),
+        "nonempty control materialization cannot bridge producer and reduction"
+    );
+}
 
 #[test]
 fn canonical_numeric_suspension_is_not_an_inference_category() {

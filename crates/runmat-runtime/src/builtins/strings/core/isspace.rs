@@ -1,13 +1,23 @@
 //! Whitespace classification for host text.
 
-use runmat_builtins::{ISSPACE_DESCRIPTOR, ISSPACE_ERROR_TOO_MANY_OUTPUTS};
+use runmat_builtins::{
+    ISSPACE_DESCRIPTOR, ISSPACE_ERROR_INVALID_STRING_ARRAY, ISSPACE_ERROR_TOO_MANY_OUTPUTS,
+};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::core::classification::classify_text_value;
-use crate::builtins::strings::core::compat::compat_error;
-use crate::{gather_if_needed_async, BuiltinResult};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+
+fn invalid_string_array_error() -> RuntimeError {
+    let descriptor = &ISSPACE_ERROR_INVALID_STRING_ARRAY;
+    let mut builder = build_runtime_error(descriptor.message).with_builtin("isspace");
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
 
 #[runtime_builtin(
     name = "isspace",
@@ -24,12 +34,7 @@ pub(crate) async fn isspace_builtin(text: Value) -> BuiltinResult<Value> {
         Value::StringArray(array) if array.data.len() == 1 => {
             Value::String(array.data.into_iter().next().expect("string scalar"))
         }
-        Value::StringArray(_) => {
-            return Err(compat_error(
-                "isspace",
-                "isspace: string input must be a string scalar",
-            ));
-        }
+        Value::StringArray(_) => return Err(invalid_string_array_error()),
         Value::String(_) | Value::CharArray(_) => text,
         _ => return Ok(Value::Bool(false)),
     };

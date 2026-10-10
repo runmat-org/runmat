@@ -127,7 +127,20 @@ impl BroadcastPlan {
             }
         }
 
-        let len = output_shape.iter().copied().product();
+        // For a nonempty result every aligned input extent is at most the
+        // corresponding output extent, so checked output cardinality also
+        // bounds each source stride and iterator rewind. Empty results never
+        // enter the iterator; keep the canonical zero-extent shape intact.
+        let len = if output_shape.contains(&0) {
+            0
+        } else {
+            output_shape
+                .iter()
+                .try_fold(1usize, |product, &extent| product.checked_mul(extent))
+                .ok_or_else(|| {
+                    "broadcast: output element count exceeds addressable size".to_string()
+                })?
+        };
         let strides_a = compute_strides(&ext_a);
         let strides_b = compute_strides(&ext_b);
 
@@ -246,6 +259,38 @@ pub(crate) mod tests {
     fn broadcast_mismatched_dimension_errors() {
         let err = broadcast_shapes("test", &[2, 3], &[4, 3]).unwrap_err();
         assert!(err.contains("dimension 1"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn broadcast_plan_rejects_cross_product_overflow() {
+        let error = BroadcastPlan::new(&[usize::MAX, 1], &[1, 2]).unwrap_err();
+        assert!(error.contains("exceeds addressable size"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn checked_plan_preserves_empty_scalar_and_rank_one_orientation() {
+        let empty = BroadcastPlan::new(&[0, 3], &[1, 3]).unwrap();
+        assert_eq!(empty.output_shape(), &[0, 3]);
+        assert_eq!(empty.len(), 0);
+        assert_eq!(empty.iter().next(), None);
+        let late_zero = BroadcastPlan::new(&[usize::MAX, 1, 0], &[1, 2, 0]).unwrap();
+        assert_eq!(late_zero.output_shape(), &[usize::MAX, 2, 0]);
+        assert_eq!(late_zero.len(), 0);
+        assert_eq!(late_zero.iter().next(), None);
+
+        let scalar = BroadcastPlan::new(&[1, 1], &[2, 3]).unwrap();
+        assert_eq!(scalar.output_shape(), &[2, 3]);
+        assert_eq!(scalar.len(), 6);
+        assert!(scalar.iter().all(|(_, left, _)| left == 0));
+
+        let row = BroadcastPlan::new(&[3], &[2, 3]).unwrap();
+        assert_eq!(row.output_shape(), &[2, 3]);
+        assert_eq!(
+            row.iter().map(|(_, left, _)| left).collect::<Vec<_>>(),
+            vec![0, 0, 1, 1, 2, 2]
+        );
     }
 
     #[test]

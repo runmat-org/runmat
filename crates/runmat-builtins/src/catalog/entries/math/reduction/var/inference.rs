@@ -56,16 +56,11 @@ fn infer_output(
         return ValueFact::unknown(DynamicReason::RuntimeValue);
     };
     let shape = inferred_dispersion_shape(&input.shape, &controls);
-    // The host reduction currently produces binary64 while a resident
-    // provider may preserve binary32. Neither path may be called proven
-    // Single until the owner normalizes that output boundary.
-    if class == NumericClass::Single {
-        let mut dynamic = ValueFact::unknown(DynamicReason::RuntimeValue);
-        dynamic.shape = shape;
-        return dynamic;
-    }
     let storage = if input.residency == ResidencyFact::Host {
         match shape.element_count() {
+            // Single has no immediate scalar Value; a one-element result
+            // remains typed tensor storage.
+            Some(1) if class == NumericClass::Single => StorageFact::Dense,
             Some(1) => StorageFact::Scalar,
             Some(_) => StorageFact::Dense,
             None => StorageFact::Unknown,
@@ -75,7 +70,7 @@ fn infer_output(
     };
     let mut result = ValueFact::proven(
         ValueKindFact::Numeric(NumericFact {
-            class: NumericClass::Double,
+            class,
             domain: NumericDomain::Real,
         }),
         shape,

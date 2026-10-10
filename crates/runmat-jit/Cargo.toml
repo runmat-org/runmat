@@ -35,3 +35,8 @@ runmat-runtime = { workspace = true, features = ["plot-web"] }
 runmat-builtins = { workspace = true }
 runmat-gc = { workspace = true }
 runmat-value = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+anyhow = { workspace = true }
+runmat-accelerate = { workspace = true }
+runmat-accelerate-api = { workspace = true }

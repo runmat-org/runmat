@@ -218,7 +218,7 @@ async fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinR
     let total = total_elements(&effective_dims, "ind2sub")?;
     let strides = build_strides(&effective_dims, "ind2sub")?;
 
-    if let Some(result) = try_gpu_ind2sub(&effective_dims, &strides, total, &indices_val)? {
+    if let Some(result) = try_gpu_ind2sub(&effective_dims, &strides, total, &indices_val).await? {
         return Ok(result);
     }
 
@@ -305,146 +305,128 @@ fn finish_outputs(outputs: Vec<Value>) -> crate::BuiltinResult<Value> {
     make_cell(outputs, 1, len).map_err(|message| ind2sub_error(message))
 }
 
-fn try_gpu_ind2sub(
+async fn try_gpu_ind2sub(
     dims: &[usize],
     strides: &[usize],
     total: usize,
     indices: &Value,
 ) -> crate::BuiltinResult<Option<Value>> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = (dims, strides, total, indices);
-        Ok(None)
+    let provider = match runmat_accelerate_api::provider() {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+    if !provider.supports_ind2sub() {
+        return Ok(None);
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let provider = match runmat_accelerate_api::provider() {
-            Some(p) => p,
-            None => return Ok(None),
-        };
-        if !provider.supports_ind2sub() {
-            return Ok(None);
-        }
-        let handle = match indices {
-            Value::GpuTensor(handle) => handle,
-            _ => return Ok(None),
-        };
-        let provider = match gpu_helpers::exact_provider_for_handle(handle) {
-            Some(provider) => provider,
-            None => {
-                return Err(ind2sub_provider_error(
-                    "ind2sub: no acceleration provider owns the index handle.",
-                ))
-            }
-        };
-        if !provider.supports_ind2sub() {
-            return Ok(None);
-        }
-        if runmat_accelerate_api::handle_integer_type(handle).is_some() {
-            return Ok(None);
-        }
-        let expected_precision = provider.precision();
-        if expected_precision != runmat_accelerate_api::ProviderPrecision::F64 {
-            return Ok(None);
-        }
-        if runmat_accelerate_api::handle_storage(handle)
-            != runmat_accelerate_api::GpuTensorStorage::Real
-            || runmat_accelerate_api::handle_is_logical(handle)
-            || runmat_accelerate_api::handle_precision(handle) != Some(expected_precision)
-            || !gpu_helpers::gpu_class_metadata_matches(
-                handle,
-                Some(expected_precision),
-                None,
-                false,
-            )
-        {
+    let handle = match indices {
+        Value::GpuTensor(handle) => handle,
+        _ => return Ok(None),
+    };
+    let provider = match gpu_helpers::exact_provider_for_handle(handle) {
+        Some(provider) => provider,
+        None => {
             return Err(ind2sub_provider_error(
-                "ind2sub: index handle metadata contradicts its provider payload.",
-            ));
+                "ind2sub: no acceleration provider owns the index handle.",
+            ))
         }
-        if dims.len() != strides.len() {
-            return Err(ind2sub_error("Size vector must have at least one element."));
-        }
-        if dims.iter().any(|&d| d > u32::MAX as usize)
-            || strides.iter().any(|&s| s > u32::MAX as usize)
-            || total > u32::MAX as usize
-        {
-            return Ok(None);
-        }
-        let len = if handle.shape().is_empty() {
-            1usize
-        } else {
-            handle.shape().iter().copied().product()
-        };
-        if total == 0 && len > 0 {
-            return Err(ind2sub_error(
-                "Index exceeds number of array elements. Index must not exceed 0.",
-            ));
-        }
-        if len > u32::MAX as usize {
-            return Ok(None);
-        }
-        let output_shape = if handle.shape().is_empty() {
-            vec![len, 1]
-        } else {
-            handle.shape().to_vec()
-        };
-        let _residency = gpu_helpers::ResidencyRestoreGuard::new(handle);
-        let result = provider.ind2sub(dims, strides, handle, total, len, &output_shape);
-        match result {
-            Ok(mut handles) => {
-                if handles.len() != dims.len() {
-                    return Err(ind2sub_provider_error(
-                        "ind2sub: provider returned an unexpected number of outputs.",
-                    ));
-                }
-                let valid = handles.iter().enumerate().all(|(index, output)| {
-                    output.shape() == output_shape
-                        && output.device_id() == provider.device_id()
-                        && gpu_helpers::exact_provider_for_handle(output).is_some_and(|owner| {
-                            runmat_accelerate_api::same_provider_instance(owner, provider)
-                        })
-                        && runmat_accelerate_api::handle_storage(output)
-                            == runmat_accelerate_api::GpuTensorStorage::Real
-                        && runmat_accelerate_api::handle_precision(output)
-                            == Some(expected_precision)
-                        && runmat_accelerate_api::handle_integer_type(output).is_none()
-                        && !runmat_accelerate_api::handle_is_logical(output)
-                        && gpu_helpers::gpu_class_metadata_matches(
-                            output,
-                            Some(expected_precision),
-                            None,
-                            false,
-                        )
-                        && !output.shares_allocation_with(handle)
-                        && handles[..index]
-                            .iter()
-                            .all(|prior| !output.shares_allocation_with(prior))
-                });
-                if !valid {
-                    return Err(ind2sub_provider_error(
-                        "ind2sub: provider returned an invalid output handle.",
-                    ));
-                }
-                for output in &mut handles {
-                    gpu_helpers::propagate_output_provenance(output, [handle])?;
-                    runmat_accelerate_api::mark_residency(output);
-                }
-                let values: Vec<Value> = handles.into_iter().map(Value::GpuTensor).collect();
-                finish_outputs(values).map(Some)
+    };
+    if !provider.supports_ind2sub() {
+        return Ok(None);
+    }
+    if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+        return Ok(None);
+    }
+    let expected_precision = provider.precision();
+    if expected_precision != runmat_accelerate_api::ProviderPrecision::F64 {
+        return Ok(None);
+    }
+    if runmat_accelerate_api::handle_storage(handle)
+        != runmat_accelerate_api::GpuTensorStorage::Real
+        || runmat_accelerate_api::handle_is_logical(handle)
+        || runmat_accelerate_api::handle_precision(handle) != Some(expected_precision)
+        || !gpu_helpers::gpu_class_metadata_matches(handle, Some(expected_precision), None, false)
+    {
+        return Err(ind2sub_provider_error(
+            "ind2sub: index handle metadata contradicts its provider payload.",
+        ));
+    }
+    if dims.len() != strides.len() {
+        return Err(ind2sub_error("Size vector must have at least one element."));
+    }
+    if dims.iter().any(|&d| d > u32::MAX as usize)
+        || strides.iter().any(|&s| s > u32::MAX as usize)
+        || total > u32::MAX as usize
+    {
+        return Ok(None);
+    }
+    let len = if handle.shape().is_empty() {
+        1usize
+    } else {
+        handle.shape().iter().copied().product()
+    };
+    if total == 0 && len > 0 {
+        return Err(ind2sub_error(
+            "Index exceeds number of array elements. Index must not exceed 0.",
+        ));
+    }
+    if len > u32::MAX as usize {
+        return Ok(None);
+    }
+    let output_shape = if handle.shape().is_empty() {
+        vec![len, 1]
+    } else {
+        handle.shape().to_vec()
+    };
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(handle);
+    let result = provider
+        .ind2sub(dims, strides, handle, total, len, &output_shape)
+        .await;
+    match result {
+        Ok(mut handles) => {
+            if handles.len() != dims.len() {
+                return Err(ind2sub_provider_error(
+                    "ind2sub: provider returned an unexpected number of outputs.",
+                ));
             }
-            Err(err) => {
-                let message = err.to_string();
-                if message.contains("GPU kernel limits")
-                    || message.contains("storage buffers")
-                    || message.contains("bind group entries")
-                {
-                    Ok(None)
-                } else {
-                    Err(ind2sub_provider_error(message))
-                }
+            let valid = handles.iter().enumerate().all(|(index, output)| {
+                output.shape() == output_shape
+                    && output.device_id() == provider.device_id()
+                    && gpu_helpers::exact_provider_for_handle(output).is_some_and(|owner| {
+                        runmat_accelerate_api::same_provider_instance(owner, provider)
+                    })
+                    && runmat_accelerate_api::handle_storage(output)
+                        == runmat_accelerate_api::GpuTensorStorage::Real
+                    && runmat_accelerate_api::handle_precision(output) == Some(expected_precision)
+                    && runmat_accelerate_api::handle_integer_type(output).is_none()
+                    && !runmat_accelerate_api::handle_is_logical(output)
+                    && gpu_helpers::gpu_class_metadata_matches(
+                        output,
+                        Some(expected_precision),
+                        None,
+                        false,
+                    )
+                    && !output.shares_allocation_with(handle)
+                    && handles[..index]
+                        .iter()
+                        .all(|prior| !output.shares_allocation_with(prior))
+            });
+            if !valid {
+                return Err(ind2sub_provider_error(
+                    "ind2sub: provider returned an invalid output handle.",
+                ));
             }
+            for output in &mut handles {
+                gpu_helpers::propagate_output_provenance(output, [handle])?;
+                runmat_accelerate_api::mark_residency(output);
+            }
+            let values: Vec<Value> = handles.into_iter().map(Value::GpuTensor).collect();
+            finish_outputs(values).map(Some)
         }
+        Err(err) if err.is_unsupported() => Ok(None),
+        Err(err) => Err(crate::runtime_error::with_provider_execution_source(
+            ind2sub_provider_error(err.to_string()),
+            err,
+        )),
     }
 }
 

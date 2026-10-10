@@ -4,7 +4,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
         "`strncmpi(A, B, N)` compares at most N leading Unicode scalar values without letter case. String arrays, character-matrix rows, and cell text containers expand over compatible element shapes.",
         "The current RunMat comparison requires both nonmissing text elements to contain at least N characters. Unlike `strncmp`, two matching shorter strings return false when N is longer. For N=0, nonmissing elements compare true; missing elements remain false. This records current RunMat behavior, not a claim of verified MATLAB parity.",
-        "N accepts scalar real double, single, logical, and all eight integer classes. Negative N acts as zero; nonintegral, nonfinite, or unrepresentable counts reject. Direct numeric or resident A/B returns scalar false before N validation or provider access.",
+        "N accepts scalar real double, single, logical, and all eight integer classes. Negative integral N acts as zero; nonintegral, nonfinite, or unrepresentable counts reject without rounding. Direct numeric or resident A/B returns scalar false before N validation or provider access.",
     ] },
     BuiltinDocumentationSection { heading: "Placement and effects", paragraphs: &[
         "Comparison and logical result construction are host operations in native and browser runtimes. A supported resident N is gathered and may suspend; there is no GPU text kernel or fusion form. Invalid text, count, or shape can throw.",
@@ -38,6 +38,19 @@ const EXAMPLES: &[BuiltinExample] = &[
             source: "assert(isequal(tf, false));",
         },
     },
+    BuiltinExample {
+        id: "exact-integer-count-runmat",
+        title: "Use an exact integer prefix count",
+        program: "tf = strncmpi(\"RunMat\", \"runway\", uint64(3))",
+        display_output: Some("tf = logical 1"),
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isequal(tf, true));",
+        },
+    },
 ];
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
@@ -59,6 +72,6 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/core/strncmpi.rs") }],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "prefix and count behavior", location: "builtins::strings::core::compat::tests" }],
-        notes: &["Legacy sidecar signature, summary, categories, host placement, example, two related links, and source link are retained. Its zero/negative-count blanket-true claim was narrowed because missing inputs remain false. Short-input semantics remain an explicit unresolved parity decision."],
+        notes: &["Legacy sidecar signature, summary, categories, host placement, example, two related links, and source link are retained; an exact-integer example was added. Its zero/negative-count blanket-true claim was narrowed because missing inputs remain false. Short-input semantics remain an explicit unresolved parity decision."],
     }, introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };

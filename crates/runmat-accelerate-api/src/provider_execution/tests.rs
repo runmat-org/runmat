@@ -96,6 +96,29 @@ fn unsupported_marker_survives_wrapping_but_ordinary_failure_is_not_fallback() {
     }
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn legacy_unknown_effect_does_not_replay_or_erase_actual_post_effect() {
+    let unsupported = ProviderExecutionError::from(crate::unsupported_provider_operation(
+        "legacy implementation returned unsupported",
+    ));
+    assert!(unsupported.is_unsupported());
+    let unknown = unsupported.with_unproven_effects();
+    assert_eq!(unknown.disposition, FallbackDisposition::Unproven);
+    assert!(!unknown.is_unsupported());
+    assert!(unknown
+        .source()
+        .is_some_and(|cause| cause.is::<crate::UnsupportedProviderOperation>()));
+
+    let actual = ProviderExecutionError::from(crate::unsupported_provider_operation(
+        "failure after provider effect",
+    ))
+    .after_effect()
+    .with_unproven_effects();
+    assert_eq!(actual.disposition, FallbackDisposition::AfterEffect);
+    assert!(!ProviderExecutionError::from_source(actual).is_unsupported());
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn native_error_retains_send_sync_boundary() {

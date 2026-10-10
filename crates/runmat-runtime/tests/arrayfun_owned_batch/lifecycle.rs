@@ -35,10 +35,12 @@ impl std::fmt::Display for BinaryFailure {
 impl std::error::Error for BinaryFailure {}
 
 impl Provider {
-    fn binary_failure(&self) -> AccelProviderFuture<'_, GpuTensorHandle> {
+    fn binary_failure(
+        &self,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'_, GpuTensorHandle> {
         Box::pin(async move {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Err(anyhow::Error::new(BinaryFailure))
+            Err(anyhow::Error::new(BinaryFailure).into())
         })
     }
 }
@@ -48,28 +50,28 @@ impl AccelProvider for Provider {
         &'a self,
         _: &'a GpuTensorHandle,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         self.binary_failure()
     }
     fn elem_sub<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         self.binary_failure()
     }
     fn elem_mul<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         self.binary_failure()
     }
     fn elem_div<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         self.binary_failure()
     }
     fn device_id(&self) -> u32 {

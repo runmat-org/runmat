@@ -88,6 +88,22 @@ fn exercise_lazy_mean_and_moments(precision: NumericPrecision) {
             .unwrap()
             .moment_pair(&(identity, vec![axis]))
             .is_some());
+        let pinned = provider
+            .reserve_cached_mean_nd(&lazy, &[axis])
+            .unwrap()
+            .expect("same exact source view has a pinned warm pair");
+        let two_outputs = 2 * shape.iter().product::<usize>() as u64 * class.element_size() as u64;
+        assert!(pinned.retained_pair_bytes() >= two_outputs);
+        let pinned_mean = pinned.into_mean();
+        assert!(pinned_mean.shares_allocation_with(&mean));
+        assert!(
+            provider
+                .reserve_cached_mean_nd(&original, &[axis])
+                .unwrap()
+                .is_none(),
+            "sibling view is not a warm hit"
+        );
+        drop(pinned_mean);
         assert_values(&provider, &repeated, &means);
 
         // Direct moments is also used independently of mean's cache. Both
@@ -175,6 +191,92 @@ fn exercise_source_retirement_with_cached_pair(poison_cache: bool) {
 #[ignore = "requires actual F32 WGPU adapter; verifies source-driven cache output retirement"]
 fn actual_source_retirement_releases_cached_moment_output_owners() {
     exercise_source_retirement_with_cached_pair(false);
+}
+
+#[test]
+#[ignore = "requires actual F32 WGPU adapter; verifies pinned warm pair survives cache retirement"]
+fn actual_pinned_warm_pair_survives_source_retirement_until_consumed() {
+    let provider = WgpuProvider::new(WgpuProviderOptions::default())
+        .expect("qualification requires an actual WGPU adapter");
+    assert_eq!(provider.precision, NumericPrecision::F32);
+    let input = provider
+        .upload_numeric_exec(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1.0, 2.0, 3.0, 4.0]),
+            shape: &[2, 2],
+            storage: runmat_accelerate_api::GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let produced = block_on(provider.reduce_mean_nd(&input, &[0])).unwrap();
+    let (cached_mean, cached_ex2) = provider
+        .reduction_reuse
+        .lock()
+        .unwrap()
+        .moment_pair(&(input.view_identity(), vec![0]))
+        .unwrap();
+    let mean_weak = cached_mean.downgrade();
+    let ex2_weak = cached_ex2.downgrade();
+    let pinned = provider
+        .reserve_cached_mean_nd(&input, &[0])
+        .unwrap()
+        .expect("exact warm pair");
+    drop((produced, cached_mean, cached_ex2));
+    drop(input);
+    assert!(mean_weak.acquire().is_ok());
+    assert!(ex2_weak.acquire().is_ok());
+    let selected_mean = pinned.into_mean();
+    assert!(
+        ex2_weak.acquire().is_err(),
+        "hidden pair is no longer pinned"
+    );
+    assert_values(&provider, &selected_mean, &[2.0, 3.0]);
+    drop(selected_mean);
+    assert!(mean_weak.acquire().is_err());
+}
+
+#[test]
+#[ignore = "requires actual F32 WGPU adapter; verifies selected cold moments geometry and cache"]
+fn actual_selected_cold_mean_executes_one_exact_moments_route() {
+    let provider = WgpuProvider::new(WgpuProviderOptions::default())
+        .expect("qualification requires an actual WGPU adapter");
+    assert_eq!(provider.precision, NumericPrecision::F32);
+    let input = provider
+        .upload_numeric_exec(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1.0, 2.0, 3.0, 4.0]),
+            shape: &[2, 2],
+            storage: runmat_accelerate_api::GpuTensorStorage::Real,
+        })
+        .unwrap();
+    assert!(provider
+        .reserve_cached_mean_nd(&input, &[0])
+        .unwrap()
+        .is_none());
+    let selected = provider
+        .prepare_cold_mean_nd(&input, &[0])
+        .unwrap()
+        .expect("canonical cold input has a selected route");
+    assert_eq!(selected.output_shape(), [1, 2]);
+    assert_eq!(selected.requested_pair_bytes(), Some(16));
+    assert!(selected.requested_uniform_bytes() > 0);
+    assert_eq!(
+        selected.requested_incremental_peak_bytes(),
+        Some(16 + selected.requested_uniform_bytes())
+    );
+    // A concurrent ordinary call may warm the cache after selection. The
+    // selected cold executor must not silently switch to that warm output.
+    let concurrently_warmed = block_on(provider.reduce_mean_nd(&input, &[0])).unwrap();
+    let executed = provider.execute_cold_mean_nd(selected).unwrap();
+    assert_eq!(executed.requested_pair_bytes, 16);
+    assert!(executed.observed_pair_bytes >= executed.requested_pair_bytes);
+    assert_eq!(executed.selected_submissions, 1);
+    let mean = executed.mean;
+    assert!(!mean.shares_allocation_with(&concurrently_warmed));
+    assert_values(&provider, &mean, &[1.5, 3.5]);
+    let warm = provider
+        .reserve_cached_mean_nd(&input, &[0])
+        .unwrap()
+        .expect("cold route retains its hidden moment pair");
+    assert_eq!(warm.retained_pair_bytes(), 16);
+    assert!(warm.into_mean().shares_allocation_with(&mean));
 }
 
 #[test]

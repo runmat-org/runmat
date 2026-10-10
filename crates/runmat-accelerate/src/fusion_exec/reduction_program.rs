@@ -1,10 +1,7 @@
 //! Immutable request-local semantic receipt; this module submits no kernels and
 //! is not an alternative placement scheduler or a provider capability promise.
 use super::{AdmittedBindings, FusionExecutionRequest};
-use crate::fusion::{
-    semantics::{FusionAdmissionFailure, ResolvedProgram},
-    typed_producer::TypedProducer,
-};
+use crate::fusion::{semantics::ResolvedProgram, typed_producer::TypedProducer};
 use crate::graph::ValueId;
 use runmat_accelerate_api::scalar_program::ScalarProgram;
 use runmat_accelerate_api::{ProviderExecutionError, ProviderExecutionResult, ProviderPrecision};
@@ -39,6 +36,7 @@ pub struct ResolvedReductionProgram<'a> {
     execution_precision: ProviderPrecision,
     producer_work_units: u64,
     checked_scalar: Option<ScalarProgram>,
+    host_bindings: Option<Vec<runmat_builtins::BuiltinBindingIdentity>>,
 }
 impl<'a> ResolvedReductionProgram<'a> {
     pub fn data_inputs(&self) -> &[ReductionDataInput<'a>] {
@@ -73,6 +71,9 @@ impl<'a> ResolvedReductionProgram<'a> {
     pub fn checked_scalar(&self) -> Option<&ScalarProgram> {
         self.checked_scalar.as_ref()
     }
+    pub fn host_bindings(&self) -> Option<&[runmat_builtins::BuiltinBindingIdentity]> {
+        self.host_bindings.as_deref()
+    }
 }
 
 /// Resolve one actual invocation, capturing selected binding authority before
@@ -88,6 +89,9 @@ pub async fn resolve_reduction_program<'a>(
     let Some(bindings) = AdmittedBindings::new(request) else {
         return Ok(None);
     };
+    // Primitive VM instructions also need their actual runtime-selected
+    // canonical implementation. Capture before any owner probe suspends.
+    let host_bindings = bindings.canonical_bindings(request.runtime.as_ref());
     let Some(declaration) = bindings.reduction(mapped.terminal) else {
         return Ok(None);
     };
@@ -133,9 +137,9 @@ pub async fn resolve_reduction_program<'a>(
     {
         Ok(program) => program,
         Err(error) => {
-            return match error.downcast::<FusionAdmissionFailure>() {
-                Ok(failure) => Err(failure.0.into()),
-                Err(_) => Ok(None),
+            return match error.into_execution_or_structural() {
+                Ok(_) => Ok(None),
+                Err(failure) => Err(failure),
             }
         }
     };
@@ -149,6 +153,12 @@ pub async fn resolve_reduction_program<'a>(
     else {
         return Ok(None);
     };
+    if contract.operation != declaration.operation {
+        return Err(anyhow::anyhow!(
+            "selected reduction declaration changed its operation during resolution"
+        )
+        .into());
+    }
     // Source-derived Double arithmetic is not implicitly licensed by the
     // existing policy for downcasting Double INPUTS. Preserve that gap honestly.
     if precision == ProviderPrecision::F32
@@ -228,5 +238,6 @@ pub async fn resolve_reduction_program<'a>(
         execution_precision: precision,
         producer_work_units,
         checked_scalar,
+        host_bindings,
     }))
 }

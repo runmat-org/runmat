@@ -18,6 +18,93 @@ pub(super) fn fusion_execution_entries() -> usize {
 }
 
 #[test]
+fn supplied_final_only_span_with_stores_reaches_ordinary_vm_before_fusion_execution() {
+    use runmat_accelerate::fusion::FusionPlan;
+    use runmat_runtime::context::RuntimeInvocationArity;
+
+    let source = r#"
+        imgs = ones(2,4,5,'single');
+        mu = single(mean(imgs,[2 3],'native'));
+        sigma = single(sqrt(mean((imgs-mu).^2,[2 3],'native')+single(1e-6)));
+        out = single(((imgs-mu)./sigma).^single(1.8));
+    "#;
+    let ast = runmat_parser::parse(source).expect("parse image source");
+    let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty()).expect("lower HIR");
+    let mir = runmat_mir::lowering::lower_assembly(&hir.assembly).expect("lower MIR");
+    let bytecode = crate::bytecode::compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id)
+        .expect("compile image source");
+    let mut ordinary_vars = Vec::new();
+    let mut ordinary = crate::interpreter::state::InterpreterState::new(
+        bytecode.clone(),
+        &mut ordinary_vars,
+        Some("<main>"),
+        RuntimeInvocationArity::Script,
+    );
+    ordinary.fusion_plan = None;
+    ordinary.fusion_accel_graph = None;
+    let crate::interpreter::api::InterpreterOutcome::Completed(expected) =
+        futures::executor::block_on(super::super::run_interpreter(
+            Box::new(ordinary),
+            &mut ordinary_vars,
+        ))
+        .expect("independent ordinary selected image source");
+    let expected = expected.values;
+    let publication_slots: Vec<_> = ["mu", "sigma", "out"]
+        .into_iter()
+        .map(|name| {
+            let slot = bytecode
+                .var_names
+                .iter()
+                .find_map(|(slot, label)| (label == name).then_some(*slot))
+                .expect("selected publication slot");
+            (name, slot)
+        })
+        .collect();
+    let graph = crate::accel::graph::build_accel_graph(&bytecode.instructions, &bytecode.var_types);
+    let group = graph
+        .detect_fusion_groups()
+        .into_iter()
+        .find(|group| group.kind == runmat_accelerate::FusionKind::ImageNormalize)
+        .expect("real image graph group");
+    assert!(
+        crate::accel::fusion::final_only_span_requires_ordinary_stores(
+            &group.kind,
+            &bytecode.instructions,
+            &group.span,
+        )
+    );
+    let mut initial_vars = Vec::new();
+    let mut state = crate::interpreter::state::InterpreterState::new(
+        bytecode,
+        &mut initial_vars,
+        Some("<main>"),
+        RuntimeInvocationArity::Script,
+    );
+    state.completion_assigned_slots = Some(HashSet::new());
+    state.fusion_plan = Some(Rc::new(FusionPlan::from_graph(&graph, &[group])));
+    state.fusion_accel_graph = Some(graph);
+    FUSION_EXECUTION_ENTRIES.with(|entries| entries.set(0));
+    let outcome = futures::executor::block_on(super::super::run_interpreter(
+        Box::new(state),
+        &mut initial_vars,
+    ))
+    .expect("observable stores must take the ordinary interpreter path");
+    assert_eq!(
+        FUSION_EXECUTION_ENTRIES.with(std::cell::Cell::get),
+        0,
+        "the selected final-only plan must not reach fusion execution"
+    );
+    let crate::interpreter::api::InterpreterOutcome::Completed(completion) = outcome;
+    for (name, slot) in publication_slots {
+        assert_eq!(
+            completion.values[slot], expected[slot],
+            "{name} publication"
+        );
+        assert!(completion.assigned_slots.contains(&slot), "{name} assigned");
+    }
+}
+
+#[test]
 fn second_store_failure_keeps_first_publication_and_exact_error() {
     for kind in [VarKind::Global, VarKind::Local] {
         let records_completion = kind == VarKind::Global;

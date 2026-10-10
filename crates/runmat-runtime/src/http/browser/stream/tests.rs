@@ -212,8 +212,7 @@ async fn real_browser_timer_rejects_ready_body_without_late_publication() {
     });
     let source = JsFuture::from(aborted)
         .await
-        .err()
-        .expect("browser timer must abort pending request");
+        .expect_err("browser timer must abort pending request");
     signal.set_onabort(None);
     callback.borrow_mut().take();
     assert!(signal.aborted());

@@ -19,7 +19,10 @@ pub use join::FactJoin;
 pub use literal::{infer_literal, infer_struct_literal};
 pub use member::{infer_member_read, infer_member_sequence, infer_member_write};
 pub use mutation::{infer_index_mutation, infer_mutation};
-pub use operator::{infer_binary, infer_unary};
+pub use operator::{
+    floating_binary_result_class, infer_binary, infer_unary, real_floating_add_mode,
+    RealFloatingAddMode,
+};
 pub use satisfaction::*;
 pub use shape::*;
 pub use widen::FactWiden;

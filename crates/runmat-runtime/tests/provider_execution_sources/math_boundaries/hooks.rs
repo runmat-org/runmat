@@ -63,10 +63,10 @@ impl AccelProvider for Provider {
     fn reduce_min<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             if self.failure == "reduce_min" {
-                return self.fail("reduce_min");
+                return self.fail("reduce_min").map_err(Into::into);
             }
             self.trace.lock().unwrap().push("reduce_min");
             let result = self.owner.allocate_numeric(HostNumericTensorOwned {
@@ -124,8 +124,8 @@ impl AccelProvider for Provider {
     fn reduce_max<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.fail("reduce_max") })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.fail("reduce_max").map_err(Into::into) })
     }
     fn transpose(&self, input: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         if self.failure == "transpose" {

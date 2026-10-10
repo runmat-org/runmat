@@ -126,7 +126,8 @@ fn full_elementwise_source_and_rounding_are_unchanged() {
             "@group(0) @binding(2) var<storage, read_write> output0: Tensor;\n",
             3,
             expected_body,
-            "    output0.data[g] = f64(typed1);\n"
+            "    output0.data[g] = f64(typed1);\n",
+            false,
         )
     );
     assert_eq!(

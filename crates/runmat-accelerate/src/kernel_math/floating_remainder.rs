@@ -33,6 +33,10 @@ pub(crate) fn functions(precision: ProviderPrecision) -> String {
     let decode = format.decode;
     let encode = format.encode;
     let nan = format.nan;
+    let nan_bits = match precision {
+        ProviderPrecision::F32 => "let nan_bits: u32 = 0x7fc00000u;",
+        ProviderPrecision::F64 => "",
+    };
     let name = entrypoint(precision);
     format!(
         r#"
@@ -114,6 +118,7 @@ fn rm_remainder_compensated_zero_{ty}(a: RmRemainderParts_{ty}, b: RmRemainderPa
 }}
 
 fn {name}(left: {ty}, right: {ty}, modulus: bool) -> {ty} {{
+    {nan_bits}
     let a = rm_remainder_decode_{ty}(left);
     let b = rm_remainder_decode_{ty}(right);
     if a.nan || b.nan {{ return {nan}; }}

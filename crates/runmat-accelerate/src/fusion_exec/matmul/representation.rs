@@ -33,8 +33,9 @@ pub(super) fn shape(value: &Value, provider: &'static dyn AccelProvider) -> Opti
                 || handle.physical().element_type() != element
                 || runmat_accelerate_api::handle_is_transposed(handle)
                 || !gpu_class_metadata_matches(handle, Some(precision), None, false)
-                || !exact_provider_for_handle(handle)
-                    .is_some_and(|owner| std::ptr::eq(owner, provider))
+                || !exact_provider_for_handle(handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
             {
                 return None;
             }

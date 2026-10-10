@@ -73,7 +73,8 @@ fn dynamic_logical() -> ValueFact {
 mod tests {
     use super::*;
     use runmat_types::{LiteralContext, OutputSelection};
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn nonscalar_string_is_invalid_but_numeric_returns_scalar_false() {
         let entry = &super::super::ISSPACE_CATALOG_ENTRY;
         let request = CallRequest {
@@ -95,5 +96,23 @@ mod tests {
             infer(&nontext, entry).outputs[0],
             ValueFact::scalar(ValueKindFact::Logical)
         );
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn one_element_dense_string_carrier_is_classified_with_dynamic_character_length() {
+        let request = CallRequest {
+            arguments: vec![ValueFact::proven(
+                ValueKindFact::String,
+                ShapeFact::from(vec![Some(1), Some(1)]),
+                StorageFact::Dense,
+            )],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::default(),
+        };
+        let result = infer(&request, &super::super::ISSPACE_CATALOG_ENTRY);
+        assert!(result.diagnostics.is_empty());
+        assert!(matches!(&result.outputs[0].kind, ValueKindFact::Logical));
+        assert_eq!(result.outputs[0].shape, ShapeFact::Unknown);
     }
 }

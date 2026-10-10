@@ -3,8 +3,8 @@
 use futures::{executor::block_on, task::noop_waker, FutureExt};
 use runmat_accelerate::backend::wgpu::provider::{WgpuProvider, WgpuProviderOptions};
 use runmat_accelerate_api::{
-    AccelContextHandle, AccelContextKind, AccelDownloadFuture, AccelProvider, AccelProviderFuture,
-    GpuTensorHandle, HostTensorView, ProviderPrecision, ThreadProviderGuard, WgpuBufferRef,
+    AccelContextHandle, AccelContextKind, AccelDownloadFuture, AccelProvider, GpuTensorHandle,
+    HostTensorView, ProviderPrecision, ThreadProviderGuard, WgpuBufferRef,
 };
 use runmat_runtime::builtins::plotting::{clone_figure, lock_plot_test_context, new_figure_handle};
 use runmat_value::{Tensor, Value};
@@ -43,13 +43,13 @@ impl AccelProvider for FailingBounds {
     fn reduce_min<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         self.bounds.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move {
             if self.mode.load(Ordering::SeqCst) == 0 {
                 futures::future::pending::<()>().await;
             }
-            anyhow::bail!("injected plotting bounds failure")
+            Err(anyhow::anyhow!("injected plotting bounds failure").into())
         })
     }
 }

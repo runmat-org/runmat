@@ -7,19 +7,20 @@ use runmat_types::ClassIdentity;
 use runmat_value::Value;
 use std::cell::RefCell;
 
-mod provenance;
+pub(crate) mod direct_call_observation;
 #[path = "dispatcher/owned_gather.rs"]
 mod owned_gather;
+mod provenance;
 #[path = "dispatcher/workspace_effect.rs"]
 mod workspace_effect;
 
 pub use owned_gather::gather_if_needed_owned_async;
 
 #[cfg(test)]
-mod provenance_tests;
-#[cfg(test)]
 #[path = "dispatcher/output_projection_tests.rs"]
 mod output_projection_tests;
+#[cfg(test)]
+mod provenance_tests;
 
 thread_local! {
     static CLASS_ACCESS_CONTEXT: RefCell<Option<ClassIdentity>> = const { RefCell::new(None) };
@@ -314,7 +315,7 @@ async fn call_builtin_async_impl(
     output_count: Option<usize>,
     context: Option<crate::context::RuntimeContext>,
 ) -> Result<Value, RuntimeError> {
-    call_builtin_sequence_async_impl(name, args, output_count, context)
+    call_builtin_sequence_async_impl(name, args, output_count, context, None)
         .await
         .map(crate::call::arguments::project_legacy_builtin_value_abi)
 }
@@ -325,8 +326,9 @@ async fn call_builtin_sequence_async_impl(
     args: &[Value],
     output_count: Option<usize>,
     context: Option<crate::context::RuntimeContext>,
+    observation: Option<std::rc::Rc<direct_call_observation::CallObservation>>,
 ) -> Result<runmat_value::ValueSequence, RuntimeError> {
-    try_call_builtin_sequence_async_impl(name, args, output_count, context)
+    try_call_builtin_sequence_async_impl(name, args, output_count, context, observation)
         .await?
         .ok_or_else(|| {
             let resolved_name = ResolvedBuiltinName::resolve(name);
@@ -343,6 +345,7 @@ async fn try_call_builtin_sequence_async_impl(
     args: &[Value],
     output_count: Option<usize>,
     context: Option<crate::context::RuntimeContext>,
+    observation: Option<std::rc::Rc<direct_call_observation::CallObservation>>,
 ) -> Result<Option<runmat_value::ValueSequence>, RuntimeError> {
     ensure_wasm_builtins_registered();
 
@@ -358,8 +361,18 @@ async fn try_call_builtin_sequence_async_impl(
     let scoped_builtin_service = context
         .as_ref()
         .and_then(|context| context.service_ports().builtin().cloned());
+    let global_registered = scoped_builtin_service
+        .is_none()
+        .then(|| crate::builtin::registration::registered_runtime_builtin_bindings_by_name(name));
     let matching_bindings = scoped_builtin_service.as_ref().map_or_else(
-        || crate::builtin::runtime_builtin_bindings_by_name(name),
+        || {
+            global_registered
+                .as_ref()
+                .expect("global registry was selected")
+                .iter()
+                .map(|row| row.binding())
+                .collect::<Vec<_>>()
+        },
         |service| service.bindings_by_name(name),
     );
     let mut matching_builtins = Vec::new();
@@ -430,7 +443,7 @@ async fn try_call_builtin_sequence_async_impl(
         .map(|binding| {
             (
                 SelectedBindingOrigin::CanonicalOrScoped,
-                SelectedImplementation::Canonical(binding.implementation),
+                SelectedImplementation::Canonical(binding),
             )
         })
         .chain(
@@ -453,6 +466,28 @@ async fn try_call_builtin_sequence_async_impl(
     let (origin, implementation) = implementations
         .next()
         .expect("nonempty builtin authority has a selected implementation");
+    let authority = match implementation {
+        SelectedImplementation::Canonical(binding) => {
+            if let Some(service) = scoped_builtin_service {
+                service
+                    .binding_registration_revision(binding)
+                    .map(
+                        |generation| direct_call_observation::RegistrationAuthority::Scoped {
+                            service,
+                            generation,
+                        },
+                    )
+            } else {
+                global_registered
+                    .as_ref()
+                    .and_then(|rows| rows.last())
+                    .map(|row| {
+                        direct_call_observation::RegistrationAuthority::Global(row.registration())
+                    })
+            }
+        }
+        SelectedImplementation::Legacy(_) => None,
+    };
     let prepared = preparation::prepare_selected(origin, name, args, context.as_ref()).await?;
     // Explicit Requested gather adaptation stays within this one implementation.
     let result = selected_execution::execute(
@@ -460,6 +495,8 @@ async fn try_call_builtin_sequence_async_impl(
         prepared.as_deref().unwrap_or(args),
         context,
         output_count,
+        observation.as_deref(),
+        authority,
     )
     .await?;
     compatibility_checked_builtin_sequence(name, args, result).map(Some)
@@ -472,6 +509,8 @@ pub(crate) async fn try_call_builtin_sequence_async_with_outputs(
     context: Option<&crate::context::RuntimeContext>,
 ) -> Result<Option<runmat_value::ValueSequence>, RuntimeError> {
     let fence = workspace_effect::PostCallWorkspaceEffectFence::capture(context);
+    let observation =
+        direct_call_observation::CallObservation::capture(context).map(std::rc::Rc::new);
     let context = context.cloned();
     let result = match &context {
         Some(context) => {
@@ -481,12 +520,19 @@ pub(crate) async fn try_call_builtin_sequence_async_with_outputs(
                     args,
                     Some(output_count),
                     Some(context.clone()),
+                    observation.clone(),
                 ))
                 .await
         }
-        None => try_call_builtin_sequence_async_impl(name, args, Some(output_count), None).await,
+        None => {
+            try_call_builtin_sequence_async_impl(name, args, Some(output_count), None, None).await
+        }
     };
-    fence.finish_optional_sequence(result)
+    let (result, outcome) = fence.finish_optional_sequence_observed(result);
+    if let Some(observation) = observation {
+        observation.finish_completed(outcome);
+    }
+    result
 }
 
 async fn try_distributed_builtin(
@@ -526,7 +572,7 @@ async fn try_distributed_builtin(
                     materialized.push(argument.clone());
                 }
             }
-            call_builtin_sequence_async_impl(name, &materialized, output_count, Some(context))
+            call_builtin_sequence_async_impl(name, &materialized, output_count, Some(context), None)
                 .await
                 .map(Some)
         }
@@ -836,6 +882,7 @@ async fn try_call_registered_instance_method_sequence(
             args,
             output_count,
             context.cloned(),
+            None,
         )
         .await;
         return finalize_instance_method_result(&method_identity, receiver, result).map(Some);
@@ -859,6 +906,7 @@ async fn try_call_registered_instance_method_sequence(
                 args,
                 output_count,
                 context.cloned(),
+                None,
             )
             .await;
             return finalize_instance_method_result(&method_identity, receiver, result).map(Some);
@@ -941,6 +989,7 @@ async fn try_call_registered_static_method(
             args,
             output_count,
             context.cloned(),
+            None,
         )
         .await
         .map(Some);
@@ -964,6 +1013,7 @@ async fn try_call_registered_static_method(
                 args,
                 output_count,
                 context.cloned(),
+                None,
             )
             .await
             .map(Some);
@@ -1176,6 +1226,10 @@ pub(crate) async fn call_selected_builtin_async_with_outputs(
     context: Option<crate::context::RuntimeContext>,
 ) -> Result<runmat_value::ValueSequence, RuntimeError> {
     let fence = workspace_effect::PostCallWorkspaceEffectFence::capture(context.as_ref());
+    let observation =
+        direct_call_observation::CallObservation::capture(context.as_ref()).map(std::rc::Rc::new);
+    let inner_observation = observation.clone();
+    let scoped_context = context.clone();
     let result = async move {
         let name = binding.identity.builtin.name;
         let _output_guard = crate::output_count::push_output_count(Some(output_count));
@@ -1201,17 +1255,45 @@ pub(crate) async fn call_selected_builtin_async_with_outputs(
             context.as_ref(),
         )
         .await?;
+        let authority = context.as_ref().and_then(|context| {
+            if let Some(service) = context.service_ports().builtin() {
+                service
+                    .binding_registration_revision(binding)
+                    .map(
+                        |generation| direct_call_observation::RegistrationAuthority::Scoped {
+                            service: service.clone(),
+                            generation,
+                        },
+                    )
+            } else {
+                crate::builtin::registration::registered_runtime_builtin_bindings_by_name(name)
+                    .into_iter()
+                    .find(|row| row.registration().certifies(binding))
+                    .map(|row| {
+                        direct_call_observation::RegistrationAuthority::Global(row.registration())
+                    })
+            }
+        });
         let result = selected_execution::execute(
-            SelectedImplementation::Canonical(binding.implementation),
+            SelectedImplementation::Canonical(binding),
             prepared.as_deref().unwrap_or(args),
             context,
             Some(output_count),
+            inner_observation.as_deref(),
+            authority,
         )
         .await?;
         compatibility_checked_builtin_sequence(name, args, result)
+    };
+    let result = match scoped_context {
+        Some(context) => context.scope(result).await,
+        None => result.await,
+    };
+    let (result, outcome) = fence.finish_sequence_observed(result);
+    if let Some(observation) = observation {
+        observation.finish_completed(outcome);
     }
-    .await;
-    fence.finish_sequence(result)
+    result
 }
 
 fn should_retry_with_gpu_gather(err: &RuntimeError, args: &[Value]) -> bool {

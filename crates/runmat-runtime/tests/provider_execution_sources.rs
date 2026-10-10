@@ -84,29 +84,29 @@ impl AccelProvider for Provider {
         &'a self,
         _: &'a GpuTensorHandle,
         _: usize,
-    ) -> AccelProviderFuture<'a, ReduceDimResult> {
-        Box::pin(async move { self.fail() })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ReduceDimResult> {
+        Box::pin(async move { self.fail().map_err(Into::into) })
     }
     fn reduce_max_dim<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
         _: usize,
-    ) -> AccelProviderFuture<'a, ReduceDimResult> {
-        Box::pin(async move { self.fail() })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ReduceDimResult> {
+        Box::pin(async move { self.fail().map_err(Into::into) })
     }
     fn elem_min<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.fail() })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.fail().map_err(Into::into) })
     }
     fn elem_max<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.fail() })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.fail().map_err(Into::into) })
     }
     fn scalar_min(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
         self.fail()
@@ -250,29 +250,29 @@ impl AccelProvider for UnsupportedExtrema {
         &'a self,
         _: &'a GpuTensorHandle,
         _: usize,
-    ) -> AccelProviderFuture<'a, ReduceDimResult> {
-        Box::pin(async move { self.reject() })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ReduceDimResult> {
+        Box::pin(async move { self.reject().map_err(Into::into) })
     }
     fn reduce_max_dim<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
         _: usize,
-    ) -> AccelProviderFuture<'a, ReduceDimResult> {
-        Box::pin(async move { self.reject() })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ReduceDimResult> {
+        Box::pin(async move { self.reject().map_err(Into::into) })
     }
     fn elem_min<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.reject() })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.reject().map_err(Into::into) })
     }
     fn elem_max<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
         _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.reject() })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.reject().map_err(Into::into) })
     }
     fn scalar_min(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
         self.reject()

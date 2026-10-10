@@ -1,8 +1,9 @@
 //! One test allocation map, mirroring the required existing-provider authority.
+use crate::allocation::shared::Shared;
 use crate::allocation::*;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 #[cfg(not(target_arch = "wasm32"))]
 type Callback = Box<dyn FnOnce() + Send>;
@@ -41,8 +42,11 @@ pub(super) struct TestOwner {
 }
 
 impl TestOwner {
-    pub(super) fn new(id: AllocationIdentity, outcome: AllocationRetirementOutcome) -> Arc<Self> {
-        Arc::new(Self {
+    pub(super) fn new(
+        id: AllocationIdentity,
+        outcome: AllocationRetirementOutcome,
+    ) -> Shared<Self> {
+        Shared::new(Self {
             device: id.device_id(),
             entries: Mutex::new(HashMap::from([(
                 id,

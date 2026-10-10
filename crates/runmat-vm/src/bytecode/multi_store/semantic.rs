@@ -30,7 +30,7 @@ impl Bytecode {
     }
 }
 
-fn semantic_region<'a>(
+pub(super) fn semantic_region<'a>(
     bytecode: &Bytecode,
     projection: &'a FusionStageProjection,
     structural: ProspectiveMultiStoreRegion,

@@ -2,9 +2,10 @@
 // This is a packaged-product gate: a missing binary or compile capability is a failure.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const binary = process.argv[2] && resolve(process.argv[2]);
 if (!binary || !existsSync(binary)) {
@@ -24,11 +25,11 @@ function invoke(program, args = []) {
     if (completed.error) throw completed.error;
     return completed;
 }
-function compile(name, sourceText) {
+function compile(name, sourceText, options = []) {
     const source = join(directory, `${name}.m`);
     const output = join(directory, process.platform === "win32" ? `${name}.exe` : name);
     writeFileSync(source, sourceText, { encoding: "utf8", flag: "wx" });
-    const result = invoke(binary, ["--color=never", "compile", source, "--output", output]);
+    const result = invoke(binary, ["--color=never", "compile", source, "--output", output, ...options]);
     assert.equal(result.status, 0, `compiling ${basename(source)} failed:\n${result.stderr}`);
     assert.ok(existsSync(output), `compiling ${basename(source)} did not produce a linked executable`);
     return output;
@@ -55,6 +56,50 @@ try {
     const callbackResult = invoke(callback);
     assert.equal(callbackResult.status, 0, `standalone callback failed:\n${callbackResult.stderr}`);
     assert.equal(callbackResult.stdout.trim(), "'aot_source_callback'", "local callback lost its owning file source");
+
+    // The three direct strcmp sites receive actual String scalars from the
+    // canonical newline binding. This exercises an emitted and linked native
+    // object, not the test-linked NativeEntryPoint used by the S1 feedback test.
+    const scopedPlan = join(directory, "aot_s1_closed_world.plan.json");
+    const scoped = compile("aot_s1_closed_world", [
+        "function result = aot_s1_closed_world()",
+        "  left = newline();",
+        "  right = newline();",
+        "  result = 0;",
+        "  if strcmp(left, right)",
+        "    result = result + 1;",
+        "  end",
+        "  if strcmp(left, right)",
+        "    result = result + 10;",
+        "  end",
+        "  if strcmp(left, right)",
+        "    result = result + 100;",
+        "  end",
+        "end",
+        ""
+    ].join("\n"), ["--policy", "closed-world", "--link-plan-json", scopedPlan]);
+    const plan = JSON.parse(readFileSync(scopedPlan, "utf8"));
+    assert.equal(plan.policy, "closed-world", "the emitted program must use closed-world bindings");
+    for (const name of ["newline", "strcmp"]) {
+        assert.ok(
+            plan.retained_builtin_bindings.some(binding => binding.name === name && binding.variant === "default"),
+            `closed-world link plan omitted the selected ${name} binding`
+        );
+        assert.ok(
+            plan.reachability.edges.some(edge => edge.to === `builtin:${name}` && edge.reason === "direct_call"),
+            `compiled source lost its direct ${name} call target`
+        );
+    }
+    // The link plan records reachable targets, not a count of MIR/Native IR
+    // call sites. The three source sites and checksum check linked behavior.
+    if (process.platform !== "win32") {
+        const symbolGate = fileURLToPath(new URL("../check-closed-world-binary.sh", import.meta.url));
+        const checked = invoke(symbolGate, [scoped, scopedPlan]);
+        assert.equal(checked.status, 0, `closed-world symbol gate failed:\n${checked.stderr}`);
+    }
+    const scopedResult = invoke(scoped);
+    assert.equal(scopedResult.status, 0, `linked scalar strcmp program failed:\n${scopedResult.stderr}`);
+    assert.equal(scopedResult.stdout.trim(), "111", "linked scalar strcmp checksum changed");
 
     const bound = compile("aot_bound_local_capture", [
         "function result = aot_bound_local_capture()",
@@ -190,7 +235,7 @@ try {
     assert.notEqual(dealBadCountResult.status, 0, "linked deal must reject mismatched input/output counts");
     assert.match(dealBadCountResult.stderr, /RunMat:deal:InputOutputCountMismatch/u);
 
-    console.log("linked AOT source, callback, re-invocation, error, arity, and deal witnesses passed");
+    console.log("linked AOT source, callback, closed-world scalar strcmp, re-invocation, error, arity, and deal witnesses passed");
 } finally {
     rmSync(directory, { recursive: true, force: true });
 }

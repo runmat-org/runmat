@@ -51,6 +51,18 @@ pub(super) fn whole_work(
     )
 }
 
+pub(super) fn whole_work_runtime_binding_session(
+    program: Option<ProgramRevision>,
+    authority: Digest,
+    config: PlacementSessionConfig,
+) -> PlacementRevision {
+    base(
+        program,
+        PlacementExecutionAuthorityRevision::RuntimeBindingSession(authority),
+        whole_work_policy(config),
+    )
+}
+
 fn whole_work_policy(config: PlacementSessionConfig) -> Digest {
     let mut bytes = DigestStream::new();
     bytes.update(b"runmat-whole-work-policy.v1\0");

@@ -42,9 +42,12 @@ fn every_native_integer_class_is_explicitly_unsupported_not_missing() {
             block_on(provider.reduce_min(&input)),
             block_on(provider.reduce_max(&input)),
         ] {
-            assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-                &result.unwrap_err()
-            ));
+            let error = result.unwrap_err();
+            assert!(!error.is_unsupported());
+            assert!(!error.is_after_effect());
+            assert!(std::error::Error::source(&error)
+                .unwrap()
+                .is::<runmat_accelerate_api::UnsupportedProviderOperation>());
         }
     }
 }
@@ -446,7 +449,10 @@ fn authentication_precedes_unsupported_and_future_drop_preserves_borrowed_input(
             &execute(&provider, &logical, operation).unwrap_err()
         ));
     }
-    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-        &block_on(provider.reduce_min(&logical)).unwrap_err()
-    ));
+    let error = block_on(provider.reduce_min(&logical)).unwrap_err();
+    assert!(!error.is_unsupported());
+    assert!(!error.is_after_effect());
+    assert!(std::error::Error::source(&error)
+        .unwrap()
+        .is::<runmat_accelerate_api::UnsupportedProviderOperation>());
 }

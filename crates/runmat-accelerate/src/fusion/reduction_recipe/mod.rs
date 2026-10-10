@@ -137,9 +137,8 @@ pub fn build(
     let output_payload_bytes = u64::from(geometry.slices) * bytes(output_precision);
     let partial_payload_bytes = u64::from(geometry.partial_elements) * u64::from(partial.stride);
     ensure!(
-        output_payload_bytes.max(4) <= config.max_storage_binding_bytes
-            && partial_payload_bytes.max(4) <= config.max_storage_binding_bytes,
-        "reduction storage binding limit"
+        output_payload_bytes.max(4) <= config.max_storage_binding_bytes,
+        "reduction output storage binding limit"
     );
     let work = ReductionRecipeWork {
         producer_scalar_work_units: program.producer_work_units(),

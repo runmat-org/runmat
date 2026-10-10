@@ -112,6 +112,8 @@ impl WgpuProvider {
             ));
         }
 
+        self.require_ieee_words(entry.precision)?;
+
         let mode = match kind {
             ProviderSymmetryKind::Symmetric => 0u32,
             ProviderSymmetryKind::Skew => 1u32,

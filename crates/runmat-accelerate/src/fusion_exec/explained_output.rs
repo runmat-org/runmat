@@ -16,7 +16,8 @@ pub(super) fn admit(
         && output.physical().storage() == GpuTensorStorage::Real
         && !runmat_accelerate_api::handle_is_logical(&output)
         && output.device_id() == provider.device_id()
-        && exact_provider_for_handle(&output).is_some_and(|owner| std::ptr::eq(owner, provider))
+        && exact_provider_for_handle(&output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && output.allocation_lease().validate_live().is_ok()
         && !protected
             .iter()

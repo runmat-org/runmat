@@ -11,30 +11,30 @@ use std::sync::atomic::{AtomicU32, Ordering};
 #[cfg(feature = "wgpu")]
 use std::sync::Arc;
 
-#[cfg(any(test, feature = "test-support"))]
-pub mod test_support;
 mod platform;
 mod provider_registry;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 pub use platform::AcceleratorThreadBound;
 pub use provider_registry::same_provider_instance;
 pub mod allocation;
 pub use allocation::{
     GpuPhysicalDescriptor, GpuTensorHandle, GpuTensorLayout, GpuTensorView, GpuTensorWireDescriptor,
 };
-mod native_device;
 mod iir;
+mod native_device;
 pub use iir::{
     provider_iir_causal_query, provider_iir_state_shape, provider_iir_zero_phase_query,
     ProviderIirCoefficientSource, ProviderIirFilterOptions, ProviderIirFilterResult,
     ProviderIirIndexCancelled, ProviderIirZeroPhaseFault, ProviderIirZeroPhaseIndexBuilder,
     ProviderIirZeroPhaseIndexPlan, ProviderIirZeroPhaseRequest, ProviderPreparedIirCoefficients,
 };
-mod logical_upload;
 mod fusion_outputs;
-pub mod observation;
-mod residency;
+mod logical_upload;
 mod numeric_upload;
+pub mod observation;
 mod provider_execution;
+mod residency;
 mod view_plan;
 pub use view_plan::{
     ProviderViewCapability, ProviderViewChain, ProviderViewOutcome, ProviderViewPlanError,
@@ -58,6 +58,7 @@ pub use provider_execution::{
 };
 mod placement;
 mod power;
+pub mod power_service;
 mod resident_select;
 pub use resident_select::ResidentSelectPlan;
 /// Exact feasibility identity of the provider-owned resident selection hook.
@@ -68,21 +69,26 @@ pub mod scalar_program;
 #[cfg(feature = "wgpu")]
 mod wgpu_access;
 #[cfg(feature = "wgpu")]
+mod wgpu_buffer_owner;
+#[cfg(feature = "wgpu")]
 pub use wgpu_access::{
     WgpuAccessError, WgpuCleanup, WgpuDeviceAccess, WgpuEmission, WgpuEmissionMode,
     WgpuScopeErrorKind, WgpuScopeErrors, WgpuScopeReceipt,
 };
+#[cfg(feature = "wgpu")]
+pub use wgpu_buffer_owner::WgpuBufferOwner;
 
 pub use fusion_outputs::validate_fused_output_classes;
 pub use logical_upload::{upload_logical_protecting, HostLogicalTensorView};
 pub use native_device::*;
 pub use numeric_upload::{
-    is_invalid_numeric_upload_result, upload_numeric_protecting, InvalidNumericUploadResult,
-    NumericUploadCompletionError, NumericUploadError, NumericUploadResult,
+    class_preserving_upload_query, is_invalid_numeric_upload_result, upload_numeric_protecting,
+    InvalidNumericUploadResult, NumericUploadCompletionError, NumericUploadError,
+    NumericUploadResult,
 };
 pub use numerical_domain::{NumericalDomainEvidence, RoundDigitsMode};
 pub use placement::*;
-pub use power::PowerResultDomain;
+pub use power::{PowerResultDomain, PowerScalarControl, RealPowerArithmeticMode, RealPowerOperand};
 pub use residency::{clear_residency_checked, ResidencyCleanupError, ResidencyRestoreGuard};
 
 type ResidencyMarkFn = fn(&GpuTensorHandle);
@@ -629,7 +635,7 @@ pub struct WgpuBufferRef {
     // Retains allocation accounting as well as the backend buffer. The backend
     // must associate this exact buffer with this handle before construction.
     owner: GpuTensorHandle,
-    buffer: Arc<wgpu::Buffer>,
+    buffer: WgpuBufferOwner,
     access: WgpuDeviceAccess,
     pub len: usize,
     pub shape: Vec<usize>,
@@ -645,7 +651,7 @@ impl WgpuBufferRef {
     /// `access` must be the existing authority which created this backing;
     /// raw buffer properties cannot authenticate its device association.
     pub fn from_owned_buffer(
-        buffer: Arc<wgpu::Buffer>,
+        buffer: WgpuBufferOwner,
         handle: GpuTensorHandle,
         access: WgpuDeviceAccess,
     ) -> anyhow::Result<Self> {
@@ -1036,6 +1042,14 @@ pub enum ReductionFlavor {
     Sum,
     Mean,
     CustomScale(f64),
+}
+
+/// Physical shader requirements declared by the owning WGSL producer.
+/// A provider checks these against its *enabled device*, not adapter offers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ProviderShaderRequirements {
+    Basic,
+    F64IeeeWords,
 }
 
 impl ReductionFlavor {
@@ -1559,8 +1573,153 @@ fn unsupported_future<T>(message: &'static str) -> AccelProviderFuture<'static, 
     Box::pin(async move { Err(unsupported_provider_operation(message)) })
 }
 
+fn unsupported_execution_future<T>(message: &'static str) -> ProviderExecutionFuture<'static, T> {
+    Box::pin(async move { Err(unsupported_provider_operation(message).into()) })
+}
+
 /// Device/provider interface that backends implement and register into the runtime layer
 pub trait AccelProvider: AcceleratorThreadBound {
+    /// Effect-free ordinary real Sub/Div proposal. Source-level numerical
+    /// admission and any selected-program binding remain separate.
+    fn propose_real_binary(
+        &self,
+        _request: &ProviderRealBinaryRequest,
+    ) -> ProviderExecutionResult<Option<ProviderRealBinaryPhysicalProposal>> {
+        Ok(None)
+    }
+
+    /// Consume a privately minted recipe against both authentic live views.
+    fn execute_real_binary_recipe<'a>(
+        &'a self,
+        _lhs: &'a GpuTensorHandle,
+        _rhs: &'a GpuTensorHandle,
+        _recipe: &'a ProviderRealBinaryRecipe,
+    ) -> ProviderExecutionFuture<'a, ProviderExecutedRealBinary> {
+        Box::pin(async {
+            Err(ProviderExecutionError::from(
+                unsupported_provider_operation("real binary recipe execution is unsupported"),
+            ))
+        })
+    }
+
+    /// Description-only physical proposal for one ordinary real-elementwise
+    /// operation. It does not supply numerical or selected-source admission.
+    fn propose_real_elementwise(
+        &self,
+        _request: &ProviderRealElementwiseRequest,
+    ) -> ProviderExecutionResult<Option<ProviderRealElementwisePhysicalProposal>> {
+        Ok(None)
+    }
+
+    /// Consume the same privately minted recipe used for physical planning.
+    /// Providers must authenticate the actual source and rederive the recipe
+    /// before effects, then report observed allocation/submission resources.
+    fn execute_real_elementwise_recipe<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
+        _recipe: &'a ProviderRealElementwiseRecipe,
+    ) -> ProviderExecutionFuture<'a, ProviderExecutedRealElementwise> {
+        Box::pin(async {
+            Err(ProviderExecutionError::from(
+                unsupported_provider_operation("real elementwise recipe execution is unsupported"),
+            ))
+        })
+    }
+    /// Project the ordinary resident F32/F64 dense-real output allocation key.
+    /// Other encodings fail closed. This does not certify an operation,
+    /// kernel, numerical domain, resource transcript, or placement.
+    fn plan_dense_real_output_buffer_bytes(
+        &self,
+        _output: &ProviderRepresentation,
+    ) -> ProviderExecutionResult<Option<u64>> {
+        Ok(None)
+    }
+
+    /// Project the actual provider allocator's output extent for this exact
+    /// symbolic POWER route. This is not a future handle or a placement ticket;
+    /// the produced allocation must be checked against it after execution.
+    fn plan_power_output_buffer_bytes(
+        &self,
+        _planned: &power_service::PowerSymbolicPlan,
+        _domain: PowerResultDomain,
+    ) -> ProviderExecutionResult<Option<u64>> {
+        Ok(None)
+    }
+
+    /// Propose the same ordered real mean recipe for a future, handle-free
+    /// intermediate. This is not allocation, source-owner or execution proof.
+    fn plan_ordered_real_mean(
+        &self,
+        _source: &ProviderRepresentation,
+        _source_buffer_bytes: u64,
+        _axes_zero_based: &[usize],
+        _output_precision: ProviderPrecision,
+        _nan_mode: ProviderRealMeanNaNMode,
+    ) -> anyhow::Result<Option<ProviderOrderedRealMeanRecipe>> {
+        Ok(None)
+    }
+
+    /// Prepare one call-boundary, source-ordered real mean with Double
+    /// accumulation. The default declines without touching the device.
+    fn prepare_ordered_real_mean(
+        &self,
+        _source: &GpuTensorHandle,
+        _axes_zero_based: &[usize],
+        _output_precision: ProviderPrecision,
+        _nan_mode: ProviderRealMeanNaNMode,
+    ) -> anyhow::Result<Option<ProviderOrderedRealMean>> {
+        Ok(None)
+    }
+
+    /// Consume a symbolic proposal only after authenticating the exact live
+    /// view/lease and rederiving the same capabilities and physical recipe.
+    fn prepare_ordered_real_mean_against_recipe(
+        &self,
+        _source: &GpuTensorHandle,
+        _recipe: &ProviderOrderedRealMeanRecipe,
+    ) -> anyhow::Result<Option<ProviderOrderedRealMean>> {
+        Ok(None)
+    }
+
+    fn execute_ordered_real_mean(
+        &self,
+        _selected: ProviderOrderedRealMean,
+    ) -> ProviderExecutionResult<ProviderExecutedOrderedRealMean> {
+        Err(ProviderExecutionError::from(
+            unsupported_provider_operation("ordered real mean unavailable"),
+        ))
+    }
+
+    /// Pin an exact live N-D mean cache hit for consumption by a selected
+    /// staged route. Absence means cold or unsupported, never an advisory hit.
+    /// Implementations must validate the source view, dimensions, and both
+    /// returned allocation leases before returning a reservation.
+    fn reserve_cached_mean_nd(
+        &self,
+        _source: &GpuTensorHandle,
+        _dims_zero_based: &[usize],
+    ) -> anyhow::Result<Option<ProviderPinnedNdMean>> {
+        Ok(None)
+    }
+    /// Select the exact cold N-D moments route when no validated warm entry
+    /// was pinned. The receipt owns the source lease and is consumed once by
+    /// `execute_cold_mean_nd`; default providers cannot claim this route.
+    fn prepare_cold_mean_nd(
+        &self,
+        _source: &GpuTensorHandle,
+        _dims_zero_based: &[usize],
+    ) -> anyhow::Result<Option<ProviderColdNdMean>> {
+        Ok(None)
+    }
+
+    fn execute_cold_mean_nd(
+        &self,
+        _selected: ProviderColdNdMean,
+    ) -> anyhow::Result<ProviderExecutedColdNdMean> {
+        Err(unsupported_provider_operation(
+            "selected cold ND mean unavailable",
+        ))
+    }
     /// Read-only whole-route derivative capability. `false` means the runtime
     /// must reject before executing the corresponding network forward pass.
     fn resident_network_adjoint_supported(
@@ -1611,19 +1770,22 @@ pub trait AccelProvider: AcceleratorThreadBound {
     /// boundary knows which handles are borrowed. Errors must release only
     /// allocations actually owned by this invocation. The default preserves
     /// legacy real-double and real-integer transfers; native single and complex
-    /// representations require an override.
+    /// representations require an override. Legacy `upload`/`upload_integer`
+    /// errors have no effect-phase receipt: even a nested Unsupported marker
+    /// cannot authorize host replay. Providers that can certify an unsupported
+    /// response before effects must override this typed raw hook.
     fn upload_numeric_raw(
         &self,
         host: &crate::HostNumericTensorView,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
         host.validate()?;
         match (host.data, host.storage) {
-            (crate::HostNumericDataView::F64(data), GpuTensorStorage::Real) => {
-                self.upload(&crate::HostTensorView {
+            (crate::HostNumericDataView::F64(data), GpuTensorStorage::Real) => Ok(self
+                .upload(&crate::HostTensorView {
                     data,
                     shape: host.shape,
                 })
-            }
+                .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?),
             (data, GpuTensorStorage::Real) if data.element_type().integer_type().is_some() => {
                 let data = match data {
                     crate::HostNumericDataView::I8(data) => crate::HostIntegerDataView::I8(data),
@@ -1638,16 +1800,19 @@ pub trait AccelProvider: AcceleratorThreadBound {
                         unreachable!("guarded integer numeric transfer")
                     }
                 };
-                self.upload_integer(&crate::HostIntegerTensorView {
-                    data,
-                    shape: host.shape,
-                })
+                Ok(self
+                    .upload_integer(&crate::HostIntegerTensorView {
+                        data,
+                        shape: host.shape,
+                    })
+                    .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?)
             }
             (data, storage) => Err(anyhow!(
                 "provider must implement native {:?} {:?} uploads through upload_numeric_raw",
                 data.element_type(),
                 storage
-            )),
+            )
+            .into()),
         }
     }
 
@@ -1717,6 +1882,17 @@ pub trait AccelProvider: AcceleratorThreadBound {
     /// scratch does not by itself prove that no command is submitted.
     fn download_numeric_queue_slots(&self, _handle: &GpuTensorHandle) -> u32 {
         1
+    }
+
+    /// Physical cost of downloading a result that this provider has not yet
+    /// produced. The future representation is not an ownership receipt: the
+    /// caller must still validate the actual handle and its exact download
+    /// feasibility before readback. Unknown providers return no evidence.
+    fn produced_numeric_readback_evidence(
+        &self,
+        _output: &ProviderRepresentation,
+    ) -> Option<ProviderProducedNumericReadbackEvidence> {
+        None
     }
 
     /// Upload exact native integer storage without converting through f64.
@@ -2052,6 +2228,12 @@ pub trait AccelProvider: AcceleratorThreadBound {
 
     /// Read-only limits for an audited ordinary dimensional-sum route.
     fn sum_geometry(&self) -> Option<ProviderSumGeometry> {
+        None
+    }
+
+    /// Read-only limits for the two-output dimensional min/max hook. None
+    /// leaves physical work unresolved for automatic or managed placement.
+    fn extrema_geometry(&self) -> Option<ProviderExtremaGeometry> {
         None
     }
 
@@ -2554,22 +2736,22 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &'a self,
         _a: &'a GpuTensorHandle,
         _b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("elem_add not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("elem_add not supported by provider")
     }
     fn elem_mul<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("elem_mul not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("elem_mul not supported by provider")
     }
     fn elem_max<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("elem_max not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("elem_max not supported by provider")
     }
     /// Select between resident real tensors using a resident logical mask.
     /// Selection does not perform arithmetic blending, so an unselected NaN or
@@ -2587,45 +2769,45 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &'a self,
         _a: &'a GpuTensorHandle,
         _b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("elem_min not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("elem_min not supported by provider")
     }
     fn elem_sub<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("elem_sub not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("elem_sub not supported by provider")
     }
     fn elem_div<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("elem_div not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("elem_div not supported by provider")
     }
     /// Compute an exact MATLAB-style remainder for compatible native integer tensors.
     fn elem_rem<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("elem_rem not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("elem_rem not supported by provider")
     }
     /// Compute an exact MATLAB-style modulus for compatible native integer tensors.
     fn elem_mod<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("elem_mod not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("elem_mod not supported by provider")
     }
     fn elem_pow<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("elem_pow not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("elem_pow not supported by provider")
     }
 
     /// Classify the actual broadcasted pairs of real floating inputs. The
@@ -2676,8 +2858,13 @@ pub trait AccelProvider: AcceleratorThreadBound {
     fn modulate_constellation<'a>(
         &'a self,
         _request: ProviderModulationRequest<'a>,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("modulate_constellation not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            Err(
+                unsupported_provider_operation("modulate_constellation not supported by provider")
+                    .into(),
+            )
+        })
     }
 
     /// Group a resident real/logical bit tensor into symbols, map through a complex
@@ -2685,8 +2872,13 @@ pub trait AccelProvider: AcceleratorThreadBound {
     fn modulate_bits_constellation<'a>(
         &'a self,
         _request: ProviderBitModulationRequest<'a>,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("modulate_bits_constellation not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            Err(unsupported_provider_operation(
+                "modulate_bits_constellation not supported by provider",
+            )
+            .into())
+        })
     }
 
     fn elem_hypot<'a>(
@@ -2700,43 +2892,55 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &'a self,
         _a: &'a GpuTensorHandle,
         _b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("elem_ge not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("elem_ge not supported by provider").into())
+        })
     }
     fn elem_le<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("elem_le not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("elem_le not supported by provider").into())
+        })
     }
     fn elem_lt<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("elem_lt not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("elem_lt not supported by provider").into())
+        })
     }
     fn elem_gt<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("elem_gt not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("elem_gt not supported by provider").into())
+        })
     }
     fn elem_eq<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("elem_eq not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("elem_eq not supported by provider").into())
+        })
     }
     fn elem_ne<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _b: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("elem_ne not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("elem_ne not supported by provider").into())
+        })
     }
     fn logical_and(
         &self,
@@ -2924,8 +3128,10 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _a: &'a GpuTensorHandle,
         _digits: i32,
         _significant: bool,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("round_digits not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("round_digits not supported by provider").into())
+        })
     }
     fn unary_fix<'a>(
         &'a self,
@@ -3024,8 +3230,13 @@ pub trait AccelProvider: AcceleratorThreadBound {
     fn activation_softmax_rows<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("activation_softmax_rows not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(
+                unsupported_provider_operation("activation_softmax_rows not supported by provider")
+                    .into(),
+            )
+        })
     }
     fn unary_expm1<'a>(
         &'a self,
@@ -3066,14 +3277,18 @@ pub trait AccelProvider: AcceleratorThreadBound {
     fn unary_double<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("unary_double not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("unary_double not supported by provider").into())
+        })
     }
     fn unary_single<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("unary_single not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("unary_single not supported by provider").into())
+        })
     }
     fn unary_pow2<'a>(
         &'a self,
@@ -3171,12 +3386,15 @@ pub trait AccelProvider: AcceleratorThreadBound {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
         epilogue: &'a MatmulEpilogue,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             if epilogue.is_noop() {
-                return self.matmul(a, b).await;
+                return self
+                    .matmul(a, b)
+                    .await
+                    .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects());
             }
-            Err(anyhow::anyhow!("matmul_epilogue not supported by provider"))
+            Err(unsupported_provider_operation("matmul_epilogue not supported by provider").into())
         })
     }
     fn image_normalize<'a>(
@@ -3681,8 +3899,10 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &'a self,
         _a: &'a GpuTensorHandle,
         _target: IntegerElementType,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("cast_to_integer not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("cast_to_integer not supported by provider").into())
+        })
     }
     fn reduce_mean<'a>(
         &'a self,
@@ -3820,8 +4040,8 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _a: &'a GpuTensorHandle,
         _normalization: ProviderStdNormalization,
         _nan_mode: ProviderNanMode,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("reduce_std not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("reduce_std not supported by provider")
     }
     fn reduce_std_dim<'a>(
         &'a self,
@@ -3829,8 +4049,8 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _dim: usize,
         _normalization: ProviderStdNormalization,
         _nan_mode: ProviderNanMode,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("reduce_std_dim not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("reduce_std_dim not supported by provider")
     }
     fn reduce_any<'a>(
         &'a self,
@@ -3890,8 +4110,8 @@ pub trait AccelProvider: AcceleratorThreadBound {
     fn reduce_min<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("reduce_min not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("reduce_min not supported by provider")
     }
     /// Reduce a zero-based dimension with fixed Include-NaN semantics.
     /// Return the first NaN (if any), otherwise the first minimum, with 1-based
@@ -3903,14 +4123,14 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &'a self,
         _a: &'a GpuTensorHandle,
         _dim: usize,
-    ) -> AccelProviderFuture<'a, ReduceDimResult> {
-        unsupported_future("reduce_min_dim not supported by provider")
+    ) -> ProviderExecutionFuture<'a, ReduceDimResult> {
+        unsupported_execution_future("reduce_min_dim not supported by provider")
     }
     fn reduce_max<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("reduce_max not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("reduce_max not supported by provider")
     }
     /// As `reduce_min_dim`, selecting the first maximum instead of minimum.
     /// NaN policy remains Include; positive zero orders above negative zero,
@@ -3919,8 +4139,8 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &'a self,
         _a: &'a GpuTensorHandle,
         _dim: usize,
-    ) -> AccelProviderFuture<'a, ReduceDimResult> {
-        unsupported_future("reduce_max_dim not supported by provider")
+    ) -> ProviderExecutionFuture<'a, ReduceDimResult> {
+        unsupported_execution_future("reduce_max_dim not supported by provider")
     }
     fn cumsum_scan(
         &self,
@@ -4026,18 +4246,28 @@ pub trait AccelProvider: AcceleratorThreadBound {
         Err(anyhow::anyhow!("find not supported by provider"))
     }
 
-    fn fused_elementwise(
-        &self,
-        _shader: &str,
-        _inputs: &[GpuTensorHandle],
-        _output_shape: &[usize],
+    fn fused_elementwise<'a>(
+        &'a self,
+        _shader: &'a str,
+        requirements: ProviderShaderRequirements,
+        _inputs: &'a [GpuTensorHandle],
+        _output_shape: &'a [usize],
         _len: usize,
         output_class: ProviderElementType,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        validate_fused_output_classes(self.precision(), &[output_class])?;
-        Err(unsupported_provider_operation(
-            "fused_elementwise not supported by provider",
-        ))
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            if !self.supports_shader_requirements(requirements) {
+                return Err(unsupported_provider_operation(
+                    "selected fused elementwise shader requires unavailable features",
+                )
+                .into());
+            }
+            validate_fused_output_classes(self.precision(), &[output_class])?;
+            Err(
+                unsupported_provider_operation("fused_elementwise not supported by provider")
+                    .into(),
+            )
+        })
     }
 
     /// Execute a single fused elementwise kernel that writes `num_outputs` output buffers in one
@@ -4049,25 +4279,33 @@ pub trait AccelProvider: AcceleratorThreadBound {
     /// physical hook stage, not a later output adaptation. Logical outputs use
     /// the provider's native floating encoding and producer-owned classification.
     /// The default is typed Unsupported, never guessed shader rewriting.
-    fn fused_elementwise_multi(
-        &self,
-        _shader: &str,
-        _inputs: &[GpuTensorHandle],
-        _output_shape: &[usize],
+    fn fused_elementwise_multi<'a>(
+        &'a self,
+        _shader: &'a str,
+        requirements: ProviderShaderRequirements,
+        _inputs: &'a [GpuTensorHandle],
+        _output_shape: &'a [usize],
         _len: usize,
-        output_classes: &[ProviderElementType],
-    ) -> anyhow::Result<Vec<GpuTensorHandle>> {
-        validate_fused_output_classes(self.precision(), output_classes)?;
-        Err(unsupported_provider_operation(
-            "fused_elementwise_multi not supported by provider",
-        ))
+        output_classes: &'a [ProviderElementType],
+    ) -> ProviderExecutionFuture<'a, Vec<GpuTensorHandle>> {
+        Box::pin(async move {
+            if !self.supports_shader_requirements(requirements) {
+                return Err(unsupported_provider_operation(
+                    "selected fused elementwise shader requires unavailable features",
+                )
+                .into());
+            }
+            validate_fused_output_classes(self.precision(), output_classes)?;
+            Err(
+                unsupported_provider_operation("fused_elementwise_multi not supported by provider")
+                    .into(),
+            )
+        })
     }
 
     /// Build a numeric tensor where NaNs in `a` are replaced with 0.0 (device side).
-    fn map_nan_to_zero(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(unsupported_provider_operation(
-            "map_nan_to_zero not supported by provider",
-        ))
+    fn map_nan_to_zero(&self, _a: &GpuTensorHandle) -> ProviderExecutionResult<GpuTensorHandle> {
+        Err(unsupported_provider_operation("map_nan_to_zero not supported by provider").into())
     }
 
     /// Build a numeric mask tensor with 1.0 where value is not NaN and 0.0 where value is NaN.
@@ -4087,6 +4325,7 @@ pub trait AccelProvider: AcceleratorThreadBound {
     fn fused_reduction(
         &self,
         _shader: &str,
+        _requirements: ProviderShaderRequirements,
         _inputs: &[GpuTensorHandle],
         _output_shape: &[usize],
         _reduce_len: usize,
@@ -4095,6 +4334,46 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _flavor: ReductionFlavor,
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("fused_reduction not supported by provider"))
+    }
+
+    /// Enabled physical dimensions for one checked recipe, before effects.
+    fn reduction_recipe_config(
+        &self,
+        _reduce_elements: u32,
+        _slices: u32,
+    ) -> ProviderExecutionResult<reduction::ReductionRecipeConfig> {
+        Err(ProviderExecutionError::from(
+            unsupported_provider_operation("typed reduction configuration unsupported"),
+        ))
+    }
+
+    /// Pre-effect physical candidates for this exact checked recipe. This
+    /// query never launches autotune trials or authenticates future leases.
+    /// The caller chooses one through the canonical placement authority and
+    /// passes that same selection to submit_reduction_recipe.
+    fn reduction_recipe_candidates(
+        &self,
+        _recipe: &reduction::ProviderReductionRecipe,
+    ) -> ProviderExecutionResult<Vec<reduction::ReductionStrategy>> {
+        Err(ProviderExecutionError::from(
+            unsupported_provider_operation("typed reduction selection unsupported"),
+        ))
+    }
+
+    /// Execute one immutable selected physical reduction recipe.
+    fn submit_reduction_recipe(
+        &self,
+        _submission: &reduction::ReductionSubmission<'_>,
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
+        Err(ProviderExecutionError::from(
+            unsupported_provider_operation("typed reduction recipe unsupported"),
+        ))
+    }
+
+    /// Admission probe for a selected generated shader, before host uploads.
+    /// The default cannot claim a non-basic device feature.
+    fn supports_shader_requirements(&self, requirements: ProviderShaderRequirements) -> bool {
+        requirements == ProviderShaderRequirements::Basic
     }
 
     /// Optionally pre-compile commonly used pipelines to amortize first-dispatch costs.
@@ -4152,40 +4431,42 @@ pub trait AccelProvider: AcceleratorThreadBound {
 
     /// Fast-path: write a GPU column in a matrix from a GPU vector, returning a new handle.
     /// Expected: `values.shape == [rows, 1]` (or `[rows]`) and `col_index < cols`.
-    fn scatter_column(
-        &self,
-        _matrix: &GpuTensorHandle,
+    fn scatter_column<'a>(
+        &'a self,
+        _matrix: &'a GpuTensorHandle,
         _col_index: usize,
-        _values: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(unsupported_provider_operation(
-            "scatter_column not supported by provider",
-        ))
+        _values: &'a GpuTensorHandle,
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            Err(unsupported_provider_operation("scatter_column not supported by provider").into())
+        })
     }
 
     /// Fast-path: write a GPU row in a matrix from a GPU vector, returning a new handle.
     /// Expected: `values.shape == [1, cols]` (or `[cols]`) and `row_index < rows`.
-    fn scatter_row(
-        &self,
-        _matrix: &GpuTensorHandle,
+    fn scatter_row<'a>(
+        &'a self,
+        _matrix: &'a GpuTensorHandle,
         _row_index: usize,
-        _values: &GpuTensorHandle,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(unsupported_provider_operation(
-            "scatter_row not supported by provider",
-        ))
+        _values: &'a GpuTensorHandle,
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            Err(unsupported_provider_operation("scatter_row not supported by provider").into())
+        })
     }
 
-    fn sub2ind(
-        &self,
-        _dims: &[usize],
-        _strides: &[usize],
-        _inputs: &[&GpuTensorHandle],
-        _scalar_mask: &[bool],
+    fn sub2ind<'a>(
+        &'a self,
+        _dims: &'a [usize],
+        _strides: &'a [usize],
+        _inputs: &'a [&'a GpuTensorHandle],
+        _scalar_mask: &'a [bool],
         _len: usize,
-        _output_shape: &[usize],
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("sub2ind not supported by provider"))
+        _output_shape: &'a [usize],
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            Err(unsupported_provider_operation("sub2ind not supported by provider").into())
+        })
     }
 
     /// Returns true if the provider offers a device-side `ind2sub` implementation.
@@ -4194,16 +4475,16 @@ pub trait AccelProvider: AcceleratorThreadBound {
     }
 
     /// Convert linear indices into per-dimension subscripts on the device.
-    fn ind2sub(
-        &self,
-        _dims: &[usize],
-        _strides: &[usize],
-        _indices: &GpuTensorHandle,
+    fn ind2sub<'a>(
+        &'a self,
+        _dims: &'a [usize],
+        _strides: &'a [usize],
+        _indices: &'a GpuTensorHandle,
         _total: usize,
         _len: usize,
-        _output_shape: &[usize],
-    ) -> anyhow::Result<Vec<GpuTensorHandle>> {
-        Err(anyhow::anyhow!("ind2sub not supported by provider"))
+        _output_shape: &'a [usize],
+    ) -> ProviderExecutionFuture<'a, Vec<GpuTensorHandle>> {
+        Box::pin(async move { Err(anyhow::anyhow!("ind2sub not supported by provider").into()) })
     }
 
     /// Determine if a matrix is symmetric (or skew-symmetric) without gathering it to the host.

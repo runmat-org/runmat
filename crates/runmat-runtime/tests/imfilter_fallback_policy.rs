@@ -79,13 +79,16 @@ impl AccelProvider for Provider {
     fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         panic!("kernel preparation must use checked native upload")
     }
-    fn upload_numeric_raw(&self, view: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        view: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::SeqCst);
         match self.mode {
-            Mode::UploadOperational => Err(anyhow::Error::new(Operational)),
-            Mode::UploadUnsupported => Err(unsupported_provider_operation(
-                "native kernel upload unavailable",
-            )),
+            Mode::UploadOperational => Err(anyhow::Error::new(Operational).into()),
+            Mode::UploadUnsupported => {
+                Err(unsupported_provider_operation("native kernel upload unavailable").into())
+            }
             Mode::UploadAlias | Mode::RestoreAlias => {
                 Ok(self.alias.lock().unwrap().as_ref().unwrap().clone())
             }
@@ -335,7 +338,10 @@ impl AccelProvider for PreflightOnly {
     fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         panic!("unavailable original must reject before upload")
     }
-    fn upload_numeric_raw(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        _: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         panic!("unavailable original must reject before native upload")
     }
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {

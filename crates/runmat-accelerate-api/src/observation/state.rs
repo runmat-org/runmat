@@ -2,6 +2,14 @@ use super::*;
 use std::sync::Mutex;
 use std::task::{Context, Poll, Waker};
 
+#[path = "state/resources.rs"]
+mod resources;
+use resources::ResourceState;
+pub use resources::{
+    ProviderResourcePhasePlan, ProviderResourcePhaseToken, ProviderResourceScope,
+    ProviderResourceSnapshot, ProviderResourceTicket, ProviderScopedResourceSnapshot,
+};
+
 struct State {
     start: Option<Duration>,
     publication: Option<Duration>,
@@ -20,7 +28,9 @@ struct State {
     expected_execution: Option<(u32, crate::ProviderOperationIdentity)>,
     stages: [ProviderStageMeasurement; ProviderObservationStage::COUNT],
     pipelines: ProviderPipelineObservations,
+    resources: ResourceState,
     waiter: Option<Waker>,
+    resource_waiter: Option<Waker>,
 }
 
 impl State {
@@ -29,7 +39,11 @@ impl State {
             return ProviderObservationStatus::Failed(failure);
         }
         match (self.start, self.publication) {
-            (Some(start), Some(publication)) if self.pending == 0 => {
+            (Some(start), Some(publication))
+                if self.pending == 0
+                    && self.resources.live_count() == 0
+                    && !self.resources.scope_pending() =>
+            {
                 match publication
                     .max(self.completion.unwrap_or(publication))
                     .checked_sub(start)
@@ -66,6 +80,9 @@ struct Shared {
     state: Mutex<State>,
     clock: Arc<dyn ProviderObservationClock>,
     budget: Arc<ProviderObservationBudget>,
+    // Only the default clock can be compared to an outer runmat_time::Instant.
+    // Synthetic/custom clocks remain valid for provider-local v2 receipts.
+    host_start: Option<runmat_time::Instant>,
 }
 
 // Kept outside callback-shared state: an outstanding map callback must not hold
@@ -88,8 +105,16 @@ impl Shared {
         } else {
             None
         };
+        let resource_wake = if state.resources.live_count() == 0 {
+            state.resource_waiter.take()
+        } else {
+            None
+        };
         drop(state);
         if let Some(wake) = wake {
+            wake.wake();
+        }
+        if let Some(wake) = resource_wake {
             wake.wake();
         }
         result
@@ -108,7 +133,9 @@ impl Default for ProviderOperationReceipt {
 
 impl ProviderOperationReceipt {
     pub fn new() -> Self {
-        Self::with_clock(clock())
+        Self::with_budget(Arc::new(ProviderObservationBudget::new(
+            std::num::NonZeroU32::new(64).expect("nonzero local observation limit"),
+        )))
     }
 
     pub fn with_clock(clock: Arc<dyn ProviderObservationClock>) -> Self {
@@ -121,7 +148,13 @@ impl ProviderOperationReceipt {
     }
 
     pub fn with_budget(budget: Arc<ProviderObservationBudget>) -> Self {
-        Self::with_clock_and_budget(clock(), budget)
+        let host_start = runmat_time::Instant::now();
+        Self::construct(
+            Arc::new(Clock(host_start)),
+            budget,
+            Some(host_start),
+            Some(Duration::ZERO),
+        )
     }
 
     #[cfg(feature = "wgpu")]
@@ -138,7 +171,16 @@ impl ProviderOperationReceipt {
         clock: Arc<dyn ProviderObservationClock>,
         budget: Arc<ProviderObservationBudget>,
     ) -> Self {
-        let start = clock.now();
+        Self::construct(clock, budget, None, None)
+    }
+
+    fn construct(
+        clock: Arc<dyn ProviderObservationClock>,
+        budget: Arc<ProviderObservationBudget>,
+        host_start: Option<runmat_time::Instant>,
+        initial_start: Option<Duration>,
+    ) -> Self {
+        let start = initial_start.or_else(|| clock.now());
         Self(
             Arc::new(Shared {
                 state: Mutex::new(State {
@@ -161,14 +203,26 @@ impl ProviderOperationReceipt {
                     expected_execution: None,
                     stages: [ProviderStageMeasurement::default(); ProviderObservationStage::COUNT],
                     pipelines: ProviderPipelineObservations::default(),
+                    resources: ResourceState::default(),
                     waiter: None,
+                    resource_waiter: None,
                 }),
                 clock,
                 budget,
+                host_start,
             }),
             #[cfg(feature = "wgpu")]
             ProgressOwner::default(),
         )
+    }
+
+    /// The exact default-clock prelude preceding this receipt. A custom clock
+    /// has no shared epoch and must not contribute a full-call positive sample.
+    pub fn default_clock_prelude_since(
+        &self,
+        outer_started: runmat_time::Instant,
+    ) -> Option<Duration> {
+        self.0.host_start?.checked_duration_since(outer_started)
     }
 
     pub fn recorder(&self) -> ProviderOperationRecorder {
@@ -414,6 +468,7 @@ impl ProviderOperationReceipt {
                 route_outcome: state.route_outcome,
                 stages: state.stages,
                 pipelines: state.pipelines,
+                resources: state.resources.snapshot(),
             })
         })
     }
@@ -445,10 +500,37 @@ impl ProviderOperationReceipt {
                     route_outcome: state.route_outcome,
                     stages: state.stages,
                     pipelines: state.pipelines,
+                    resources: state.resources.snapshot(),
                 })),
                 None,
             )
         });
+        drop(old);
+        result
+    }
+
+    /// Wait only for issued resource-ticket retirement, independently of the
+    /// operation's success, failure, publication, or consumed feedback. `None`
+    /// means no resource scope was ever issued; an unfinished or cancelled
+    /// scope remains unfinished/cancelled in the returned snapshot.
+    pub fn poll_resource_retirement(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<ProviderResourceSnapshot>> {
+        let mut next = Some(cx.waker().clone());
+        let (result, old) = self.0.with(|state| {
+            if state.resources.live_count() != 0 {
+                // A pending poll checks only the aggregate owner count. Clone
+                // the potentially many scoped facts once, when ready.
+                (
+                    Poll::Pending,
+                    std::mem::replace(&mut state.resource_waiter, next.take()),
+                )
+            } else {
+                (Poll::Ready(state.resources.snapshot()), None)
+            }
+        });
+        // A replaced Waker may itself run code in Drop. Never drop it locked.
         drop(old);
         result
     }

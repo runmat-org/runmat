@@ -86,11 +86,9 @@ fn unknown_degree_does_not_imply_coefficient_count() {
     );
 }
 
-#[test]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn wide_typed_degree_literal_is_not_rounded_through_double() {
-    if usize::BITS < 64 {
-        return;
-    }
     let sample = numeric(
         NumericClass::Double,
         NumericDomain::Real,
@@ -114,10 +112,28 @@ fn wide_typed_degree_literal_is_not_rounded_through_double() {
         },
     ]);
     let result = crate::infer_catalog_call(&POLYFIT_CATALOG_ENTRY, &call);
-    assert_eq!(
-        result.outputs[0].shape,
-        ShapeFact::from(vec![Some(1), Some(9_007_199_254_740_994)])
-    );
+    let width = usize::try_from(9_007_199_254_740_993_u64)
+        .ok()
+        .and_then(|degree| degree.checked_add(1));
+    match width {
+        Some(exact_width) => {
+            assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+            assert_eq!(
+                result.outputs[0].shape,
+                ShapeFact::from(vec![Some(1), Some(exact_width)])
+            );
+        }
+        None => {
+            assert!(result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "RM-CATALOG-POLYFIT-DEGREE"));
+            assert_eq!(
+                result.outputs[0].shape,
+                ShapeFact::from(vec![Some(1), None])
+            );
+        }
+    }
 }
 
 #[test]

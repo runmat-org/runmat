@@ -1,6 +1,8 @@
 use super::super::{builtin_error, power_host, BUILTIN_NAME};
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin};
-use crate::builtins::math::elementwise::binary_arithmetic::provider_support::common_owner;
+use crate::builtins::math::elementwise::binary_arithmetic::provider_support::{
+    common_owner, HostFallbackAdmission,
+};
 use crate::BuiltinResult;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, PowerResultDomain};
 use runmat_value::Value;
@@ -68,12 +70,17 @@ pub(super) async fn try_real_pair(
             output,
             builtin_error("power: provider returned malformed domain-preserving output"),
         )),
-        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
+        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+            Err(typed_provider_error(
+                "provider execution after classification",
+                runmat_accelerate_api::ProviderExecutionError::from(error),
+            ))
+        }
         Err(error) => Err(provider_error("provider execution", error)),
     }
 }
 
-fn valid_output(
+pub(super) fn valid_output(
     output: &GpuTensorHandle,
     lhs: &GpuTensorHandle,
     rhs: &GpuTensorHandle,
@@ -114,23 +121,36 @@ fn compatible_real_inputs(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool 
             == runmat_accelerate_api::handle_precision(rhs)
 }
 
-fn provider_error(stage: &str, source: anyhow::Error) -> crate::RuntimeError {
+pub(super) fn provider_error(stage: &str, source: anyhow::Error) -> crate::RuntimeError {
     let mut error = builtin_error(format!("power: {stage} failed: {source}"));
     error = crate::runtime_error::with_provider_execution_source(error, source.into());
     error
+}
+
+pub(super) fn typed_provider_error(
+    stage: &str,
+    source: runmat_accelerate_api::ProviderExecutionError,
+) -> crate::RuntimeError {
+    let error = builtin_error(format!("power: {stage} failed: {source}"));
+    crate::runtime_error::with_provider_execution_source(error, source.after_effect())
 }
 
 async fn gather_pair_and_evaluate(
     lhs: GpuTensorHandle,
     rhs: GpuTensorHandle,
 ) -> BuiltinResult<Value> {
+    let fallback = HostFallbackAdmission::new(
+        &runmat_builtins::POWER_CATALOG_ENTRY,
+        &Value::GpuTensor(lhs.clone()),
+        &Value::GpuTensor(rhs.clone()),
+    )?;
     let left = gpu_helpers::gather_tensor_async(&lhs)
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     let right = gpu_helpers::gather_tensor_async(&rhs)
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-    power_host(Value::Tensor(left), Value::Tensor(right))
+    fallback.finish(power_host(Value::Tensor(left), Value::Tensor(right))?)
 }
 
 #[cfg(test)]

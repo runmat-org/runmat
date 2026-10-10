@@ -25,17 +25,15 @@ fn mark_false() {
 }
 
 fn is_nan_f64(value: f64) -> bool {
-    return value != value;
+    @IEEE_NAN_PREDICATE@
 }
 
 fn pos_inf_f64() -> f64 {
-    var bits: u64 = 0x7ff0000000000000u;
-    return bitcast<f64>(bits);
+    return runmat_f64_from_words(0u, 0x7ff00000u);
 }
 
 fn neg_inf_f64() -> f64 {
-    var bits: u64 = 0xfff0000000000000u;
-    return bitcast<f64>(bits);
+    return runmat_f64_from_words(0u, 0xfff00000u);
 }
 
 fn is_inf_f64(value: f64) -> bool {
@@ -133,7 +131,7 @@ fn mark_false() {
 }
 
 fn is_nan_f32(value: f32) -> bool {
-    return value != value;
+    @IEEE_NAN_PREDICATE@
 }
 
 fn pos_inf_f32() -> f32 {

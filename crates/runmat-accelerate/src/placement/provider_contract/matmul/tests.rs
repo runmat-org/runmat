@@ -1,5 +1,38 @@
 use super::*;
+#[cfg(feature = "wgpu")]
+use runmat_accelerate_api::{
+    AccelDownloadFuture, GpuTensorHandle, HostTensorView, ProviderShaderRequirements,
+};
 use runmat_accelerate_api::{MatmulAffine, ProviderWorkload};
+
+#[cfg(feature = "wgpu")]
+struct F64IeeeGeometryProvider;
+
+#[cfg(feature = "wgpu")]
+impl AccelProvider for F64IeeeGeometryProvider {
+    fn upload(&self, _: &HostTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
+        anyhow::bail!("geometry fixture never uploads")
+    }
+
+    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        Box::pin(async { anyhow::bail!("geometry fixture never downloads") })
+    }
+
+    fn device_info(&self) -> String {
+        "F64 IEEE geometry fixture".into()
+    }
+
+    fn precision(&self) -> ProviderPrecision {
+        ProviderPrecision::F64
+    }
+
+    fn supports_shader_requirements(&self, required: ProviderShaderRequirements) -> bool {
+        matches!(
+            required,
+            ProviderShaderRequirements::Basic | ProviderShaderRequirements::F64IeeeWords
+        )
+    }
+}
 
 fn query(diagonal: bool, residency: ProviderResidency) -> ProviderFeasibilityQuery {
     let repr = |shape: Vec<u64>, residency| ProviderRepresentation {
@@ -108,7 +141,7 @@ fn workload_serialization_preserves_signed_control_bits_and_old_unknown() {
 #[cfg(feature = "wgpu")]
 #[test]
 fn wgpu_geometry_accounts_diagonal_warmup_uniforms_and_empty_allocation() {
-    let provider = crate::simple_provider::InProcessProvider::new();
+    let provider = F64IeeeGeometryProvider;
     let q = query(true, ProviderResidency::Device);
     let geometry = Some(ProviderMatmulGeometry {
         tile_size: 8,
@@ -139,7 +172,7 @@ fn wgpu_geometry_accounts_diagonal_warmup_uniforms_and_empty_allocation() {
 #[cfg(feature = "wgpu")]
 #[test]
 fn physical_work_uses_frozen_provider_geometry_not_global_defaults() {
-    let provider = crate::simple_provider::InProcessProvider::new();
+    let provider = F64IeeeGeometryProvider;
     let mut q = query(false, ProviderResidency::Device);
     let rows = 65_535 * 8 + 1;
     q.inputs[0].shape[0] = rows;

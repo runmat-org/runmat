@@ -23,7 +23,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
             "A provider can execute real floating input directly when exact domain inspection proves that every value lies in the closed interval from minus one through one. Successful provider output is validated before it becomes the result.",
             "When domain inspection or the unary operation is unsupported, RunMat gathers through the concrete owner, computes on the host, and restores the result to that owner and device. Other provider failures remain errors.",
             "MATLAB-compatible GPU execution requires potentially complex output to start from explicitly complex input. RunMat mode additionally permits resident real input outside the real domain and restores the promoted complex result through the same provider.",
-            "Ordinary real elementwise fusion is disabled because input outside the closed unit interval must produce a complex result rather than a device NaN.",
+            "Selected elementwise fusion is limited to requests with exact real-domain evidence before shader execution. Unproved input remains on the ordinary runtime path, preserving complex promotion outside the closed unit interval.",
         ],
     },
 ];
@@ -136,7 +136,7 @@ const FAQS: &[BuiltinDocumentationFaq] = &[
     },
     BuiltinDocumentationFaq {
         question: "Can atanh participate in fusion?",
-        answer: "Not in ordinary real elementwise fusion. The result domain depends on runtime values, and a real fused kernel cannot represent required complex promotion.",
+        answer: "Only when request-local evidence proves every represented input lies within the closed unit interval. Otherwise the ordinary runtime path retains complex promotion and provider fallback behavior.",
     },
     BuiltinDocumentationFaq {
         question: "Does atanh preserve shape and precision?",

@@ -84,13 +84,26 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) fn float_handle_su
 
 pub(super) fn provider_error(
     operation: ArithmeticProviderOperation,
-    error: anyhow::Error,
+    error: impl Into<runmat_accelerate_api::ProviderExecutionError>,
 ) -> crate::RuntimeError {
+    let error = error.into();
     let result = build_runtime_error(format!("{}: {error}", operation.name()))
         .with_builtin(operation.name())
         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .build();
-    crate::runtime_error::with_provider_execution_source(result, error.into())
+    crate::runtime_error::with_provider_execution_source(result, error)
+}
+
+pub(super) fn provider_error_after_effect(
+    operation: ArithmeticProviderOperation,
+    error: impl Into<runmat_accelerate_api::ProviderExecutionError>,
+) -> crate::RuntimeError {
+    let error = error.into().after_effect();
+    let diagnostic = build_runtime_error(format!("{}: {error}", operation.name()))
+        .with_builtin(operation.name())
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build();
+    crate::runtime_error::with_provider_execution_source(diagnostic, error)
 }
 
 pub(super) fn provider_contract_error(

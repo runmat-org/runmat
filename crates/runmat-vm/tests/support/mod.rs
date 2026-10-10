@@ -5,6 +5,7 @@ use runmat_hir::LoweringContext;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
+#[cfg(not(target_arch = "wasm32"))]
 const EXEC_STACK_BYTES: usize = 32 * 1024 * 1024;
 
 struct VmThreadStateGuard;
@@ -24,7 +25,14 @@ impl Drop for VmThreadStateGuard {
 
 fn run_with_stack<T>(f: impl FnOnce() -> T) -> Result<T, RuntimeError> {
     let _state_guard = VmThreadStateGuard::enter();
-    Ok(stacker::grow(EXEC_STACK_BYTES, f))
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Ok(stacker::grow(EXEC_STACK_BYTES, f))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        Ok(f())
+    }
 }
 
 pub fn compile_source(source: &str) -> Result<runmat_vm::Bytecode, RuntimeError> {

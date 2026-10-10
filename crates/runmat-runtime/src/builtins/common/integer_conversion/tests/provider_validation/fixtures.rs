@@ -1,7 +1,7 @@
 use runmat_accelerate::simple_provider::InProcessProvider;
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorHandle,
-    HostIntegerTensorView, HostTensorView, IntegerElementType, ProviderPrecision,
+    AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostIntegerTensorView, HostTensorView,
+    IntegerElementType, ProviderPrecision,
 };
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -49,7 +49,7 @@ impl AccelProvider for Provider {
     fn upload_numeric_raw(
         &self,
         view: &runmat_accelerate_api::HostNumericTensorView,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.inner.upload_numeric_raw(view)
     }
     fn download_numeric<'a>(
@@ -63,7 +63,7 @@ impl AccelProvider for Provider {
         &'a self,
         input: &'a GpuTensorHandle,
         target: IntegerElementType,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         self.calls.fetch_add(1, Ordering::Relaxed);
         let mode = *self.mode.lock().unwrap();
         Box::pin(async move {
@@ -74,9 +74,12 @@ impl AccelProvider for Provider {
                     futures::future::pending().await
                 }
                 ResultMode::Alias => Ok(input.clone()),
-                ResultMode::Failure => anyhow::bail!("injected cast execution failure"),
+                ResultMode::Failure => Err(runmat_accelerate_api::ProviderExecutionError::from(
+                    anyhow::anyhow!("injected cast execution failure"),
+                )),
                 ResultMode::Unsupported => Err(
-                    runmat_accelerate_api::unsupported_provider_operation("cast unavailable"),
+                    runmat_accelerate_api::unsupported_provider_operation("cast unavailable")
+                        .into(),
                 ),
                 ResultMode::WrongClass | ResultMode::ForeignOwner => {
                     let output = if matches!(mode, ResultMode::WrongClass) {

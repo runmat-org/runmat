@@ -6,7 +6,7 @@ pub use runmat_types::{
     FusionReductionContract, FusionReductionCount, FusionReductionEmpty, FusionReductionOperation,
     FusionReductionTies,
 };
-use runmat_types::{NumericClass, NumericDomain, ValueFact};
+use runmat_types::{NumericClass, NumericDomain, StorageFact, ValueFact};
 use runmat_value::Value;
 use std::{future::Future, pin::Pin};
 
@@ -58,6 +58,10 @@ pub type FusionReductionStagesFuture<'a> =
     Pin<Box<dyn Future<Output = crate::BuiltinResult<Option<Vec<FusionReductionContract>>>> + 'a>>;
 pub struct FusionReductionDeclaration {
     pub revision: u32,
+    /// Operation fixed by this selected builtin. The resolved contract may
+    /// refine axes/classes, but a legacy kernel may never guess its operation
+    /// from a name or treat an unsupported extrema as Sum.
+    pub operation: FusionReductionOperation,
     pub prepare: FusionReductionPreparer,
 }
 
@@ -65,6 +69,17 @@ pub struct FusionReductionDeclaration {
 /// Resolving the final, domain-refined fact is pure and does not parse again.
 pub trait PreparedFusionReduction {
     fn resolve(&self, input: &ValueFact) -> crate::BuiltinResult<Option<FusionReductionContract>>;
+
+    /// Carrier certification is independent of any input sign theorem.
+    /// Only the prepared operation's ordinary public output owner may opt in.
+    fn publication_storage(
+        &self,
+        _input: &ValueFact,
+        _output: &ValueFact,
+        _stages: &[FusionReductionContract],
+    ) -> Option<StorageFact> {
+        None
+    }
 
     /// Ordered arithmetic stages for one public reduction call. The default
     /// covers reductions whose public operation is one physical reduction.
@@ -76,6 +91,17 @@ pub trait PreparedFusionReduction {
     ) -> crate::BuiltinResult<Option<Vec<FusionReductionContract>>> {
         self.resolve(input)
             .map(|contract| contract.map(|stage| vec![stage]))
+    }
+
+    /// Optional represented publication and sign theorem. This is deliberately
+    /// absent for every owner unless its actual final publication certifies it.
+    fn nonnegative_output_storage(
+        &self,
+        _input: &ValueFact,
+        _output: &ValueFact,
+        _stages: &[FusionReductionContract],
+    ) -> Option<StorageFact> {
+        None
     }
 }
 
@@ -106,6 +132,36 @@ pub type FusionReductionPreparer =
     for<'a> fn(FusionReductionControls<'a>) -> FusionReductionPrepareFuture<'a>;
 
 impl FusionReductionDeclaration {
+    pub async fn certify_publication_storage(
+        &self,
+        context: FusionReductionContext<'_>,
+        output: &ValueFact,
+    ) -> crate::BuiltinResult<Option<StorageFact>> {
+        if context.real_floating_input().is_none()
+            || !matches!(
+                context.input.storage,
+                StorageFact::Scalar | StorageFact::Dense
+            )
+            || matches!(output.storage, StorageFact::Sparse | StorageFact::Opaque)
+        {
+            return Ok(None);
+        }
+        let Some(prepared) = (self.prepare)(FusionReductionControls {
+            values: context.controls,
+            requested_outputs: context.requested_outputs,
+        })
+        .await?
+        else {
+            return Ok(None);
+        };
+        let Some(stages) = prepared.resolve_stages(context.input)? else {
+            return Ok(None);
+        };
+        Ok(prepared
+            .publication_storage(context.input, output, &stages)
+            .filter(|storage| matches!(storage, StorageFact::Scalar | StorageFact::Dense)))
+    }
+
     pub fn resolve<'a>(&'a self, context: FusionReductionContext<'a>) -> FusionReductionFuture<'a> {
         Box::pin(async move {
             // Preserve the standalone resolver's existing unsupported-input gate.

@@ -10,7 +10,7 @@ pub async fn call_builtin_sequence_async(
     name: &str,
     args: &[Value],
 ) -> Result<ValueSequence, RuntimeError> {
-    call_builtin_sequence_async_impl(name, args, None, None).await
+    call_builtin_sequence_async_impl(name, args, None, None, None).await
 }
 
 /// Session-owned binding selection, execution and workspace reconciliation.
@@ -27,7 +27,7 @@ pub async fn call_builtin_sequence_async_with_outputs(
     args: &[Value],
     outputs: usize,
 ) -> Result<ValueSequence, RuntimeError> {
-    call_builtin_sequence_async_impl(name, args, Some(outputs), None).await
+    call_builtin_sequence_async_impl(name, args, Some(outputs), None, None).await
 }
 
 pub async fn call_builtin_sequence_async_with_outputs_in_context(
@@ -46,13 +46,20 @@ async fn call_in_context(
     outputs: Option<usize>,
 ) -> Result<ValueSequence, RuntimeError> {
     let fence = workspace_effect::PostCallWorkspaceEffectFence::capture(Some(context));
+    let observation = super::direct_call_observation::CallObservation::capture(Some(context))
+        .map(std::rc::Rc::new);
     let result = context
         .scope(call_builtin_sequence_async_impl(
             name,
             args,
             outputs,
             Some(context.clone()),
+            observation.clone(),
         ))
         .await;
-    fence.finish_sequence(result)
+    let (result, outcome) = fence.finish_sequence_observed(result);
+    if let Some(observation) = observation {
+        observation.finish_completed(outcome);
+    }
+    result
 }

@@ -19,6 +19,12 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let output = match request.arguments.first() {
         Some(input) => match &input.kind {
             ValueKindFact::Character => logical_with_shape(input.shape.clone()),
+            // Unlike isspace, isletter does not unwrap a one-element
+            // StringArray. Every known Dense string carrier takes its
+            // no-provider scalar-false path.
+            ValueKindFact::String if input.storage == StorageFact::Dense => {
+                ValueFact::scalar(ValueKindFact::Logical)
+            }
             ValueKindFact::String
                 if input.shape.element_count().is_some_and(|count| count != 1) =>
             {
@@ -63,7 +69,8 @@ fn dynamic_logical() -> ValueFact {
 mod tests {
     use super::*;
     use runmat_types::{LiteralContext, OutputSelection};
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn character_shape_and_unsupported_false_are_distinct() {
         let entry = &super::super::ISLETTER_CATALOG_ENTRY;
         let request = CallRequest {
@@ -85,5 +92,22 @@ mod tests {
             infer(&nontext, entry).outputs[0],
             ValueFact::scalar(ValueKindFact::Logical)
         );
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn one_element_dense_string_carrier_is_still_scalar_false() {
+        let request = CallRequest {
+            arguments: vec![ValueFact::proven(
+                ValueKindFact::String,
+                ShapeFact::from(vec![Some(1), Some(1)]),
+                StorageFact::Dense,
+            )],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::default(),
+        };
+        let result = infer(&request, &super::super::ISLETTER_CATALOG_ENTRY);
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.outputs[0], ValueFact::scalar(ValueKindFact::Logical));
     }
 }

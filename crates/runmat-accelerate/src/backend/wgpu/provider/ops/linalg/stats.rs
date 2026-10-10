@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "stats/validation_tests.rs"]
+mod validation_tests;
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct CovarianceToCorrelationParams {
@@ -1011,6 +1015,9 @@ impl WgpuProvider {
             total <= u32::MAX as usize && rows <= u32::MAX as usize,
             "covariance_to_correlation: matrix exceeds GPU dispatch limits"
         );
+        if total != 0 {
+            self.require_ieee_words(entry.precision)?;
+        }
 
         let (correlation_buffer, sigma_buffer) =
             self.with_emission(|emission, _| -> Result<_> {
@@ -1252,7 +1259,7 @@ fn covariance_to_correlation_shader(precision: NumericPrecision) -> String {
         NumericPrecision::F32 => "3.4028234663852886e38",
     };
     let workgroup = crate::backend::wgpu::config::WORKGROUP_SIZE;
-    format!(
+    let source = format!(
         r#"
 const MAX_FINITE_COV2CORR: {ty} = {ty}({max_finite});
 
@@ -1278,12 +1285,16 @@ struct Params {{
 @group(0) @binding(4) var<uniform> params: Params;
 @group(0) @binding(5) var<storage, read_write> validation: Tensor;
 
-fn is_nan_cov2corr(x: {ty}) -> bool {{
-  return x != x;
+fn is_nan_cov2corr(value: {ty}) -> bool {{
+  @IEEE_NAN_PREDICATE@
+}}
+
+fn isFiniteCov2corr(value: {ty}) -> bool {{
+  @IEEE_FINITE_PREDICATE@
 }}
 
 fn is_finite_cov2corr(x: {ty}) -> bool {{
-  return (x == x) && (abs(x) < MAX_FINITE_COV2CORR);
+  return isFiniteCov2corr(x) && (abs(x) < MAX_FINITE_COV2CORR);
 }}
 
 fn nan_cov2corr() -> {ty} {{
@@ -1423,6 +1434,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
         max_finite = max_finite,
         tol = tol,
         workgroup = workgroup,
+    );
+    crate::backend::wgpu::shaders::nan_predicate::inject_finite(
+        &crate::backend::wgpu::shaders::nan_predicate::inject(&source, precision),
+        precision,
     )
 }
 

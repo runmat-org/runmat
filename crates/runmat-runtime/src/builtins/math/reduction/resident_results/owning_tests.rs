@@ -26,9 +26,12 @@ impl AccelProvider for Provider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { anyhow::bail!("unexpected download") })
     }
-    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         if self.calls.fetch_add(1, Ordering::SeqCst) == 1 {
-            anyhow::bail!("second output failed")
+            return Err(anyhow::anyhow!("second output failed").into());
         }
         let output = self.owner.allocate_zeroed(
             host.shape.to_vec(),

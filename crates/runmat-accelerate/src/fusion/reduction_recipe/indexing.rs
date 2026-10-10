@@ -162,7 +162,11 @@ pub(super) fn geometry(
         chunks,
         partial_elements,
         single: dispatch(slices, config.max_dispatch_dimension)?,
-        pass1: dispatch(partial_elements, config.max_dispatch_dimension)?,
+        // Prefer the enabled 3D grid for an executable TwoPass. If only that
+        // alternate stage exceeds the device grid, carry exact representable
+        // geometry for source validation and let selection reject TwoPass.
+        pass1: dispatch(partial_elements, config.max_dispatch_dimension)
+            .or_else(|_| dispatch(partial_elements, u32::MAX))?,
         pass2: dispatch(slices, config.max_dispatch_dimension)?,
     })
 }

@@ -18,13 +18,13 @@ use std::sync::{
     Arc,
 };
 
-mod workload;
-mod stage;
-mod managed_ledger;
-mod output_permit;
-mod final_facts;
 mod exact_bytes;
 mod exact_diagnostic;
+mod final_facts;
+mod managed_ledger;
+mod output_permit;
+mod stage;
+mod workload;
 pub(crate) fn hash_serializable<T: serde::Serialize>(facts: &T) -> Digest {
     Digest::sha256_serialized(facts).expect("typed host effect facts serialize")
 }
@@ -257,12 +257,16 @@ fn select_host_effect_inner(
         region: None,
         operation: request.operation.into(),
         runtime_facts,
+        provider_provenance: None,
+        graph_output_authority: None,
         revision,
     });
     let signature = PlacementSignatureRef {
         region: None,
         operation: request.operation,
         runtime_facts,
+        provider_provenance: None,
+        graph_output_authority: None,
         revision: managed_revision
             .or_else(|| {
                 portable_signature

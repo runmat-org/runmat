@@ -23,6 +23,8 @@ pub struct PlacementRevision {
 pub enum PlacementExecutionAuthorityRevision {
     Provider(Digest),
     HostService(Digest),
+    /// Valid only within its owning PlacementSession; never profile-persisted.
+    RuntimeBindingSession(Digest),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -33,6 +35,14 @@ pub struct PlacementSignature {
     /// Digest of exact shapes, representations, layouts, residency, requested
     /// outputs, and guards observed at dispatch.
     pub runtime_facts: Digest,
+    /// Provider capability namespace for typed invalidation of a session-bound
+    /// decision. It is not an execution permit or a provider instance handle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_provenance: Option<Digest>,
+    /// Canonical public-output roles and graph joins for multi-output plans.
+    /// Absent on legacy one-output selections, preserving their wire identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_output_authority: Option<Digest>,
     pub revision: PlacementRevision,
 }
 
@@ -69,6 +79,10 @@ pub struct PlacementSignatureRef<'a> {
     pub region: Option<RegionId>,
     pub operation: &'a str,
     pub runtime_facts: Digest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_provenance: Option<Digest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph_output_authority: Option<Digest>,
     pub revision: PlacementRevisionRef<'a>,
 }
 
@@ -78,6 +92,8 @@ impl<'a> From<&'a PlacementSignature> for PlacementSignatureRef<'a> {
             region: signature.region,
             operation: &signature.operation,
             runtime_facts: signature.runtime_facts,
+            provider_provenance: signature.provider_provenance,
+            graph_output_authority: signature.graph_output_authority,
             revision: (&signature.revision).into(),
         }
     }
@@ -109,6 +125,7 @@ impl PlacementSignatureRef<'_> {
                 .map(ProgramRevision::identity_digest)
                 .transpose()?,
             authority: self.revision.authority,
+            provider_provenance: self.provider_provenance,
             policy: self.revision.policy,
         })
     }
@@ -118,6 +135,8 @@ impl PlacementSignatureRef<'_> {
             region: self.region,
             operation: self.operation.to_owned(),
             runtime_facts: self.runtime_facts,
+            provider_provenance: self.provider_provenance,
+            graph_output_authority: self.graph_output_authority,
             revision: PlacementRevision {
                 program: self.revision.program.cloned(),
                 catalog: self.revision.catalog,
@@ -177,6 +196,8 @@ mod borrowed_signature_tests {
             }),
             operation: "readmatrix".into(),
             runtime_facts: Digest::sha256(b"numeric-text"),
+            provider_provenance: None,
+            graph_output_authority: None,
             revision: PlacementRevision {
                 program: Some(program),
                 catalog: Digest::sha256(b"placement-catalog"),
@@ -207,6 +228,8 @@ mod borrowed_signature_tests {
             region: None,
             operation: "host.effect".into(),
             runtime_facts: Digest::sha256(b"effect"),
+            provider_provenance: None,
+            graph_output_authority: None,
             revision: PlacementRevision {
                 program: None,
                 catalog: Digest::sha256(b"catalog"),
@@ -229,6 +252,56 @@ mod borrowed_signature_tests {
         assert_eq!(
             borrowed.permit_identity().unwrap(),
             without_program.permit_identity().unwrap()
+        );
+    }
+
+    #[test]
+    fn absent_provider_provenance_preserves_legacy_wire_and_present_value_separates_keys() {
+        #[derive(serde::Serialize)]
+        struct LegacySignature<'a> {
+            region: Option<RegionId>,
+            operation: &'a str,
+            runtime_facts: Digest,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            graph_output_authority: Option<Digest>,
+            revision: PlacementRevisionRef<'a>,
+        }
+
+        let digest = Digest::sha256(b"provider namespace");
+        let mut current = PlacementSignature {
+            region: None,
+            operation: "fusion.reduction".into(),
+            runtime_facts: digest,
+            provider_provenance: None,
+            graph_output_authority: None,
+            revision: PlacementRevision {
+                program: None,
+                catalog: digest,
+                compiler: digest,
+                authority: PlacementExecutionAuthorityRevision::RuntimeBindingSession(digest),
+                policy: digest,
+            },
+        };
+        let legacy = LegacySignature {
+            region: current.region,
+            operation: &current.operation,
+            runtime_facts: current.runtime_facts,
+            graph_output_authority: current.graph_output_authority,
+            revision: (&current.revision).into(),
+        };
+        let legacy_bytes = serde_json::to_vec(&legacy).unwrap();
+        assert_eq!(serde_json::to_vec(&current).unwrap(), legacy_bytes);
+        assert_eq!(current.cache_key(), Digest::sha256(&legacy_bytes));
+        assert_eq!(
+            serde_json::from_slice::<PlacementSignature>(&legacy_bytes).unwrap(),
+            current
+        );
+
+        current.provider_provenance = Some(digest);
+        assert_ne!(current.cache_key(), Digest::sha256(&legacy_bytes));
+        assert_eq!(
+            current.permit_identity().unwrap().provider_provenance,
+            Some(digest)
         );
     }
 }
@@ -266,6 +339,7 @@ pub struct PlacementPermitIdentity {
     pub signature: Digest,
     pub program: Option<Digest>,
     pub authority: PlacementExecutionAuthorityRevision,
+    pub provider_provenance: Option<Digest>,
     pub policy: Digest,
 }
 
@@ -329,6 +403,7 @@ pub enum PlacementInvalidation {
     Program { revision: ProgramRevision },
     Provider { digest: Digest },
     HostService { digest: Digest },
+    RuntimeBindingSession { digest: Digest },
     Policy { digest: Digest },
     Signature { key: Digest },
 }
@@ -343,10 +418,15 @@ impl PlacementInvalidation {
             Self::Provider { digest } => {
                 signature.revision.authority
                     == PlacementExecutionAuthorityRevision::Provider(*digest)
+                    || signature.provider_provenance == Some(*digest)
             }
             Self::HostService { digest } => {
                 signature.revision.authority
                     == PlacementExecutionAuthorityRevision::HostService(*digest)
+            }
+            Self::RuntimeBindingSession { digest } => {
+                signature.revision.authority
+                    == PlacementExecutionAuthorityRevision::RuntimeBindingSession(*digest)
             }
             Self::Policy { digest } => signature.revision.policy == *digest,
             Self::Signature { key } => signature.cache_key() == *key,
@@ -361,9 +441,14 @@ impl PlacementInvalidation {
                 .is_ok_and(|digest| identity.program == Some(digest)),
             Self::Provider { digest } => {
                 identity.authority == PlacementExecutionAuthorityRevision::Provider(*digest)
+                    || identity.provider_provenance == Some(*digest)
             }
             Self::HostService { digest } => {
                 identity.authority == PlacementExecutionAuthorityRevision::HostService(*digest)
+            }
+            Self::RuntimeBindingSession { digest } => {
+                identity.authority
+                    == PlacementExecutionAuthorityRevision::RuntimeBindingSession(*digest)
             }
             Self::Policy { digest } => identity.policy == *digest,
             Self::Signature { key } => identity.signature == *key,
