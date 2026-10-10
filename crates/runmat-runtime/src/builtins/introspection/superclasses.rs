@@ -3,7 +3,7 @@ use runmat_builtins::{
     BuiltinErrorDescriptor, SUPERCLASSES_ERROR_CLASS_INVALID, SUPERCLASSES_ERROR_CLASS_UNKNOWN,
 };
 const BUILTIN_NAME: &str = "superclasses";
-use crate::builtins::introspection::class::class_name_for_value;
+use crate::builtins::introspection::class_identity::class_identity_for_value;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, Value};
@@ -56,7 +56,7 @@ fn requested_class_name(value: &Value) -> BuiltinResult<runmat_types::ClassIdent
         | Value::Future(_)
         | Value::Task(_)
         | Value::Pool(_)
-        | Value::Job(_) => class_name_for_value(value),
+        | Value::Job(_) => return Ok(class_identity_for_value(value)),
         _ => return Err(superclasses_error(&SUPERCLASSES_ERROR_CLASS_INVALID)),
     };
     runmat_types::ClassIdentity::new(source).map_err(|error| {

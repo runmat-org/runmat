@@ -10,7 +10,7 @@ use runmat_value::{IntValue, NumericDType, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::image::color::common;
-use crate::builtins::introspection::class::class_name_for_value;
+use crate::builtins::introspection::class_identity::class_name_for_value;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "im2uint8";

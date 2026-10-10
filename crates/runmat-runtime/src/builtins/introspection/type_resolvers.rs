@@ -1,34 +1,6 @@
 use runmat_builtins::{ResolveContext, Type};
 
-pub fn class_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::String
-}
-
-pub fn isa_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Bool
-}
-
-pub fn underlying_type_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::String
-}
-
-pub fn is_underlying_type_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Bool
-}
-
-pub fn ischar_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Bool
-}
-
-pub fn isstring_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Bool
-}
-
 pub fn ismethod_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Bool
-}
-
-pub fn isobject_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
 }
 
@@ -69,51 +41,6 @@ pub fn clearvars_type(_args: &[Type], _context: &ResolveContext) -> Type {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn class_type_reports_string() {
-        assert_eq!(
-            class_type(&[], &ResolveContext::new(Vec::new())),
-            Type::String
-        );
-    }
-
-    #[test]
-    fn isa_type_reports_bool() {
-        assert_eq!(isa_type(&[], &ResolveContext::new(Vec::new())), Type::Bool);
-    }
-
-    #[test]
-    fn underlying_type_type_reports_string() {
-        assert_eq!(
-            underlying_type_type(&[], &ResolveContext::new(Vec::new())),
-            Type::String
-        );
-    }
-
-    #[test]
-    fn is_underlying_type_type_reports_bool() {
-        assert_eq!(
-            is_underlying_type_type(&[], &ResolveContext::new(Vec::new())),
-            Type::Bool
-        );
-    }
-
-    #[test]
-    fn ischar_type_reports_bool() {
-        assert_eq!(
-            ischar_type(&[], &ResolveContext::new(Vec::new())),
-            Type::Bool
-        );
-    }
-
-    #[test]
-    fn isstring_type_reports_bool() {
-        assert_eq!(
-            isstring_type(&[], &ResolveContext::new(Vec::new())),
-            Type::Bool
-        );
-    }
 
     #[test]
     fn ismethod_type_reports_bool() {

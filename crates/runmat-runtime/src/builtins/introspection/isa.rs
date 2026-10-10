@@ -1,113 +1,15 @@
-//! MATLAB-compatible `isa` builtin with GPU-aware semantics for RunMat.
-
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
-use crate::builtins::introspection::class::class_name_for_value;
-use crate::builtins::introspection::type_resolvers::isa_type;
+//! Runtime binding for canonical class/category membership query.
+use crate::builtins::introspection::class_identity::class_identity_for_value;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{handle_integer_type, handle_is_logical};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use runmat_builtins::{BuiltinErrorDescriptor, ISA_ERROR_TYPE_NAME_INVALID};
 use runmat_macros::runtime_builtin;
+use runmat_types::{ClassIdentity, IsaTypeDesignator};
 use runmat_value::Value;
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isa")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "isa",
-    op_kind: GpuOpKind::Custom("metadata"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::InheritInputs,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Metadata predicate that returns host logical scalars; no GPU kernels or gathers are required.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::isa")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "isa",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes:
-        "Not eligible for fusion planning; isa executes on the host and produces a logical scalar.",
-};
-
-const ISA_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when input belongs to the requested class/category.",
-}];
-
-const ISA_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input value to inspect.",
-    },
-    BuiltinParamDescriptor {
-        name: "type_name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Class or abstract type name.",
-    },
-];
-
-const ISA_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = isa(A, type_name)",
-    inputs: &ISA_INPUTS,
-    outputs: &ISA_OUTPUT,
-}];
-
-const BUILTIN_NAME: &str = "isa";
-
-const ISA_ERROR_TYPE_NAME_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISA.TYPE_NAME_INVALID",
-    identifier: None,
-    when: "Second argument is not a string scalar or row character vector.",
-    message: "isa: TYPE must be a string scalar or character vector",
-};
-
-const ISA_ERRORS: [BuiltinErrorDescriptor; 1] = [ISA_ERROR_TYPE_NAME_INVALID];
-
-pub const ISA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISA_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISA_ERRORS,
-};
-const ISA_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable, notes: "Host and internally auto-resident integer values expose their exact class and integer/numeric abstract categories; an explicit gpuArray remains the resident wrapper object's class." }];
-pub const ISA_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "tf = isa(integer_A, type_name)", inputs: &ISA_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::Logical, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Host and internally auto-resident integer class/category checks use dtype metadata exactly. Only explicit resident values match gpuArray; isUnderlyingType owns explicit resident underlying-class inspection." }];
 
 #[runtime_builtin(
     name = "isa",
-    category = "introspection",
-    summary = "Test whether a value belongs to a specified class or category.",
-    keywords = "isa,type checking,class comparison,numeric category,gpuArray",
-    accel = "metadata",
-    type_resolver(isa_type),
-    descriptor(crate::builtins::introspection::isa::ISA_DESCRIPTOR),
-    integer_capabilities(crate::builtins::introspection::isa::ISA_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::isa"
 )]
 fn isa_builtin(value: Value, class_designator: Value) -> crate::BuiltinResult<Value> {
@@ -116,19 +18,21 @@ fn isa_builtin(value: Value, class_designator: Value) -> crate::BuiltinResult<Va
     Ok(Value::Bool(result))
 }
 
-fn parse_type_name(value: &Value) -> BuiltinResult<String> {
+fn parse_type_name(value: &Value) -> BuiltinResult<Option<IsaTypeDesignator>> {
     match value {
-        Value::String(s) => Ok(s.clone()),
+        Value::String(s) => Ok(IsaTypeDesignator::parse(s)),
         Value::StringArray(sa) => {
             if sa.rows == 1 && sa.cols == 1 && !sa.data.is_empty() {
-                Ok(sa.data[0].clone())
+                Ok(IsaTypeDesignator::parse(&sa.data[0]))
             } else {
                 Err(isa_error(&ISA_ERROR_TYPE_NAME_INVALID).into())
             }
         }
         Value::CharArray(ca) => {
             if ca.rows == 1 {
-                Ok(ca.data.iter().collect())
+                Ok(IsaTypeDesignator::parse(
+                    &ca.data.iter().collect::<String>(),
+                ))
             } else {
                 Err(isa_error(&ISA_ERROR_TYPE_NAME_INVALID).into())
             }
@@ -138,33 +42,31 @@ fn parse_type_name(value: &Value) -> BuiltinResult<String> {
 }
 
 fn isa_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
-    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    let mut builder = build_runtime_error(error.message).with_builtin("isa");
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
 }
 
-fn value_is_a(value: &Value, requested: &str) -> bool {
-    let trimmed = requested.trim();
-    if trimmed.is_empty() {
+fn value_is_a(value: &Value, requested: &Option<IsaTypeDesignator>) -> bool {
+    let Some(requested) = requested else {
         return false;
-    }
-    let requested_lower = trimmed.to_ascii_lowercase();
+    };
     if matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
     {
-        return requested_lower == "gpuarray";
+        return requested.concrete_is(runmat_types::standard::GPU_ARRAY);
     }
-    match requested_lower.as_str() {
-        "numeric" => is_numeric(value),
-        "float" => is_float(value),
-        "integer" => is_integer(value),
-        "logical" => is_logical(value),
-        "char" => matches!(value, Value::CharArray(_)),
-        "string" => matches!(value, Value::String(_) | Value::StringArray(_)),
-        "cell" => matches!(value, Value::Cell(_)),
-        "struct" => matches!(value, Value::Struct(_) | Value::StructArray(_)),
-        "function_handle" => matches!(
+    match requested {
+        IsaTypeDesignator::Numeric => is_numeric(value),
+        IsaTypeDesignator::Float => is_float(value),
+        IsaTypeDesignator::Integer => is_integer(value),
+        IsaTypeDesignator::Logical => is_logical(value),
+        IsaTypeDesignator::Character => matches!(value, Value::CharArray(_)),
+        IsaTypeDesignator::String => matches!(value, Value::String(_) | Value::StringArray(_)),
+        IsaTypeDesignator::Cell => matches!(value, Value::Cell(_)),
+        IsaTypeDesignator::Struct => matches!(value, Value::Struct(_) | Value::StructArray(_)),
+        IsaTypeDesignator::FunctionHandle => matches!(
             value,
             Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
@@ -172,22 +74,20 @@ fn value_is_a(value: &Value, requested: &str) -> bool {
                 | Value::BoundFunctionHandle { .. }
                 | Value::Closure(_)
         ),
-        "gpuarray" => {
-            matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
-        }
-        "listener" | "event.listener" => matches!(value, Value::Listener(_)),
-        "meta.class" => matches!(value, Value::ClassRef(_)),
-        "mexception" => matches!(value, Value::MException(_)),
-        "handle" => is_handle_like(value),
-        _ => {
-            let actual = class_name_for_value(value);
-            if actual.eq_ignore_ascii_case(trimmed) {
+        IsaTypeDesignator::GpuArray => false,
+        IsaTypeDesignator::Listener => matches!(value, Value::Listener(_)),
+        IsaTypeDesignator::MetaClass => matches!(value, Value::ClassRef(_)),
+        IsaTypeDesignator::Exception => matches!(value, Value::MException(_)),
+        IsaTypeDesignator::Handle => is_handle_like(value),
+        IsaTypeDesignator::Concrete(class) => {
+            let actual = class_identity_for_value(value);
+            if actual.eq_ignore_ascii_case(class) {
                 return true;
             }
             match value {
-                Value::ObjectArray(array) => class_inherits(array.class_name(), &requested_lower),
-                Value::Object(obj) => class_inherits(&obj.class_name, &requested_lower),
-                Value::HandleObject(handle) => class_inherits(&handle.class_name, &requested_lower),
+                Value::ObjectArray(array) => class_inherits(array.class_name(), class),
+                Value::Object(obj) => class_inherits(&obj.class_name, class),
+                Value::HandleObject(handle) => class_inherits(&handle.class_name, class),
                 _ => false,
             }
         }
@@ -243,17 +143,18 @@ fn is_logical(value: &Value) -> bool {
 fn is_handle_like(value: &Value) -> bool {
     match value {
         Value::HandleObject(_) | Value::Listener(_) => true,
-        Value::ObjectArray(array) => class_inherits(array.class_name(), "handle"),
-        Value::Object(obj) => class_inherits(&obj.class_name, "handle"),
+        Value::ObjectArray(array) => {
+            class_inherits(array.class_name(), &runmat_types::standard::HANDLE.owned())
+        }
+        Value::Object(obj) => {
+            class_inherits(&obj.class_name, &runmat_types::standard::HANDLE.owned())
+        }
         _ => false,
     }
 }
 
-fn class_inherits(class_name: &runmat_types::ClassIdentity, requested_lower: &str) -> bool {
-    if class_name
-        .display_name()
-        .eq_ignore_ascii_case(requested_lower)
-    {
+fn class_inherits(class_name: &ClassIdentity, requested: &ClassIdentity) -> bool {
+    if class_name.eq_ignore_ascii_case(requested) {
         return true;
     }
     let mut cursor = Some(class_name.clone());
@@ -262,7 +163,7 @@ fn class_inherits(class_name: &runmat_types::ClassIdentity, requested_lower: &st
         if !visited.insert(name.clone()) {
             break;
         }
-        if name.display_name().eq_ignore_ascii_case(requested_lower) {
+        if name.eq_ignore_ascii_case(requested) {
             return true;
         }
         if let Some(def) = crate::class_registry::get_class(&name) {

@@ -18,7 +18,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::introspection::class::class_name_for_value;
+use crate::builtins::introspection::class_identity::class_name_for_value;
 use crate::builtins::introspection::type_resolvers::whos_type;
 use crate::builtins::io::mat::load::read_mat_file_for_builtin;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};

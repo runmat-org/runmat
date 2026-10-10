@@ -54,7 +54,7 @@ async fn is_class(arguments: &[Value]) -> BuiltinResult<Value> {
     };
     let requested = class_identity(requested)
         .ok_or_else(|| error::invalid("cellfun: class name must be a string scalar"))?;
-    let actual = crate::builtins::introspection::class::class_identity_for_value(value);
+    let actual = crate::builtins::introspection::class_identity::class_identity_for_value(value);
     Ok(Value::Bool(actual == requested))
 }
 

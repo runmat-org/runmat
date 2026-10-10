@@ -1,91 +1,10 @@
-//! MATLAB-compatible `isobject` builtin.
-
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
-use crate::builtins::introspection::type_resolvers::isobject_type;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
+//! Runtime binding for canonical object predicate.
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isobject")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "isobject",
-    op_kind: GpuOpKind::Custom("metadata"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::InheritInputs,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Metadata predicate; explicit gpuArray inputs stay resident and return logical true, while internal automatic residency remains an invisible numeric implementation detail.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::isobject")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "isobject",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Object/type predicate that does not participate in fusion planning.",
-};
-
-const ISOBJECT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when input is a MATLAB object.",
-}];
-
-const ISOBJECT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value to inspect.",
-}];
-
-const ISOBJECT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = isobject(A)",
-    inputs: &ISOBJECT_INPUTS,
-    outputs: &ISOBJECT_OUTPUT,
-}];
-
-const ISOBJECT_ERRORS: [BuiltinErrorDescriptor; 0] = [];
-
-pub const ISOBJECT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISOBJECT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISOBJECT_ERRORS,
-};
-pub const ISOBJECT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "isobject is a universal object-type predicate; host integers and internally auto-resident integers return scalar false, while an explicitly constructed integer gpuArray returns true without payload access.",
-    };
-
 #[runtime_builtin(
     name = "isobject",
-    category = "introspection",
-    summary = "Return true when a value is a MATLAB object.",
-    keywords = "isobject,object,handle,metaclass,type checking",
-    accel = "metadata",
-    type_resolver(isobject_type),
-    descriptor(crate::builtins::introspection::isobject::ISOBJECT_DESCRIPTOR),
-    integer_audit(crate::builtins::introspection::isobject::ISOBJECT_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::isobject"
 )]
 fn isobject_builtin(value: Value) -> crate::BuiltinResult<Value> {

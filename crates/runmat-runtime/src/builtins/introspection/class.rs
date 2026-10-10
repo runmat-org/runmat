@@ -1,167 +1,17 @@
-//! MATLAB-compatible `class` builtin with GPU-aware semantics for RunMat.
-
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
-use crate::builtins::introspection::type_resolvers::class_type;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
+//! Runtime binding for canonical class metadata query.
+#[cfg(test)]
+use crate::builtins::introspection::class_identity::class_identity_for_value;
+use crate::builtins::introspection::class_identity::class_name_for_value;
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::class")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "class",
-    op_kind: GpuOpKind::Custom("introspection"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::InheritInputs,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Introspection-only builtin; providers do not need to implement hooks. RunMat reads residency metadata and returns a host string.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::class")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "class",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Not eligible for fusion; class executes on the host and returns a string scalar.",
-};
-
-const CLASS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "name",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Class name for the input value.",
-}];
-
-const CLASS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value to inspect.",
-}];
-
-const CLASS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "name = class(A)",
-    inputs: &CLASS_INPUTS,
-    outputs: &CLASS_OUTPUT,
-}];
-
-const CLASS_ERRORS: [BuiltinErrorDescriptor; 0] = [];
-
-pub const CLASS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CLASS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CLASS_ERRORS,
-};
-
-const CLASS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Integer scalars and arrays report their exact signedness and width. Explicit gpuArray values report the wrapper class, while internal automatic residency reports the underlying numeric class without inspecting or gathering payload data.",
-    }];
-
-pub const CLASS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "name = class(A)",
-        inputs: &CLASS_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "The result is a host character class name. Dense, sparse, paired complex, and internally auto-resident integer storage is read from exact dtype metadata; only explicit resident values return gpuArray, without provider access.",
-    }];
-
 #[runtime_builtin(
     name = "class",
-    category = "introspection",
-    summary = "Return class names for values.",
-    keywords = "class,type inspection,type name,gpuArray class",
-    type_resolver(class_type),
-    descriptor(crate::builtins::introspection::class::CLASS_DESCRIPTOR),
-    integer_capabilities(crate::builtins::introspection::class::CLASS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::class"
 )]
 fn class_builtin(value: Value) -> crate::BuiltinResult<String> {
     Ok(class_name_for_value(&value))
-}
-
-/// Return the canonical MATLAB class name for a runtime value.
-pub(crate) fn class_name_for_value(value: &Value) -> String {
-    class_identity_for_value(value).display_name().to_owned()
-}
-
-/// Return the canonical class identity without reducing it to display text.
-pub(crate) fn class_identity_for_value(value: &Value) -> runmat_types::ClassIdentity {
-    match value {
-        Value::Num(_) | Value::Complex(_, _) => runmat_types::standard::DOUBLE.owned(),
-        Value::ComplexTensor(tensor) => tensor.numeric_dtype().class_identity(),
-        Value::Tensor(tensor) => tensor.numeric_dtype().class_identity(),
-        Value::SparseTensor(sparse) => runmat_types::ClassIdentity::from(sparse.class_name()),
-        Value::Int(iv) => runmat_types::ClassIdentity::from(iv.class_name()),
-        Value::Bool(_) | Value::LogicalArray(_) => runmat_types::standard::LOGICAL.owned(),
-        Value::String(_) | Value::StringArray(_) => runmat_types::standard::STRING.owned(),
-        Value::CharArray(_) => runmat_types::standard::CHAR.owned(),
-        Value::Symbolic(_) | Value::SymbolicArray(_) => runmat_types::ClassIdentity::from("sym"),
-        Value::Cell(_) => runmat_types::standard::CELL.owned(),
-        Value::Struct(_) | Value::StructArray(_) => runmat_types::standard::STRUCT.owned(),
-        Value::GpuTensor(handle) => {
-            if runmat_accelerate_api::handle_is_explicit(handle) {
-                runmat_types::ClassIdentity::from("gpuArray")
-            } else {
-                crate::builtins::common::gpu_helpers::expected_gpu_class_identity(
-                    runmat_accelerate_api::handle_precision(handle),
-                    runmat_accelerate_api::handle_integer_type(handle),
-                    runmat_accelerate_api::handle_is_logical(handle),
-                )
-                .unwrap_or_else(|| runmat_types::standard::DOUBLE.owned())
-            }
-        }
-        Value::FunctionHandle(_)
-        | Value::ExternalFunctionHandle(_)
-        | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
-        | Value::Closure(_) => runmat_types::ClassIdentity::from("function_handle"),
-        Value::HandleObject(handle) => handle.class_name.clone(),
-        Value::Listener(_) => runmat_types::ClassIdentity::from("event.listener"),
-        Value::ObjectArray(array) => array.class_name().clone(),
-        Value::Object(object) => object.class_name.clone(),
-        Value::ClassRef(_) => runmat_types::ClassIdentity::from("meta.class"),
-        Value::MException(_) => runmat_types::ClassIdentity::from("MException"),
-        Value::OutputList(_) => runmat_types::ClassIdentity::from("output_list"),
-        Value::Future(_) => runmat_types::ClassIdentity::from("parallel.Future"),
-        Value::Task(_) => runmat_types::ClassIdentity::from("parallel.Task"),
-        Value::Pool(_) => runmat_types::ClassIdentity::from("parallel.Pool"),
-        Value::Job(_) => runmat_types::ClassIdentity::from("parallel.Job"),
-        Value::Distributed(_) => runmat_types::ClassIdentity::from("distributed"),
-        Value::Composite(_) => runmat_types::ClassIdentity::from("Composite"),
-        Value::Foreign(reference) => {
-            runmat_types::ClassIdentity::from(reference.type_identity.name.clone())
-        }
-    }
 }
 
 #[cfg(test)]
@@ -184,6 +34,14 @@ pub(crate) mod tests {
     fn class_reports_double_for_numeric_scalars() {
         let name = class_builtin(Value::Num(std::f64::consts::PI)).expect("class");
         assert_eq!(name, "double");
+    }
+
+    #[test]
+    fn nested_class_query_uses_string_value_carrier() {
+        let inner = class_builtin(Value::Int(IntValue::U64(u64::MAX))).expect("inner class");
+        let value = Value::from(inner);
+        assert!(matches!(value, Value::String(_)));
+        assert_eq!(class_builtin(value).expect("outer class"), "string");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

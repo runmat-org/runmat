@@ -1,88 +1,10 @@
-//! MATLAB-compatible `ischar` builtin with GPU-aware semantics for RunMat.
-//!
-//! Detects whether a value is a MATLAB character array while preserving host/GPU residency.
-
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
-use crate::builtins::introspection::type_resolvers::ischar_type;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
+//! Runtime binding for canonical character-array predicate.
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::ischar")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "ischar",
-    op_kind: GpuOpKind::Custom("metadata"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::InheritInputs,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Runs entirely on the host and inspects value metadata; gpuArray inputs return logical false.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::ischar")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "ischar",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Metadata-only predicate that does not participate in fusion planning.",
-};
-
-const ISCHAR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when input is a character array.",
-}];
-
-const ISCHAR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value to inspect.",
-}];
-
-const ISCHAR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = ischar(A)",
-    inputs: &ISCHAR_INPUTS,
-    outputs: &ISCHAR_OUTPUT,
-}];
-
-const ISCHAR_ERRORS: [BuiltinErrorDescriptor; 0] = [];
-
-pub const ISCHAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISCHAR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISCHAR_ERRORS,
-};
-pub const ISCHAR_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "ischar is a universal type predicate; integer host or resident values return scalar false from metadata without payload conversion or provider access." };
-
 #[runtime_builtin(
     name = "ischar",
-    category = "introspection",
-    summary = "Return true when a value is a character array.",
-    keywords = "ischar,char array,type checking,introspection",
-    accel = "metadata",
-    type_resolver(ischar_type),
-    descriptor(crate::builtins::introspection::ischar::ISCHAR_DESCRIPTOR),
-    integer_audit(crate::builtins::introspection::ischar::ISCHAR_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::ischar"
 )]
 fn ischar_builtin(value: Value) -> crate::BuiltinResult<Value> {

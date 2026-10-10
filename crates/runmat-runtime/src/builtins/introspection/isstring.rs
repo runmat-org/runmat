@@ -1,94 +1,10 @@
-//! MATLAB-compatible `isstring` builtin with GPU-aware semantics for RunMat.
-//!
-//! Determines whether a value is a MATLAB string array (including string scalars) without moving
-//! data between host and device memory.
-
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
-use crate::builtins::introspection::type_resolvers::isstring_type;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
+//! Runtime binding for canonical string-array predicate.
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isstring")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "isstring",
-    op_kind: GpuOpKind::Custom("metadata"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::InheritInputs,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Metadata-only predicate; gpuArray inputs stay on device while the result is returned on the host.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::isstring")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "isstring",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Type-check predicate that does not participate in fusion planning.",
-};
-
-const ISSTRING_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when input is a string scalar or string array.",
-}];
-
-const ISSTRING_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value to inspect.",
-}];
-
-const ISSTRING_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = isstring(A)",
-    inputs: &ISSTRING_INPUTS,
-    outputs: &ISSTRING_OUTPUT,
-}];
-
-const ISSTRING_ERRORS: [BuiltinErrorDescriptor; 0] = [];
-
-pub const ISSTRING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISSTRING_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISSTRING_ERRORS,
-};
-pub const ISSTRING_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "isstring is a universal type predicate; integer host or resident values return scalar false from value metadata without reading payload data.",
-    };
-
 #[runtime_builtin(
     name = "isstring",
-    category = "introspection",
-    summary = "Return true when a value is a MATLAB string array.",
-    keywords = "isstring,string array,string scalar,type checking,introspection",
-    accel = "metadata",
-    type_resolver(isstring_type),
-    descriptor(crate::builtins::introspection::isstring::ISSTRING_DESCRIPTOR),
-    integer_audit(crate::builtins::introspection::isstring::ISSTRING_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::isstring"
 )]
 fn isstring_builtin(value: Value) -> crate::BuiltinResult<Value> {

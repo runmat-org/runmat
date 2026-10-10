@@ -1,11 +1,12 @@
 //! Exact broadcast comparisons and range validation.
 
 use super::{
-    class_name_for_value, handle_integer_type, handle_is_logical, host_value,
-    invalid_argument_error, tensor, try_complex_ordering_comparison, try_real_ordering_comparison,
-    value_is_numeric_or_logical, BuiltinResult, IntegerComparisonError, IntegerComparisonOp,
-    RangeInclusivity, SparseTensor, Value,
+    handle_integer_type, handle_is_logical, host_value, invalid_argument_error, tensor,
+    try_complex_ordering_comparison, try_real_ordering_comparison, value_is_numeric_or_logical,
+    BuiltinResult, IntegerComparisonError, IntegerComparisonOp, RangeInclusivity, SparseTensor,
+    Value,
 };
+use crate::builtins::introspection::class_identity::class_identity_for_value;
 
 pub(super) async fn value_is_ordered_against_zero_async(
     value: &Value,
@@ -284,9 +285,7 @@ pub(super) fn numeric_class_identity(value: &Value) -> Option<runmat_types::Clas
                 false,
             )
         }
-        _ if value_is_numeric_or_logical(value) => {
-            runmat_types::ClassIdentity::new(class_name_for_value(value)).ok()
-        }
+        _ if value_is_numeric_or_logical(value) => Some(class_identity_for_value(value)),
         _ => None,
     }
 }

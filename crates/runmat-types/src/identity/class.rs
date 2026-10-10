@@ -51,6 +51,12 @@ impl ClassIdentity {
         self == &expected
     }
 
+    /// Compatibility comparison for public class-query designators. Registry
+    /// identities themselves retain their original case and source spelling.
+    pub fn eq_ignore_ascii_case(&self, other: &ClassIdentity) -> bool {
+        self.0.eq_ignore_ascii_case(&other.0)
+    }
+
     pub fn is_in_namespace(&self, namespace: StaticClassNamespace) -> bool {
         self.0
             .strip_prefix(namespace.0)

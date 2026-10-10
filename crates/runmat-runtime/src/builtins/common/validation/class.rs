@@ -4,7 +4,7 @@ use super::{
     handle_integer_type, handle_is_logical, value_has_logical_class,
     value_has_native_integer_class, NumericDType, RuntimeError, Value,
 };
-use crate::builtins::introspection::class::class_identity_for_value;
+use crate::builtins::introspection::class_identity::class_identity_for_value;
 use runmat_types::{standard, ClassIdentity};
 
 pub fn value_is_numeric(value: &Value) -> bool {

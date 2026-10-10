@@ -13,18 +13,34 @@ mod superclasses;
 mod functions;
 mod inputname;
 mod localfunctions;
+mod class_query;
+mod isa;
+mod ischar;
+mod isobject;
+mod isstring;
+mod underlying_type;
+mod is_underlying_type;
+mod isvalid;
 
 pub use self::arity_check::*;
+pub use self::class_query::*;
 pub use self::function_dispatch::*;
 pub use self::functions::*;
 pub use self::get_p::*;
 pub use self::inputname::*;
+pub use self::is_underlying_type::*;
+pub use self::isa::*;
+pub use self::ischar::*;
+pub use self::isobject::*;
+pub use self::isstring::*;
+pub use self::isvalid::*;
 pub use self::localfunctions::*;
 pub use self::num_arguments_from_subscript::*;
 pub use self::set_p::*;
 pub use self::subsasgn::*;
 pub use self::subsref::*;
 pub use self::superclasses::*;
+pub use self::underlying_type::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(arity_check::ENTRIES.iter().copied());
@@ -38,4 +54,12 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(functions::ENTRIES.iter().copied());
     values.extend(inputname::ENTRIES.iter().copied());
     values.extend(localfunctions::ENTRIES.iter().copied());
+    values.extend(class_query::ENTRIES.iter().copied());
+    values.extend(isa::ENTRIES.iter().copied());
+    values.extend(ischar::ENTRIES.iter().copied());
+    values.extend(isobject::ENTRIES.iter().copied());
+    values.extend(isstring::ENTRIES.iter().copied());
+    values.extend(underlying_type::ENTRIES.iter().copied());
+    values.extend(is_underlying_type::ENTRIES.iter().copied());
+    values.extend(isvalid::ENTRIES.iter().copied());
 }
