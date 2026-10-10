@@ -46,7 +46,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions {
-                source: "assert(max(abs(z-[1 1i -1 -1i])) < 1e-10);",
+                source: "assert(max(abs(z-[1, 1i, -1, -1i])) < 1e-10);",
             },
         },
         BuiltinExample {

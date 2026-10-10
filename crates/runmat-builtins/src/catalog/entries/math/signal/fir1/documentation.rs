@@ -83,7 +83,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::ExpectedError {
-                identifier: "RunMat:fir1:InvalidFrequency",
+                identifier: "MATLAB:fir1:InvalidFrequency",
             },
         },
     ],

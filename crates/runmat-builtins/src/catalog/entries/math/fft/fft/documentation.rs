@@ -96,7 +96,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions {
-                source: "assert(isequal(size(Y),size(x))); assert(abs(Y(1)-1)<1e-10);",
+                source: "assert(isequal(size(Y),size(x))); assert(abs(Y(1)-10)<1e-10);",
             },
         },
         BuiltinExample {

@@ -7,7 +7,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     summary: "Select the minimum Chebyshev Type II filter order and critical cutoff.",
     description: "`[n,Wn] = cheb2ord(Wp,Ws,Rp,Rs)` finds the minimum Chebyshev Type II order meeting passband ripple `Rp` and stopband attenuation `Rs`. Digital edges are normalized so 1 is Nyquist; a final `'s'` selects analog rad/s edges.",
     keywords: &["cheb2ord", "Chebyshev", "Type II", "filter order", "IIR"],
-    related: &["buttord", "cheby2", "freqz", "filter"],
+    related: &["buttord", "freqz", "filter"],
     sections: &[
         BuiltinDocumentationSection {
             heading: "Response forms",

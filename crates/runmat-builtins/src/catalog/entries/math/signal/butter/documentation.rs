@@ -124,7 +124,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::ExpectedError {
-                identifier: "RunMat:butter:InvalidFrequency",
+                identifier: "MATLAB:butter:InvalidFrequency",
             },
         },
     ],

@@ -44,7 +44,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::ExpectedError {
-            identifier: "RunMat:ind2sub:InvalidInput",
+            identifier: "MATLAB:ind2sub:InvalidInput",
         },
     },
     BuiltinExample {

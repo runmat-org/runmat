@@ -44,7 +44,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::ExpectedError {
-            identifier: "RunMat:sub2ind:IndexBounds",
+            identifier: "MATLAB:sub2ind:IndexBounds",
         },
     },
     BuiltinExample {

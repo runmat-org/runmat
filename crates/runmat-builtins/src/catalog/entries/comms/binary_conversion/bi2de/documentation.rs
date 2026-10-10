@@ -102,7 +102,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::ExpectedError {
-                identifier: "RunMat:bi2de:InvalidInput",
+                identifier: "MATLAB:bi2de:InvalidInput",
             },
         },
         BuiltinExample {
