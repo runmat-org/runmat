@@ -1,12 +1,11 @@
 //! MATLAB-compatible `buttord` Butterworth order selection.
 
 use runmat_builtins::{
-    BUTTORD_COMPLEX_FREQUENCY_EXTENSION, BUTTORD_ERROR_ARG_COUNT, BUTTORD_ERROR_INTERNAL,
-    BUTTORD_ERROR_INVALID_ATTENUATION, BUTTORD_ERROR_INVALID_FREQUENCY,
+    BuiltinErrorDescriptor, BUTTORD_COMPLEX_FREQUENCY_EXTENSION, BUTTORD_ERROR_ARG_COUNT,
+    BUTTORD_ERROR_INTERNAL, BUTTORD_ERROR_INVALID_ATTENUATION, BUTTORD_ERROR_INVALID_FREQUENCY,
     BUTTORD_ERROR_INVALID_OPTION, BUTTORD_ERROR_TOO_MANY_OUTPUTS, BUTTORD_GPU_INPUT_EXTENSION,
     BUTTORD_INTEGER_ATTENUATION_EXTENSION, BUTTORD_INTEGER_FREQUENCY_EXTENSION,
     BUTTORD_LOGICAL_ATTENUATION_EXTENSION, BUTTORD_LOGICAL_FREQUENCY_EXTENSION,
-    BuiltinErrorDescriptor,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -15,13 +14,13 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::math::signal::common::{SignalCooperation, real_vector_to_row_value};
+use crate::builtins::math::signal::common::{real_vector_to_row_value, SignalCooperation};
 use crate::builtins::math::signal::order_selection::{
-    FilterKind, OrderEdgeError, OrderFamily, checked_order, classify_kind, db_excess,
-    db_excess_log_ratio, find_natural_frequency, option_text, parse_positive_db, real_edges,
-    transform_edges, unwarp_frequency, validate_critical_frequencies,
+    checked_order, classify_kind, db_excess, db_excess_log_ratio, find_natural_frequency,
+    option_text, parse_positive_db, real_edges, transform_edges, unwarp_frequency,
+    validate_critical_frequencies, FilterKind, OrderEdgeError, OrderFamily,
 };
-use crate::{BuiltinResult, GpuGatherRetry, RuntimeError, build_runtime_error};
+use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 
 const BUILTIN_NAME: &str = "buttord";
 
@@ -530,20 +529,16 @@ mod tests {
             builtin.binding_identity(&builtin.bindings[0])
         );
         let descriptor = builtin.descriptor;
-        assert!(
-            descriptor
-                .signatures
-                .iter()
-                .any(|sig| sig.label == "[n, Wn] = buttord(Wp, Ws, Rp, Rs)")
-        );
+        assert!(descriptor
+            .signatures
+            .iter()
+            .any(|sig| sig.label == "[n, Wn] = buttord(Wp, Ws, Rp, Rs)"));
         assert_eq!(builtin.extensions.len(), 6);
         assert_eq!(builtin.integer_capabilities.len(), 2);
-        assert!(
-            builtin
-                .integer_capabilities
-                .iter()
-                .all(|capability| capability.output_class == BuiltinIntegerOutputClassRule::Double)
-        );
+        assert!(builtin
+            .integer_capabilities
+            .iter()
+            .all(|capability| capability.output_class == BuiltinIntegerOutputClassRule::Double));
     }
 
     #[test]
@@ -621,13 +616,13 @@ mod tests {
     fn integer_boundary_rejects_rounding_but_accepts_exact_wide_multiple() {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let mut cooperation = SignalCooperation::new(None, BUILTIN_NAME);
-        let inexact = block_on(prepare_integer_role(
+        let Err(inexact) = block_on(prepare_integer_role(
             Value::Int(IntValue::U64((1_u64 << 53) + 1)),
             OrderInputRole::Wp,
             &mut cooperation,
-        ))
-        .err()
-        .expect("rounded integer must fail before order analysis");
+        )) else {
+            panic!("rounded integer must fail before order analysis");
+        };
         assert_eq!(
             inexact.identifier(),
             BUTTORD_ERROR_INVALID_FREQUENCY.identifier

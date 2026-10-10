@@ -81,9 +81,13 @@ mod tests {
     #[test]
     fn checked_single_add_min_accounts_all_producers_and_terminal() {
         let inputs = [vec![3, 4], vec![1, 4]];
-        let one =
-            checked_single_add_min_host_scratch(&[3, 4], &[1, 4], &[vec![3, 4]], &[inputs.clone()])
-                .unwrap();
+        let one = checked_single_add_min_host_scratch(
+            &[3, 4],
+            &[1, 4],
+            &[vec![3, 4]],
+            std::slice::from_ref(&inputs),
+        )
+        .unwrap();
         let two = checked_single_add_min_host_scratch(
             &[3, 4],
             &[1, 4],
