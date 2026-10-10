@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use runmat_mir::analysis::FusionStageFactStatus;
-use runmat_types::{EffectKind, ProgramPointId};
+use runmat_types::{EffectKind, ProgramPointId, RegionValueId};
 use serde::{Deserialize, Serialize};
 
 use super::{FunctionBytecode, FunctionRegistry, FusionCandidateGroup, FusionInstructionWindow};
@@ -93,9 +93,7 @@ impl FunctionBytecode {
             return Ok(());
         };
         self.validate_fusion_stage_projection()?;
-        let projection = self.fusion_stage_projection.as_ref().ok_or_else(|| {
-            "function fusion hint has no selected statement authority".to_string()
-        })?;
+        let index = FunctionFusionCertificateIndex::new(self)?;
         if !scaffold.valid_for(self.function, &self.instructions, &self.instr_spans) {
             return Err("function fusion hint disagrees with executable windows".into());
         }
@@ -108,78 +106,8 @@ impl FunctionBytecode {
         }
         let mut authorized_signal_pcs = HashSet::new();
         for candidate in &scaffold.candidates {
-            let block = u32::try_from(candidate.block.0)
-                .map_err(|_| "function fusion hint block exceeds statement identity".to_string())?;
-            let point_at = |position: usize| -> Result<ProgramPointId, String> {
-                Ok(ProgramPointId {
-                    function: projection.owner,
-                    block,
-                    position: u32::try_from(position).map_err(|_| {
-                        "function fusion hint position exceeds statement identity".to_string()
-                    })?,
-                })
-            };
-            let terminal = projection
-                .statement_at(point_at(candidate.stmt_end - 1)?)
-                .ok_or_else(|| "function fusion hint has no selected terminal".to_string())?;
-            let mut counted_signals = 0usize;
-            for position in candidate.stmt_start..candidate.stmt_end {
-                let statement = projection
-                    .statement_at(point_at(position)?)
-                    .ok_or_else(|| {
-                        "function fusion hint names a missing selected statement".to_string()
-                    })?;
-                if !matches!(
-                    statement.contract.status,
-                    FusionStageFactStatus::Inferred | FusionStageFactStatus::UnknownInputs
-                ) {
-                    return Err(
-                        "function fusion hint crosses an effectful or uncertain statement".into(),
-                    );
-                }
-                let signal_pcs = (statement.pc.start..statement.pc.end)
-                    .filter(|pc| {
-                        self.instructions.get(*pc).is_some_and(|instruction| {
-                            instr_fusion_signal_kind(instruction).is_some()
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                if signal_pcs.is_empty() {
-                    if !selected_empty_tensor_control(
-                        self, scaffold, projection, statement, terminal,
-                    ) {
-                        return Err(
-                            "function fusion hint has an uncertified control statement".into()
-                        );
-                    }
-                    continue;
-                }
-                // MIR emits one signal per selected statement. A count forged to
-                // equal the covered span cannot manufacture a second signal.
-                if signal_pcs.len() != 1 {
-                    return Err("function fusion hint has multiple signals in one statement".into());
-                }
-                counted_signals += 1;
-                if !statement.contract.effects.0.is_empty()
-                    && (scaffold.private_layout.is_none()
-                        || position.checked_add(1) != Some(candidate.stmt_end)
-                        || !self
-                            .instructions
-                            .get(signal_pcs[0])
-                            .is_some_and(canonical_terminal_reduction)
-                        || !statement.contract.effects.0.iter().all(|effect| {
-                            matches!(effect, EffectKind::MayThrow | EffectKind::MaySuspend)
-                        }))
-                {
-                    return Err("function fusion hint has nonterminal or impure effects".into());
-                }
-                authorized_signal_pcs.extend(signal_pcs);
-            }
-            if counted_signals != candidate.signal_count {
-                return Err(
-                    "function fusion hint signal count disagrees with selected body".into(),
-                );
-            }
+            authorized_signal_pcs
+                .extend(index.certify_candidate(candidate, scaffold.private_layout.as_ref())?);
         }
         if scaffold.windows.iter().any(|window| {
             (window.span.start..=window.span.end).any(|pc| !authorized_signal_pcs.contains(&pc))
@@ -190,21 +118,179 @@ impl FunctionBytecode {
     }
 }
 
+/// Reusable selected-statement authority for both compiler slicing and strict
+/// artifact admission. The projection and use index are built once per body.
+pub(crate) struct FunctionFusionCertificateIndex<'a> {
+    body: &'a FunctionBytecode,
+    projection: &'a crate::bytecode::FusionStageProjection,
+    rows: HashMap<ProgramPointId, usize>,
+    signal_pcs: Vec<Vec<usize>>,
+    use_counts: HashMap<RegionValueId, usize>,
+    unique_users: HashMap<RegionValueId, ProgramPointId>,
+    private_temporary_pairs: HashSet<(u32, usize)>,
+}
+
+impl<'a> FunctionFusionCertificateIndex<'a> {
+    pub(crate) fn owner(&self) -> runmat_types::ProgramFunctionId {
+        self.projection.owner
+    }
+
+    pub(crate) fn new(body: &'a FunctionBytecode) -> Result<Self, String> {
+        let projection = body.fusion_stage_projection.as_ref().ok_or_else(|| {
+            "function fusion hint has no selected statement authority".to_string()
+        })?;
+        let mut rows = HashMap::with_capacity(projection.statements.len());
+        let mut signal_pcs = Vec::with_capacity(projection.statements.len());
+        let mut use_counts = HashMap::new();
+        let mut unique_users = HashMap::new();
+        let private_temporary_pairs = projection
+            .private_temporary_slots
+            .iter()
+            .map(|pair| (pair.local, pair.slot))
+            .collect();
+        for (index, statement) in projection.statements.iter().enumerate() {
+            rows.insert(statement.contract.point, index);
+            signal_pcs.push(
+                (statement.pc.start..statement.pc.end)
+                    .filter(|pc| {
+                        body.instructions.get(*pc).is_some_and(|instruction| {
+                            instr_fusion_signal_kind(instruction).is_some()
+                        })
+                    })
+                    .collect(),
+            );
+            for used in &statement.contract.uses {
+                *use_counts.entry(*used).or_insert(0) += 1;
+                unique_users.insert(*used, statement.contract.point);
+            }
+        }
+        Ok(Self {
+            body,
+            projection,
+            rows,
+            signal_pcs,
+            use_counts,
+            unique_users,
+            private_temporary_pairs,
+        })
+    }
+
+    pub(crate) fn statement_at(
+        &self,
+        point: ProgramPointId,
+    ) -> Option<&'a crate::bytecode::CompiledFusionStageStatement> {
+        self.rows
+            .get(&point)
+            .map(|index| &self.projection.statements[*index])
+    }
+
+    pub(crate) fn signal_pcs(&self, point: ProgramPointId) -> Option<&[usize]> {
+        self.rows
+            .get(&point)
+            .map(|index| self.signal_pcs[*index].as_slice())
+    }
+
+    pub(crate) fn unique_user(&self, definition: RegionValueId) -> Option<ProgramPointId> {
+        (self.use_counts.get(&definition) == Some(&1))
+            .then(|| self.unique_users.get(&definition).copied())
+            .flatten()
+    }
+
+    pub(crate) fn certified_empty_control(
+        &self,
+        statement: &crate::bytecode::CompiledFusionStageStatement,
+        terminal: &crate::bytecode::CompiledFusionStageStatement,
+        layout: Option<&FunctionPrivateSlotLayout>,
+    ) -> bool {
+        let Some(layout) = layout else {
+            return false;
+        };
+        selected_empty_tensor_control(self, layout, statement, terminal)
+    }
+
+    pub(crate) fn certify_candidate(
+        &self,
+        candidate: &FusionCandidateGroup,
+        layout: Option<&FunctionPrivateSlotLayout>,
+    ) -> Result<Vec<usize>, String> {
+        let block = u32::try_from(candidate.block.0)
+            .map_err(|_| "function fusion hint block exceeds statement identity".to_string())?;
+        let point_at = |position: usize| -> Result<ProgramPointId, String> {
+            Ok(ProgramPointId {
+                function: self.projection.owner,
+                block,
+                position: u32::try_from(position).map_err(|_| {
+                    "function fusion hint position exceeds statement identity".to_string()
+                })?,
+            })
+        };
+        let terminal = self
+            .statement_at(point_at(candidate.stmt_end.checked_sub(1).ok_or_else(
+                || "function fusion hint has no selected terminal".to_string(),
+            )?)?)
+            .ok_or_else(|| "function fusion hint has no selected terminal".to_string())?;
+        let mut authorized = Vec::new();
+        for position in candidate.stmt_start..candidate.stmt_end {
+            let point = point_at(position)?;
+            let statement = self.statement_at(point).ok_or_else(|| {
+                "function fusion hint names a missing selected statement".to_string()
+            })?;
+            if !matches!(
+                statement.contract.status,
+                FusionStageFactStatus::Inferred | FusionStageFactStatus::UnknownInputs
+            ) {
+                return Err(
+                    "function fusion hint crosses an effectful or uncertain statement".into(),
+                );
+            }
+            let signal_pcs = self.signal_pcs(point).ok_or_else(|| {
+                "function fusion hint names a missing selected statement".to_string()
+            })?;
+            if signal_pcs.is_empty() {
+                if !self.certified_empty_control(statement, terminal, layout) {
+                    return Err("function fusion hint has an uncertified control statement".into());
+                }
+                continue;
+            }
+            if signal_pcs.len() != 1 {
+                return Err("function fusion hint has multiple signals in one statement".into());
+            }
+            if !statement.contract.effects.0.is_empty()
+                && (layout.is_none()
+                    || position.checked_add(1) != Some(candidate.stmt_end)
+                    || !self
+                        .body
+                        .instructions
+                        .get(signal_pcs[0])
+                        .is_some_and(canonical_terminal_reduction)
+                    || !statement.contract.effects.0.iter().all(|effect| {
+                        matches!(effect, EffectKind::MayThrow | EffectKind::MaySuspend)
+                    }))
+            {
+                return Err("function fusion hint has nonterminal or impure effects".into());
+            }
+            authorized.extend_from_slice(signal_pcs);
+        }
+        if authorized.len() != candidate.signal_count {
+            return Err("function fusion hint signal count disagrees with selected body".into());
+        }
+        Ok(authorized)
+    }
+}
+
 fn selected_empty_tensor_control(
-    body: &FunctionBytecode,
-    scaffold: &FunctionFusionScaffold,
-    projection: &crate::bytecode::FusionStageProjection,
+    index: &FunctionFusionCertificateIndex<'_>,
+    layout: &FunctionPrivateSlotLayout,
     statement: &crate::bytecode::CompiledFusionStageStatement,
     terminal: &crate::bytecode::CompiledFusionStageStatement,
 ) -> bool {
-    let Some(layout) = scaffold.private_layout.as_ref() else {
-        return false;
-    };
     let [definition] = statement.contract.defs.as_slice() else {
         return false;
     };
-    let Some([Instr::CreateMatrix(0, 0), Instr::StoreVar(slot)]) =
-        body.instructions.get(statement.pc.start..statement.pc.end)
+    let Some([Instr::CreateMatrix(0, 0), Instr::StoreVar(slot)]) = index
+        .body
+        .instructions
+        .get(statement.pc.start..statement.pc.end)
     else {
         return false;
     };
@@ -216,22 +302,25 @@ fn selected_empty_tensor_control(
         && statement.contract.uses.is_empty()
         && statement.contract.effects.0.is_empty()
         && statement.contract.live_after.contains(definition)
-        && definition.function == projection.owner
+        && definition.function == index.projection.owner
         && layout.owns_private_pair(pair)
-        && projection.private_temporary_slots.contains(&pair)
+        && index
+            .private_temporary_pairs
+            .contains(&(pair.local, pair.slot))
         && terminal.contract.uses.contains(definition)
         && !terminal.contract.live_after.contains(definition)
-        && projection
-            .statements
-            .iter()
-            .filter(|row| row.contract.uses.contains(definition))
-            .count()
-            == 1
+        && index.use_counts.get(definition) == Some(&1)
         && {
-            let mut signals = (terminal.pc.start..terminal.pc.end)
-                .filter_map(|pc| body.instructions.get(pc))
-                .filter(|instruction| instr_fusion_signal_kind(instruction).is_some());
-            signals.next().is_some_and(canonical_terminal_reduction) && signals.next().is_none()
+            index
+                .signal_pcs(terminal.contract.point)
+                .is_some_and(|signals| {
+                    signals.len() == 1
+                        && index
+                            .body
+                            .instructions
+                            .get(signals[0])
+                            .is_some_and(canonical_terminal_reduction)
+                })
         }
 }
 

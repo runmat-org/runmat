@@ -33,7 +33,7 @@ mod function_fusion;
 #[cfg(feature = "native-accel")]
 pub use function_fusion::FunctionFusionScaffold;
 #[cfg(feature = "native-accel")]
-pub(crate) use function_fusion::FunctionPrivateSlotLayout;
+pub(crate) use function_fusion::{FunctionFusionCertificateIndex, FunctionPrivateSlotLayout};
 #[cfg(feature = "native-accel")]
 #[path = "program/vm_fusion_plan.rs"]
 mod vm_fusion_plan;

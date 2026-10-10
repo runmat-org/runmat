@@ -125,7 +125,7 @@ fn second_store_failure_keeps_first_publication_and_exact_error() {
             let store = |index| FusionStoreMaterialization {
                 value_id: index as u32,
                 binding: VarBinding {
-                    kind: kind.clone(),
+                    kind,
                     index,
                 },
             };

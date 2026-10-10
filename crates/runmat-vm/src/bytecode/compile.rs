@@ -532,18 +532,6 @@ fn accel_node_matches_semantic_window_kind(
 }
 
 #[cfg(feature = "native-accel")]
-fn instruction_within_semantic_candidate_span(
-    instruction_index: usize,
-    instr_spans: &[runmat_hir::Span],
-    candidate_span: runmat_hir::Span,
-) -> bool {
-    if instr_spans.is_empty() || instruction_index >= instr_spans.len() {
-        return false;
-    }
-    source_span_contains(candidate_span, instr_spans[instruction_index])
-}
-
-#[cfg(feature = "native-accel")]
 pub(crate) fn derive_semantic_fusion_instruction_windows(
     instructions: &[Instr],
     instr_spans: &[runmat_hir::Span],
@@ -553,87 +541,88 @@ pub(crate) fn derive_semantic_fusion_instruction_windows(
         return Vec::new();
     }
 
-    let mut windows = Vec::new();
-    let mut assigned_instructions = HashSet::new();
-
-    for candidate in candidate_groups {
-        let mut run_start: Option<usize> = None;
-        let mut run_kind: Option<crate::bytecode::FusionInstructionKind> = None;
-        for (index, instr) in instructions.iter().enumerate() {
-            if index >= instr_spans.len() || assigned_instructions.contains(&index) {
-                if let Some(start) = run_start.take() {
-                    windows.push(crate::bytecode::FusionInstructionWindow {
-                        span: runmat_accelerate::graph::InstrSpan {
-                            start,
-                            end: index.saturating_sub(1),
-                        },
-                        kind: run_kind
-                            .unwrap_or(crate::bytecode::FusionInstructionKind::Elementwise),
-                    });
-                    run_kind = None;
-                }
-                continue;
+    // Sweep source starts and query the earliest candidate whose source end
+    // still contains each signal. This preserves candidate-order ownership of
+    // overlapping spans without rescanning the entire stream per candidate.
+    let mut ends = candidate_groups
+        .iter()
+        .map(|candidate| candidate.source_span.end)
+        .collect::<Vec<_>>();
+    ends.sort_unstable();
+    ends.dedup();
+    let mut candidate_order = (0..candidate_groups.len()).collect::<Vec<_>>();
+    candidate_order.sort_by_key(|index| (candidate_groups[*index].source_span.start, *index));
+    let mut signals = instructions
+        .iter()
+        .enumerate()
+        .take(instr_spans.len())
+        .filter_map(|(pc, instruction)| {
+            instr_fusion_signal_kind(instruction).map(|kind| (pc, kind))
+        })
+        .collect::<Vec<_>>();
+    signals.sort_by_key(|(pc, _)| (instr_spans[*pc].start, *pc));
+    let mut minimum_candidate = vec![usize::MAX; ends.len() + 1];
+    let mut by_candidate = vec![Vec::new(); candidate_groups.len()];
+    let mut next_candidate = 0;
+    for (pc, kind) in signals {
+        let span = instr_spans[pc];
+        while next_candidate < candidate_order.len()
+            && candidate_groups[candidate_order[next_candidate]]
+                .source_span
+                .start
+                <= span.start
+        {
+            let id = candidate_order[next_candidate];
+            let end_index = ends
+                .binary_search(&candidate_groups[id].source_span.end)
+                .unwrap();
+            let mut bit = ends.len() - end_index;
+            while bit <= ends.len() {
+                minimum_candidate[bit] = minimum_candidate[bit].min(id);
+                bit += bit & bit.wrapping_neg();
             }
-            if !instruction_within_semantic_candidate_span(
-                index,
-                instr_spans,
-                candidate.source_span,
-            ) {
-                if let Some(start) = run_start.take() {
-                    windows.push(crate::bytecode::FusionInstructionWindow {
-                        span: runmat_accelerate::graph::InstrSpan {
-                            start,
-                            end: index.saturating_sub(1),
-                        },
-                        kind: run_kind
-                            .unwrap_or(crate::bytecode::FusionInstructionKind::Elementwise),
-                    });
-                    run_kind = None;
-                }
-                continue;
-            }
-            let Some(signal_kind) = instr_fusion_signal_kind(instr) else {
-                if let Some(start) = run_start.take() {
-                    windows.push(crate::bytecode::FusionInstructionWindow {
-                        span: runmat_accelerate::graph::InstrSpan {
-                            start,
-                            end: index.saturating_sub(1),
-                        },
-                        kind: run_kind
-                            .unwrap_or(crate::bytecode::FusionInstructionKind::Elementwise),
-                    });
-                    run_kind = None;
-                }
-                continue;
-            };
-
-            if run_start.is_none() {
-                run_start = Some(index);
-                run_kind = Some(signal_kind);
-            } else if matches!(signal_kind, crate::bytecode::FusionInstructionKind::Matmul) {
-                run_kind = Some(crate::bytecode::FusionInstructionKind::Matmul);
-            } else if matches!(
-                signal_kind,
-                crate::bytecode::FusionInstructionKind::Reduction
-            ) && !matches!(
-                run_kind,
-                Some(crate::bytecode::FusionInstructionKind::Matmul)
-            ) {
-                run_kind = Some(crate::bytecode::FusionInstructionKind::Reduction);
-            }
-            assigned_instructions.insert(index);
+            next_candidate += 1;
         }
-        if let Some(start) = run_start.take() {
-            windows.push(crate::bytecode::FusionInstructionWindow {
-                span: runmat_accelerate::graph::InstrSpan {
-                    start,
-                    end: instructions.len().saturating_sub(1),
-                },
-                kind: run_kind.unwrap_or(crate::bytecode::FusionInstructionKind::Elementwise),
-            });
+        let end_index = ends.partition_point(|end| *end < span.end);
+        let mut bit = ends.len() - end_index;
+        let mut owner = usize::MAX;
+        while bit > 0 {
+            owner = owner.min(minimum_candidate[bit]);
+            bit &= bit - 1;
+        }
+        if owner != usize::MAX {
+            by_candidate[owner].push((pc, kind));
         }
     }
-
+    let mut windows = Vec::new();
+    for mut assigned in by_candidate {
+        assigned.sort_by_key(|(pc, _)| *pc);
+        let mut current: Option<crate::bytecode::FusionInstructionWindow> = None;
+        for (pc, kind) in assigned {
+            if let Some(window) = current.as_mut() {
+                if window.span.end.checked_add(1) == Some(pc) {
+                    window.span.end = pc;
+                    if kind == crate::bytecode::FusionInstructionKind::Matmul
+                        || (kind == crate::bytecode::FusionInstructionKind::Reduction
+                            && window.kind != crate::bytecode::FusionInstructionKind::Matmul)
+                    {
+                        window.kind = kind;
+                    }
+                    continue;
+                }
+            }
+            if let Some(window) = current.take() {
+                windows.push(window);
+            }
+            current = Some(crate::bytecode::FusionInstructionWindow {
+                span: runmat_accelerate::graph::InstrSpan { start: pc, end: pc },
+                kind,
+            });
+        }
+        if let Some(window) = current {
+            windows.push(window);
+        }
+    }
     windows
 }
 
@@ -953,6 +942,14 @@ fn compile_semantic_functions(
                 collective_contracts: Vec::new(),
             },
         );
+        #[cfg(feature = "native-accel")]
+        function_fusion::certify_compiled_function_scaffold(
+            functions
+                .get_mut(&function.id)
+                .expect("just inserted function"),
+            mir,
+        )
+        .map_err(CompileError::new)?;
     }
     Ok(functions)
 }

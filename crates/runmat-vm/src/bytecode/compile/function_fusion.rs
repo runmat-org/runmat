@@ -4,9 +4,11 @@
 
 use super::{derive_semantic_fusion_instruction_windows, derive_semantic_fusion_metadata};
 use crate::bytecode::{
-    program::{FunctionFusionScaffold, FunctionPrivateSlotLayout},
-    Instr,
+    program::{FunctionFusionCertificateIndex, FunctionFusionScaffold, FunctionPrivateSlotLayout},
+    FunctionBytecode, FusionCandidateGroup, Instr,
 };
+use runmat_mir::analysis::FusionStageFactStatus;
+use runmat_types::ProgramPointId;
 
 pub(super) fn derive_function_scaffold(
     mir: &runmat_mir::MirAssembly,
@@ -42,93 +44,253 @@ pub(super) fn derive_function_scaffold(
         .then_some(scaffold)
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn function_local_semantic_windows_survive_executable_materialization() {
-        let source = "function y = f()\npersistent p\nt = p .* 2;\np = p + t + 1;\ny = p;\nend\n";
-        let ast = runmat_parser::parse(source).unwrap();
-        let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty()).unwrap();
-        let mir = runmat_mir::lowering::lower_assembly(&hir.assembly).unwrap();
-        assert!(hir.assembly.entrypoints.is_empty());
-        let function = hir.assembly.functions[0].id;
-        let registry = crate::bytecode::FunctionRegistry::new(
-            crate::bytecode::compile_semantic_function_registry(&hir.assembly, &mir).unwrap(),
-        );
-        let body = registry.get(function).unwrap();
-        let scaffold = body
-            .fusion_scaffold
-            .as_ref()
-            .expect("function-owned MIR candidates");
-        assert!(
-            scaffold.private_layout.is_some(),
-            "compiler-owned function slots"
-        );
-        assert!(scaffold.valid_for(function, &body.instructions, &body.instr_spans));
-        body.validate_fusion_scaffold()
-            .expect("selected statement admission");
-        let layout = crate::layout::derive_layout(&hir.assembly, &mir).unwrap();
-        let executable = crate::Bytecode::for_function(body, registry.clone(), layout.clone());
-        assert_eq!(
-            executable.fusion_metadata.mir_fusion_candidate_group_count,
-            scaffold.candidates.len()
-        );
-        assert_eq!(executable.function_private_layout, scaffold.private_layout);
-        assert!(executable
-            .fusion_metadata
-            .instruction_windows
+/// The MIR run finder intentionally sees structural signals before selected
+/// statement effects. Slice only compiler-produced hints here, against the
+/// exact function stream and the same strict certificate used by ProgramV2.
+/// A failing hint never becomes artifact authority, but valid neighboring
+/// groups remain eligible for runtime admission.
+pub(super) fn certify_compiled_function_scaffold(
+    body: &mut FunctionBytecode,
+    mir: &runmat_mir::MirAssembly,
+) -> Result<(), String> {
+    let Some(original) = body.fusion_scaffold.take() else {
+        return Ok(());
+    };
+    let owner = body
+        .fusion_stage_projection
+        .as_ref()
+        .ok_or_else(|| "compiler fusion scaffold has no selected statement projection".to_string())?
+        .owner;
+    let mir_body = mir
+        .bodies
+        .get(&body.function)
+        .ok_or_else(|| "compiler fusion scaffold has no matching MIR function body".to_string())?;
+    let blocks = mir_body
+        .blocks
+        .iter()
+        .map(|block| (block.id, block))
+        .collect::<std::collections::HashMap<_, _>>();
+    let accepted = {
+        let index = FunctionFusionCertificateIndex::new(body)?;
+        let mut accepted = Vec::new();
+        for candidate in &original.candidates {
+            let block = blocks
+                .get(&candidate.block)
+                .copied()
+                .ok_or_else(|| "compiler fusion candidate has no matching MIR block".to_string())?;
+            let block_id = u32::try_from(candidate.block.0)
+                .map_err(|_| "compiler fusion block exceeds portable identity".to_string())?;
+            let slice = CandidateSlice {
+                index: &index,
+                block,
+                original_candidate: candidate,
+                layout: original.private_layout.as_ref(),
+            };
+            let mut start = candidate.stmt_start;
+            let mut position = start;
+            let mut pending_controls = Vec::new();
+            while position < candidate.stmt_end {
+                let point = ProgramPointId {
+                    function: owner,
+                    block: block_id,
+                    position: u32::try_from(position).map_err(|_| {
+                        "compiler fusion statement position exceeds portable identity".to_string()
+                    })?,
+                };
+                let statement = index.statement_at(point).ok_or_else(|| {
+                    "compiler fusion candidate has no selected statement".to_string()
+                })?;
+                let signals = index.signal_pcs(point).map_or(0, <[usize]>::len);
+                let selected = matches!(
+                    statement.contract.status,
+                    FusionStageFactStatus::Inferred | FusionStageFactStatus::UnknownInputs
+                );
+                if selected && statement.contract.effects.0.is_empty() && signals == 1 {
+                    position += 1;
+                    continue;
+                }
+                if selected && statement.contract.effects.0.is_empty() && signals == 0 {
+                    let certified_bridge = statement
+                        .contract
+                        .defs
+                        .as_slice()
+                        .first()
+                        .and_then(|definition| index.unique_user(*definition))
+                        .filter(|terminal| {
+                            terminal.block == block_id
+                                && terminal.position > point.position
+                                && (terminal.position as usize) < candidate.stmt_end
+                        })
+                        .and_then(|terminal| index.statement_at(terminal))
+                        .is_some_and(|terminal| {
+                            index.certified_empty_control(
+                                statement,
+                                terminal,
+                                original.private_layout.as_ref(),
+                            )
+                        });
+                    if certified_bridge {
+                        pending_controls.push(position);
+                        position += 1;
+                        continue;
+                    }
+                    slice.flush_pure_parts(start, position, &pending_controls, true, &mut accepted);
+                    pending_controls.clear();
+                    start = position + 1;
+                    position = start;
+                    continue;
+                }
+                // An effectful statement can close a candidate only when the
+                // existing certificate proves its unique terminal reduction.
+                let terminal_admitted = selected
+                    && signals == 1
+                    && slice.try_add_segment(start, position + 1, &mut accepted);
+                if !terminal_admitted {
+                    let tail = slice.flush_pure_parts(
+                        start,
+                        position,
+                        &pending_controls,
+                        false,
+                        &mut accepted,
+                    );
+                    // A different terminal reduction may still certify the
+                    // pure suffix after an earlier bridge was interrupted.
+                    let tail_terminal_admitted = !pending_controls.is_empty()
+                        && selected
+                        && signals == 1
+                        && tail < position
+                        && slice.try_add_segment(tail, position + 1, &mut accepted);
+                    if !tail_terminal_admitted {
+                        slice.try_add_segment(tail, position, &mut accepted);
+                    }
+                }
+                pending_controls.clear();
+                start = position + 1;
+                position = start;
+            }
+            if !slice.try_add_segment(start, candidate.stmt_end, &mut accepted)
+                && !pending_controls.is_empty()
+            {
+                slice.flush_pure_parts(
+                    start,
+                    candidate.stmt_end,
+                    &pending_controls,
+                    true,
+                    &mut accepted,
+                );
+            }
+        }
+        accepted
+    };
+    body.fusion_scaffold = assemble_scaffold(body, accepted, &original);
+    body.validate_fusion_scaffold()
+}
+
+struct CandidateSlice<'slice, 'body> {
+    index: &'slice FunctionFusionCertificateIndex<'body>,
+    block: &'slice runmat_mir::BasicBlock,
+    original_candidate: &'slice FusionCandidateGroup,
+    layout: Option<&'slice FunctionPrivateSlotLayout>,
+}
+
+impl CandidateSlice<'_, '_> {
+    fn flush_pure_parts(
+        &self,
+        start: usize,
+        end: usize,
+        controls: &[usize],
+        include_tail: bool,
+        accepted: &mut Vec<FusionCandidateGroup>,
+    ) -> usize {
+        let mut tail = start;
+        for control in controls.iter().copied().filter(|control| *control < end) {
+            self.try_add_segment(tail, control, accepted);
+            tail = control + 1;
+        }
+        if include_tail {
+            self.try_add_segment(tail, end, accepted);
+        }
+        tail
+    }
+
+    fn try_add_segment(
+        &self,
+        start: usize,
+        end: usize,
+        accepted: &mut Vec<FusionCandidateGroup>,
+    ) -> bool {
+        let Some(statements) = self.block.statements.get(start..end) else {
+            return false;
+        };
+        let Ok(block_id) = u32::try_from(self.original_candidate.block.0) else {
+            return false;
+        };
+        let signal_count = (start..end)
+            .filter_map(|position| {
+                self.index.signal_pcs(ProgramPointId {
+                    function: self.index.owner(),
+                    block: block_id,
+                    position: u32::try_from(position).ok()?,
+                })
+            })
+            .map(<[usize]>::len)
+            .sum();
+        if signal_count < 2 {
+            return false;
+        }
+        let Some(first) = statements.first() else {
+            return false;
+        };
+        let source_span = statements
             .iter()
-            .all(|window| {
-                body.instructions[window.span.start..=window.span.end]
-                    .iter()
-                    .all(|instruction| {
-                        !matches!(
-                            instruction,
-                            crate::Instr::StoreVar(_) | crate::Instr::StoreLocal(_)
-                        )
-                    })
-            }));
-
-        let mut remapped = body.clone();
-        let destination = runmat_hir::FunctionId(function.0 + 10);
-        let portable = remapped.portable_function;
-        let source = remapped.source_id;
-        crate::bytecode::remap_session_function(
-            &mut remapped,
-            destination,
-            portable,
-            source,
-            &[(function, destination)].into_iter().collect(),
-        )
-        .expect("session-owned remap");
-        assert!(remapped
-            .fusion_scaffold
-            .as_ref()
-            .is_some_and(|scaffold| scaffold.valid_for(
-                destination,
-                &remapped.instructions,
-                &remapped.instr_spans
-            )));
-        remapped
-            .validate_fusion_scaffold()
-            .expect("remapped statement admission");
-        let mut legacy = body.clone();
-        legacy.fusion_scaffold = None;
-        assert_ne!(
-            crate::bytecode::semantic_definition_fingerprint(body).unwrap(),
-            crate::bytecode::semantic_definition_fingerprint(&legacy).unwrap()
-        );
-
-        let mut malformed = body.clone();
-        malformed.fusion_scaffold.as_mut().unwrap().candidates[0].function =
-            runmat_hir::FunctionId(function.0 + 1);
-        let malformed_registry =
-            crate::bytecode::FunctionRegistry::new([(function, malformed)].into_iter().collect());
-        let rejected = crate::Bytecode::for_function(
-            malformed_registry.get(function).unwrap(),
-            malformed_registry.clone(),
-            layout,
-        );
-        assert!(rejected.runtime_fusion_groups().is_empty());
+            .skip(1)
+            .fold(first.span, |span, statement| {
+                runmat_hir::merge_span(span, statement.span)
+            });
+        let mut candidate = self.original_candidate.clone();
+        candidate.stmt_start = start;
+        candidate.stmt_end = end;
+        candidate.signal_count = signal_count;
+        candidate.source_span = source_span;
+        let admitted = self
+            .index
+            .certify_candidate(&candidate, self.layout)
+            .is_ok();
+        if admitted {
+            accepted.push(candidate);
+        }
+        admitted
     }
 }
+
+fn assemble_scaffold(
+    body: &FunctionBytecode,
+    mut candidates: Vec<FusionCandidateGroup>,
+    original: &FunctionFusionScaffold,
+) -> Option<FunctionFusionScaffold> {
+    if candidates.is_empty() {
+        return None;
+    }
+    for (id, candidate) in candidates.iter_mut().enumerate() {
+        candidate.id = id;
+    }
+    let mut windows = derive_semantic_fusion_instruction_windows(
+        &body.instructions,
+        &body.instr_spans,
+        &candidates,
+    );
+    windows.sort_by_key(|window| (window.span.start, window.span.end));
+    Some(FunctionFusionScaffold {
+        signal_count: candidates
+            .iter()
+            .map(|candidate| candidate.signal_count)
+            .sum(),
+        candidates,
+        windows,
+        private_layout: original.private_layout.clone(),
+    })
+}
+
+#[cfg(test)]
+#[path = "function_fusion/tests.rs"]
+mod tests;
