@@ -240,7 +240,10 @@ fn work(
         ProviderExtremaDemand::ValuesOnly => value_bytes,
         ProviderExtremaDemand::ValuesAndIndices => two_outputs,
     };
-    // The nonempty hook allocates both outputs and a 16/32-byte uniform.
+    // The borrowed source remains live throughout the nonempty hook, which
+    // allocates both outputs and a 16/32-byte uniform. ProviderResourceEstimate
+    // is the complete simultaneous peak; Runtime subtracts the authenticated
+    // already-live backing exactly once when testing incremental capacity.
     let uniform = if matches!(
         input.element_type,
         ProviderElementType::F32 | ProviderElementType::F64
@@ -249,10 +252,7 @@ fn work(
     } else {
         32
     };
-    let Some(peak) = value_bytes
-        .checked_add(index_bytes)
-        .and_then(|bytes| bytes.checked_add(uniform))
-    else {
+    let Some(peak) = complete_peak(backing_bytes, two_outputs, uniform) else {
         return reject(
             ProviderRejectionCode::ResourceLimit,
             "extrema.peak_overflow",
@@ -263,4 +263,10 @@ fn work(
         output_bytes: Some(retained),
         dispatches: Some(1),
     })
+}
+
+fn complete_peak(borrowed_bytes: u64, two_outputs: u64, uniform_bytes: u64) -> Option<u64> {
+    borrowed_bytes
+        .checked_add(two_outputs)?
+        .checked_add(uniform_bytes)
 }

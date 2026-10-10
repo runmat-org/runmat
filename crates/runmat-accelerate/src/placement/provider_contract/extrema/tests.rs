@@ -8,6 +8,7 @@ use runmat_accelerate_api::{
 struct GeometryProvider {
     precision: ProviderPrecision,
     max_groups: u32,
+    max_buffer_bytes: u64,
 }
 
 impl AccelProvider for GeometryProvider {
@@ -17,8 +18,8 @@ impl AccelProvider for GeometryProvider {
 
     fn extrema_geometry(&self) -> Option<ProviderExtremaGeometry> {
         Some(ProviderExtremaGeometry {
-            max_buffer_bytes: 4096,
-            max_binding_bytes: 4096,
+            max_buffer_bytes: self.max_buffer_bytes,
+            max_binding_bytes: self.max_buffer_bytes,
             workgroup_size: 64,
             max_workgroups_per_dimension: self.max_groups,
         })
@@ -53,22 +54,39 @@ fn query(
     class: ProviderElementType,
     physical_class: NumericElementType,
 ) -> ProviderFeasibilityQuery {
+    query_with_shape(kind, demand, class, physical_class, [2, 3])
+}
+
+fn query_with_shape(
+    kind: ProviderExtremaKind,
+    demand: ProviderExtremaDemand,
+    class: ProviderElementType,
+    physical_class: NumericElementType,
+    shape: [u64; 2],
+) -> ProviderFeasibilityQuery {
     let input = TestAllocationOwner::new()
-        .allocate_zeroed(vec![2, 3], physical_class, GpuTensorStorage::Real)
+        .allocate_zeroed(
+            shape
+                .into_iter()
+                .map(|extent| usize::try_from(extent).expect("fixture extent fits usize"))
+                .collect(),
+            physical_class,
+            GpuTensorStorage::Real,
+        )
         .unwrap()
         .handle;
     let backing = ProviderExtremaInputBacking::from_full_live_handle(&input)
         .unwrap()
         .expect("full contiguous input");
     let index_class = ProviderElementType::F32;
-    let mut outputs = vec![representation(class, &[1, 3])];
+    let mut outputs = vec![representation(class, &[1, shape[1]])];
     if demand == ProviderExtremaDemand::ValuesAndIndices {
-        outputs.push(representation(index_class, &[1, 3]));
+        outputs.push(representation(index_class, &[1, shape[1]]));
     }
     ProviderFeasibilityQuery {
         operation: ProviderOperationIdentity::new(identity(kind)),
         family: ProviderOperationFamily::Reduction,
-        inputs: vec![representation(class, &[2, 3])],
+        inputs: vec![representation(class, &shape)],
         outputs,
         workload: ProviderWorkload {
             extrema: Some(ProviderExtremaWorkload {
@@ -105,6 +123,7 @@ fn values_only_still_accounts_for_two_physical_float_outputs() {
     let provider = GeometryProvider {
         precision: ProviderPrecision::F32,
         max_groups: 1,
+        max_buffer_bytes: 4096,
     };
     let one = query(
         ProviderExtremaKind::Minimum,
@@ -114,7 +133,7 @@ fn values_only_still_accounts_for_two_physical_float_outputs() {
     );
     let estimate = supported(validate(&provider, true, &one).unwrap());
     assert_eq!(estimate.output_bytes, Some(12));
-    assert_eq!(estimate.transient_bytes, Some(40));
+    assert_eq!(estimate.transient_bytes, Some(64));
     assert_eq!(estimate.dispatches, Some(1));
     let mut pair = one.clone();
     pair.outputs
@@ -123,7 +142,7 @@ fn values_only_still_accounts_for_two_physical_float_outputs() {
     pair.workload.extrema.as_mut().unwrap().demand = ProviderExtremaDemand::ValuesAndIndices;
     let estimate = supported(validate(&provider, true, &pair).unwrap());
     assert_eq!(estimate.output_bytes, Some(24));
-    assert_eq!(estimate.transient_bytes, Some(40));
+    assert_eq!(estimate.transient_bytes, Some(64));
 }
 
 #[test]
@@ -131,6 +150,7 @@ fn native_wide_integer_value_and_float_index_have_distinct_physical_bytes() {
     let provider = GeometryProvider {
         precision: ProviderPrecision::F32,
         max_groups: 1,
+        max_buffer_bytes: 4096,
     };
     let pair = query(
         ProviderExtremaKind::Maximum,
@@ -140,7 +160,7 @@ fn native_wide_integer_value_and_float_index_have_distinct_physical_bytes() {
     );
     let estimate = supported(validate(&provider, true, &pair).unwrap());
     assert_eq!(estimate.output_bytes, Some(36));
-    assert_eq!(estimate.transient_bytes, Some(68));
+    assert_eq!(estimate.transient_bytes, Some(116));
     let mut wrong = pair.clone();
     wrong.outputs[1].element_type = ProviderElementType::F64;
     assert_eq!(
@@ -158,4 +178,43 @@ fn native_wide_integer_value_and_float_index_have_distinct_physical_bytes() {
         rejected(validate(&provider, true, &wrong).unwrap()),
         ProviderRejectionCode::UnknownResourceEstimate
     );
+}
+
+#[test]
+fn large_borrowed_source_is_in_complete_peak_but_not_new_allocation() {
+    let provider = GeometryProvider {
+        precision: ProviderPrecision::F32,
+        max_groups: 1,
+        max_buffer_bytes: 8 * 1024 * 1024,
+    };
+    let query = query_with_shape(
+        ProviderExtremaKind::Minimum,
+        ProviderExtremaDemand::ValuesOnly,
+        ProviderElementType::F32,
+        NumericElementType::F32,
+        [262_145, 4],
+    );
+    let borrowed = query
+        .workload
+        .extrema
+        .as_ref()
+        .and_then(|route| route.input_backing)
+        .and_then(ProviderExtremaInputBacking::live_requested_bytes)
+        .expect("authentic borrowed source extent");
+    assert_eq!(borrowed, 4_194_320);
+    let estimate = supported(validate(&provider, true, &query).unwrap());
+    assert_eq!(estimate.output_bytes, Some(16));
+    assert_eq!(estimate.transient_bytes, Some(4_194_368));
+    assert_eq!(
+        estimate.transient_bytes.unwrap().checked_sub(borrowed),
+        Some(48)
+    );
+}
+
+#[test]
+fn complete_peak_overflow_cannot_wrap_into_a_small_demand() {
+    assert_eq!(complete_peak(24, 24, 16), Some(64));
+    assert_eq!(complete_peak(u64::MAX, 24, 16), None);
+    assert_eq!(complete_peak(24, u64::MAX, 16), None);
+    assert_eq!(complete_peak(24, 24, u64::MAX), None);
 }
