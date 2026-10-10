@@ -2,8 +2,8 @@ use runmat_accelerate_api::allocation::WeakAllocationLease;
 use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocationOwner};
 use runmat_accelerate_api::*;
 use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
     Mutex,
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -21,6 +21,8 @@ pub enum Mode {
     LowerShape,
     Pending,
     Unsupported,
+    UnsupportedAfterAdmission,
+    NonFinite,
 }
 #[derive(Clone, Copy)]
 pub enum Upload {
@@ -199,14 +201,14 @@ impl AccelProvider for Provider {
             Upload::Unsupported => {
                 return Err(
                     unsupported_provider_operation("fixture typed upload unavailable").into(),
-                )
+                );
             }
             Upload::Failure => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::BrokenPipe,
                     "typed upload failure",
                 )
-                .into())
+                .into());
             }
             Upload::Alias => return Ok(self.borrowed.lock().unwrap().as_ref().unwrap().clone()),
             Upload::Previous if upload != 0 => {
@@ -398,6 +400,11 @@ impl AccelProvider for Provider {
             Ok(output)
         })
     }
+    fn supports_signal_hilbert(&self, _: &ProviderHilbertRequest<'_>) -> bool {
+        // This fixture deliberately exercises malformed and terminal hook
+        // outputs. Its unavailable mode instead exercises preflight fallback.
+        !matches!(self.mode, Mode::Unsupported)
+    }
     fn signal_hilbert<'a>(
         &'a self,
         request: &'a ProviderHilbertRequest<'a>,
@@ -414,14 +421,26 @@ impl AccelProvider for Provider {
             Ok(output)
         })
     }
+    fn supports_signal_envelope(&self, _: &ProviderEnvelopeRequest<'_>) -> bool {
+        !matches!(self.mode, Mode::Unsupported)
+    }
     fn signal_envelope<'a>(
         &'a self,
         request: &'a ProviderEnvelopeRequest<'a>,
     ) -> ProviderExecutionFuture<'a, ProviderEnvelopeResult> {
         Box::pin(async move {
             self.hooks.fetch_add(1, Ordering::SeqCst);
-            if matches!(self.mode, Mode::Unsupported) {
+            if matches!(
+                self.mode,
+                Mode::Unsupported | Mode::UnsupportedAfterAdmission
+            ) {
                 return Err(unsupported_provider_operation("fixture envelope unavailable").into());
+            }
+            if matches!(self.mode, Mode::NonFinite) {
+                return Err(ProviderExecutionError::from_source(
+                    EnvelopeSignalDomainError::NonFinite,
+                )
+                .after_effect());
             }
             let upper = self.output(request.input, GpuTensorStorage::Real)?;
             let lower = if matches!(self.mode, Mode::Siblings) {

@@ -2,30 +2,21 @@
 
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinErrorDescriptor, SUB2IND_ERROR_INDEX_BOUNDS, SUB2IND_ERROR_INTERNAL,
+    SUB2IND_ERROR_INVALID_INPUT, SUB2IND_ERROR_PROVIDER,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, Tensor, Value};
 
 use super::common::{
-    build_strides, dims_from_tokens, fits_positive_platform_index, materialize_value, parse_dims,
+    build_strides, fits_positive_platform_index, materialize_value, parse_dims, IndexingOperation,
 };
-use crate::builtins::array::type_resolvers::is_scalar_type;
-use crate::builtins::common::arg_tokens::tokens_from_context;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::shape_rules::element_count_if_known;
 
 #[path = "sub2ind/resident_owner.rs"]
 mod resident_owner;
@@ -57,140 +48,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Index conversion executes eagerly on the host; fusion does not apply.",
 };
 
-fn sub2ind_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    if args.len() < 2 {
-        return Type::Unknown;
-    }
-    if let Some(dims) = dims_from_tokens(&tokens_from_context(ctx)) {
-        if args.len() - 1 != dims.len() {
-            return Type::Unknown;
-        }
-    }
-    let subscripts = &args[1..];
-    if subscripts.iter().all(|ty| is_scalar_type(ty)) {
-        return Type::Num;
-    }
-    for ty in subscripts {
-        if let Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } = ty {
-            if element_count_if_known(shape).unwrap_or(0) > 1 {
-                return Type::Tensor {
-                    shape: Some(shape.clone()),
-                };
-            }
-        }
-    }
-    Type::tensor()
-}
-
 const BUILTIN_NAME: &str = "sub2ind";
-
-const SUB2IND_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "sz",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The size vector accepts every native integer class and is parsed directly as positive platform dimensions.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "I1...In",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Every subscript role accepts all eight integer classes, including scalar expansion and full-width exact bounds checks.",
-    },
-];
-pub const SUB2IND_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "ind = sub2ind(integer_sz, integer_I1, integer_In...)",
-        inputs: &SUB2IND_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Dimensions and subscripts are read from authoritative integer storage, combined with checked column-major index arithmetic, and returned as documented double indices. Resident integer inputs use exact gather fallback and return resident double output when the owner supports upload.",
-    }];
-
-const SUB2IND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ind",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Column-major linear indices corresponding to provided subscripts.",
-}];
-
-const SUB2IND_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "sz",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Size vector describing source array dimensions.",
-    },
-    BuiltinParamDescriptor {
-        name: "I1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First-dimension subscript values.",
-    },
-    BuiltinParamDescriptor {
-        name: "In",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Remaining per-dimension subscript arrays/scalars.",
-    },
-];
-
-const SUB2IND_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "ind = sub2ind(sz, I1, In...)",
-    inputs: &SUB2IND_INPUTS,
-    outputs: &SUB2IND_OUTPUT,
-}];
-
-const SUB2IND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SUB2IND.INVALID_INPUT",
-    identifier: Some("RunMat:sub2ind:InvalidInput"),
-    when: "Size vector, subscript count, or subscript types are invalid.",
-    message: "sub2ind: invalid input arguments",
-};
-
-const SUB2IND_ERROR_INDEX_BOUNDS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SUB2IND.INDEX_BOUNDS",
-    identifier: Some("RunMat:sub2ind:IndexBounds"),
-    when: "At least one subscript lies outside bounds for its dimension.",
-    message: "sub2ind: subscript index exceeds dimension bounds",
-};
-
-const SUB2IND_ERROR_PROVIDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SUB2IND.PROVIDER",
-    identifier: Some("RunMat:sub2ind:ProviderError"),
-    when: "GPU provider sub2ind hook fails.",
-    message: "sub2ind: provider execution failed",
-};
-
-const SUB2IND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SUB2IND.INTERNAL",
-    identifier: Some("RunMat:sub2ind:InternalError"),
-    when: "Internal tensor conversion/output construction fails.",
-    message: "sub2ind: internal error",
-};
-
-const SUB2IND_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    SUB2IND_ERROR_INVALID_INPUT,
-    SUB2IND_ERROR_INDEX_BOUNDS,
-    SUB2IND_ERROR_PROVIDER,
-    SUB2IND_ERROR_INTERNAL,
-];
-
-pub const SUB2IND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SUB2IND_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SUB2IND_ERRORS,
-};
 
 fn sub2ind_error_with_message(
     message: impl Into<String>,
@@ -221,13 +79,7 @@ fn sub2ind_internal_error(message: impl Into<String>) -> RuntimeError {
 
 #[runtime_builtin(
     name = "sub2ind",
-    category = "array/indexing",
-    summary = "Convert N-D subscripts to MATLAB-style column-major linear indices.",
-    keywords = "sub2ind,linear index,column major,gpu indexing",
-    accel = "custom",
-    type_resolver(sub2ind_type),
-    descriptor(crate::builtins::array::indexing::sub2ind::SUB2IND_DESCRIPTOR),
-    integer_capabilities(crate::builtins::array::indexing::sub2ind::SUB2IND_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::indexing::sub2ind"
 )]
 async fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -239,8 +91,8 @@ async fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinRes
             _ => None,
         })
         .collect();
-    let (dims_value, _) = materialize_value(dims_val, "sub2ind").await?;
-    let dims = parse_dims(&dims_value, "sub2ind").await?;
+    let (dims_value, _) = materialize_value(dims_val, IndexingOperation::Sub2Ind).await?;
+    let dims = parse_dims(&dims_value, IndexingOperation::Sub2Ind).await?;
     if dims.is_empty() {
         return Err(sub2ind_error("Size vector must have at least one element."));
     }
@@ -257,7 +109,7 @@ async fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinRes
 
     let mut subscripts: Vec<Tensor> = Vec::with_capacity(rest.len());
     for value in rest {
-        let (materialised, _) = materialize_value(value, "sub2ind").await?;
+        let (materialised, _) = materialize_value(value, IndexingOperation::Sub2Ind).await?;
         let tensor = tensor::value_into_tensor_for("sub2ind", materialised)
             .map_err(|message| sub2ind_error(message))?;
         subscripts.push(tensor);
@@ -338,7 +190,7 @@ async fn try_gpu_sub2ind(
         result_len = tensor::element_count(shape);
     }
 
-    let strides = build_strides(dims, "sub2ind")?;
+    let strides = build_strides(dims, IndexingOperation::Sub2Ind)?;
     if dims.iter().any(|&d| d > u32::MAX as usize)
         || strides.iter().any(|&s| s > u32::MAX as usize)
         || result_len > u32::MAX as usize
@@ -403,7 +255,7 @@ fn compute_indices(
         return Ok((Vec::new(), target_shape));
     }
 
-    let strides = build_strides(dims, "sub2ind")?;
+    let strides = build_strides(dims, IndexingOperation::Sub2Ind)?;
     let mut output = Vec::with_capacity(result_len);
 
     for idx in 0..result_len {
@@ -542,7 +394,6 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::Type;
     use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
     fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -556,33 +407,6 @@ pub(crate) mod tests {
         let result =
             sub2ind_builtin(Value::Tensor(dims), vec![Value::Num(2.0), Value::Num(3.0)]).unwrap();
         assert_eq!(result, Value::Num(8.0));
-    }
-
-    #[test]
-    fn sub2ind_type_scalar_outputs_num() {
-        assert_eq!(
-            sub2ind_type(
-                &[Type::Tensor { shape: None }, Type::Num, Type::Int],
-                &ResolveContext::new(Vec::new()),
-            ),
-            Type::Num
-        );
-    }
-
-    #[test]
-    fn sub2ind_type_vector_outputs_tensor() {
-        let subs = Type::Tensor {
-            shape: Some(vec![Some(3), Some(1)]),
-        };
-        assert_eq!(
-            sub2ind_type(
-                &[Type::Tensor { shape: None }, subs.clone(), Type::Num],
-                &ResolveContext::new(Vec::new()),
-            ),
-            Type::Tensor {
-                shape: Some(vec![Some(3), Some(1)])
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -723,6 +547,19 @@ pub(crate) mod tests {
             err.identifier(),
             super::SUB2IND_ERROR_INVALID_INPUT.identifier
         );
+    }
+
+    #[test]
+    fn rejects_trailing_singleton_rank_mismatch_for_non_scalar_subscripts() {
+        let dims = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
+        let rows = Tensor::new(vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0], vec![2, 3]).unwrap();
+        let cols = Tensor::new(vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0], vec![2, 3, 1]).unwrap();
+        let error = sub2ind_builtin(
+            Value::Tensor(dims),
+            vec![Value::Tensor(rows), Value::Tensor(cols)],
+        )
+        .expect_err("runtime requires exact non-scalar shape and rank");
+        assert_eq!(error.identifier(), SUB2IND_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

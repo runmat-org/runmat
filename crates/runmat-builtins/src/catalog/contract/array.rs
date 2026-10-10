@@ -7,7 +7,15 @@ pub enum ArrayInferenceRule {
     Combinatorics(CombinatoricsInferenceRule),
     Creation(ArrayCreationInferenceRule),
     Grouping(GroupingInferenceRule),
+    Indexing(IndexingInferenceRule),
     Introspection(ArrayIntrospectionInferenceRule),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum IndexingInferenceRule {
+    Find,
+    Ind2Sub,
+    Sub2Ind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

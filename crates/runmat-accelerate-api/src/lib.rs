@@ -2,14 +2,14 @@ use anyhow::anyhow;
 #[cfg(test)]
 use once_cell::sync::Lazy;
 use once_cell::sync::OnceCell;
-use runmat_types::{standard, ClassIdentity};
+use runmat_types::{ClassIdentity, standard};
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU32, Ordering};
 #[cfg(feature = "wgpu")]
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 mod platform;
 mod provider_registry;
@@ -24,10 +24,10 @@ pub use allocation::{
 mod iir;
 mod native_device;
 pub use iir::{
-    provider_iir_causal_query, provider_iir_state_shape, provider_iir_zero_phase_query,
     ProviderIirCoefficientSource, ProviderIirFilterOptions, ProviderIirFilterResult,
     ProviderIirIndexCancelled, ProviderIirZeroPhaseFault, ProviderIirZeroPhaseIndexBuilder,
     ProviderIirZeroPhaseIndexPlan, ProviderIirZeroPhaseRequest, ProviderPreparedIirCoefficients,
+    provider_iir_causal_query, provider_iir_state_shape, provider_iir_zero_phase_query,
 };
 mod fusion_outputs;
 mod logical_upload;
@@ -42,6 +42,8 @@ pub use view_plan::{
 };
 mod covariance;
 pub use covariance::CovarianceWeightDomainError;
+mod envelope;
+pub use envelope::EnvelopeSignalDomainError;
 mod deep_learning;
 pub use deep_learning::{
     DeepLearningFeedForwardCapability, DeepLearningFeedForwardStage,
@@ -53,8 +55,8 @@ pub use deep_learning::{
     DeepLearningPool1DResultAxis, DeepLearningPool1DRoute,
 };
 pub use provider_execution::{
-    is_unsupported_provider_error, ProviderExecutionCompletionError, ProviderExecutionError,
-    ProviderExecutionFuture, ProviderExecutionResult,
+    ProviderExecutionCompletionError, ProviderExecutionError, ProviderExecutionFuture,
+    ProviderExecutionResult, is_unsupported_provider_error,
 };
 mod placement;
 mod power;
@@ -79,17 +81,17 @@ pub use wgpu_access::{
 pub use wgpu_buffer_owner::WgpuBufferOwner;
 
 pub use fusion_outputs::validate_fused_output_classes;
-pub use logical_upload::{upload_logical_protecting, HostLogicalTensorView};
+pub use logical_upload::{HostLogicalTensorView, upload_logical_protecting};
 pub use native_device::*;
 pub use numeric_upload::{
-    class_preserving_upload_query, is_invalid_numeric_upload_result, upload_numeric_protecting,
     InvalidNumericUploadResult, NumericUploadCompletionError, NumericUploadError,
-    NumericUploadResult,
+    NumericUploadResult, class_preserving_upload_query, is_invalid_numeric_upload_result,
+    upload_numeric_protecting,
 };
 pub use numerical_domain::{NumericalDomainEvidence, RoundDigitsMode};
 pub use placement::*;
 pub use power::{PowerResultDomain, PowerScalarControl, RealPowerArithmeticMode, RealPowerOperand};
-pub use residency::{clear_residency_checked, ResidencyCleanupError, ResidencyRestoreGuard};
+pub use residency::{ResidencyCleanupError, ResidencyRestoreGuard, clear_residency_checked};
 
 type ResidencyMarkFn = fn(&GpuTensorHandle);
 type ResidencyClearFn = fn(GpuHandleIdentity) -> Result<(), ResidencyCleanupError>;
@@ -1740,13 +1742,14 @@ pub trait AccelProvider: AcceleratorThreadBound {
     /// Producer-owned logical registration. Implementations choose their real
     /// U8/F32/F64 encoding and publish a logically classified owning view.
     /// Numeric upload followed by caller relabeling is not this contract.
+    /// Only a certified pre-effect Unsupported result permits an automatic
+    /// source to retain its host logical output. Providers must mark failures
+    /// after possible allocation or submission as unproven or after-effect.
     fn upload_logical_raw(
         &self,
         _host: &HostLogicalTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(unsupported_provider_operation(
-            "provider does not implement logical upload",
-        ))
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
+        Err(unsupported_provider_operation("provider does not implement logical upload").into())
     }
     fn upload(&self, host: &crate::HostTensorView) -> anyhow::Result<GpuTensorHandle>;
     fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a>;
@@ -3600,6 +3603,21 @@ pub trait AccelProvider: AcceleratorThreadBound {
             Err(unsupported_provider_operation("signal_envelope not supported by provider").into())
         })
     }
+    /// Pure request-local admission for the optional envelope hook. `false`
+    /// permits host selection before provider effects; every error after an
+    /// admitted hook invocation is terminal, including Unsupported.
+    fn supports_signal_envelope(&self, _request: &ProviderEnvelopeRequest<'_>) -> bool {
+        false
+    }
+    /// Pure request-local admission for the optional analytic-signal hook.
+    /// `false` certifies that no Hilbert hook was invoked, so an owning-runtime
+    /// host implementation may be selected before provider effects. An
+    /// implementation returning `true` must treat every later hook failure as
+    /// terminal, including a reported Unsupported error after staging.
+    fn supports_signal_hilbert(&self, _request: &ProviderHilbertRequest<'_>) -> bool {
+        false
+    }
+
     fn signal_hilbert<'a>(
         &'a self,
         _request: &'a ProviderHilbertRequest<'a>,
@@ -3623,6 +3641,14 @@ pub trait AccelProvider: AcceleratorThreadBound {
             "flip not supported by provider",
         ))
     }
+    /// Read-only admission for the legacy unphased `circshift` hook. `false`
+    /// proves only that no provider call was made and permits host fallback;
+    /// after `true`, any hook error is terminal because its effects are unknown.
+    /// Providers must include actual class, shape, layout and shift limits.
+    fn supports_circshift(&self, _handle: &GpuTensorHandle, _shifts: &[isize]) -> bool {
+        false
+    }
+
     fn circshift(
         &self,
         _handle: &GpuTensorHandle,
@@ -4235,6 +4261,18 @@ pub trait AccelProvider: AcceleratorThreadBound {
         Err(anyhow::anyhow!(
             "integer_cummax_scan not supported by provider"
         ))
+    }
+
+    /// Certifies that this provider admits the exact find request before any
+    /// execution effect. A false result permits the runtime's owner-aware host
+    /// path; an error after true is never replay authority.
+    fn supports_find(
+        &self,
+        _a: &GpuTensorHandle,
+        _limit: Option<usize>,
+        _direction: FindDirection,
+    ) -> bool {
+        false
     }
 
     fn find(
@@ -5860,10 +5898,12 @@ mod tests {
             .acquire_tensor(&wire)
             .unwrap();
         assert!(acquired.shares_allocation_with(&handle));
-        assert!(serde_json::from_str::<GpuTensorWireDescriptor>(
-            r#"{"shape":[1,1],"device_id":5,"buffer_id":8}"#
-        )
-        .is_err());
+        assert!(
+            serde_json::from_str::<GpuTensorWireDescriptor>(
+                r#"{"shape":[1,1],"device_id":5,"buffer_id":8}"#
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -6029,9 +6069,11 @@ mod tests {
                 }
             }
         ));
-        assert!(!PROVIDER_A
-            .capability_snapshot()
-            .supports(ProviderOperationFamily::Elementwise));
+        assert!(
+            !PROVIDER_A
+                .capability_snapshot()
+                .supports(ProviderOperationFamily::Elementwise)
+        );
 
         let snapshot = PROVIDER_A.capability_snapshot();
         let encoded = serde_json::to_string(&snapshot).expect("serialize capability snapshot");
@@ -6091,9 +6133,11 @@ mod tests {
             NumericElementType::F32,
             GpuTensorStorage::Real,
         );
-        assert!(numeric
-            .with_view(numeric.view().clone().with_logical(true))
-            .is_err());
+        assert!(
+            numeric
+                .with_view(numeric.view().clone().with_logical(true))
+                .is_err()
+        );
         assert_eq!(
             handle_class_identity(&numeric),
             Some(standard::SINGLE.owned())

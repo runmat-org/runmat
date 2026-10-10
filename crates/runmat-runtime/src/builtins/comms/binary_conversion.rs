@@ -1,9 +1,12 @@
 //! MATLAB-compatible binary and hexadecimal conversion helpers.
 
 use runmat_builtins::{
-    ResolveContext, Type, BI2DE_GPU_INPUT_EXTENSION, BI2DE_INTEGER_BASE_EXTENSION,
-    DE2BI_GPU_INPUT_EXTENSION, DE2BI_INTEGER_CONTROL_EXTENSION, DE2BI_LOGICAL_INPUT_EXTENSION,
-    DE2BI_ND_INPUT_EXTENSION, DE2BI_WIDE_INTEGER_EXTENSION,
+    BI2DE_ERROR_BASE, BI2DE_ERROR_INPUT, BI2DE_ERROR_ORDER, BI2DE_ERROR_PROVIDER,
+    BI2DE_ERROR_RANGE, BI2DE_GPU_INPUT_EXTENSION, BI2DE_INTEGER_BASE_EXTENSION,
+    BuiltinErrorDescriptor, DE2BI_ERROR_BASE, DE2BI_ERROR_INPUT, DE2BI_ERROR_ORDER,
+    DE2BI_ERROR_PROVIDER, DE2BI_ERROR_RESOURCE, DE2BI_ERROR_WIDTH, DE2BI_GPU_INPUT_EXTENSION,
+    DE2BI_INTEGER_CONTROL_EXTENSION, DE2BI_LOGICAL_INPUT_EXTENSION, DE2BI_ND_INPUT_EXTENSION,
+    DE2BI_WIDE_INTEGER_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -12,7 +15,7 @@ use runmat_value::{
 };
 
 use crate::builtins::common::{gpu_helpers, tensor as tensor_utils};
-use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use crate::{BuiltinResult, RuntimeError, build_runtime_error};
 
 mod typed_output;
 use typed_output::{digit_decimal_result, digit_output_storage};
@@ -35,6 +38,110 @@ enum DigitOrder {
     LeftMsb,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DigitConversion {
+    Bi2de,
+    De2bi,
+}
+
+#[derive(Clone, Copy)]
+enum DigitError {
+    Bi2deInput,
+    Bi2deBase,
+    Bi2deOrder,
+    Bi2deRange,
+    De2biInput,
+    De2biBase,
+    De2biOrder,
+    De2biWidth,
+    De2biResource,
+}
+
+impl DigitConversion {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Bi2de => BI2DE_NAME,
+            Self::De2bi => DE2BI_NAME,
+        }
+    }
+
+    fn base_error(self) -> DigitError {
+        match self {
+            Self::Bi2de => DigitError::Bi2deBase,
+            Self::De2bi => DigitError::De2biBase,
+        }
+    }
+
+    fn order_error(self) -> DigitError {
+        match self {
+            Self::Bi2de => DigitError::Bi2deOrder,
+            Self::De2bi => DigitError::De2biOrder,
+        }
+    }
+}
+
+impl DigitError {
+    fn operation(self) -> DigitConversion {
+        match self {
+            Self::Bi2deInput | Self::Bi2deBase | Self::Bi2deOrder | Self::Bi2deRange => {
+                DigitConversion::Bi2de
+            }
+            Self::De2biInput
+            | Self::De2biBase
+            | Self::De2biOrder
+            | Self::De2biWidth
+            | Self::De2biResource => DigitConversion::De2bi,
+        }
+    }
+
+    fn descriptor(self) -> &'static BuiltinErrorDescriptor {
+        match self {
+            Self::Bi2deInput => &BI2DE_ERROR_INPUT,
+            Self::Bi2deBase => &BI2DE_ERROR_BASE,
+            Self::Bi2deOrder => &BI2DE_ERROR_ORDER,
+            Self::Bi2deRange => &BI2DE_ERROR_RANGE,
+            Self::De2biInput => &DE2BI_ERROR_INPUT,
+            Self::De2biBase => &DE2BI_ERROR_BASE,
+            Self::De2biOrder => &DE2BI_ERROR_ORDER,
+            Self::De2biWidth => &DE2BI_ERROR_WIDTH,
+            Self::De2biResource => &DE2BI_ERROR_RESOURCE,
+        }
+    }
+}
+
+fn digit_error(error: DigitError, message: impl Into<String>) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(error.operation().name());
+    if let Some(identifier) = error.descriptor().identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+#[derive(Clone, Copy)]
+enum NumericParseOwner {
+    Digit(DigitError),
+    Text(&'static str),
+}
+
+const BI2DE_INPUT_OWNER: NumericParseOwner = NumericParseOwner::Digit(DigitError::Bi2deInput);
+const DE2BI_INPUT_OWNER: NumericParseOwner = NumericParseOwner::Digit(DigitError::De2biInput);
+
+impl NumericParseOwner {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Digit(error) => error.operation().name(),
+            Self::Text(name) => name,
+        }
+    }
+
+    fn error(self, message: impl Into<String>) -> RuntimeError {
+        match self {
+            Self::Digit(error) => digit_error(error, message),
+            Self::Text(name) => conversion_error(name, message),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct DigitMatrix {
     data: Vec<usize>,
@@ -44,27 +151,41 @@ struct DigitMatrix {
 }
 
 fn bi2de_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BI2DE_NAME)
-        .build()
+    digit_error(DigitError::Bi2deInput, message)
 }
 
 fn de2bi_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(DE2BI_NAME)
-        .build()
+    digit_error(DigitError::De2biInput, message)
 }
 
 fn conversion_error(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
 }
 
-fn vector_or_scalar_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::tensor()
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TextConversion {
+    Dec2Bin,
+    Dec2Hex,
+    Bin2Dec,
+    Hex2Dec,
 }
 
-fn char_matrix_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::String
+impl TextConversion {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Dec2Bin => DEC2BIN_NAME,
+            Self::Dec2Hex => DEC2HEX_NAME,
+            Self::Bin2Dec => BIN2DEC_NAME,
+            Self::Hex2Dec => HEX2DEC_NAME,
+        }
+    }
+
+    const fn radix(self) -> u32 {
+        match self {
+            Self::Dec2Bin | Self::Bin2Dec => 2,
+            Self::Dec2Hex | Self::Hex2Dec => 16,
+        }
+    }
 }
 
 #[runtime_builtin(
@@ -80,11 +201,16 @@ async fn bi2de_builtin(b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             BI2DE_NAME,
         )?;
     }
-    if matches!(b, Value::GpuTensor(_)) {
+    if let Value::GpuTensor(handle) = &b {
         crate::compatibility::ensure_builtin_extension_enabled(
             &BI2DE_GPU_INPUT_EXTENSION,
             BI2DE_NAME,
         )?;
+        if runmat_accelerate_api::handle_storage(handle)
+            != runmat_accelerate_api::GpuTensorStorage::Real
+        {
+            return Err(bi2de_error("bi2de: B must contain real digits"));
+        }
     }
     let digits = digit_matrix_from_value(b, BI2DE_NAME).await?;
     validate_digit_matrix(&digits, opts.base, BI2DE_NAME)?;
@@ -125,11 +251,18 @@ async fn de2bi_builtin(d: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             DE2BI_NAME,
         )?;
     }
-    if matches!(d, Value::GpuTensor(_)) {
+    if let Value::GpuTensor(handle) = &d {
         crate::compatibility::ensure_builtin_extension_enabled(
             &DE2BI_GPU_INPUT_EXTENSION,
             DE2BI_NAME,
         )?;
+        if runmat_accelerate_api::handle_storage(handle)
+            != runmat_accelerate_api::GpuTensorStorage::Real
+        {
+            return Err(de2bi_error(
+                "de2bi: D must contain real nonnegative integers",
+            ));
+        }
     }
     let (decimals, dtype) = decimal_vector_from_value(d).await?;
     if decimals.iter().any(|&value| value > MAX_EXACT_INTEGER) {
@@ -146,10 +279,13 @@ async fn de2bi_builtin(d: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         .unwrap_or(0);
     let width = opts.width.unwrap_or(needed_width);
     if opts.width.is_some() && width < needed_width {
-        return Err(de2bi_error(format!(
-            "de2bi: N is too small to represent an input value in base {}",
-            opts.base
-        )));
+        return Err(digit_error(
+            DigitError::De2biWidth,
+            format!(
+                "de2bi: N is too small to represent an input value in base {}",
+                opts.base
+            ),
+        ));
     }
 
     let rows = decimals.len();
@@ -176,50 +312,38 @@ fn is_fixed_width_integer(value: &Value) -> bool {
 
 #[runtime_builtin(
     name = "dec2bin",
-    category = "comms/conversion",
-    summary = "Convert decimal integers to binary character rows.",
-    keywords = "dec2bin,decimal,binary,base conversion,twos complement",
-    type_resolver(char_matrix_type),
+    binding_variant = "default",
     builtin_path = "crate::builtins::comms::binary_conversion"
 )]
 async fn dec2bin_builtin(d: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    decimal_to_text_builtin(d, rest, DEC2BIN_NAME, 2, true).await
+    decimal_to_text_builtin(d, rest, TextConversion::Dec2Bin).await
 }
 
 #[runtime_builtin(
     name = "dec2hex",
-    category = "comms/conversion",
-    summary = "Convert decimal integers to hexadecimal character rows.",
-    keywords = "dec2hex,decimal,hexadecimal,base conversion,twos complement",
-    type_resolver(char_matrix_type),
+    binding_variant = "default",
     builtin_path = "crate::builtins::comms::binary_conversion"
 )]
 async fn dec2hex_builtin(d: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    decimal_to_text_builtin(d, rest, DEC2HEX_NAME, 16, false).await
+    decimal_to_text_builtin(d, rest, TextConversion::Dec2Hex).await
 }
 
 #[runtime_builtin(
     name = "bin2dec",
-    category = "comms/conversion",
-    summary = "Convert binary text to decimal numbers.",
-    keywords = "bin2dec,binary,decimal,base conversion,twos complement",
-    type_resolver(vector_or_scalar_type),
+    binding_variant = "default",
     builtin_path = "crate::builtins::comms::binary_conversion"
 )]
 async fn bin2dec_builtin(bin_str: Value) -> BuiltinResult<Value> {
-    text_to_decimal_builtin(bin_str, BIN2DEC_NAME, 2).await
+    text_to_decimal_builtin(bin_str, TextConversion::Bin2Dec).await
 }
 
 #[runtime_builtin(
     name = "hex2dec",
-    category = "comms/conversion",
-    summary = "Convert hexadecimal text to decimal numbers.",
-    keywords = "hex2dec,hexadecimal,decimal,base conversion,twos complement",
-    type_resolver(vector_or_scalar_type),
+    binding_variant = "default",
     builtin_path = "crate::builtins::comms::binary_conversion"
 )]
 async fn hex2dec_builtin(hex_str: Value) -> BuiltinResult<Value> {
-    text_to_decimal_builtin(hex_str, HEX2DEC_NAME, 16).await
+    text_to_decimal_builtin(hex_str, TextConversion::Hex2Dec).await
 }
 
 #[derive(Debug)]
@@ -235,15 +359,15 @@ impl Bi2deOptions {
         match args {
             [] => {}
             [one] => {
-                if let Some(parsed) = parse_order(one, BI2DE_NAME)? {
+                if let Some(parsed) = parse_order(one, DigitConversion::Bi2de)? {
                     order = parsed;
                 } else {
-                    base = parse_base(one, BI2DE_NAME)?;
+                    base = parse_base(one, DigitConversion::Bi2de)?;
                 }
             }
             [base_value, flag] => {
-                base = parse_base(base_value, BI2DE_NAME)?;
-                order = parse_required_order(flag, BI2DE_NAME)?;
+                base = parse_base(base_value, DigitConversion::Bi2de)?;
+                order = parse_required_order(flag, DigitConversion::Bi2de)?;
             }
             _ => return Err(bi2de_error("bi2de: expected at most three inputs")),
         }
@@ -266,11 +390,12 @@ impl De2biOptions {
         let mut idx = 0usize;
 
         if let Some(first) = args.get(idx) {
-            if let Some(parsed) = parse_order(first, DE2BI_NAME)? {
+            if let Some(parsed) = parse_order(first, DigitConversion::De2bi)? {
                 order = parsed;
                 idx += 1;
                 if idx != args.len() {
-                    return Err(de2bi_error(
+                    return Err(digit_error(
+                        DigitError::De2biOrder,
                         "de2bi: digit order flag must follow width and base arguments",
                     ));
                 }
@@ -281,17 +406,17 @@ impl De2biOptions {
         }
 
         if let Some(second) = args.get(idx) {
-            if let Some(parsed) = parse_order(second, DE2BI_NAME)? {
+            if let Some(parsed) = parse_order(second, DigitConversion::De2bi)? {
                 order = parsed;
                 idx += 1;
             } else {
-                base = parse_base(second, DE2BI_NAME)?;
+                base = parse_base(second, DigitConversion::De2bi)?;
                 idx += 1;
             }
         }
 
         if let Some(third) = args.get(idx) {
-            order = parse_required_order(third, DE2BI_NAME)?;
+            order = parse_required_order(third, DigitConversion::De2bi)?;
             idx += 1;
         }
 
@@ -305,10 +430,9 @@ impl De2biOptions {
 async fn decimal_to_text_builtin(
     value: Value,
     rest: Vec<Value>,
-    builtin: &'static str,
-    radix: u32,
-    floor_fractional: bool,
+    conversion: TextConversion,
 ) -> BuiltinResult<Value> {
+    let builtin = conversion.name();
     if rest.len() > 1 {
         return Err(conversion_error(
             builtin,
@@ -320,12 +444,17 @@ async fn decimal_to_text_builtin(
         .map(|value| parse_min_digits(value, builtin))
         .transpose()?
         .unwrap_or(0);
-    let decimals = decimal_items_from_value(value, builtin, floor_fractional).await?;
+    let decimals = decimal_items_from_value(
+        value,
+        builtin,
+        matches!(conversion, TextConversion::Dec2Bin),
+    )
+    .await?;
     checked_decimal_text_output_len(decimals.len(), 1usize.max(min_digits), builtin)?;
     let mut rows = Vec::with_capacity(decimals.len());
     let mut width = 1usize.max(min_digits);
     for decimal in decimals {
-        let row = format_decimal_item(decimal, radix, min_digits, builtin)?;
+        let row = format_decimal_item(decimal, conversion.radix(), min_digits, builtin)?;
         width = width.max(row.text.chars().count());
         rows.push(row);
     }
@@ -360,16 +489,13 @@ fn checked_decimal_text_output_len(
     Ok(len)
 }
 
-async fn text_to_decimal_builtin(
-    value: Value,
-    builtin: &'static str,
-    radix: u32,
-) -> BuiltinResult<Value> {
+async fn text_to_decimal_builtin(value: Value, conversion: TextConversion) -> BuiltinResult<Value> {
+    let builtin = conversion.name();
     let parsed = text_items_from_value(value, builtin)?;
     let values = parsed
         .items
         .iter()
-        .map(|text| parse_base_text(text, radix, builtin))
+        .map(|text| parse_base_text(text, conversion))
         .collect::<BuiltinResult<Vec<_>>>()?;
     value_from_decimal_text_values(values, parsed.shape, parsed.preserve_shape, parsed.column)
         .map_err(|err| conversion_error(builtin, format!("{builtin}: {err}")))
@@ -602,7 +728,7 @@ fn format_unsigned_digits(mut value: u128, radix: u32, min_digits: usize, pad: c
 }
 
 fn parse_min_digits(value: &Value, builtin: &'static str) -> BuiltinResult<usize> {
-    let parsed = parse_nonnegative_integer(value, builtin, "minDigits")?;
+    let parsed = parse_nonnegative_integer(value, NumericParseOwner::Text(builtin), "minDigits")?;
     if parsed > usize::MAX as u128 {
         return Err(conversion_error(
             builtin,
@@ -678,7 +804,9 @@ fn text_items_from_cell(cell: CellArray, builtin: &'static str) -> BuiltinResult
     })
 }
 
-fn parse_base_text(text: &str, radix: u32, builtin: &'static str) -> BuiltinResult<f64> {
+fn parse_base_text(text: &str, conversion: TextConversion) -> BuiltinResult<f64> {
+    let builtin = conversion.name();
+    let radix = conversion.radix();
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return Err(conversion_error(
@@ -686,7 +814,7 @@ fn parse_base_text(text: &str, radix: u32, builtin: &'static str) -> BuiltinResu
             format!("{builtin}: input text must not be empty"),
         ));
     }
-    let (digits, suffix) = strip_base_prefix_and_suffix(trimmed, radix);
+    let (digits, suffix) = strip_base_prefix_and_suffix(trimmed, conversion);
     if digits.is_empty() {
         return Err(conversion_error(
             builtin,
@@ -770,15 +898,20 @@ enum TextSuffix {
     Unsigned(usize),
 }
 
-fn strip_base_prefix_and_suffix(text: &str, radix: u32) -> (String, Option<TextSuffix>) {
-    let mut body = if radix == 2 {
-        text.strip_prefix("0b")
+fn strip_base_prefix_and_suffix(
+    text: &str,
+    conversion: TextConversion,
+) -> (String, Option<TextSuffix>) {
+    let mut body = match conversion {
+        TextConversion::Bin2Dec => text
+            .strip_prefix("0b")
             .or_else(|| text.strip_prefix("0B"))
-            .unwrap_or(text)
-    } else {
-        text.strip_prefix("0x")
+            .unwrap_or(text),
+        TextConversion::Hex2Dec => text
+            .strip_prefix("0x")
             .or_else(|| text.strip_prefix("0X"))
-            .unwrap_or(text)
+            .unwrap_or(text),
+        TextConversion::Dec2Bin | TextConversion::Dec2Hex => text,
     };
     let mut suffix_bits = None;
     for suffix in ["s8", "s16", "s32", "s64"] {
@@ -834,11 +967,24 @@ async fn digit_matrix_from_value(
         Value::Tensor(tensor) => digit_matrix_from_tensor(tensor, builtin),
         Value::LogicalArray(logical) => digit_matrix_from_logical(logical, builtin),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(|cause| {
+                    build_runtime_error("bi2de: failed to gather resident digits")
+                        .with_builtin(BI2DE_NAME)
+                        .with_identifier(
+                            BI2DE_ERROR_PROVIDER
+                                .identifier
+                                .expect("provider identifier"),
+                        )
+                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                        .with_source(cause)
+                        .build()
+                })?;
             digit_matrix_from_tensor(tensor, builtin)
         }
         Value::Num(n) => Ok(DigitMatrix {
-            data: vec![number_to_digit(n, builtin, "B")?],
+            data: vec![number_to_digit(n, "B")?],
             rows: 1,
             cols: 1,
             dtype: Some(NumericDType::F64),
@@ -846,7 +992,7 @@ async fn digit_matrix_from_value(
         Value::Int(i) => {
             let dtype = i.numeric_dtype();
             Ok(DigitMatrix {
-                data: vec![integer_to_digit(&i, builtin, "B")?],
+                data: vec![integer_to_digit(&i, "B")?],
                 rows: 1,
                 cols: 1,
                 dtype: Some(dtype),
@@ -861,11 +1007,9 @@ async fn digit_matrix_from_value(
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             Err(bi2de_error("bi2de: B must contain real digits"))
         }
-        other => Err(build_runtime_error(format!(
+        other => Err(bi2de_error(format!(
             "{builtin}: B must be a numeric or logical matrix, got {other:?}"
-        ))
-        .with_builtin(builtin)
-        .build()),
+        ))),
     }
 }
 
@@ -875,21 +1019,20 @@ fn digit_matrix_from_tensor(tensor: Tensor, builtin: &'static str) -> BuiltinRes
     let dtype = tensor.numeric_dtype();
     let data = match tensor
         .into_numeric_storage()
-        .map_err(|err| conversion_error(builtin, format!("{builtin}: {err}")))?
+        .map_err(|err| bi2de_error(format!("{builtin}: {err}")))?
     {
         NumericStorage::F64(values) => values
             .into_iter()
-            .map(|value| number_to_digit(value, builtin, "B"))
+            .map(|value| number_to_digit(value, "B"))
             .collect::<BuiltinResult<Vec<_>>>()?,
         NumericStorage::F32(values) => values
             .into_iter()
-            .map(|value| number_to_digit(f64::from(value), builtin, "B"))
+            .map(|value| number_to_digit(f64::from(value), "B"))
             .collect::<BuiltinResult<Vec<_>>>()?,
         storage => integer_storage_to_digits(
             &storage
                 .into_integer_storage()
                 .expect("non-floating numeric storage is integer"),
-            builtin,
             "B",
         )?,
     };
@@ -935,13 +1078,26 @@ async fn decimal_vector_from_value(value: Value) -> BuiltinResult<(Vec<u128>, Nu
             NumericDType::F64,
         )),
         Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(|cause| {
+                    build_runtime_error("de2bi: failed to gather resident decimals")
+                        .with_builtin(DE2BI_NAME)
+                        .with_identifier(
+                            DE2BI_ERROR_PROVIDER
+                                .identifier
+                                .expect("provider identifier"),
+                        )
+                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                        .with_source(cause)
+                        .build()
+                })?;
             let dtype = tensor.numeric_dtype();
             Ok((decimal_vector_from_tensor(tensor)?, dtype))
         }
         Value::Num(n) => Ok((vec![number_to_decimal(n, "D")?], NumericDType::F64)),
         Value::Int(i) => Ok((
-            vec![integer_to_nonnegative(&i, DE2BI_NAME, "D")?],
+            vec![integer_to_nonnegative(&i, DE2BI_INPUT_OWNER, "D")?],
             i.numeric_dtype(),
         )),
         Value::Bool(b) => Ok((vec![u128::from(b)], NumericDType::F64)),
@@ -971,7 +1127,6 @@ fn decimal_vector_from_tensor(tensor: Tensor) -> BuiltinResult<Vec<u128>> {
             &storage
                 .into_integer_storage()
                 .expect("non-floating numeric storage is integer"),
-            DE2BI_NAME,
             "D",
         ),
     }
@@ -981,11 +1136,9 @@ fn ensure_matrix_shape(shape: &[usize], builtin: &'static str, name: &str) -> Bu
     if shape.len() <= 2 {
         Ok(())
     } else {
-        Err(
-            build_runtime_error(format!("{builtin}: {name} must be a vector or 2-D matrix"))
-                .with_builtin(builtin)
-                .build(),
-        )
+        Err(bi2de_error(format!(
+            "{builtin}: {name} must be a vector or 2-D matrix"
+        )))
     }
 }
 
@@ -996,12 +1149,10 @@ fn validate_digit_matrix(
 ) -> BuiltinResult<()> {
     for &digit in &digits.data {
         if digit >= base {
-            return Err(build_runtime_error(format!(
+            return Err(bi2de_error(format!(
                 "{builtin}: digit values must be integers in the range [0, {}]",
                 base - 1
-            ))
-            .with_builtin(builtin)
-            .build());
+            )));
         }
     }
     Ok(())
@@ -1022,7 +1173,9 @@ fn row_digits_to_decimal(
                 acc = acc
                     .checked_mul(base_u)
                     .and_then(|value| value.checked_add(digit))
-                    .ok_or_else(|| bi2de_error("bi2de: decimal value overflow"))?;
+                    .ok_or_else(|| {
+                        digit_error(DigitError::Bi2deRange, "bi2de: decimal value overflow")
+                    })?;
                 ensure_exact_range(acc, BI2DE_NAME)?;
             }
         }
@@ -1034,7 +1187,9 @@ fn row_digits_to_decimal(
                 acc = acc
                     .checked_mul(base_u)
                     .and_then(|value| value.checked_add(digit))
-                    .ok_or_else(|| bi2de_error("bi2de: decimal value overflow"))?;
+                    .ok_or_else(|| {
+                        digit_error(DigitError::Bi2deRange, "bi2de: decimal value overflow")
+                    })?;
                 ensure_exact_range(acc, BI2DE_NAME)?;
             }
         }
@@ -1077,13 +1232,19 @@ fn digits_required(mut value: u128, base: usize) -> usize {
 }
 
 fn checked_de2bi_output_len(rows: usize, width: usize) -> BuiltinResult<usize> {
-    let len = rows
-        .checked_mul(width)
-        .ok_or_else(|| de2bi_error("de2bi: requested output exceeds the maximum supported size"))?;
+    let len = rows.checked_mul(width).ok_or_else(|| {
+        digit_error(
+            DigitError::De2biResource,
+            "de2bi: requested output exceeds the maximum supported size",
+        )
+    })?;
     if len > MAX_DE2BI_OUTPUT_ELEMENTS {
-        return Err(de2bi_error(format!(
-            "de2bi: requested output has {len} elements; limit is {MAX_DE2BI_OUTPUT_ELEMENTS}"
-        )));
+        return Err(digit_error(
+            DigitError::De2biResource,
+            format!(
+                "de2bi: requested output has {len} elements; limit is {MAX_DE2BI_OUTPUT_ELEMENTS}"
+            ),
+        ));
     }
     Ok(len)
 }
@@ -1092,81 +1253,78 @@ fn parse_width(value: &Value) -> BuiltinResult<Option<usize>> {
     if is_empty_numeric(value) {
         return Ok(None);
     }
-    let width = parse_nonnegative_integer(value, DE2BI_NAME, "N")?;
+    let width =
+        parse_nonnegative_integer(value, NumericParseOwner::Digit(DigitError::De2biWidth), "N")?;
     if width == 0 {
-        return Err(de2bi_error("de2bi: N must be a positive integer"));
+        return Err(digit_error(
+            DigitError::De2biWidth,
+            "de2bi: N must be a positive integer",
+        ));
     }
     if width > usize::MAX as u128 {
-        return Err(de2bi_error("de2bi: N is too large for this platform"));
+        return Err(digit_error(
+            DigitError::De2biWidth,
+            "de2bi: N is too large for this platform",
+        ));
     }
     Ok(Some(width as usize))
 }
 
-fn parse_base(value: &Value, builtin: &'static str) -> BuiltinResult<usize> {
-    let base = parse_nonnegative_integer(value, builtin, "P")?;
+fn parse_base(value: &Value, operation: DigitConversion) -> BuiltinResult<usize> {
+    let builtin = operation.name();
+    let base =
+        parse_nonnegative_integer(value, NumericParseOwner::Digit(operation.base_error()), "P")?;
     if base < 2 {
-        return Err(
-            build_runtime_error(format!("{builtin}: P must be an integer greater than 1"))
-                .with_builtin(builtin)
-                .build(),
-        );
+        return Err(digit_error(
+            operation.base_error(),
+            format!("{builtin}: P must be an integer greater than 1"),
+        ));
     }
     if base > MAX_EXACT_INTEGER || base > usize::MAX as u128 {
-        return Err(
-            build_runtime_error(format!("{builtin}: P is too large for this platform"))
-                .with_builtin(builtin)
-                .build(),
-        );
+        return Err(digit_error(
+            operation.base_error(),
+            format!("{builtin}: P is too large for this platform"),
+        ));
     }
     Ok(base as usize)
 }
 
 fn parse_nonnegative_integer(
     value: &Value,
-    builtin: &'static str,
+    owner: NumericParseOwner,
     name: &str,
 ) -> BuiltinResult<u128> {
+    let builtin = owner.name();
     if let Value::Int(integer) = value {
-        return integer_to_nonnegative(integer, builtin, name);
+        return integer_to_nonnegative(integer, owner, name);
     }
     if let Value::Tensor(tensor) = value {
         if tensor_utils::is_scalar_tensor(tensor) {
             if let Some(storage) = tensor.integer_storage() {
-                let integer = storage.value_at(0).ok_or_else(|| {
-                    build_runtime_error(format!("{builtin}: {name} must be a scalar"))
-                        .with_builtin(builtin)
-                        .build()
-                })?;
-                return integer_to_nonnegative(&integer, builtin, name);
+                let integer = storage
+                    .value_at(0)
+                    .ok_or_else(|| owner.error(format!("{builtin}: {name} must be a scalar")))?;
+                return integer_to_nonnegative(&integer, owner, name);
             }
         }
     }
-    let n = scalar_number(value, builtin, name)?;
+    let n = scalar_number(value, owner, name)?;
     if !n.is_finite() {
-        return Err(
-            build_runtime_error(format!("{builtin}: {name} must be finite"))
-                .with_builtin(builtin)
-                .build(),
-        );
+        return Err(owner.error(format!("{builtin}: {name} must be finite")));
     }
     if n.fract() != 0.0 || n < 0.0 {
-        return Err(build_runtime_error(format!(
-            "{builtin}: {name} must be a nonnegative integer"
-        ))
-        .with_builtin(builtin)
-        .build());
+        return Err(owner.error(format!("{builtin}: {name} must be a nonnegative integer")));
     }
     if n > MAX_EXACT_INTEGER as f64 {
-        return Err(build_runtime_error(format!(
+        return Err(owner.error(format!(
             "{builtin}: {name} exceeds the maximum exact integer supported by RunMat"
-        ))
-        .with_builtin(builtin)
-        .build());
+        )));
     }
     Ok(n as u128)
 }
 
-fn scalar_number(value: &Value, builtin: &'static str, name: &str) -> BuiltinResult<f64> {
+fn scalar_number(value: &Value, owner: NumericParseOwner, name: &str) -> BuiltinResult<f64> {
+    let builtin = owner.name();
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
@@ -1177,110 +1335,97 @@ fn scalar_number(value: &Value, builtin: &'static str, name: &str) -> BuiltinRes
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
-        _ => Err(
-            build_runtime_error(format!("{builtin}: {name} must be a scalar"))
-                .with_builtin(builtin)
-                .build(),
-        ),
+        _ => Err(owner.error(format!("{builtin}: {name} must be a scalar"))),
     }
 }
 
-fn number_to_digit(value: f64, builtin: &'static str, name: &str) -> BuiltinResult<usize> {
-    let integer = parse_nonnegative_integer(&Value::Num(value), builtin, name)?;
+fn number_to_digit(value: f64, name: &str) -> BuiltinResult<usize> {
+    let integer = parse_nonnegative_integer(&Value::Num(value), BI2DE_INPUT_OWNER, name)?;
     if integer > usize::MAX as u128 {
-        return Err(build_runtime_error(format!(
-            "{builtin}: {name} value is too large for this platform"
-        ))
-        .with_builtin(builtin)
-        .build());
+        return Err(BI2DE_INPUT_OWNER.error(format!(
+            "bi2de: {name} value is too large for this platform"
+        )));
     }
     Ok(integer as usize)
 }
 
-fn integer_to_digit(value: &IntValue, builtin: &'static str, name: &str) -> BuiltinResult<usize> {
-    let integer = integer_to_nonnegative(value, builtin, name)?;
+fn integer_to_digit(value: &IntValue, name: &str) -> BuiltinResult<usize> {
+    let integer = integer_to_nonnegative(value, BI2DE_INPUT_OWNER, name)?;
     if integer > usize::MAX as u128 {
-        return Err(build_runtime_error(format!(
-            "{builtin}: {name} value is too large for this platform"
-        ))
-        .with_builtin(builtin)
-        .build());
+        return Err(BI2DE_INPUT_OWNER.error(format!(
+            "bi2de: {name} value is too large for this platform"
+        )));
     }
     Ok(integer as usize)
 }
 
-fn integer_storage_to_digits(
-    storage: &IntegerStorage,
-    builtin: &'static str,
-    name: &str,
-) -> BuiltinResult<Vec<usize>> {
+fn integer_storage_to_digits(storage: &IntegerStorage, name: &str) -> BuiltinResult<Vec<usize>> {
     storage
         .exact_values()
         .iter()
-        .map(|value| integer_to_digit(value, builtin, name))
+        .map(|value| integer_to_digit(value, name))
         .collect()
 }
 
 fn integer_storage_to_nonnegative(
     storage: &IntegerStorage,
-    builtin: &'static str,
     name: &str,
 ) -> BuiltinResult<Vec<u128>> {
     storage
         .exact_values()
         .iter()
-        .map(|value| integer_to_nonnegative(value, builtin, name))
+        .map(|value| integer_to_nonnegative(value, DE2BI_INPUT_OWNER, name))
         .collect()
 }
 
 fn integer_to_nonnegative(
     value: &IntValue,
-    builtin: &'static str,
+    owner: NumericParseOwner,
     name: &str,
 ) -> BuiltinResult<u128> {
-    value.try_to_u64().map(u128::from).ok_or_else(|| {
-        build_runtime_error(format!("{builtin}: {name} must be a nonnegative integer"))
-            .with_builtin(builtin)
-            .build()
-    })
+    let builtin = owner.name();
+    value
+        .try_to_u64()
+        .map(u128::from)
+        .ok_or_else(|| owner.error(format!("{builtin}: {name} must be a nonnegative integer")))
 }
 
 fn number_to_decimal(value: f64, name: &str) -> BuiltinResult<u128> {
-    parse_nonnegative_integer(&Value::Num(value), DE2BI_NAME, name)
+    parse_nonnegative_integer(&Value::Num(value), DE2BI_INPUT_OWNER, name)
 }
 
 fn ensure_exact_range(value: u128, builtin: &'static str) -> BuiltinResult<()> {
     if value > MAX_EXACT_INTEGER {
-        Err(build_runtime_error(format!(
-            "{builtin}: result exceeds the maximum exact integer supported by RunMat"
+        Err(digit_error(
+            DigitError::Bi2deRange,
+            format!("{builtin}: result exceeds the maximum exact integer supported by RunMat"),
         ))
-        .with_builtin(builtin)
-        .build())
     } else {
         Ok(())
     }
 }
 
-fn parse_order(value: &Value, builtin: &'static str) -> BuiltinResult<Option<DigitOrder>> {
+fn parse_order(value: &Value, operation: DigitConversion) -> BuiltinResult<Option<DigitOrder>> {
+    let builtin = operation.name();
     let Some(text) = value_as_string(value) else {
         return Ok(None);
     };
     match normalize_flag(&text).as_str() {
         "rightmsb" => Ok(Some(DigitOrder::RightMsb)),
         "leftmsb" => Ok(Some(DigitOrder::LeftMsb)),
-        other => Err(
-            build_runtime_error(format!("{builtin}: unsupported digit order '{other}'"))
-                .with_builtin(builtin)
-                .build(),
-        ),
+        other => Err(digit_error(
+            operation.order_error(),
+            format!("{builtin}: unsupported digit order '{other}'"),
+        )),
     }
 }
 
-fn parse_required_order(value: &Value, builtin: &'static str) -> BuiltinResult<DigitOrder> {
-    parse_order(value, builtin)?.ok_or_else(|| {
-        build_runtime_error(format!("{builtin}: digit order flag must be a string"))
-            .with_builtin(builtin)
-            .build()
+fn parse_required_order(value: &Value, operation: DigitConversion) -> BuiltinResult<DigitOrder> {
+    parse_order(value, operation)?.ok_or_else(|| {
+        digit_error(
+            operation.order_error(),
+            format!("{}: digit order flag must be a string", operation.name()),
+        )
     })
 }
 
@@ -1624,6 +1769,48 @@ mod tests {
         ))
         .expect_err("invalid binary digit should fail");
         assert!(err.to_string().contains("digit values must be integers"));
+        assert_eq!(err.identifier(), BI2DE_ERROR_INPUT.identifier);
+    }
+
+    #[test]
+    fn digit_conversion_errors_have_typed_operation_and_role_owners() {
+        let digits = || tensor(vec![1.0], vec![1, 1]);
+        for (input, controls, descriptor) in [
+            (digits(), vec![Value::Num(1.0)], &BI2DE_ERROR_BASE),
+            (digits(), vec![Value::from("sideways")], &BI2DE_ERROR_ORDER),
+            (
+                tensor(vec![1.0; 54], vec![1, 54]),
+                vec![],
+                &BI2DE_ERROR_RANGE,
+            ),
+        ] {
+            let error =
+                block_on(super::bi2de_builtin(input, controls)).expect_err("bi2de domain error");
+            assert_eq!(error.identifier(), descriptor.identifier);
+        }
+        for (input, controls, descriptor) in [
+            (Value::Num(-1.0), vec![], &DE2BI_ERROR_INPUT),
+            (Value::Num(0.0), vec![Value::Num(0.0)], &DE2BI_ERROR_WIDTH),
+            (
+                Value::Num(1.0),
+                vec![tensor(vec![], vec![0, 0]), Value::Num(1.0)],
+                &DE2BI_ERROR_BASE,
+            ),
+            (
+                Value::Num(1.0),
+                vec![Value::from("sideways")],
+                &DE2BI_ERROR_ORDER,
+            ),
+            (
+                Value::Num(0.0),
+                vec![Value::Num((MAX_DE2BI_OUTPUT_ELEMENTS + 1) as f64)],
+                &DE2BI_ERROR_RESOURCE,
+            ),
+        ] {
+            let error =
+                block_on(super::de2bi_builtin(input, controls)).expect_err("de2bi domain error");
+            assert_eq!(error.identifier(), descriptor.identifier);
+        }
     }
 
     #[test]
@@ -1757,6 +1944,24 @@ mod tests {
     }
 
     #[test]
+    fn logical_min_digits_controls_are_admitted_for_both_radices() {
+        for width in [
+            Value::Bool(false),
+            Value::Bool(true),
+            Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).expect("logical scalar")),
+        ] {
+            assert_eq!(
+                char_rows(&dec2bin(Value::Num(23.0), vec![width.clone()])),
+                vec!["10111"]
+            );
+            assert_eq!(
+                char_rows(&dec2hex(Value::Num(23.0), vec![width])),
+                vec!["17"]
+            );
+        }
+    }
+
+    #[test]
     fn dec2bin_floors_fractional_numeric_input() {
         assert_eq!(char_rows(&dec2bin(Value::Num(12.5), vec![])), vec!["1100"]);
         assert_eq!(
@@ -1807,9 +2012,10 @@ mod tests {
             vec![],
         ))
         .expect_err("2^64 should fail");
-        assert!(err
-            .to_string()
-            .contains("outside the supported integer range"));
+        assert!(
+            err.to_string()
+                .contains("outside the supported integer range")
+        );
     }
 
     #[test]
@@ -1820,6 +2026,54 @@ mod tests {
         ))
         .expect_err("oversized output should fail");
         assert!(err.to_string().contains("requested output"));
+    }
+
+    #[test]
+    fn decimal_text_conversion_flattens_nd_and_preserves_empty_rows() {
+        let nd = dec2bin(tensor(vec![1.0, 2.0, 3.0, 4.0], vec![1, 2, 2]), vec![]);
+        assert_eq!(char_rows(&nd), vec!["001", "010", "011", "100"]);
+        let empty = dec2hex(tensor(vec![], vec![0, 3]), vec![]);
+        assert_eq!((empty.rows, empty.cols), (0, 1));
+        assert!(empty.data.is_empty());
+    }
+
+    #[test]
+    fn invalid_decimal_text_control_rejects_before_resident_download() {
+        use crate::builtins::common::{gpu_helpers, test_support};
+
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![23.0], vec![1, 1]).expect("fixture tensor");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+            provider.reset_telemetry();
+            for conversion in [TextConversion::Dec2Bin, TextConversion::Dec2Hex] {
+                for invalid_width in [
+                    Value::Num(-1.0),
+                    Value::LogicalArray(
+                        LogicalArray::new(vec![0, 1], vec![1, 2]).expect("logical vector"),
+                    ),
+                ] {
+                    let error = block_on(decimal_to_text_builtin(
+                        Value::GpuTensor(handle.clone()),
+                        vec![invalid_width],
+                        conversion,
+                    ))
+                    .expect_err("invalid width must reject");
+                    assert!(error.to_string().contains("minDigits"));
+                    assert_eq!(error.context.builtin.as_deref(), Some(conversion.name()));
+                }
+            }
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert!(
+                block_on(decimal_to_text_builtin(
+                    Value::GpuTensor(handle.clone()),
+                    vec![Value::Bool(true)],
+                    TextConversion::Dec2Bin,
+                ))
+                .is_ok()
+            );
+            assert!(provider.telemetry_snapshot().download_bytes > 0);
+            handle.release().expect("release fixture handle");
+        });
     }
 
     #[test]
@@ -1925,9 +2179,10 @@ mod tests {
             "100000000000000000000000000000000000000000000000000000",
         )))
         .expect_err("inexact binary value should fail");
-        assert!(err
-            .to_string()
-            .contains("maximum exact integer supported by RunMat"));
+        assert!(
+            err.to_string()
+                .contains("maximum exact integer supported by RunMat")
+        );
     }
 
     #[test]
@@ -1962,15 +2217,62 @@ mod tests {
 
         let err = block_on(super::hex2dec_builtin(Value::from("0x20000000000000")))
             .expect_err("inexact hex value should fail");
-        assert!(err
-            .to_string()
-            .contains("maximum exact integer supported by RunMat"));
+        assert!(
+            err.to_string()
+                .contains("maximum exact integer supported by RunMat")
+        );
+    }
+
+    #[test]
+    fn singleton_string_arrays_scalarize_and_empty_arrays_keep_their_shape() {
+        for (text, radix) in [
+            ("101", TextConversion::Bin2Dec),
+            ("A", TextConversion::Hex2Dec),
+        ] {
+            for shape in [vec![1], vec![1, 1, 1]] {
+                let input = StringArray::new(vec![text.into()], shape).expect("singleton string");
+                let output = block_on(text_to_decimal_builtin(Value::StringArray(input), radix))
+                    .expect("singleton conversion");
+                assert!(matches!(output, Value::Num(_)));
+            }
+            let input = StringArray::new(vec![], vec![0, 2]).expect("empty string array");
+            let Value::Tensor(output) =
+                block_on(text_to_decimal_builtin(Value::StringArray(input), radix))
+                    .expect("empty conversion")
+            else {
+                panic!("empty string array must produce an empty tensor");
+            };
+            assert_eq!(output.shape(), &[0, 2]);
+        }
+    }
+
+    #[test]
+    fn nested_text_cells_reject_multi_item_string_and_multirow_character_values() {
+        let bad_string = Value::StringArray(
+            StringArray::new(vec!["1".into(), "0".into()], vec![1, 2])
+                .expect("two-item string array"),
+        );
+        let bad_char = Value::CharArray(
+            CharArray::new("1010".chars().collect(), 2, 2).expect("two-row char array"),
+        );
+        for nested in [bad_string, bad_char] {
+            let cell = CellArray::new(vec![nested], 1, 1).expect("cell");
+            for radix in [TextConversion::Bin2Dec, TextConversion::Hex2Dec] {
+                let error = block_on(text_to_decimal_builtin(Value::Cell(cell.clone()), radix))
+                    .expect_err("nested non-scalar text must reject");
+                assert!(
+                    error
+                        .to_string()
+                        .contains("cell array elements must be text")
+                );
+            }
+        }
     }
 
     #[test]
     fn bi2de_and_de2bi_scalar_integers_remain_exact() {
         assert_eq!(
-            integer_to_nonnegative(&IntValue::U64(u64::MAX), DE2BI_NAME, "D").unwrap(),
+            integer_to_nonnegative(&IntValue::U64(u64::MAX), DE2BI_INPUT_OWNER, "D").unwrap(),
             u128::from(u64::MAX)
         );
         assert_eq!(
@@ -1986,7 +2288,7 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(digits.data, vec![1]);
-        assert!(integer_to_nonnegative(&IntValue::I8(-1), DE2BI_NAME, "D").is_err());
+        assert!(integer_to_nonnegative(&IntValue::I8(-1), DE2BI_INPUT_OWNER, "D").is_err());
         assert!(block_on(decimal_vector_from_value(Value::Int(IntValue::I8(-1)))).is_err());
     }
 
@@ -1999,6 +2301,7 @@ mod tests {
         ))
         .expect_err("wide typed minDigits should reject before allocation");
         assert!(err.to_string().contains("requested output"));
+        assert_eq!(err.identifier(), None);
 
         let width = Tensor::new_integer(
             IntegerStorage::U64(vec![MAX_DECIMAL_TEXT_OUTPUT_CHARS as u64 + 1]),
@@ -2011,6 +2314,7 @@ mod tests {
         ))
         .expect_err("wide typed tensor minDigits should reject before allocation");
         assert!(err.to_string().contains("requested output"));
+        assert_eq!(err.identifier(), None);
     }
 
     #[test]
@@ -2020,7 +2324,12 @@ mod tests {
 
         let width = Tensor::new_integer(IntegerStorage::U16(vec![12]), vec![1, 1]).unwrap();
         assert_eq!(
-            scalar_number(&Value::Tensor(width), DE2BI_NAME, "N").unwrap(),
+            scalar_number(
+                &Value::Tensor(width),
+                NumericParseOwner::Digit(DigitError::De2biWidth),
+                "N"
+            )
+            .unwrap(),
             12.0
         );
 

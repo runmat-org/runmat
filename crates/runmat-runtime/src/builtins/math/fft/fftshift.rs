@@ -3,24 +3,18 @@
 //! `fftshift` recenters zero-frequency components for outputs produced by FFTs.
 
 use super::common::{
-    apply_shift, apply_shift_numeric_storage, build_shift_plan, compute_shift_dims, ShiftKind,
+    apply_shift, apply_shift_numeric_storage, build_shift_plan, compute_shift_dims,
+    gpu_metadata_snapshot, restore_gpu_metadata, same_gpu_handle, valid_provider_shift_output,
+    ShiftKind,
 };
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::fft::type_resolvers::fftshift_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexStorage, ComplexTensor, LogicalArray, Tensor, Value};
 
@@ -52,139 +46,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "fftshift";
-
-const FFTSHIFT_MULTI_DIM_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fftshift-multi-dimension-selector",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fftshift numeric dimension vectors and logical masks are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FftshiftMultiDimensionExtension"),
-};
-pub const FFTSHIFT_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [FFTSHIFT_MULTI_DIM_EXTENSION];
-
-const FFTSHIFT_DATA_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "X",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-    notes: "All integer classes are reordered exactly with class, shape, and complexity preserved.",
-}];
-const FFTSHIFT_DIM_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "DIM",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes:
-        "The documented DIM form is one positive scalar parsed from authoritative integer storage.",
-}];
-const FFTSHIFT_MULTI_DIM_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "DIMS",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
-        notes: "RunMat-only numeric vectors are decoded exactly; logical mask vectors share the same independent extension gate.",
-    }];
-pub const FFTSHIFT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor { form: "Y = fftshift(integer_X)", inputs: &FFTSHIFT_DATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving, notes: "Real and typed-complex integer values are reordered exactly with class preserved; resident fallback re-uploads to the owning provider." },
-    BuiltinIntegerCapabilityDescriptor { form: "Y = fftshift(X, integer_DIM)", inputs: &FFTSHIFT_DIM_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "All eight documented integer scalar classes select one dimension exactly." },
-    BuiltinIntegerCapabilityDescriptor { form: "Y = fftshift(X, integer_DIMS)", inputs: &FFTSHIFT_MULTI_DIM_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostAndGpu, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "RunMat-only multi-axis vector/mask selection is independently gated from documented scalar DIM semantics." },
-];
-
-const FFTSHIFT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Shifted array with the same size and type family as X.",
-}];
-
-const FFTSHIFT_INPUTS_CORE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Numeric, complex, logical, or gpuArray input.",
-}];
-
-const FFTSHIFT_INPUTS_DIMS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric, complex, logical, or gpuArray input.",
-    },
-    BuiltinParamDescriptor {
-        name: "DIM",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Positive scalar dimension; vectors and logical masks are RunMat extensions.",
-    },
-];
-
-const FFTSHIFT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = fftshift(X)",
-        inputs: &FFTSHIFT_INPUTS_CORE,
-        outputs: &FFTSHIFT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = fftshift(X, DIM)",
-        inputs: &FFTSHIFT_INPUTS_DIMS,
-        outputs: &FFTSHIFT_OUTPUT,
-    },
-];
-
-const FFTSHIFT_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FFTSHIFT.ARG_COUNT",
-    identifier: Some("RunMat:fftshift:ArgCount"),
-    when: "More than two input arguments are supplied.",
-    message: "fftshift: invalid argument count",
-};
-
-const FFTSHIFT_ERROR_INVALID_DIMS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FFTSHIFT.INVALID_DIMS",
-    identifier: Some("RunMat:fftshift:InvalidDimensions"),
-    when: "DIM argument is malformed or out of range.",
-    message: "fftshift: invalid dimension argument",
-};
-
-const FFTSHIFT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FFTSHIFT.INVALID_INPUT",
-    identifier: Some("RunMat:fftshift:InvalidInput"),
-    when: "X is not a supported numeric/logical input type.",
-    message: "fftshift: expected numeric or logical input",
-};
-
-const FFTSHIFT_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FFTSHIFT.UNSUPPORTED_INPUT",
-    identifier: Some("RunMat:fftshift:UnsupportedInput"),
-    when: "X is an unsupported object/cell/function/meta runtime type.",
-    message: "fftshift: unsupported input type",
-};
-
-const FFTSHIFT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FFTSHIFT.INTERNAL",
-    identifier: Some("RunMat:fftshift:Internal"),
-    when: "Shifting, tensor reconstruction, or GPU transfer operations fail.",
-    message: "fftshift: internal error",
-};
-
-const FFTSHIFT_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    FFTSHIFT_ERROR_ARG_COUNT,
-    FFTSHIFT_ERROR_INVALID_DIMS,
-    FFTSHIFT_ERROR_INVALID_INPUT,
-    FFTSHIFT_ERROR_UNSUPPORTED_INPUT,
-    FFTSHIFT_ERROR_INTERNAL,
-];
-
-pub const FFTSHIFT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FFTSHIFT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FFTSHIFT_ERRORS,
-};
 
 fn fftshift_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     fftshift_error_with_message(error.message, error)
@@ -222,6 +83,21 @@ fn fftshift_error_with_message(
     builder.build()
 }
 
+fn fftshift_terminal_error(detail: impl AsRef<str>) -> RuntimeError {
+    build_runtime_error(format!(
+        "fftshift: provider integrity error: {}",
+        detail.as_ref()
+    ))
+    .with_builtin(BUILTIN_NAME)
+    .with_identifier(
+        FFTSHIFT_ERROR_PROVIDER_INTEGRITY
+            .identifier
+            .expect("fftshift provider-integrity descriptor identifier"),
+    )
+    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+    .build()
+}
+
 fn compute_fftshift_dims(shape: &[usize], dims_arg: Option<&Value>) -> BuiltinResult<Vec<usize>> {
     compute_shift_dims(shape, dims_arg, BUILTIN_NAME).map_err(|source| {
         fftshift_error_with_source(
@@ -234,14 +110,7 @@ fn compute_fftshift_dims(shape: &[usize], dims_arg: Option<&Value>) -> BuiltinRe
 
 #[runtime_builtin(
     name = "fftshift",
-    category = "math/fft",
-    summary = "Shift zero-frequency components to spectrum centers.",
-    keywords = "fftshift,fourier transform,frequency centering,spectrum,gpu",
-    accel = "custom",
-    type_resolver(fftshift_type),
-    descriptor(crate::builtins::math::fft::fftshift::FFTSHIFT_DESCRIPTOR),
-    extensions(crate::builtins::math::fft::fftshift::FFTSHIFT_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::fft::fftshift::FFTSHIFT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::fft::fftshift"
 )]
 async fn fftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -428,9 +297,34 @@ async fn fftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         // Provider reshape may mutate a handle's registry entry in place. Only use
         // the native path when no synthetic trailing dimensions are required.
-        if plan.ext_shape == handle.shape() {
-            if let Ok(out) = provider.circshift(&handle, &plan.provider) {
-                return gpu_helpers::resident_gpu_value(out);
+        if plan.ext_shape == handle.shape() && provider.supports_circshift(&handle, &plan.provider)
+        {
+            let input_metadata = gpu_metadata_snapshot(&handle);
+            match provider.circshift(&handle, &plan.provider) {
+                Ok(out) => {
+                    if same_gpu_handle(&out, &handle) {
+                        restore_gpu_metadata(&handle, input_metadata);
+                        return Err(fftshift_terminal_error(
+                            "provider circshift aliased its input",
+                        ));
+                    }
+                    if !valid_provider_shift_output(provider, &out, &handle, input_metadata) {
+                        return Err(gpu_helpers::reject_gpu_output(
+                            out,
+                            fftshift_terminal_error(
+                                "provider circshift returned malformed metadata",
+                            ),
+                        ));
+                    }
+                    return gpu_helpers::resident_gpu_value(out);
+                }
+                Err(source) => {
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        fftshift_terminal_error(format!("provider circshift failed: {source}")),
+                        runmat_accelerate_api::ProviderExecutionError::from(source)
+                            .with_unproven_effects(),
+                    ));
+                }
             }
         }
     }
@@ -471,7 +365,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
     use runmat_value::{
         ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor,
     };
@@ -485,25 +378,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn fftshift_type_preserves_tensor_shape() {
-        let out = fftshift_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(5)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(5)])
-            }
-        );
-    }
-
-    #[test]
     fn fftshift_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("fftshift builtin");
-        let descriptor = builtin.descriptor.expect("fftshift descriptor");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME).expect("fftshift builtin");
+        let descriptor = builtin.descriptor;
         let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
         assert!(labels.contains(&"Y = fftshift(X)"));
         assert!(labels.contains(&"Y = fftshift(X, DIM)"));
@@ -578,7 +456,8 @@ pub(crate) mod tests {
 
     #[test]
     fn fftshift_integer_contract_separates_scalar_dim_from_multi_axis_extension() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("fftshift registration");
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME)
+            .expect("fftshift registration");
         assert_eq!(builtin.integer_capabilities.len(), 3);
         assert_eq!(builtin.extensions.len(), 1);
 

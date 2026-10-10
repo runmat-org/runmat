@@ -2,14 +2,21 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod blackman;
+mod butter;
+mod buttord;
+mod cheb2ord;
 mod conv;
 mod conv2;
 mod deconv;
+mod envelope;
 mod filter;
 mod filtfilt;
+mod fir1;
+mod freqz;
 mod gauspuls;
 mod hamming;
 mod hann;
+mod hilbert;
 mod periodogram;
 mod pwelch;
 mod rectpuls;
@@ -19,17 +26,25 @@ mod spectral_facts;
 mod spectrogram;
 mod square;
 mod tripuls;
+mod unwrap;
 mod window_facts;
 
 pub use self::blackman::*;
+pub use self::butter::*;
+pub use self::buttord::*;
+pub use self::cheb2ord::*;
 pub use self::conv::*;
 pub use self::conv2::*;
 pub use self::deconv::*;
+pub use self::envelope::*;
 pub use self::filter::*;
 pub use self::filtfilt::*;
+pub use self::fir1::*;
+pub use self::freqz::*;
 pub use self::gauspuls::*;
 pub use self::hamming::*;
 pub use self::hann::*;
+pub use self::hilbert::*;
 pub use self::periodogram::*;
 pub use self::pwelch::*;
 pub use self::rectpuls::*;
@@ -38,17 +53,25 @@ pub use self::sinc::*;
 pub use self::spectrogram::*;
 pub use self::square::*;
 pub use self::tripuls::*;
+pub use self::unwrap::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(blackman::ENTRIES.iter().copied());
+    values.extend(butter::ENTRIES.iter().copied());
+    values.extend(buttord::ENTRIES.iter().copied());
+    values.extend(cheb2ord::ENTRIES.iter().copied());
     values.extend(conv::ENTRIES.iter().copied());
     values.extend(conv2::ENTRIES.iter().copied());
     values.extend(deconv::ENTRIES.iter().copied());
+    values.extend(envelope::ENTRIES.iter().copied());
     values.extend(filter::ENTRIES.iter().copied());
     values.extend(filtfilt::ENTRIES.iter().copied());
+    values.extend(fir1::ENTRIES.iter().copied());
+    values.extend(freqz::ENTRIES.iter().copied());
     values.extend(gauspuls::ENTRIES.iter().copied());
     values.extend(hamming::ENTRIES.iter().copied());
     values.extend(hann::ENTRIES.iter().copied());
+    values.extend(hilbert::ENTRIES.iter().copied());
     values.extend(periodogram::ENTRIES.iter().copied());
     values.extend(pwelch::ENTRIES.iter().copied());
     values.extend(rectpuls::ENTRIES.iter().copied());
@@ -57,4 +80,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(spectrogram::ENTRIES.iter().copied());
     values.extend(square::ENTRIES.iter().copied());
     values.extend(tripuls::ENTRIES.iter().copied());
+    values.extend(unwrap::ENTRIES.iter().copied());
 }

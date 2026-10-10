@@ -10,7 +10,9 @@ use runmat_value::Value;
 
 use super::PlacementPolicy;
 mod multi;
-pub(crate) use multi::{plan_local_multi, LocalMultiPlacementRequest, LocalPhysicalCandidate};
+pub(crate) use multi::{
+    plan_local_multi, LocalCpuAdmission, LocalMultiPlacementRequest, LocalPhysicalCandidate,
+};
 mod rejected;
 mod session_facts;
 mod signature;
@@ -221,6 +223,7 @@ pub(crate) fn plan_local(
             vm_right: None,
             family,
             cpu,
+            cpu_admission: multi::LocalCpuAdmission::Legacy,
             physical: vec![multi::LocalPhysicalCandidate {
                 physical_identity: None,
                 provider_kind,

@@ -1,7 +1,11 @@
-use super::{super::*, input_preparation::TypedInputPlan};
+use super::{
+    super::*,
+    host_readback::{self, CpuHostAdmission, CpuReadbackPlan},
+    input_preparation::TypedInputPlan,
+};
 use crate::placement::{
-    plan_local_multi, LocalMultiPlacementRequest, LocalPhysicalCandidate, LocalPlacementOutcome,
-    PlacementPolicy, TotalCandidateObservationContract,
+    LocalCpuAdmission, LocalMultiPlacementRequest, LocalPhysicalCandidate, LocalPlacementOutcome,
+    PlacementPolicy, TotalCandidateObservationContract, plan_local_multi,
 };
 use runmat_accelerate_api::reduction::ReductionSelection;
 use runmat_accelerate_api::{
@@ -20,7 +24,10 @@ pub(super) enum Choice {
         index: usize,
         ticket: Box<FusionPlacementSelection>,
     },
-    Shared(FusionCpuObservation),
+    Shared {
+        observation: FusionCpuObservation,
+        readback: Option<CpuReadbackPlan>,
+    },
 }
 
 pub(super) fn choose(
@@ -64,7 +71,17 @@ pub(super) fn choose(
         confidence: EstimateConfidence::Low,
         source: EstimateSource::StaticPrior,
     };
-    let cpu = ExecutionCandidateDescriptor {
+    let host = if vm_right.is_some() {
+        host_readback::admit(request, program, provider)
+    } else if data_inputs
+        .iter()
+        .all(|value| !runmat_runtime::dispatcher::value_contains_gpu(value))
+    {
+        Some(CpuHostAdmission::Direct)
+    } else {
+        None
+    };
+    let mut cpu = ExecutionCandidateDescriptor {
         identity: format!("cpu.shared.{operation}.typed"),
         region: None,
         kind: ExecutionCandidateKind::SharedRuntime,
@@ -74,6 +91,15 @@ pub(super) fn choose(
         output_residency: CandidateOutputResidency::Host,
         presentation: runmat_execution::CandidateOutputPresentation::Direct,
         guards: Vec::new(),
+    };
+    let cpu_admission = match &host {
+        Some(CpuHostAdmission::Direct) => LocalCpuAdmission::Legacy,
+        Some(CpuHostAdmission::Readback(admission)) => {
+            cpu.presentation = admission.presentation.clone();
+            cpu.cost.scratch_bytes = Some(admission.scratch_bytes);
+            LocalCpuAdmission::Exact(Box::new(admission.resources))
+        }
+        None => LocalCpuAdmission::Unavailable,
     };
     let physical = selections
         .iter()
@@ -118,6 +144,7 @@ pub(super) fn choose(
             vm_right,
             family: ProviderOperationFamily::Fusion,
             cpu,
+            cpu_admission,
             physical,
             compare_profitability: request.placement.is_some(),
             runtime: request.runtime.as_ref(),
@@ -129,7 +156,16 @@ pub(super) fn choose(
     match outcome {
         LocalPlacementOutcome::ProviderRejected { code, feedback, .. } => {
             observer.provider_rejected(code);
-            Ok(Choice::Shared(FusionCpuObservation::new(feedback)))
+            if host.is_none() {
+                return Err(anyhow!(
+                    "typed provider rejected and no executable host reduction route exists"
+                )
+                .into());
+            }
+            Ok(Choice::Shared {
+                observation: FusionCpuObservation::new(feedback),
+                readback: selected_readback(host),
+            })
         }
         LocalPlacementOutcome::Selected {
             selected,
@@ -185,11 +221,27 @@ pub(super) fn choose(
                 "typed_reduction_complete_cost",
                 cpu_cost.checked_total_ns(),
             );
-            Ok(Choice::Shared(FusionCpuObservation::new(feedback)))
+            if host.is_none() {
+                return Err(anyhow!(
+                    "placement selected a host reduction without an executable host route"
+                )
+                .into());
+            }
+            Ok(Choice::Shared {
+                observation: FusionCpuObservation::new(feedback),
+                readback: selected_readback(host),
+            })
         }
         LocalPlacementOutcome::Selected { .. } => Err(anyhow!(
             "typed reduction placement returned an inconsistent physical ordinal"
         )
         .into()),
+    }
+}
+
+fn selected_readback(host: Option<CpuHostAdmission>) -> Option<CpuReadbackPlan> {
+    match host {
+        Some(CpuHostAdmission::Readback(admission)) => Some(admission.plan),
+        _ => None,
     }
 }

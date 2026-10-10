@@ -274,14 +274,21 @@ impl AccelProvider for CudaProvider {
         Ok(self.upload_numeric_impl(host)?)
     }
 
-    fn upload_logical_raw(&self, host: &HostLogicalTensorView<'_>) -> Result<GpuTensorHandle> {
+    fn upload_logical_raw(
+        &self,
+        host: &HostLogicalTensorView<'_>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         host.validate()?;
-        let result = self.allocate_initialized(
-            host.shape,
-            NativeDeviceClass::Logical,
-            GpuTensorStorage::Real,
-            |pointer, _| self.driver.upload(pointer, host.data),
-        )?;
+        let result = self
+            .allocate_initialized(
+                host.shape,
+                NativeDeviceClass::Logical,
+                GpuTensorStorage::Real,
+                |pointer, _| self.driver.upload(pointer, host.data),
+            )
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })?;
         runmat_value::record_host_copy(
             runmat_value::HostCopyReason::ProviderUpload,
             host.data.len(),

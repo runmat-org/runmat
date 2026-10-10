@@ -69,31 +69,42 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
         outputs: &OUTPUT,
     },
 ];
-const ERRORS: [BuiltinErrorDescriptor; 4] = [
-    BuiltinErrorDescriptor {
-        code: "RM.BI2DE.INPUT",
-        identifier: None,
-        when: "B is not a real numeric/logical 2-D digit array, or a digit is invalid.",
-        message: "bi2de: B must contain valid real digits",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.BI2DE.BASE",
-        identifier: None,
-        when: "P is not an integer scalar at least two.",
-        message: "bi2de: P must be an integer greater than 1",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.BI2DE.ORDER",
-        identifier: None,
-        when: "The digit order is not right-msb or left-msb.",
-        message: "bi2de: unsupported digit order",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.BI2DE.RANGE",
-        identifier: None,
-        when: "A converted result exceeds the exact supported decimal range.",
-        message: "bi2de: result exceeds the maximum exact integer supported by RunMat",
-    },
+pub const BI2DE_ERROR_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BI2DE.INPUT",
+    identifier: Some("RunMat:bi2de:InvalidInput"),
+    when: "B is not a real numeric/logical 2-D digit array, or a digit is invalid.",
+    message: "bi2de: B must contain valid real digits",
+};
+pub const BI2DE_ERROR_BASE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BI2DE.BASE",
+    identifier: Some("RunMat:bi2de:InvalidBase"),
+    when: "P is not an integer scalar at least two.",
+    message: "bi2de: P must be an integer greater than 1",
+};
+pub const BI2DE_ERROR_ORDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BI2DE.ORDER",
+    identifier: Some("RunMat:bi2de:InvalidOrder"),
+    when: "The digit order is not right-msb or left-msb.",
+    message: "bi2de: unsupported digit order",
+};
+pub const BI2DE_ERROR_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BI2DE.RANGE",
+    identifier: Some("RunMat:bi2de:ExactRange"),
+    when: "A converted result exceeds the exact supported decimal range.",
+    message: "bi2de: result exceeds the maximum exact integer supported by RunMat",
+};
+pub const BI2DE_ERROR_PROVIDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BI2DE.PROVIDER",
+    identifier: Some("RunMat:bi2de:ProviderError"),
+    when: "Gathering a resident digit matrix fails after admission.",
+    message: "bi2de: failed to gather resident digits",
+};
+const ERRORS: [BuiltinErrorDescriptor; 5] = [
+    BI2DE_ERROR_INPUT,
+    BI2DE_ERROR_BASE,
+    BI2DE_ERROR_ORDER,
+    BI2DE_ERROR_RANGE,
+    BI2DE_ERROR_PROVIDER,
 ];
 pub const BI2DE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
@@ -103,20 +114,23 @@ pub const BI2DE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 
 const INTEGER_DIGITS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "B", classes: &ALL_INTEGER_CLASSES,
+    name: "B",
+    classes: &ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::Documented,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
     notes: "Integer digits are read from native storage and checked against the base before conversion.",
 }];
 const INTEGER_BASE: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "P", classes: &ALL_INTEGER_CLASSES,
+    name: "P",
+    classes: &ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::RunMatOnly,
     scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
     notes: "The documented base uses single or double; RunMat additionally accepts exact fixed-width integer controls.",
 }];
 pub const BI2DE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {
-        form: "D = bi2de(integer_B, P, flg)", inputs: &INTEGER_DIGITS,
+        form: "D = bi2de(integer_B, P, flg)",
+        inputs: &INTEGER_DIGITS,
         computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
         output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
         overflow: BuiltinIntegerOverflowRule::Error,
@@ -125,7 +139,8 @@ pub const BI2DE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = 
         notes: "The output retains the integer input class when it fits; otherwise it widens in the same signedness. Results above 2^52 reject rather than round through double.",
     },
     BuiltinIntegerCapabilityDescriptor {
-        form: "D = bi2de(B, integer_P, flg)", inputs: &INTEGER_BASE,
+        form: "D = bi2de(B, integer_P, flg)",
+        inputs: &INTEGER_BASE,
         computation_domain: BuiltinIntegerComputationDomain::Structural,
         output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
         overflow: BuiltinIntegerOverflowRule::Error,

@@ -1,9 +1,9 @@
 //! One canonical CPU/provider candidate set for a local placement decision.
 //! Each physical record is normalized before a single service plan call.
 use super::{
-    observation_revision, observation_semantic_identity, rejected_cpu_feedback, session_facts,
-    signature, transfer_prior_ns, LocalPlacementFeedback, LocalPlacementOutcome, PlacementPolicy,
-    RejectedCpuFeedbackRequest, TotalCandidateObservationContract,
+    LocalPlacementFeedback, LocalPlacementOutcome, PlacementPolicy, RejectedCpuFeedbackRequest,
+    TotalCandidateObservationContract, observation_revision, observation_semantic_identity,
+    rejected_cpu_feedback, session_facts, signature, transfer_prior_ns,
 };
 use crate::placement::{select_candidate, summarize_values, tensor_representation};
 use runmat_accelerate_api::{
@@ -48,6 +48,15 @@ pub(crate) struct LocalPhysicalCandidate<'a> {
     pub(crate) downstream_materialization: bool,
 }
 
+pub(crate) enum LocalCpuAdmission {
+    /// Preserve the established resource projection for ordinary host routes.
+    Legacy,
+    /// A domain owner proved an executable host route and its complete demand.
+    Exact(Box<CandidateResourceDemand>),
+    /// No executable host route was admitted; do not fabricate a CPU candidate.
+    Unavailable,
+}
+
 pub(crate) struct LocalMultiPlacementRequest<'a> {
     pub(crate) operation: &'a str,
     pub(crate) semantic_identity: Option<Digest>,
@@ -57,6 +66,7 @@ pub(crate) struct LocalMultiPlacementRequest<'a> {
     pub(crate) vm_right: Option<&'a runmat_runtime::context::VmFusionCompletionRight>,
     pub(crate) family: ProviderOperationFamily,
     pub(crate) cpu: ExecutionCandidateDescriptor,
+    pub(crate) cpu_admission: LocalCpuAdmission,
     pub(crate) physical: Vec<LocalPhysicalCandidate<'a>>,
     pub(crate) compare_profitability: bool,
     pub(crate) runtime: Option<&'a runmat_runtime::context::RuntimeContext>,
@@ -65,7 +75,7 @@ pub(crate) struct LocalMultiPlacementRequest<'a> {
 mod decision;
 mod graph;
 mod inputs;
-use graph::{candidate_name, candidate_resource, cpu_resource, Admitted};
+use graph::{Admitted, candidate_name, candidate_resource, cpu_resource};
 
 pub(crate) fn plan_local_multi(
     provider: &dyn AccelProvider,
@@ -80,10 +90,16 @@ pub(crate) fn plan_local_multi(
         vm_right,
         family,
         mut cpu,
+        cpu_admission,
         physical,
         compare_profitability,
         runtime,
     } = request;
+    let cpu_resources = match cpu_admission {
+        LocalCpuAdmission::Legacy => Some(cpu_resource(&cpu)),
+        LocalCpuAdmission::Exact(resources) => Some(*resources),
+        LocalCpuAdmission::Unavailable => None,
+    };
     let inputs::SourcePreflight {
         digest: source_digest,
         routes,
@@ -293,6 +309,15 @@ pub(crate) fn plan_local_multi(
     }
     rejected.sort_by(|left, right| left.0.cmp(&right.0));
     if admitted.is_empty() {
+        if cpu_resources.is_none() {
+            return Err(Box::new(
+                runmat_runtime::build_runtime_error(
+                    "typed provider candidates rejected and no executable host route exists",
+                )
+                .with_identifier("RunMat:Placement:NoLegalCandidate")
+                .build(),
+            ));
+        }
         let (identity, query, code) = rejected.first().expect("at least one physical record");
         let rejection_identity = if rejected.len() == 1 {
             semantic_identity
@@ -338,6 +363,7 @@ pub(crate) fn plan_local_multi(
         prepared_authority,
         vm_right,
         cpu,
+        cpu_resources,
         cpu_cost,
         admitted,
         rejected,

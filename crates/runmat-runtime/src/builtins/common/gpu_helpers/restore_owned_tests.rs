@@ -11,7 +11,16 @@ use std::sync::{
 enum NumericUpload {
     Success,
     Unsupported,
+    UnprovenUnsupported,
+    AfterEffectUnsupported,
     Execution,
+}
+#[derive(Clone, Copy)]
+enum LogicalUpload {
+    Success,
+    Unsupported,
+    UnprovenUnsupported,
+    AfterEffectUnsupported,
 }
 struct Provider {
     owner: TestAllocationOwner,
@@ -19,6 +28,7 @@ struct Provider {
     logical_uploads: AtomicUsize,
     unavailable_upload: AtomicBool,
     output_probe: Mutex<Option<runmat_accelerate_api::test_support::RetirementProbe>>,
+    logical_upload: Mutex<LogicalUpload>,
 }
 impl Provider {
     fn new(numeric_upload: NumericUpload) -> &'static Self {
@@ -28,6 +38,7 @@ impl Provider {
             logical_uploads: AtomicUsize::new(0),
             unavailable_upload: AtomicBool::new(false),
             output_probe: Mutex::new(None),
+            logical_upload: Mutex::new(LogicalUpload::Success),
         }))
     }
 }
@@ -62,21 +73,53 @@ impl AccelProvider for Provider {
             *self.output_probe.lock().unwrap() = Some(allocation.probe);
             return Ok(allocation.handle);
         }
-        Err(match self.numeric_upload {
+        let error = match self.numeric_upload {
             NumericUpload::Success => unreachable!("successful upload returned above"),
-            NumericUpload::Unsupported => {
+            NumericUpload::Unsupported
+            | NumericUpload::UnprovenUnsupported
+            | NumericUpload::AfterEffectUnsupported => {
                 runmat_accelerate_api::unsupported_provider_operation("fixture unsupported")
             }
             NumericUpload::Execution => anyhow::anyhow!("fixture execution failed"),
-        }
-        .into())
+        };
+        let error = runmat_accelerate_api::ProviderExecutionError::from(error);
+        Err(match self.numeric_upload {
+            NumericUpload::UnprovenUnsupported => error.with_unproven_effects(),
+            NumericUpload::AfterEffectUnsupported => error.after_effect(),
+            _ => error,
+        })
     }
-    fn upload_logical_raw(&self, view: &HostLogicalTensorView) -> anyhow::Result<GpuTensorHandle> {
-        self.logical_uploads.fetch_add(1, Ordering::SeqCst);
-        Ok(self
-            .owner
-            .allocate_logical(view.data.to_vec(), view.shape.to_vec())?
-            .handle)
+    fn upload_logical_raw(
+        &self,
+        view: &HostLogicalTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        match *self.logical_upload.lock().unwrap() {
+            LogicalUpload::Success => {
+                self.logical_uploads.fetch_add(1, Ordering::SeqCst);
+                Ok(self
+                    .owner
+                    .allocate_logical(view.data.to_vec(), view.shape.to_vec())
+                    .map_err(|error| {
+                        runmat_accelerate_api::ProviderExecutionError::from(error)
+                            .with_unproven_effects()
+                    })?
+                    .handle)
+            }
+            behavior => {
+                self.logical_uploads.fetch_add(1, Ordering::SeqCst);
+                let error = runmat_accelerate_api::ProviderExecutionError::from(
+                    runmat_accelerate_api::unsupported_provider_operation(
+                        "fixture logical representation unavailable",
+                    ),
+                );
+                Err(match behavior {
+                    LogicalUpload::Unsupported => error,
+                    LogicalUpload::UnprovenUnsupported => error.with_unproven_effects(),
+                    LogicalUpload::AfterEffectUnsupported => error.after_effect(),
+                    LogicalUpload::Success => unreachable!(),
+                })
+            }
+        }
     }
 }
 
@@ -170,29 +213,45 @@ fn unavailable_uploaded_result_is_terminal_and_retains_acquisition_cause() {
 }
 
 #[test]
-fn automatic_restoration_falls_back_only_for_typed_unsupported() {
+fn floating_restoration_requires_proven_automatic_intent_and_pre_effect_unsupported() {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
-    for behavior in [NumericUpload::Unsupported, NumericUpload::Execution] {
-        let provider = Provider::new(behavior);
-        let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-        let source = provider
-            .owner
-            .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
-            .unwrap();
-        let value = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
-        let result = restore_class_preserving_value(&source.handle, value.clone(), "restore-test");
-        match provider.numeric_upload {
-            NumericUpload::Success => unreachable!("loop covers failure behaviors only"),
-            NumericUpload::Unsupported => assert_eq!(result.unwrap(), value),
-            NumericUpload::Execution => {
-                let error = result.unwrap_err();
-                assert!(error.message().contains("fixture execution failed"));
-                assert!(std::error::Error::source(&error).is_some());
+    use runmat_accelerate_api::GpuHandleProvenance::{Automatic, Explicit};
+    for value in [
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![1, 2]).unwrap()),
+    ] {
+        for provenance in [None, Some(Automatic), Some(Explicit)] {
+            for behavior in [
+                NumericUpload::Unsupported,
+                NumericUpload::UnprovenUnsupported,
+                NumericUpload::AfterEffectUnsupported,
+                NumericUpload::Execution,
+            ] {
+                let provider = Provider::new(behavior);
+                let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+                let source = provider
+                    .owner
+                    .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+                    .unwrap();
+                let source_view = provenance.map_or_else(
+                    || source.handle.clone(),
+                    |intent| source.handle.with_provenance(intent).unwrap(),
+                );
+                let result =
+                    restore_class_preserving_value(&source_view, value.clone(), "restore-test");
+                if provenance == Some(Automatic) && matches!(behavior, NumericUpload::Unsupported) {
+                    assert_eq!(result.unwrap(), value);
+                } else {
+                    let error = result.expect_err("unproven intent or effect is terminal");
+                    assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+                    assert!(std::error::Error::source(&error).is_some());
+                }
+                assert_eq!(source.probe.retirements(), 0);
+                drop(source_view);
+                drop(source.handle);
+                assert_eq!(source.probe.retirements(), 1);
             }
         }
-        assert_eq!(source.probe.retirements(), 0);
-        drop(source.handle);
-        assert_eq!(source.probe.retirements(), 1);
     }
 }
 
@@ -223,4 +282,92 @@ fn logical_restoration_uses_owner_admitted_byte_upload_not_numeric_relabel() {
     assert_eq!(source.probe.retirements(), 0);
     drop(source.handle);
     assert_eq!(source.probe.retirements(), 1);
+}
+
+#[test]
+fn logical_restoration_falls_back_only_for_certified_automatic_unsupported() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    use runmat_accelerate_api::GpuHandleProvenance::{Automatic, Explicit};
+    for provenance in [None, Some(Automatic), Some(Explicit)] {
+        for behavior in [
+            LogicalUpload::Unsupported,
+            LogicalUpload::UnprovenUnsupported,
+            LogicalUpload::AfterEffectUnsupported,
+        ] {
+            let provider = Provider::new(NumericUpload::Success);
+            *provider.logical_upload.lock().unwrap() = behavior;
+            let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+            let source = provider
+                .owner
+                .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+                .unwrap();
+            let source_view = provenance.map_or_else(
+                || source.handle.clone(),
+                |intent| source.handle.with_provenance(intent).unwrap(),
+            );
+            let logical = Value::LogicalArray(LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap());
+            let result =
+                restore_class_preserving_value(&source_view, logical.clone(), "restore-test");
+            if provenance == Some(Automatic) && matches!(behavior, LogicalUpload::Unsupported) {
+                assert_eq!(result.unwrap(), logical);
+            } else {
+                let error =
+                    result.expect_err("unproven, post-effect, and explicit failures are terminal");
+                assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+                assert!(std::error::Error::source(&error).is_some());
+            }
+            assert_eq!(provider.logical_uploads.load(Ordering::SeqCst), 1);
+            assert!(source.handle.allocation_lease().validate_live().is_ok());
+            drop(source_view);
+            drop(source.handle);
+            assert_eq!(source.probe.retirements(), 1);
+        }
+    }
+}
+
+#[test]
+fn fallback_requires_every_output_intent_operand_to_be_proven_automatic() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    use runmat_accelerate_api::GpuHandleProvenance::{Automatic, Explicit};
+    for value in [
+        Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        Value::LogicalArray(LogicalArray::new(vec![0, 1], vec![1, 2]).unwrap()),
+    ] {
+        for intent in [None, Some(Automatic), Some(Explicit)] {
+            let provider = Provider::new(NumericUpload::Unsupported);
+            *provider.logical_upload.lock().unwrap() = LogicalUpload::Unsupported;
+            let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+            let source = provider
+                .owner
+                .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+                .unwrap();
+            let operand = provider
+                .owner
+                .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+                .unwrap();
+            let source_view = source.handle.with_provenance(Automatic).unwrap();
+            let intent_view = intent.map_or_else(
+                || operand.handle.clone(),
+                |provenance| operand.handle.with_provenance(provenance).unwrap(),
+            );
+            let result = restore_class_preserving_value_with_operands(
+                &source_view,
+                value.clone(),
+                "restore-test",
+                RestoreOperandContext::new(&[], &[&intent_view]),
+            );
+            if intent == Some(Automatic) {
+                assert_eq!(result.unwrap(), value);
+            } else {
+                let error = result.expect_err("unknown or explicit intent cannot fall back");
+                assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+            }
+            assert!(source.handle.allocation_lease().validate_live().is_ok());
+            assert!(operand.handle.allocation_lease().validate_live().is_ok());
+            drop((source_view, intent_view));
+            drop((source.handle, operand.handle));
+            assert_eq!(source.probe.retirements(), 1);
+            assert_eq!(operand.probe.retirements(), 1);
+        }
+    }
 }

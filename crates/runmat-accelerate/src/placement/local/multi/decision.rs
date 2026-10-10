@@ -10,6 +10,7 @@ pub(super) struct DecisionRequest<'a> {
         Option<runmat_runtime::context::preparation::PreparedBindingAuthority>,
     pub(super) vm_right: Option<&'a runmat_runtime::context::VmFusionCompletionRight>,
     pub(super) cpu: ExecutionCandidateDescriptor,
+    pub(super) cpu_resources: Option<CandidateResourceDemand>,
     pub(super) cpu_cost: ExecutionCostEstimate,
     pub(super) admitted: Vec<Admitted>,
     pub(super) rejected: Vec<(
@@ -41,6 +42,7 @@ pub(super) fn select_decision(
         prepared_authority,
         vm_right,
         cpu,
+        cpu_resources,
         cpu_cost,
         mut admitted,
         rejected,
@@ -66,12 +68,14 @@ pub(super) fn select_decision(
         ));
     }
     let mut graph_candidates = Vec::with_capacity(admitted.len() + 1);
-    graph_candidates.push(PlacementGraphCandidate {
-        resources: cpu_resource(&cpu),
-        descriptor: cpu.clone(),
-        output_facts: None,
-        transactional_results: true,
-    });
+    if let Some(resources) = cpu_resources {
+        graph_candidates.push(PlacementGraphCandidate {
+            resources,
+            descriptor: cpu.clone(),
+            output_facts: None,
+            transactional_results: true,
+        });
+    }
     for entry in &admitted {
         graph_candidates.push(PlacementGraphCandidate {
             resources: candidate_resource(entry),
@@ -82,7 +86,7 @@ pub(super) fn select_decision(
     }
     let select_local = || {
         select_candidate(
-            if compare_profitability {
+            if compare_profitability && cpu_resources.is_some() {
                 std::iter::once(cpu.clone())
                     .chain(admitted.iter().map(|entry| entry.descriptor.clone()))
                     .collect::<Vec<_>>()
@@ -180,7 +184,7 @@ pub(super) fn select_decision(
                 let decision = selection.decision;
                 observation_admitted = true;
                 let selected_name = &decision.selections[0].candidate;
-                let selected = if selected_name == &cpu.identity {
+                let selected = if cpu_resources.is_some() && selected_name == &cpu.identity {
                     cpu.clone()
                 } else {
                     admitted

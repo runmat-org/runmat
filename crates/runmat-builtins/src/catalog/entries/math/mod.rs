@@ -4,21 +4,23 @@
 mod bitwise;
 mod discrete;
 pub mod elementwise;
+mod fft;
 mod integer_division;
+mod interpolation;
 mod linalg;
+mod ode;
+mod optim;
+mod poly;
 mod reduction;
 mod rounding;
 mod signal;
 mod symbolic;
 mod trigonometry;
-mod interpolation;
-mod ode;
-mod poly;
-mod optim;
 
 pub use self::bitwise::*;
 pub use self::discrete::*;
 pub use self::elementwise::*;
+pub use self::fft::*;
 pub use self::integer_division::*;
 pub use self::interpolation::*;
 pub use self::linalg::*;
@@ -46,4 +48,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     signal::extend_entries(values);
     symbolic::extend_entries(values);
     trigonometry::extend_entries(values);
+    fft::extend_entries(values);
 }

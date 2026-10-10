@@ -73,12 +73,6 @@ pub fn row_vector_type(ctx: &ResolveContext) -> Type {
     }
 }
 
-pub fn column_vector_type() -> Type {
-    Type::Tensor {
-        shape: Some(vec![None, Some(1)]),
-    }
-}
-
 pub fn size_vector_len(ty: &Type) -> Option<usize> {
     match ty {
         Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {

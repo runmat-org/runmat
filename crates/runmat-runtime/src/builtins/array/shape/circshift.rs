@@ -953,23 +953,62 @@ async fn circshift_gpu(
     }
 
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        let mut working = handle.clone();
-        if runmat_accelerate_api::handle_integer_type(&handle).is_none()
-            && plan.ext_shape != working.shape()
-        {
-            match provider.reshape(&working, &plan.ext_shape) {
-                Ok(reshaped) => working = reshaped,
-                Err(_) => return circshift_gpu_fallback(handle, dims, shifts).await,
-            }
+        if !provider.supports_circshift(&handle, &plan.provider) {
+            return circshift_gpu_fallback(handle, dims, shifts).await;
         }
-        if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
-            if let Ok(out) = provider.circshift(&working, &plan.provider) {
+        // The hook itself accepts a trailing singleton shift rank. Do not
+        // reshape a borrowed input first: legacy reshape may mutate provider
+        // metadata even when the subsequent circshift fails.
+        match provider.circshift(&handle, &plan.provider) {
+            Ok(out) => {
+                if out.shares_allocation_with(&handle) {
+                    let mut error = circshift_internal("circshift: provider aliased its input");
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    return Err(gpu_helpers::reject_gpu_output(out, error));
+                }
+                if !circshift_provider_output_valid(provider, &out, &handle, &plan.ext_shape) {
+                    let mut error =
+                        circshift_internal("circshift: provider returned malformed output");
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    return Err(gpu_helpers::reject_gpu_output(out, error));
+                }
                 return Ok(Value::GpuTensor(out));
             }
+            Err(source) => return Err(circshift_provider_error("circshift", source)),
         }
     }
 
     circshift_gpu_fallback(handle, dims, shifts).await
+}
+
+fn circshift_provider_error(operation: &str, source: anyhow::Error) -> RuntimeError {
+    crate::runtime_error::with_provider_execution_source(
+        circshift_internal(format!(
+            "circshift: admitted provider {operation} failed: {source}"
+        )),
+        runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects(),
+    )
+}
+
+fn circshift_provider_output_valid(
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    expected_shape: &[usize],
+) -> bool {
+    output.allocation_lease().validate_live().is_ok()
+        && output.shape() == expected_shape
+        && output.device_id() == input.device_id()
+        && runmat_accelerate_api::handle_storage(output)
+            == runmat_accelerate_api::handle_storage(input)
+        && runmat_accelerate_api::handle_precision(output)
+            == runmat_accelerate_api::handle_precision(input)
+        && runmat_accelerate_api::handle_integer_type(output)
+            == runmat_accelerate_api::handle_integer_type(input)
+        && runmat_accelerate_api::handle_is_logical(output)
+            == runmat_accelerate_api::handle_is_logical(input)
+        && runmat_accelerate_api::provider_for_handle(output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 async fn circshift_gpu_fallback(
@@ -977,14 +1016,29 @@ async fn circshift_gpu_fallback(
     dims: &[usize],
     shifts: &[isize],
 ) -> crate::BuiltinResult<Value> {
-    let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    let rotated = circshift_tensor(host_tensor, dims, shifts)?;
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        return gpu_helpers::upload_tensor(provider, &rotated)
-            .map(Value::GpuTensor)
-            .map_err(|e| circshift_internal(format!("circshift: {e}")));
-    }
-    Ok(tensor::tensor_into_value(rotated))
+    let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
+        let mut error = circshift_internal("circshift: no acceleration provider owns the input");
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        error
+    })?;
+    let host = gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
+    let rotated = match host {
+        Value::Tensor(tensor) => Value::Tensor(circshift_tensor(tensor, dims, shifts)?),
+        Value::ComplexTensor(tensor) => {
+            Value::ComplexTensor(circshift_complex_tensor(tensor, dims, shifts)?)
+        }
+        Value::LogicalArray(array) => {
+            Value::LogicalArray(circshift_logical_array(array, dims, shifts)?)
+        }
+        other => {
+            let mut error = circshift_internal(format!(
+                "circshift: unexpected exact provider download {other:?}"
+            ));
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(error);
+        }
+    };
+    gpu_helpers::restore_class_preserving_value(&handle, rotated, "circshift")
 }
 
 fn circshift_generic<T: Clone>(

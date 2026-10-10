@@ -131,6 +131,12 @@ pub fn restore_class_preserving_value_with_operands(
     let explicit = std::iter::once(source)
         .chain(operands.intent_sources.iter().copied())
         .any(|handle| runmat_accelerate_api::handle_is_explicit(handle));
+    let automatic_host_fallback = std::iter::once(source)
+        .chain(operands.intent_sources.iter().copied())
+        .all(|handle| {
+            runmat_accelerate_api::handle_provenance(handle)
+                == Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        });
 
     let (
         mut output,
@@ -161,7 +167,7 @@ pub fn restore_class_preserving_value_with_operands(
                 Ok(output) => output,
                 Err(error)
                     if expected_integer.is_none()
-                        && !explicit
+                        && automatic_host_fallback
                         && matches!(&error, runmat_accelerate_api::NumericUploadError::Provider(error) if error.is_unsupported()) =>
                 {
                     return Ok(value)
@@ -185,22 +191,29 @@ pub fn restore_class_preserving_value_with_operands(
             )
         }
         Value::LogicalArray(array) => {
-            let output = runmat_accelerate_api::upload_logical_protecting(
+            let output = match runmat_accelerate_api::upload_logical_protecting(
                 provider,
                 &runmat_accelerate_api::HostLogicalTensorView {
                     data: &array.data,
                     shape: &array.shape,
                 },
                 &protected,
-            )
-            .map_err(|error| {
-                build_runtime_error(format!(
-                    "{builtin}: failed to restore logical GPU result: {error}"
-                ))
-                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                .with_source(error)
-                .build()
-            })?;
+            ) {
+                Ok(output) => output,
+                Err(runmat_accelerate_api::NumericUploadError::Provider(error))
+                    if automatic_host_fallback && error.is_unsupported() =>
+                {
+                    return Ok(value);
+                }
+                Err(error) => {
+                    return Err(build_runtime_error(format!(
+                        "{builtin}: failed to restore logical GPU result: {error}"
+                    ))
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .with_source(error)
+                    .build());
+                }
+            };
             let precision = runmat_accelerate_api::handle_precision(&output);
             let integer = runmat_accelerate_api::handle_integer_type(&output);
             (
@@ -239,7 +252,7 @@ pub fn restore_class_preserving_value_with_operands(
                 Ok(output) => output,
                 Err(error)
                     if expected_integer.is_none()
-                        && !explicit
+                        && automatic_host_fallback
                         && matches!(&error, runmat_accelerate_api::NumericUploadError::Provider(error) if error.is_unsupported()) =>
                 {
                     return Ok(value)

@@ -7,9 +7,10 @@ mod documentation;
 mod tests;
 
 pub use contract::{
-    DE2BI_DESCRIPTOR, DE2BI_EXTENSIONS, DE2BI_GPU_INPUT_EXTENSION, DE2BI_INTEGER_CAPABILITIES,
-    DE2BI_INTEGER_CONTROL_EXTENSION, DE2BI_LOGICAL_INPUT_EXTENSION, DE2BI_ND_INPUT_EXTENSION,
-    DE2BI_WIDE_INTEGER_EXTENSION,
+    DE2BI_DESCRIPTOR, DE2BI_ERROR_BASE, DE2BI_ERROR_INPUT, DE2BI_ERROR_ORDER, DE2BI_ERROR_PROVIDER,
+    DE2BI_ERROR_RESOURCE, DE2BI_ERROR_WIDTH, DE2BI_EXTENSIONS, DE2BI_GPU_INPUT_EXTENSION,
+    DE2BI_INTEGER_CAPABILITIES, DE2BI_INTEGER_CONTROL_EXTENSION, DE2BI_LOGICAL_INPUT_EXTENSION,
+    DE2BI_ND_INPUT_EXTENSION, DE2BI_WIDE_INTEGER_EXTENSION,
 };
 
 pub const DE2BI_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
@@ -39,7 +40,7 @@ pub const DE2BI_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
         residency: BuiltinResidencyPolicy::GatherToHost,
         fusion: BuiltinFusionPolicy::Boundary,
-        distributed: BuiltinDistributedPolicy::Unsupported,
+        distributed: BuiltinDistributedPolicy::MaterializeArguments,
     },
     link: BuiltinLinkContract {
         reachability: BuiltinReachability::Always,

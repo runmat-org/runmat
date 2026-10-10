@@ -1,6 +1,28 @@
 use super::*;
 
 #[test]
+fn envelope_typed_nonfinite_provider_cause_maps_to_invalid_signal_without_replay() {
+    let provider = Provider::new(Mode::NonFinite, Upload::Good);
+    let _scope = ThreadProviderGuard::set(Some(provider));
+    let input = input(provider, NumericElementType::F64, false);
+    let error = block_on(runmat_runtime::call_builtin_async(
+        "envelope",
+        &[Value::GpuTensor(input.handle.clone())],
+    ))
+    .expect_err("admitted resident signal must reject nonfinite input");
+    assert_eq!(error.identifier(), Some("RunMat:envelope:InvalidSignal"));
+    assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
+    let mut cause: &(dyn std::error::Error + 'static) = &error;
+    while !cause.is::<EnvelopeSignalDomainError>() {
+        cause = cause.source().expect("typed resident signal cause");
+    }
+    assert!(cause.is::<EnvelopeSignalDomainError>());
+    assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(input.probe.retirements(), 0);
+}
+
+#[test]
 fn protected_provider_siblings_cannot_change_automatic_caller_intent() {
     for count in [1, 2] {
         let provider = Provider::new(Mode::ExplicitSibling, Upload::Good);
@@ -75,8 +97,51 @@ fn second_fallback_upload_failure_retires_first_owned_output() {
     );
     assert_eq!(provider.uploads.load(Ordering::SeqCst), 2);
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
-    assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.hooks.load(Ordering::SeqCst), 0);
     assert_eq!(provider.produced.lock().unwrap().len(), 1);
+    provider.assert_retired();
+    input.handle.allocation_lease().validate_live().unwrap();
+    assert_eq!(input.probe.retirements(), 0);
+}
+
+#[test]
+fn admitted_envelope_unsupported_is_terminal_without_host_replay() {
+    let provider = Provider::new(Mode::UnsupportedAfterAdmission, Upload::Good);
+    let _scope = ThreadProviderGuard::set(Some(provider));
+    let input = input(provider, NumericElementType::F64, true);
+    let error = block_on(runmat_runtime::call_builtin_async_with_outputs(
+        "envelope",
+        &[Value::GpuTensor(input.handle.clone())],
+        2,
+    ))
+    .unwrap_err();
+    assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
+    assert!(std::error::Error::source(&error).is_some());
+    assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
+    input.handle.allocation_lease().validate_live().unwrap();
+    assert_eq!(input.probe.retirements(), 0);
+}
+
+#[test]
+fn pending_envelope_drop_retires_private_outputs_without_replaying_host() {
+    let provider = Provider::new(Mode::Pending, Upload::Good);
+    let _scope = ThreadProviderGuard::set(Some(provider));
+    let input = input(provider, NumericElementType::F64, true);
+    let args = [Value::GpuTensor(input.handle.clone())];
+    let mut future = Box::pin(runmat_runtime::call_builtin_async_with_outputs(
+        "envelope", &args, 2,
+    ));
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&noop_waker()))
+            .is_pending()
+    );
+    assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    drop(future);
     provider.assert_retired();
     input.handle.allocation_lease().validate_live().unwrap();
     assert_eq!(input.probe.retirements(), 0);

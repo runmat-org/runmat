@@ -1,14 +1,19 @@
 //! Standalone dispatch avoids the duplicate inventory in runtime's unit harness.
 #![cfg(not(target_arch = "wasm32"))]
 
+#[path = "support/circshift_preflight.rs"]
+mod circshift_preflight;
+#[path = "support/fft_catalog_binding.rs"]
+mod fft_catalog_binding;
+
 use futures::executor::block_on;
 use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocationOwner};
 use runmat_accelerate_api::*;
 use runmat_runtime::GpuGatherRetry;
 use runmat_value::Value;
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Mutex,
+    atomic::{AtomicUsize, Ordering},
 };
 
 #[derive(Debug)]
@@ -125,11 +130,17 @@ impl AccelProvider for Provider {
     ) -> ProviderExecutionFuture<'a, ProviderSpectralResult> {
         Box::pin(async move { self.fail() })
     }
+    fn supports_signal_envelope(&self, _: &ProviderEnvelopeRequest<'_>) -> bool {
+        true
+    }
     fn signal_envelope<'a>(
         &'a self,
         _: &'a ProviderEnvelopeRequest<'a>,
     ) -> ProviderExecutionFuture<'a, ProviderEnvelopeResult> {
         Box::pin(async move { self.fail() })
+    }
+    fn supports_signal_hilbert(&self, _: &ProviderHilbertRequest<'_>) -> bool {
+        true
     }
     fn signal_hilbert<'a>(
         &'a self,

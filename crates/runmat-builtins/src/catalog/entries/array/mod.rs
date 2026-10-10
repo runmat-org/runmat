@@ -7,16 +7,18 @@ mod combinatorics;
 mod creation;
 mod documentation;
 mod grouping;
+mod indexing;
 mod introspection;
 mod shape;
 
-pub use accumulation::*;
-pub use binning::*;
-pub use combinatorics::*;
-pub use creation::*;
-pub use grouping::*;
-pub use introspection::*;
-pub use shape::*;
+pub use self::accumulation::*;
+pub use self::binning::*;
+pub use self::combinatorics::*;
+pub use self::creation::*;
+pub use self::grouping::*;
+pub use self::indexing::*;
+pub use self::introspection::*;
+pub use self::shape::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(accumulation::ENTRIES.iter().copied());
@@ -30,6 +32,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
             .flat_map(|group| group.iter().copied()),
     );
     shape::extend_entries(values);
+    values.extend(indexing::ENTRIES.iter().copied());
 }
 
 pub(super) fn extend_constants(values: &mut Vec<crate::BuiltinConstantCatalogEntry>) {

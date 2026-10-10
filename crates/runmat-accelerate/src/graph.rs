@@ -188,7 +188,7 @@ pub enum ValueOrigin {
     Unknown,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, Serialize, Deserialize, PartialEq, Eq)]
 pub enum VarKind {
     Global,
     Local,

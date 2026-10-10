@@ -1087,7 +1087,7 @@ impl WgpuProvider {
                 self.create_storage_buffer(emission, entry.len, "runmat-circshift-out")
             })??
         };
-        let out_shape = entry.shape.clone();
+        let out_shape = ext_shape.clone();
 
         self.with_emission(|emission, pending| -> Result<()> {
             let mut enc =

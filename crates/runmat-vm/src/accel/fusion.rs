@@ -7,8 +7,8 @@ use runmat_accelerate::fusion_exec::{
     execute_centered_gram_placed, execute_elementwise_placed, execute_explained_variance_placed,
     execute_image_normalize_placed, execute_matmul_epilogue_placed,
     execute_power_step_normalize_placed, execute_reduction_with_shape_placed_async,
-    execute_reduction_with_shape_placed_async_vm, FusionExecutionOutcome, FusionExecutionRequest,
-    FusionProviderCompletion,
+    execute_reduction_with_shape_placed_async_vm, CpuReadbackFailure, FusionExecutionOutcome,
+    FusionExecutionRequest, FusionProviderCompletion,
 };
 use runmat_accelerate::placement::{
     record_event, PlacementCorrelationId, PlacementEventKind, PlacementVariant,
@@ -19,7 +19,7 @@ use runmat_runtime::builtins::common::shape::is_scalar_shape;
 use runmat_runtime::RuntimeError;
 use runmat_time::{duration_ns_saturating, Instant};
 use runmat_value::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[inline]
 pub fn value_kind(value: &Value) -> &'static str {
@@ -151,6 +151,37 @@ impl<'a> StackSliceGuard<'a> {
 
     pub fn slice(&self) -> &[Value] {
         self.slice.as_ref().expect("stack slice missing").as_slice()
+    }
+
+    /// Validate every destination before changing the selected operand slice.
+    /// The readback owner already checked each live view and source owner.
+    pub fn replace_host_operands(
+        &mut self,
+        replacements: Vec<(usize, Value)>,
+    ) -> Result<(), RuntimeError> {
+        let Some(slice) = self.slice.as_mut() else {
+            return Err(mex(
+                "FusionHostReadback",
+                "fusion host stack slice was consumed",
+            ));
+        };
+        let mut offsets = HashSet::new();
+        if replacements.iter().any(|(offset, value)| {
+            !offsets.insert(*offset)
+                || !matches!(slice.get(*offset), Some(Value::GpuTensor(_)))
+                || runmat_runtime::dispatcher::value_contains_gpu(value)
+        }) || slice.iter().enumerate().any(|(offset, value)| {
+            runmat_runtime::dispatcher::value_contains_gpu(value) && !offsets.contains(&offset)
+        }) {
+            return Err(mex(
+                "FusionHostReadback",
+                "selected host readback cannot publish its complete operand slice",
+            ));
+        }
+        for (offset, value) in replacements {
+            slice[offset] = value;
+        }
+        Ok(())
     }
 
     pub fn commit(mut self) {
@@ -628,7 +659,7 @@ pub use reduction_geometry::{resolve_reduction_geometry, ReductionGeometry};
 pub async fn execute_fusion_reduction(
     plan: &runmat_accelerate::FusionGroupPlan,
     request: FusionExecutionRequest<'_>,
-    stack_guard: StackSliceGuard<'_>,
+    mut stack_guard: StackSliceGuard<'_>,
     right: Option<runmat_runtime::context::VmFusionCompletionRight>,
 ) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
     let geom = match resolve_reduction_geometry(plan, &request) {
@@ -672,6 +703,18 @@ pub async fn execute_fusion_reduction(
                 }))
             }
             Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
+                match observation.prepare_vm_host_slice(stack_guard.slice()).await {
+                    Ok(Some(replacements)) => stack_guard
+                        .replace_host_operands(replacements)
+                        .map_err(FusionAttemptError::Terminal)?,
+                    Ok(None) => {}
+                    Err(CpuReadbackFailure::BeforeEffect(error)) => {
+                        return Err(FusionAttemptError::Deopt(error));
+                    }
+                    Err(CpuReadbackFailure::AfterEffect(error)) => {
+                        return Err(FusionAttemptError::Terminal(error));
+                    }
+                }
                 Ok(FusionExecutionOutcome::SharedRuntime(observation))
             }
             Err(error) => {
@@ -865,6 +908,82 @@ mod tests {
             );
             drop(vars);
             assert!(shared_weak.acquire().is_err());
+        });
+    }
+
+    #[test]
+    fn host_readback_slice_publication_is_atomic_and_keeps_source_handles() {
+        use futures::executor::block_on;
+        use once_cell::sync::Lazy;
+        use runmat_accelerate::simple_provider::InProcessProvider;
+        use runmat_accelerate_api::{AccelProvider, HostTensorView, ThreadProviderGuard};
+
+        static PROVIDER: Lazy<InProcessProvider> = Lazy::new(InProcessProvider::new);
+        runmat_gc::gc_test_context(|| {
+            let _provider = ThreadProviderGuard::set(Some(&*PROVIDER));
+            let upload = |value| {
+                PROVIDER
+                    .upload(&HostTensorView {
+                        data: &[value],
+                        shape: &[1, 1],
+                    })
+                    .unwrap()
+            };
+            let left = upload(7.0);
+            let right = upload(9.0);
+            let public = [
+                Value::GpuTensor(left.clone()),
+                Value::GpuTensor(right.clone()),
+            ];
+            let mut stack = vec![
+                Value::Num(3.0),
+                Value::GpuTensor(left.clone()),
+                Value::GpuTensor(right.clone()),
+            ];
+            {
+                let mut guard = StackSliceGuard::new(&mut stack, 1);
+                assert!(guard
+                    .replace_host_operands(vec![(0, Value::Num(7.0))])
+                    .is_err());
+                assert_eq!(guard.slice().len(), 2);
+                assert!(guard
+                    .slice()
+                    .iter()
+                    .all(|value| matches!(value, Value::GpuTensor(_))));
+                assert!(guard
+                    .replace_host_operands(vec![(0, Value::Num(7.0)), (0, Value::Num(9.0))])
+                    .is_err());
+                assert!(guard
+                    .slice()
+                    .iter()
+                    .all(|value| matches!(value, Value::GpuTensor(_))));
+                assert!(guard
+                    .replace_host_operands(vec![
+                        (0, Value::Num(7.0)),
+                        (1, Value::GpuTensor(right.clone()))
+                    ])
+                    .is_err());
+                assert!(guard
+                    .slice()
+                    .iter()
+                    .all(|value| matches!(value, Value::GpuTensor(_))));
+                guard
+                    .replace_host_operands(vec![(0, Value::Num(7.0)), (1, Value::Num(9.0))])
+                    .unwrap();
+                assert_eq!(guard.slice(), &[Value::Num(7.0), Value::Num(9.0)]);
+            }
+            assert_eq!(
+                stack,
+                vec![Value::Num(3.0), Value::Num(7.0), Value::Num(9.0)]
+            );
+            assert!(
+                matches!(&public[0], Value::GpuTensor(handle) if handle.view_identity() == left.view_identity())
+            );
+            assert!(
+                matches!(&public[1], Value::GpuTensor(handle) if handle.view_identity() == right.view_identity())
+            );
+            assert_eq!(block_on(PROVIDER.download(&left)).unwrap().data, vec![7.0]);
+            assert_eq!(block_on(PROVIDER.download(&right)).unwrap().data, vec![9.0]);
         });
     }
 

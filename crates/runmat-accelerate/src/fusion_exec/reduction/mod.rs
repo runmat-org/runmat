@@ -7,10 +7,13 @@ use runmat_accelerate_api::ProviderExecutionResult as ExecutionResult;
 use runmat_value::Value;
 
 mod execute;
+mod host_readback;
 mod input_preparation;
 mod legacy;
 mod select;
 mod validation;
+pub use host_readback::CpuReadbackFailure;
+pub(crate) use host_readback::CpuReadbackPlan;
 use legacy::execute_reduction_with_shape_core;
 
 #[cfg(test)]
@@ -234,12 +237,16 @@ async fn execute_reduction_with_shape_placed_async_inner(
                         &input_plan,
                         right.as_ref(),
                     )? {
-                        select::Choice::Shared(observation) => {
+                        select::Choice::Shared {
+                            observation,
+                            readback,
+                        } => {
                             let observation = match right.take() {
-                                Some(right) => observation.with_vm_host_route(
+                                Some(right) => observation.with_vm_host_route_readback(
                                     right,
                                     request.runtime.as_ref(),
                                     program.host_bindings(),
+                                    readback,
                                 ),
                                 None => observation,
                             };

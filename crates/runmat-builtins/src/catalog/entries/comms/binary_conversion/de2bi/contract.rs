@@ -112,31 +112,49 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
         outputs: &OUTPUT,
     },
 ];
-const ERRORS: [BuiltinErrorDescriptor; 4] = [
-    BuiltinErrorDescriptor {
-        code: "RM.DE2BI.INPUT",
-        identifier: None,
-        when: "D is not real nonnegative numeric data with integer values.",
-        message: "de2bi: D must contain real nonnegative integers",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.DE2BI.WIDTH",
-        identifier: None,
-        when: "N is invalid or too narrow for an input value.",
-        message: "de2bi: N is too small to represent an input value",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.DE2BI.BASE",
-        identifier: None,
-        when: "P is not an integer scalar at least two.",
-        message: "de2bi: P must be an integer greater than 1",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.DE2BI.RESOURCE",
-        identifier: None,
-        when: "The requested digit matrix exceeds the supported size.",
-        message: "de2bi: requested output exceeds the maximum supported size",
-    },
+pub const DE2BI_ERROR_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DE2BI.INPUT",
+    identifier: Some("RunMat:de2bi:InvalidInput"),
+    when: "D is not real nonnegative numeric data with integer values.",
+    message: "de2bi: D must contain real nonnegative integers",
+};
+pub const DE2BI_ERROR_WIDTH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DE2BI.WIDTH",
+    identifier: Some("RunMat:de2bi:InvalidWidth"),
+    when: "N is invalid or too narrow for an input value.",
+    message: "de2bi: N is too small to represent an input value",
+};
+pub const DE2BI_ERROR_BASE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DE2BI.BASE",
+    identifier: Some("RunMat:de2bi:InvalidBase"),
+    when: "P is not an integer scalar at least two.",
+    message: "de2bi: P must be an integer greater than 1",
+};
+pub const DE2BI_ERROR_RESOURCE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DE2BI.RESOURCE",
+    identifier: Some("RunMat:de2bi:ResourceLimit"),
+    when: "The requested digit matrix exceeds the supported size.",
+    message: "de2bi: requested output exceeds the maximum supported size",
+};
+pub const DE2BI_ERROR_ORDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DE2BI.ORDER",
+    identifier: Some("RunMat:de2bi:InvalidOrder"),
+    when: "The digit order is not right-msb or left-msb.",
+    message: "de2bi: unsupported digit order",
+};
+pub const DE2BI_ERROR_PROVIDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DE2BI.PROVIDER",
+    identifier: Some("RunMat:de2bi:ProviderError"),
+    when: "Gathering a resident decimal array fails after admission.",
+    message: "de2bi: failed to gather resident decimals",
+};
+const ERRORS: [BuiltinErrorDescriptor; 6] = [
+    DE2BI_ERROR_INPUT,
+    DE2BI_ERROR_WIDTH,
+    DE2BI_ERROR_BASE,
+    DE2BI_ERROR_RESOURCE,
+    DE2BI_ERROR_ORDER,
+    DE2BI_ERROR_PROVIDER,
 ];
 pub const DE2BI_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
@@ -146,7 +164,8 @@ pub const DE2BI_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 
 const INTEGER_DATA: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "D", classes: &ALL_INTEGER_CLASSES,
+    name: "D",
+    classes: &ALL_INTEGER_CLASSES,
     availability: BuiltinIntegerInputAvailability::Documented,
     scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
     notes: "Native integer values retain their exact bits through digit extraction; values greater than 2^52 are a separately gated RunMat extension.",
@@ -169,7 +188,8 @@ const INTEGER_CONTROL: [BuiltinIntegerInputCapability; 2] = [
 ];
 pub const DE2BI_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
     BuiltinIntegerCapabilityDescriptor {
-        form: "B = de2bi(integer_D, N, P, flg)", inputs: &INTEGER_DATA,
+        form: "B = de2bi(integer_D, N, P, flg)",
+        inputs: &INTEGER_DATA,
         computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
         output_class: BuiltinIntegerOutputClassRule::PreserveInput,
         overflow: BuiltinIntegerOverflowRule::Error,
@@ -178,7 +198,8 @@ pub const DE2BI_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = 
         notes: "The output matrix has D's numeric class. MATLAB-compatible mode follows the documented 2^52 input bound; RunMat mode supports exact wider native integers.",
     },
     BuiltinIntegerCapabilityDescriptor {
-        form: "B = de2bi(D, integer_N, integer_P, flg)", inputs: &INTEGER_CONTROL,
+        form: "B = de2bi(D, integer_N, integer_P, flg)",
+        inputs: &INTEGER_CONTROL,
         computation_domain: BuiltinIntegerComputationDomain::Structural,
         output_class: BuiltinIntegerOutputClassRule::PreserveInput,
         overflow: BuiltinIntegerOverflowRule::Error,

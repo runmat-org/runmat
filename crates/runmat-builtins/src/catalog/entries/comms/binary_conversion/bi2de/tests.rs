@@ -51,6 +51,7 @@ fn class_and_shape_inference_does_not_guess_integer_widening() {
             ..
         })
     ));
+    assert_eq!(single.outputs[0].storage, StorageFact::Dense);
     let narrow_integer = super::super::inference::infer_bi2de(
         &call(input(NumericClass::UInt8, 1, 3), vec![], 0),
         &BI2DE_CATALOG_ENTRY,
@@ -88,10 +89,12 @@ fn invalid_input_and_base_literals_are_diagnosed() {
         ),
         &BI2DE_CATALOG_ENTRY,
     );
-    assert!(invalid
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "RM-BI2DE-DIGITS"));
+    assert!(
+        invalid
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-BI2DE-DIGITS")
+    );
     let base = super::super::inference::infer_bi2de(
         &call(
             input(NumericClass::Double, 1, 3),
@@ -100,10 +103,66 @@ fn invalid_input_and_base_literals_are_diagnosed() {
         ),
         &BI2DE_CATALOG_ENTRY,
     );
-    assert!(base
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == "RM-BI2DE-BASE"));
+    assert!(
+        base.diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-BI2DE-BASE")
+    );
     assert_eq!(BI2DE_CATALOG_ENTRY.bindings, &REQUIRED_DEFAULT_BINDING);
-    assert_eq!(BI2DE_CATALOG_ENTRY.documentation.examples.len(), 4);
+    assert_eq!(BI2DE_CATALOG_ENTRY.documentation.examples.len(), 6);
+}
+
+#[test]
+fn three_argument_controls_keep_base_and_order_roles_distinct() {
+    let digits = input(NumericClass::Double, 1, 3);
+    for (literals, code, argument) in [
+        (
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::String("left-msb".into()),
+                LiteralValue::String("right-msb".into()),
+            ],
+            "RM-BI2DE-BASE",
+            1,
+        ),
+        (
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::Number(2.0),
+                LiteralValue::Number(1.0),
+            ],
+            "RM-BI2DE-ORDER",
+            2,
+        ),
+        (
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::Number(4_503_599_627_370_497.0),
+                LiteralValue::String("left-msb".into()),
+            ],
+            "RM-BI2DE-BASE",
+            1,
+        ),
+        (
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::Bool(true),
+                LiteralValue::String("left-msb".into()),
+            ],
+            "RM-BI2DE-BASE",
+            1,
+        ),
+    ] {
+        let inferred = super::super::inference::infer_bi2de(
+            &call(digits.clone(), literals, 2),
+            &BI2DE_CATALOG_ENTRY,
+        );
+        assert!(
+            inferred
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == code && diagnostic.argument == Some(argument)),
+            "{inferred:?}"
+        );
+    }
 }

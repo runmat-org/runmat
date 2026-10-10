@@ -6,9 +6,10 @@ use std::rc::Rc;
 
 use runmat_accelerate::fusion::{FusionOp, FusionPlan, FusionStoreMaterialization};
 use runmat_accelerate::graph::{AccelGraph, VarBinding, VarKind};
-use runmat_accelerate::{prepare_fusion_plan, FusionPlanRef};
+use runmat_accelerate::{FusionPlanRef, prepare_fusion_plan};
 
-use crate::accel::graph::{build_accel_graph_with_stores, AccelStore};
+use crate::accel::graph::{AccelStore, build_accel_graph_with_stores};
+use crate::accel::stack_layout::annotate_fusion_groups_with_stack_layout;
 use crate::bytecode::Instr;
 
 use runmat_runtime::context::{RuntimeContext, VmFusionCompletionRight, VmFusionInstalledRegion};
@@ -138,6 +139,24 @@ impl Bytecode {
         );
         let plan = cached.map(|cached| {
             let mut owned = (*cached).clone();
+            // Semantic windows are annotated before canonical graph
+            // reconciliation, while their node sets are still empty. Rebuild
+            // the compiler-owned stack certificate from the exact sanitized
+            // nodes selected for this VM plan; never infer variable authority
+            // from an ordinal stack pattern.
+            let mut reconciled_groups = owned
+                .groups
+                .iter()
+                .map(|selected| selected.group.clone())
+                .collect::<Vec<_>>();
+            annotate_fusion_groups_with_stack_layout(
+                &self.instructions,
+                &graph,
+                &mut reconciled_groups,
+            );
+            for (selected, reconciled) in owned.groups.iter_mut().zip(reconciled_groups) {
+                selected.group.stack_layout = reconciled.stack_layout;
+            }
             reconcile_stores(&mut owned, &self.instructions, &stores);
             Rc::new(owned)
         });

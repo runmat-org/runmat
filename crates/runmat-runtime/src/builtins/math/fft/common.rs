@@ -390,6 +390,22 @@ pub fn restore_gpu_metadata(handle: &GpuTensorHandle, snapshot: GpuMetadataSnaps
     runmat_accelerate_api::mark_residency(handle);
 }
 
+/// Shared acceptance boundary for the two exact FFT shift permutations.
+pub fn valid_provider_shift_output(
+    provider: &dyn AccelProvider,
+    output: &GpuTensorHandle,
+    input: &GpuTensorHandle,
+    expected: GpuMetadataSnapshot,
+) -> bool {
+    output.allocation_lease().validate_live().is_ok()
+        && output.shape() == input.shape()
+        && output.device_id() == input.device_id()
+        && !same_gpu_handle(output, input)
+        && gpu_metadata_snapshot(output) == expected
+        && runmat_accelerate_api::provider_for_handle(output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
+}
+
 /// Validate a provider FFT result before it crosses the public builtin boundary.
 pub fn valid_provider_fft_output(
     provider: &dyn AccelProvider,

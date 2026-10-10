@@ -45,6 +45,8 @@ fn logical_weighted_median_uses_true_native_producer_and_retains_operational_err
                         shape: &[3, 1],
                         storage: GpuTensorStorage::Real,
                     })
+                    .unwrap()
+                    .with_provenance(GpuHandleProvenance::Automatic)
                     .unwrap();
                 let borrowed = input.allocation_lease().downgrade();
                 let borrowed_weights = weights.allocation_lease().downgrade();
@@ -95,22 +97,29 @@ fn logical_weighted_median_uses_true_native_producer_and_retains_operational_err
                         assert!(retired.acquire().is_none());
                     }
                     Mode::Unsupported => {
-                        // Shared restoration does not silently abandon logical
-                        // residency even when its source intent was automatic.
-                        let error = result.unwrap_err();
-                        assert_eq!(
-                            error.gpu_gather_retry,
-                            runmat_runtime::GpuGatherRetry::Never
-                        );
-                        let source = error
-                            .source
-                            .as_ref()
-                            .unwrap()
-                            .downcast_ref::<NumericUploadError>()
-                            .unwrap();
-                        assert!(
-                            matches!(source, NumericUploadError::Provider(cause) if cause.is_unsupported())
-                        );
+                        if explicit {
+                            let error = result.unwrap_err();
+                            assert_eq!(
+                                error.gpu_gather_retry,
+                                runmat_runtime::GpuGatherRetry::Never
+                            );
+                            let source = error
+                                .source
+                                .as_ref()
+                                .unwrap()
+                                .downcast_ref::<NumericUploadError>()
+                                .unwrap();
+                            assert!(
+                                matches!(source, NumericUploadError::Provider(cause) if cause.is_unsupported())
+                            );
+                        } else {
+                            assert_eq!(
+                                result.unwrap(),
+                                Value::LogicalArray(
+                                    LogicalArray::new(vec![1], vec![1, 1, 1]).unwrap()
+                                )
+                            );
+                        }
                     }
                     Mode::Failure | Mode::Alias => fixture::assert_upload_failure(
                         &result.unwrap_err(),

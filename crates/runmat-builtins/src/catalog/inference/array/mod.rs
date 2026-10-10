@@ -3,6 +3,7 @@ mod binning;
 mod combinatorics;
 mod creation;
 mod grouping;
+mod indexing;
 mod introspection;
 
 use crate::{ArrayCreationInferenceRule, ArrayInferenceRule, BuiltinCatalogEntry};
@@ -24,6 +25,7 @@ pub(in crate::catalog::inference) fn infer(
             creation::infer_zeros(request, entry)
         }
         ArrayInferenceRule::Grouping(rule) => grouping::infer(rule, request, entry),
+        ArrayInferenceRule::Indexing(rule) => indexing::infer(rule, request, entry),
         ArrayInferenceRule::Introspection(rule) => introspection::infer(rule, request, entry),
     }
 }

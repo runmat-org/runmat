@@ -62,10 +62,15 @@ impl AccelProvider for Provider {
     fn upload_logical_raw(
         &self,
         host: &HostLogicalTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        match self.intercept("logical-upload")? {
-            Some(alias) => Ok(alias),
-            None => self.inner.upload_logical_raw(host),
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        match self.intercept("logical-upload") {
+            Ok(Some(alias)) => Ok(alias),
+            Ok(None) => self.inner.upload_logical_raw(host),
+            Err(error) if matches!(self.mode, Mode::Unsupported) => Err(error.into()),
+            Err(error) => {
+                Err(runmat_accelerate_api::ProviderExecutionError::from(error)
+                    .with_unproven_effects())
+            }
         }
     }
     fn download<'a>(&'a self, input: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {

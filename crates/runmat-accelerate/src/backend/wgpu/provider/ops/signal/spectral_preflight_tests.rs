@@ -6,6 +6,17 @@ use runmat_accelerate_api::{
     NumericElementType, ProviderPrecision, ProviderSpectralRange,
 };
 
+#[derive(Debug)]
+struct EnvelopeScalarReadbackFault;
+
+impl std::fmt::Display for EnvelopeScalarReadbackFault {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("envelope scalar readback fixture fault")
+    }
+}
+
+impl std::error::Error for EnvelopeScalarReadbackFault {}
+
 fn provider() -> WgpuProvider {
     let provider = WgpuProvider::new(Default::default()).expect("actual WGPU adapter required");
     if let Ok(requested) = std::env::var("RUNMAT_WGPU_FORCE_PRECISION") {
@@ -157,7 +168,7 @@ fn request(input: &GpuTensorHandle) -> ProviderSpectralRequest<'_> {
 #[ignore = "requires actual WGPU adapter; no unavailable-device skip"]
 fn spectral_invalid_request_and_foreign_owner_have_zero_upload_or_dispatch() {
     use runmat_accelerate_api::observation::{
-        with_provider_observation, ProviderObservationStatus, ProviderOperationReceipt,
+        ProviderObservationStatus, ProviderOperationReceipt, with_provider_observation,
     };
     let provider = provider();
     let input = upload(&provider, &[1.; 16], &[8, 2]);
@@ -245,4 +256,58 @@ fn envelope_materialization_failure_and_unpolled_drop_retain_original_only() {
         next.buffer_id() > original.buffer_id() + 1,
         "failure happened after a distinct materialization was registered"
     );
+}
+
+#[test]
+#[ignore = "requires actual WGPU adapter; envelope validation owns real mask/reduction buffers"]
+fn envelope_scalar_readback_failure_and_pending_drop_retire_validation_intermediates() {
+    use std::future::Future;
+    use std::task::{Context, Poll};
+
+    let provider = provider();
+    let input = upload(&provider, &[1., 2., 3., 4., 5., 6.], &[3, 2]);
+    let retained_input = provider.allocations.retained_bytes();
+
+    let failed = provider
+        .prepare_envelope_finite_validation(&input)
+        .expect("real finite mask and scalar reduction");
+    let scalar_id = failed.scalar().buffer_id();
+    assert!(provider.allocations.retained_bytes() > retained_input);
+    let error = failed
+        .complete(Err(anyhow::Error::new(EnvelopeScalarReadbackFault)))
+        .expect_err("scalar readback fault is terminal after device effects");
+    assert!(error.is_after_effect());
+    assert!(
+        std::error::Error::source(&error)
+            .and_then(|source| source.downcast_ref::<EnvelopeScalarReadbackFault>())
+            .is_some()
+    );
+    assert_eq!(provider.allocations.retained_bytes(), retained_input);
+    input.allocation_lease().validate_live().unwrap();
+    let next = upload(&provider, &[9.], &[1, 1]);
+    assert_eq!(
+        next.buffer_id(),
+        scalar_id + 1,
+        "failed validation must not register either envelope bounds output"
+    );
+    drop(next);
+    assert_eq!(provider.allocations.retained_bytes(), retained_input);
+
+    let pending = provider
+        .prepare_envelope_finite_validation(&input)
+        .expect("second real finite mask and scalar reduction");
+    let mut future = Box::pin(async move {
+        futures::future::pending::<()>().await;
+        pending.scalar().buffer_id()
+    });
+    let waker = futures::task::noop_waker();
+    assert!(matches!(
+        future.as_mut().poll(&mut Context::from_waker(&waker)),
+        Poll::Pending
+    ));
+    assert!(provider.allocations.retained_bytes() > retained_input);
+    drop(future);
+    assert_eq!(provider.allocations.retained_bytes(), retained_input);
+    input.allocation_lease().validate_live().unwrap();
+    assert_eq!(read(&provider, &input), vec![1., 2., 3., 4., 5., 6.]);
 }

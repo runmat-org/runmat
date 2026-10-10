@@ -44,16 +44,17 @@ impl AccelProvider for Provider {
     fn upload_logical_raw(
         &self,
         host: &HostLogicalTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.trace.lock().unwrap().push("logical-upload");
         match self.mode {
             Mode::Supported => self.inner.upload_logical_raw(host),
-            Mode::Unsupported => Err(unsupported_provider_operation("native logical upload")),
-            Mode::Failure => Err(std::io::Error::new(
-                std::io::ErrorKind::BrokenPipe,
-                "logical transport failure",
+            Mode::Unsupported => {
+                Err(unsupported_provider_operation("native logical upload").into())
+            }
+            Mode::Failure => Err(runmat_accelerate_api::ProviderExecutionError::from(
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "logical transport failure"),
             )
-            .into()),
+            .with_unproven_effects()),
             Mode::Alias => Ok(self.alias.lock().unwrap().as_ref().unwrap().clone()),
         }
     }
@@ -143,7 +144,7 @@ fn find_logical_output_preserves_native_owner_and_rejects_operational_or_alias_u
                 shape: &[2, 1],
             })
             .unwrap()
-            .with_provenance(GpuHandleProvenance::Explicit)
+            .with_provenance(GpuHandleProvenance::Automatic)
             .unwrap();
         let borrowed = input.allocation_lease().downgrade();
         if matches!(mode, Mode::Alias) {
@@ -175,7 +176,7 @@ fn find_logical_output_preserves_native_owner_and_rejects_operational_or_alias_u
                 assert!(handle_is_logical(&output));
                 assert_eq!(
                     handle_provenance(&output),
-                    Some(GpuHandleProvenance::Explicit)
+                    Some(GpuHandleProvenance::Automatic)
                 );
                 assert_eq!(output.device_id(), owner.device_id());
                 assert!(!output.shares_allocation_with(&input));
@@ -186,12 +187,14 @@ fn find_logical_output_preserves_native_owner_and_rejects_operational_or_alias_u
                 assert!(retired.acquire().is_none());
             }
             Mode::Unsupported => {
-                let Value::OutputList(outputs) = result.unwrap() else {
-                    panic!("three outputs")
-                };
-                assert!(
-                    matches!(&outputs[2], Value::LogicalArray(data) if data.data == vec![1,1] && data.shape == vec![2,1])
-                );
+                assert!(matches!(
+                    result.unwrap(),
+                    Value::OutputList(outputs)
+                        if outputs.len() == 3
+                            && matches!(&outputs[0], Value::Tensor(t) if t.as_f64_slice() == Some(&[1.0, 2.0][..]) && t.shape() == [2, 1])
+                            && matches!(&outputs[1], Value::Tensor(t) if t.as_f64_slice() == Some(&[1.0, 1.0][..]) && t.shape() == [2, 1])
+                            && matches!(&outputs[2], Value::LogicalArray(data) if data.data == vec![1, 1] && data.shape == vec![2, 1])
+                ));
             }
             Mode::Failure | Mode::Alias => {
                 let error = result.unwrap_err();
@@ -228,4 +231,72 @@ fn find_logical_output_preserves_native_owner_and_rejects_operational_or_alias_u
         drop(input);
         assert!(borrowed.acquire().is_none());
     }
+}
+
+#[test]
+fn explicit_logical_find_rejects_unrepresentable_double_indices_before_value_upload() {
+    let owner = provider(Mode::Supported);
+    unsafe { register_provider(owner) };
+    let _active = ThreadProviderGuard::set(Some(owner));
+    let input = owner
+        .inner
+        .upload_logical_raw(&HostLogicalTensorView {
+            data: &[1, 1],
+            shape: &[2, 1],
+        })
+        .unwrap()
+        .with_provenance(GpuHandleProvenance::Explicit)
+        .unwrap();
+    let borrowed = input.allocation_lease().downgrade();
+    let error = block_on(call_builtin_async_with_outputs(
+        "find",
+        &[Value::GpuTensor(input.clone())],
+        3,
+    ))
+    .unwrap_err();
+    assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
+    assert!(matches!(
+        error
+            .source
+            .as_ref()
+            .and_then(|source| source.downcast_ref::<NumericUploadError>()),
+        Some(NumericUploadError::Provider(cause)) if cause.is_unsupported()
+    ));
+    assert_eq!(*owner.trace.lock().unwrap(), ["download"]);
+    assert!(borrowed.acquire().is_some());
+    assert!(
+        matches!(block_on(owner.inner.download_numeric(&input)).unwrap().data, HostNumericDataOwned::U8(data) if data == vec![1, 1])
+    );
+    drop(input);
+    assert!(borrowed.acquire().is_none());
+}
+
+#[test]
+fn automatic_logical_find_retains_host_values_only_for_certified_unsupported() {
+    let owner = provider(Mode::Unsupported);
+    unsafe { register_provider(owner) };
+    let _active = ThreadProviderGuard::set(Some(owner));
+    let input = owner
+        .inner
+        .upload_logical_raw(&HostLogicalTensorView {
+            data: &[1, 1],
+            shape: &[2, 1],
+        })
+        .unwrap()
+        .with_provenance(GpuHandleProvenance::Automatic)
+        .unwrap();
+    let output = block_on(call_builtin_async_with_outputs(
+        "find",
+        &[Value::GpuTensor(input.clone())],
+        3,
+    ))
+    .unwrap();
+    let Value::OutputList(outputs) = output else {
+        panic!("three outputs")
+    };
+    assert!(
+        matches!(&outputs[2], Value::LogicalArray(data) if data.data == vec![1,1] && data.shape == vec![2,1])
+    );
+    assert_eq!(*owner.trace.lock().unwrap(), ["download", "logical-upload"]);
+    assert!(input.allocation_lease().validate_live().is_ok());
 }

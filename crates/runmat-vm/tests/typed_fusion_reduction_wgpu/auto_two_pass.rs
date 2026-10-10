@@ -1,10 +1,16 @@
 use super::*;
 use runmat_accelerate::placement::{ExplorationMode, PlacementSessionConfig};
-use runmat_accelerate_api::{AccelProvider, ProviderPrecision, ReductionTwoPassMode};
-use runmat_execution::{
-    CandidateExecutionLocation, ExecutionCandidateKind, PlacementFeedback, PlacementSignature,
+use runmat_accelerate_api::{
+    AccelProvider, GpuHandleProvenance, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned,
+    HostNumericDataView, HostNumericTensorView, ProviderPrecision, ReductionTwoPassMode,
+    allocation::AllocationReleaseOutcome,
 };
-use std::collections::HashSet;
+use runmat_execution::{
+    CandidateExecutionLocation, CandidateOutputPresentation, CandidateOutputResidency,
+    CandidateResourceDemand, ExecutionCandidateDescriptor, ExecutionCandidateKind,
+    PlacementFeedback, PlacementSignature, ResourceByteBound,
+};
+use std::collections::{HashMap, HashSet};
 
 #[path = "auto_two_pass/placement.rs"]
 mod placement;
@@ -12,8 +18,7 @@ use placement::{AutoPlacement, AutoSelectedRoute};
 
 const LARGE_MIN_SOURCE: &str =
     "x = gpuArray(reshape(single(1:1048580), 262145, 4)); y = min(x + x); z = gather(y);";
-const LARGE_HOST_MIN_SOURCE: &str =
-    "x = reshape(single(1:1048580), 262145, 4); y = min(x + x); z = gather(y);";
+const LARGE_EXTERNAL_MIN_SOURCE: &str = "y = min(x + x); z = gather(y);";
 const LARGE_MIN_EXPECTED: [f64; 4] = [2.0, 524292.0, 1048582.0, 1572872.0];
 
 struct ActualAutoRun {
@@ -24,6 +29,9 @@ struct ActualAutoRun {
     feedback: PlacementFeedback,
     route: ActualAutoPhysical,
     offered_provider_candidates: usize,
+    offered_host_candidates: usize,
+    selected_descriptor: ExecutionCandidateDescriptor,
+    selected_resources: CandidateResourceDemand,
 }
 
 #[derive(Clone, Copy)]
@@ -41,10 +49,80 @@ fn actual_runtime(session: Rc<PlacementSession>) -> (Rc<AutoPlacement>, RuntimeC
     (placement, runtime)
 }
 
+fn compile_external_x() -> runmat_vm::Bytecode {
+    let variables = HashMap::from([("x".to_string(), 0)]);
+    let ast = runmat_parser::parse(LARGE_EXTERNAL_MIN_SOURCE)
+        .expect("parse external Automatic input source");
+    let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::new(&variables))
+        .expect("lower external Automatic input source");
+    let mir = runmat_mir::lowering::lower_assembly(&hir.assembly)
+        .expect("lower external Automatic input MIR");
+    runmat_vm::compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id)
+        .expect("compile external Automatic input bytecode")
+}
+
+#[test]
+fn external_automatic_input_uses_reconciled_compiler_stack_certificate() {
+    let bytecode = compile_external_x();
+    let (graph, groups) = bytecode
+        .reconciled_runtime_fusion_graph()
+        .expect("external Automatic source must reconcile");
+    let reduction_groups = groups
+        .iter()
+        .filter(|group| group.kind == runmat_accelerate::FusionKind::Reduction)
+        .collect::<Vec<_>>();
+    let [group] = reduction_groups.as_slice() else {
+        panic!("expected one reduction group, got {reduction_groups:?}");
+    };
+    assert_eq!(
+        group.span,
+        runmat_accelerate::InstrSpan { start: 2, end: 5 }
+    );
+    let prefix = bytecode
+        .instructions
+        .get(..group.span.start)
+        .expect("instructions before the reduction span");
+    assert_eq!(prefix.len(), 2);
+    assert!(
+        prefix
+            .iter()
+            .all(|instruction| matches!(instruction, runmat_vm::Instr::LoadVar(0)))
+    );
+    let layout = group
+        .stack_layout
+        .as_ref()
+        .expect("compiler-owned reduction stack layout");
+    assert_eq!(layout.required_stack_operands, 2);
+    assert_eq!(layout.bindings, layout.compiler_variable_bindings);
+    assert_eq!(layout.compiler_variable_bindings.len(), 2);
+    assert_eq!(layout.compiler_variable_bindings[0].stack_offset, 0);
+    assert_eq!(layout.compiler_variable_bindings[1].stack_offset, 1);
+    let value_id = layout.compiler_variable_bindings[0].value_id;
+    assert_eq!(layout.compiler_variable_bindings[1].value_id, value_id);
+    assert!(matches!(
+        graph.value(value_id).map(|value| &value.origin),
+        Some(runmat_accelerate::ValueOrigin::Variable {
+            kind: runmat_accelerate::VarKind::Global,
+            index: 0
+        })
+    ));
+    assert!(group.nodes.iter().all(|node| graph.node(*node).is_some()));
+    assert_eq!(group.nodes.len(), 2, "one Add and one minimum");
+}
+
+fn named_slot(bytecode: &runmat_vm::Bytecode, name: &str) -> usize {
+    bytecode
+        .var_names
+        .iter()
+        .find_map(|(slot, candidate)| (candidate == name).then_some(*slot))
+        .expect("named external input or output")
+}
+
 fn execute_actual_auto(
     bytecode: &runmat_vm::Bytecode,
     runtime: &RuntimeContext,
     placement: &AutoPlacement,
+    external_x: Option<&GpuTensorHandle>,
 ) -> ActualAutoRun {
     let selection_start = placement.selections.borrow().len();
     let receipt_start = placement.base.delivered.lock().unwrap().len();
@@ -54,6 +132,9 @@ fn execute_actual_auto(
         .map(|trace| trace.correlation)
         .collect();
     let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+    if let Some(external_x) = external_x {
+        vars[named_slot(bytecode, "x")] = Value::GpuTensor(external_x.clone());
+    }
     block_on(runmat_vm::interpret_with_vars_in_context(
         bytecode,
         &mut vars,
@@ -109,9 +190,11 @@ fn execute_actual_auto(
         "both physical offers remain admitted"
     );
     let offered_device = offered_devices[0];
-    assert!(offered_devices
-        .iter()
-        .all(|device| *device == offered_device));
+    assert!(
+        offered_devices
+            .iter()
+            .all(|device| *device == offered_device)
+    );
     assert_eq!(
         selected.signature.provider_provenance,
         Some(typed_reduction_placement::selected_provider_capability_digest(offered_device)),
@@ -129,6 +212,29 @@ fn execute_actual_auto(
         offered_provider_candidates, 2,
         "Auto must offer both legal physical strategies"
     );
+    let offered_host_candidates = selected
+        .request
+        .graph
+        .nodes
+        .iter()
+        .flat_map(|node| &node.candidates)
+        .filter(|candidate| candidate.descriptor.kind == ExecutionCandidateKind::SharedRuntime)
+        .count();
+    assert!(
+        offered_host_candidates <= 1,
+        "one bounded whole-work host alternative"
+    );
+    let selected_offer = selected
+        .request
+        .graph
+        .nodes
+        .iter()
+        .flat_map(|node| &node.candidates)
+        .find(|candidate| {
+            candidate.descriptor.identity == selected.candidate
+                && candidate.descriptor.kind == selected.kind
+        })
+        .expect("selected Auto route was offered by the exact request");
 
     let report = runmat_accelerate::placement_report();
     let traces = report
@@ -213,6 +319,9 @@ fn execute_actual_auto(
         feedback: (**receipt).clone(),
         route,
         offered_provider_candidates,
+        offered_host_candidates,
+        selected_descriptor: selected_offer.descriptor.clone(),
+        selected_resources: selected_offer.resources,
     };
     drop(receipts);
     drop(selections);
@@ -247,7 +356,7 @@ fn actual_default_auto_min_selects_single_with_typed_queue_and_fenced_full_call(
         let session = Rc::new(PlacementSession::default());
         let (placement, runtime) = actual_runtime(session.clone());
 
-        let selected = execute_actual_auto(&bytecode, &runtime, placement.as_ref());
+        let selected = execute_actual_auto(&bytecode, &runtime, placement.as_ref(), None);
         let ActualAutoPhysical::Provider {
             pass_count,
             partial_bytes,
@@ -258,6 +367,10 @@ fn actual_default_auto_min_selects_single_with_typed_queue_and_fenced_full_call(
         assert_eq!(pass_count, 1, "default cold Auto selects SinglePass");
         assert_eq!(partial_bytes, 0);
         assert_eq!(selected.offered_provider_candidates, 2);
+        assert_eq!(
+            selected.offered_host_candidates, 0,
+            "explicit gpuArray intent is never offered implicit host readback"
+        );
         assert!(matches!(
             session.observed_candidate_duration(
                 &selected.signature,
@@ -291,12 +404,25 @@ fn actual_auto_exploration_executes_two_pass_twice_in_one_live_session() {
             ReductionTwoPassMode::Auto
         );
         assert_eq!(provider.precision(), ProviderPrecision::F32);
-        // A selected SharedRuntime alternative requires genuine host F32
-        // Add operands; a resident gpuArray source cannot certify that route.
-        // The separate default-Auto test retains the resident-input case.
-        let bytecode = test_helpers::compile_source(LARGE_HOST_MIN_SOURCE)
-            .expect("compile authentic large folded Single minimum");
+        // The external value is an ordinary compiler entry-stack binding.
+        // Automatic residency is supplied by the selected provider owner, so
+        // host readback must use the compiler certificate rather than infer an
+        // in-span LoadVar or override explicit gpuArray intent.
+        let bytecode = compile_external_x();
         assert_compiled_folded_graph(&bytecode, 1);
+        let shape = [262_145, 4];
+        let input = (1..=1_048_580)
+            .map(|value| value as f32)
+            .collect::<Vec<_>>();
+        let resident = provider
+            .upload_numeric_raw(&HostNumericTensorView {
+                data: HostNumericDataView::F32(&input),
+                shape: &shape,
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("upload exact Single source")
+            .with_provenance(GpuHandleProvenance::Automatic)
+            .expect("Automatic provider provenance");
         let session = Rc::new(PlacementSession::new(PlacementSessionConfig {
             leave_absolute_margin_ns: 0,
             leave_relative_margin_basis_points: 0,
@@ -306,7 +432,7 @@ fn actual_auto_exploration_executes_two_pass_twice_in_one_live_session() {
         }));
         let (placement, runtime) = actual_runtime(session.clone());
 
-        let first = execute_actual_auto(&bytecode, &runtime, placement.as_ref());
+        let first = execute_actual_auto(&bytecode, &runtime, placement.as_ref(), Some(&resident));
         let ActualAutoPhysical::Provider {
             pass_count,
             partial_bytes,
@@ -318,6 +444,10 @@ fn actual_auto_exploration_executes_two_pass_twice_in_one_live_session() {
         assert_eq!(first.preparation, CandidatePreparationState::Cold);
         assert!(partial_bytes > 0);
         assert_eq!(first.offered_provider_candidates, 2);
+        assert_eq!(
+            first.offered_host_candidates, 1,
+            "external Automatic source admits one checked readback route"
+        );
         assert!(matches!(
             session.observed_candidate_duration(&first.signature, &first.candidate, first.kind),
             CandidateObservationEvidence::Unavailable(
@@ -336,13 +466,20 @@ fn actual_auto_exploration_executes_two_pass_twice_in_one_live_session() {
         // accepted FullCall receipt checks.
         let mut invocation_count = 1;
         let mut warm_two = Vec::<ActualAutoRun>::new();
+        let mut selected_host = None;
         for _ in 0..12 {
-            let selected = execute_actual_auto(&bytecode, &runtime, placement.as_ref());
+            let selected =
+                execute_actual_auto(&bytecode, &runtime, placement.as_ref(), Some(&resident));
             invocation_count += 1;
             assert_eq!(selected.offered_provider_candidates, 2);
+            assert_eq!(
+                selected.offered_host_candidates, 1,
+                "all real trials retain the executable host alternative"
+            );
             match selected.route {
                 ActualAutoPhysical::Host => {
                     assert_eq!(selected.kind, ExecutionCandidateKind::SharedRuntime);
+                    selected_host.get_or_insert(selected);
                 }
                 ActualAutoPhysical::Provider {
                     pass_count: 1,
@@ -374,6 +511,48 @@ fn actual_auto_exploration_executes_two_pass_twice_in_one_live_session() {
                 }
             }
         }
+        let host = selected_host.expect("canonical exploration must select the resident CPU route");
+        assert_eq!(
+            host.selected_descriptor.execution_location,
+            CandidateExecutionLocation::Host
+        );
+        assert_eq!(
+            host.selected_descriptor.output_residency,
+            CandidateOutputResidency::Host
+        );
+        let CandidateOutputPresentation::ProviderReadbacksHost { readbacks } =
+            &host.selected_descriptor.presentation
+        else {
+            panic!("resident CPU route needs an authenticated provider readback");
+        };
+        let readbacks = readbacks.iter().collect::<Vec<_>>();
+        assert_eq!(readbacks.len(), 1, "one exact resident source owner");
+        assert_eq!(readbacks[0].device_id, provider.device_id());
+        assert_eq!(
+            readbacks[0].queue_slots,
+            provider.download_numeric_queue_slots(&resident)
+        );
+        assert_eq!(
+            readbacks[0].provider_scratch_bytes,
+            provider.download_numeric_provider_scratch_bound(&resident)
+        );
+        assert_eq!(host.selected_resources.cpu_millicores, 1_000);
+        assert_eq!(host.selected_resources.queue_slots, 0);
+        assert_eq!(
+            host.selected_resources.scratch_bytes,
+            ResourceByteBound::Known(
+                host.selected_descriptor
+                    .cost
+                    .scratch_bytes
+                    .expect("typed host scratch bound")
+            )
+        );
+        assert!(matches!(
+            host.selected_resources.retained_bytes,
+            ResourceByteBound::Known(bytes) if bytes > 0
+        ));
+        assert_eq!(host.feedback.kind, ExecutionCandidateKind::SharedRuntime);
+        assert!(host.feedback.succeeded && host.feedback.total_elapsed_ns > 0);
         let warm_second = warm_two
             .last()
             .expect("bounded exploration must execute a warm TwoPass route");
@@ -444,6 +623,17 @@ fn actual_auto_exploration_executes_two_pass_twice_in_one_live_session() {
         ));
         assert_session_only_feedback(session.as_ref(), &first);
         assert_session_only_feedback(session.as_ref(), warm_second);
+        let downloaded = block_on(provider.download_numeric(&resident))
+            .expect("original Automatic source remains readable");
+        assert_eq!(downloaded.shape, shape);
+        let HostNumericDataOwned::F32(actual) = downloaded.data else {
+            panic!("original Automatic source lost Single storage");
+        };
+        assert_eq!(actual, input);
+        assert_eq!(
+            resident.release().expect("retire original source owner"),
+            AllocationReleaseOutcome::Retired
+        );
         assert_eq!(placement.selections.borrow().len(), invocation_count);
         assert_eq!(placement.base.revoked_before_publication.get(), 0);
     });

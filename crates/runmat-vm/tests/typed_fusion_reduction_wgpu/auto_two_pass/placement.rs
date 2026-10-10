@@ -7,11 +7,11 @@ use runmat_execution::{
     PlacementFeedback, PlacementInvalidation, PlacementPlanRequest, PlacementRevision,
     ProgramRevision,
 };
+use runmat_runtime::RuntimeError;
 use runmat_runtime::context::{
     RuntimeGraphPlacementSelection, RuntimePlacementFeedbackSource, RuntimePlacementService,
     VmFusionRegionRegistration, VmFusionSessionRegistration,
 };
-use runmat_runtime::RuntimeError;
 use std::sync::Weak;
 
 #[derive(Clone, Copy)]

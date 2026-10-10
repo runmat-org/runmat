@@ -4146,7 +4146,7 @@ impl AccelProvider for InProcessProvider {
     fn upload_logical_raw(
         &self,
         host: &runmat_accelerate_api::HostLogicalTensorView<'_>,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         host.validate()?;
         let data = host
             .data
@@ -4155,12 +4155,16 @@ impl AccelProvider for InProcessProvider {
             .collect::<Vec<_>>();
         self.telemetry
             .record_upload_bytes(std::mem::size_of_val(data.as_slice()) as u64);
-        let output = self.allocate_produced(
-            InProcessNumericData::F64(data),
-            host.shape.to_vec(),
-            GpuTensorStorage::Real,
-            true,
-        )?;
+        let output = self
+            .allocate_produced(
+                InProcessNumericData::F64(data),
+                host.shape.to_vec(),
+                GpuTensorStorage::Real,
+                true,
+            )
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })?;
         let operation = runmat_accelerate_api::ProviderOperationIdentity::new("transfer.upload");
         if let Some(recorder) = runmat_accelerate_api::observation::current_provider_observation()
             .filter(|recorder| recorder.expects_operation(&operation))
@@ -7563,6 +7567,53 @@ impl AccelProvider for InProcessProvider {
         )
     }
 
+    fn supports_circshift(&self, handle: &GpuTensorHandle, shifts: &[isize]) -> bool {
+        if handle.device_id() != self.device_id
+            || handle.allocation_lease().validate_live().is_err()
+            || runmat_accelerate_api::handle_is_logical(handle)
+            || runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_transpose_info(handle).is_some()
+            || !runmat_accelerate_api::provider_for_handle(handle)
+                .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, self))
+        {
+            return false;
+        }
+        let length = if runmat_accelerate_api::handle_integer_type(handle).is_some() {
+            integer_registry(self.device_id)
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .get(handle)
+                .map(|data| match data {
+                    HostIntegerDataOwned::I8(values) => values.len(),
+                    HostIntegerDataOwned::I16(values) => values.len(),
+                    HostIntegerDataOwned::I32(values) => values.len(),
+                    HostIntegerDataOwned::I64(values) => values.len(),
+                    HostIntegerDataOwned::U8(values) => values.len(),
+                    HostIntegerDataOwned::U16(values) => values.len(),
+                    HostIntegerDataOwned::U32(values) => values.len(),
+                    HostIntegerDataOwned::U64(values) => values.len(),
+                })
+        } else {
+            registry(self.device_id)
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .get(handle)
+                .map(|data| data.len())
+        };
+        let Some(length) = length else {
+            return false;
+        };
+        let mut shape = handle.shape().to_vec();
+        shape.resize(shape.len().max(shifts.len()), 1);
+        shape
+            .iter()
+            .all(|dimension| *dimension <= isize::MAX as usize)
+            && shape
+                .iter()
+                .try_fold(1usize, |count, dimension| count.checked_mul(*dimension))
+                == Some(length)
+    }
+
     fn circshift(&self, handle: &GpuTensorHandle, shifts: &[isize]) -> Result<GpuTensorHandle> {
         if runmat_accelerate_api::handle_integer_type(handle).is_some() {
             let data = integer_registry(self.device_id)
@@ -8558,6 +8609,20 @@ impl AccelProvider for InProcessProvider {
             values: self.allocate_integer_tensor(values, input.shape().to_vec())?,
             indices: self.allocate_tensor(indices.unwrap_or_default(), input.shape().to_vec())?,
         })
+    }
+
+    fn supports_find(
+        &self,
+        a: &GpuTensorHandle,
+        _limit: Option<usize>,
+        direction: FindDirection,
+    ) -> bool {
+        matches!(direction, FindDirection::First)
+            && runmat_accelerate_api::handle_precision(a) == Some(ProviderPrecision::F64)
+            && runmat_accelerate_api::handle_storage(a)
+                == runmat_accelerate_api::GpuTensorStorage::Real
+            && runmat_accelerate_api::handle_integer_type(a).is_none()
+            && !runmat_accelerate_api::handle_is_logical(a)
     }
 
     fn find(

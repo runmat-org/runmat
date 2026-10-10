@@ -7,7 +7,8 @@ mod documentation;
 mod tests;
 
 pub use contract::{
-    BI2DE_DESCRIPTOR, BI2DE_EXTENSIONS, BI2DE_GPU_INPUT_EXTENSION, BI2DE_INTEGER_BASE_EXTENSION,
+    BI2DE_DESCRIPTOR, BI2DE_ERROR_BASE, BI2DE_ERROR_INPUT, BI2DE_ERROR_ORDER, BI2DE_ERROR_PROVIDER,
+    BI2DE_ERROR_RANGE, BI2DE_EXTENSIONS, BI2DE_GPU_INPUT_EXTENSION, BI2DE_INTEGER_BASE_EXTENSION,
     BI2DE_INTEGER_CAPABILITIES,
 };
 
@@ -38,7 +39,7 @@ pub const BI2DE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
         residency: BuiltinResidencyPolicy::GatherToHost,
         fusion: BuiltinFusionPolicy::Boundary,
-        distributed: BuiltinDistributedPolicy::Unsupported,
+        distributed: BuiltinDistributedPolicy::MaterializeArguments,
     },
     link: BuiltinLinkContract {
         reachability: BuiltinReachability::Always,

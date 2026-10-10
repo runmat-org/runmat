@@ -4,11 +4,11 @@ use crate::backend::wgpu::params::{
     MovingWindowParamsF32, MovingWindowParamsF64, PackedF32, PackedU32,
 };
 use crate::backend::wgpu::shaders::signal::{
+    SpectralFrameShaderConfig, SpectralFrameShaderMode, SpectralRangeShaderMode,
     analytic_signal_mask_shader, envelope_analytic_bounds_shader,
     envelope_analytic_fir_bounds_shader, envelope_analytic_mask_shader,
     envelope_center_real_to_complex_shader, envelope_rms_bounds_shader, spectral_frame_shader,
-    spectral_power_shader, spectral_select_shader, SpectralFrameShaderConfig,
-    SpectralFrameShaderMode, SpectralRangeShaderMode,
+    spectral_power_shader, spectral_select_shader,
 };
 use runmat_accelerate_api::{
     ProviderEnvelopeMethod, ProviderEnvelopeRequest, ProviderEnvelopeResult,
@@ -46,6 +46,39 @@ enum IirCoefficientPlan<'a> {
         b: std::borrow::Cow<'a, [f64]>,
         a: std::borrow::Cow<'a, [f64]>,
     },
+}
+
+/// Owns the device-side finite mask and its scalar reduction until the
+/// readback reaches a terminal state. Dropping a pending validation therefore
+/// retires both private intermediates without touching the borrowed signal.
+struct EnvelopeFiniteValidation {
+    mask: GpuTensorHandle,
+    all: GpuTensorHandle,
+}
+
+impl EnvelopeFiniteValidation {
+    fn scalar(&self) -> &GpuTensorHandle {
+        &self.all
+    }
+
+    fn complete(
+        self,
+        finite: anyhow::Result<HostTensorOwned>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<()> {
+        use runmat_accelerate_api::{EnvelopeSignalDomainError, ProviderExecutionError};
+
+        let Self { mask, all } = self;
+        drop(all);
+        drop(mask);
+        let finite = finite.map_err(|error| ProviderExecutionError::from(error).after_effect())?;
+        if finite.data.as_slice() != [1.0] {
+            return Err(
+                ProviderExecutionError::from_source(EnvelopeSignalDomainError::NonFinite)
+                    .after_effect(),
+            );
+        }
+        Ok(())
+    }
 }
 
 fn moving_window_op_code(op: ProviderMovingWindowOp) -> u32 {
@@ -467,6 +500,70 @@ impl WgpuProvider {
         })
     }
 
+    /// Side-effect-free request admission. This does not promise successful
+    /// execution: failures after invocation remain terminal to the caller.
+    pub(crate) fn signal_envelope_supported_exec(
+        &self,
+        request: &ProviderEnvelopeRequest<'_>,
+    ) -> bool {
+        let Ok(entry) = self.get_entry(request.input) else {
+            return false;
+        };
+        self.signal_envelope_supported_entry(request, &entry)
+    }
+
+    fn signal_envelope_supported_entry(
+        &self,
+        request: &ProviderEnvelopeRequest<'_>,
+        entry: &BufferEntry,
+    ) -> bool {
+        let Some(input_len) = request.channel_len.checked_mul(request.channel_count) else {
+            return false;
+        };
+        let Some(output_len) = product_checked(request.output_shape) else {
+            return false;
+        };
+        if request.channel_len == 0
+            || request.channel_count == 0
+            || input_len != output_len
+            || input_len > u32::MAX as usize
+            || entry.len != input_len
+            || entry.precision != self.precision
+            || entry.storage != GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_storage(request.input) != GpuTensorStorage::Real
+            || entry.integer_type().is_some()
+            || runmat_accelerate_api::handle_is_logical(request.input)
+            || !envelope_input_shape_matches(
+                &entry.shape,
+                request.channel_len,
+                request.channel_count,
+            )
+            || !envelope_input_shape_matches(
+                request.input.shape(),
+                request.channel_len,
+                request.channel_count,
+            )
+            || !envelope_input_shape_matches(
+                request.output_shape,
+                request.channel_len,
+                request.channel_count,
+            )
+        {
+            return false;
+        }
+        match request.method {
+            ProviderEnvelopeMethod::Analytic => input_len
+                .checked_mul(2)
+                .is_some_and(|n| n <= u32::MAX as usize),
+            ProviderEnvelopeMethod::AnalyticFir { filter_len } => {
+                filter_len > 0 && filter_len <= u32::MAX as usize
+            }
+            ProviderEnvelopeMethod::Rms { window_len } => {
+                window_len > 0 && window_len <= u32::MAX as usize
+            }
+        }
+    }
+
     pub(crate) async fn signal_envelope_exec(
         &self,
         request: &ProviderEnvelopeRequest<'_>,
@@ -484,6 +581,12 @@ impl WgpuProvider {
             return Err(anyhow!("signal_envelope: invalid request").into());
         }
         let entry = self.get_entry(request.input)?;
+        if !self.signal_envelope_supported_entry(request, &entry) {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "signal_envelope: input view or geometry is not supported",
+            )
+            .into());
+        }
         if entry.precision != self.precision {
             return Err(
                 anyhow!("signal_envelope: mixed precision tensors are not supported").into(),
@@ -521,7 +624,13 @@ impl WgpuProvider {
         // Existing reshape materializes transpose through the bit-preserving
         // permutation owner, without mutating the borrowed source view.
         let materialized = if runmat_accelerate_api::handle_is_transposed(request.input) {
-            Some(self.reshape_exec(request.input, request.input.shape())?)
+            Some(
+                self.reshape_exec(request.input, request.input.shape())
+                    .map_err(|error| {
+                        runmat_accelerate_api::ProviderExecutionError::from(error)
+                            .with_unproven_effects()
+                    })?,
+            )
         } else {
             None
         };
@@ -533,34 +642,125 @@ impl WgpuProvider {
             method: request.method,
         };
         let request = &prepared;
-        match request.method {
-            ProviderEnvelopeMethod::Analytic => self.signal_envelope_analytic_exec(request).await,
-            ProviderEnvelopeMethod::AnalyticFir { filter_len } => self
-                .signal_envelope_analytic_fir_exec(request, filter_len)
-                .map_err(Into::into),
-            ProviderEnvelopeMethod::Rms { window_len } => self
-                .signal_envelope_rms_exec(request, window_len)
-                .map_err(Into::into),
+        self.validate_envelope_finite(request.input)
+            .await
+            .map_err(|error| {
+                if materialized.is_some() {
+                    error.after_effect()
+                } else {
+                    error
+                }
+            })?;
+        let result: runmat_accelerate_api::ProviderExecutionResult<ProviderEnvelopeResult> =
+            match request.method {
+                ProviderEnvelopeMethod::Analytic => {
+                    self.signal_envelope_analytic_exec(request).await
+                }
+                ProviderEnvelopeMethod::AnalyticFir { filter_len } => self
+                    .signal_envelope_analytic_fir_exec(request, filter_len)
+                    .map_err(Into::into),
+                ProviderEnvelopeMethod::Rms { window_len } => self
+                    .signal_envelope_rms_exec(request, window_len)
+                    .map_err(Into::into),
+            };
+        result.map_err(runmat_accelerate_api::ProviderExecutionError::after_effect)
+    }
+
+    /// A resident input-domain check shared by every envelope method. The
+    /// classification and reduction operate on the prepared logical view;
+    /// only one scalar is read back. All temporary handles retire on every
+    /// return path, and every rejection after classification is post-effect.
+    async fn validate_envelope_finite(
+        &self,
+        input: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<()> {
+        let validation = self.prepare_envelope_finite_validation(input)?;
+        let finite = self.download_exec(validation.scalar()).await;
+        validation.complete(finite)
+    }
+
+    fn prepare_envelope_finite_validation(
+        &self,
+        input: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<EnvelopeFiniteValidation> {
+        use runmat_accelerate_api::ProviderExecutionError;
+
+        let mask = self
+            .logical_isfinite_exec(input)
+            .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
+        let all = match self.reduce_all_exec(&mask, false) {
+            Ok(all) => all,
+            Err(error) => {
+                drop(mask);
+                return Err(ProviderExecutionError::from(error).after_effect());
+            }
+        };
+        Ok(EnvelopeFiniteValidation { mask, all })
+    }
+
+    /// Side-effect-free admission before FFT staging. A later hook failure is
+    /// terminal even when it reports Unsupported.
+    pub(crate) fn signal_hilbert_supported_exec(
+        &self,
+        request: &ProviderHilbertRequest<'_>,
+    ) -> bool {
+        let Ok(entry) = self.get_entry(request.input) else {
+            return false;
+        };
+        self.signal_hilbert_supported_entry(request, &entry)
+    }
+
+    fn signal_hilbert_supported_entry(
+        &self,
+        request: &ProviderHilbertRequest<'_>,
+        entry: &BufferEntry,
+    ) -> bool {
+        if entry.precision != self.precision
+            || entry.storage != GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_storage(request.input) != GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_is_transposed(request.input)
+            || entry.integer_type().is_some()
+            || runmat_accelerate_api::handle_is_logical(request.input)
+            || request.length == Some(0)
+        {
+            return false;
         }
+        let shape = request.input.shape();
+        let Some(&current_len) = shape.get(request.dim) else {
+            return false;
+        };
+        let target_len = request.length.unwrap_or(current_len);
+        if current_len == 0 || target_len == 0 || target_len > u32::MAX as usize {
+            return false;
+        }
+        let Some(inner_stride) = product_checked(&shape[..request.dim]) else {
+            return false;
+        };
+        let Some(outer_stride) = product_checked(&shape[request.dim + 1..]) else {
+            return false;
+        };
+        inner_stride > 0
+            && inner_stride <= u32::MAX as usize
+            && outer_stride
+                .checked_mul(inner_stride)
+                .and_then(|slices| slices.checked_mul(target_len))
+                .and_then(|values| values.checked_mul(2))
+                .is_some_and(|complex_words| complex_words <= u32::MAX as usize)
     }
 
     pub(crate) async fn signal_hilbert_exec(
         &self,
         request: &ProviderHilbertRequest<'_>,
     ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        // Authenticate the owning allocation first: an expired or foreign
+        // handle keeps its actual owner/lease error instead of being recast
+        // as an optional-hook Unsupported result.
         let entry = self.get_entry(request.input)?;
-        if entry.precision != self.precision {
-            return Err(
-                anyhow!("signal_hilbert: mixed precision tensors are not supported").into(),
-            );
-        }
-        if !(entry.storage == GpuTensorStorage::Real
-            && runmat_accelerate_api::handle_storage(request.input) == GpuTensorStorage::Real)
-        {
-            return Err(anyhow!("signal_hilbert: complex input tensors are not supported").into());
-        }
-        if request.length == Some(0) {
-            return Err(anyhow!("signal_hilbert: invalid request").into());
+        if !self.signal_hilbert_supported_entry(request, &entry) {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "signal_hilbert: input view or geometry is not supported",
+            )
+            .into());
         }
 
         let spectrum = self
@@ -3091,7 +3291,7 @@ fn spectral_range_shader_mode(range: ProviderSpectralRange) -> SpectralRangeShad
 #[cfg(test)]
 mod tests {
     use crate::backend::wgpu::provider::{
-        register_wgpu_provider, WgpuProvider, WgpuProviderOptions,
+        WgpuProvider, WgpuProviderOptions, register_wgpu_provider,
     };
     use num_complex::Complex;
     use runmat_accelerate_api::{
@@ -3877,11 +4077,13 @@ mod tests {
                 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0,
             ];
             assert_eq!(actual.shape, vec![2, 3, 4]);
-            assert!(actual
-                .data
-                .iter()
-                .zip(expected)
-                .all(|(got, want)| (got - want).abs() < 1.0e-5));
+            assert!(
+                actual
+                    .data
+                    .iter()
+                    .zip(expected)
+                    .all(|(got, want)| (got - want).abs() < 1.0e-5)
+            );
             assert_eq!(state.shape, vec![1, 2, 3]);
             assert_eq!(state.data.len(), 6);
             assert!(state.data.iter().all(|value| value.abs() < 1.0e-5));

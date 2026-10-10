@@ -172,8 +172,8 @@ pub struct PlacementPlanRequest {
     pub limits: PlacementGraphLimits,
     pub resources: PlacementResourceSnapshot,
     pub deterministic: bool,
-    /// When true, provider candidates must guarantee staged results so a
-    /// pre-commit failure can select the CPU/runtime fallback without replay.
+    /// When true, provider candidates must guarantee staged results. A
+    /// pre-commit failure may use an executable fallback if one was offered.
     pub require_transactional_results: bool,
 }
 
@@ -220,8 +220,9 @@ impl PlacementPlanRequest {
                 .candidates
                 .iter()
                 .all(|candidate| candidate.descriptor.kind.is_provider())
+                && (!whole_work_envelope || !self.require_transactional_results)
             {
-                return Err("every placement node requires a CPU/runtime fallback");
+                return Err("provider-only placement requires one transactional whole-work node");
             }
             let mut candidates = BTreeSet::new();
             let mut candidate_arities = Vec::with_capacity(node.candidates.len());
@@ -436,5 +437,30 @@ mod tests {
         request.graph.edges = vec![edge];
         request.limits.max_edges = 0;
         assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn provider_only_requires_one_transactional_whole_work_node() {
+        let mut request = request();
+        request.graph.nodes[0].candidates.remove(0);
+        request
+            .validate()
+            .expect("provider-only whole-work is executable");
+
+        request.require_transactional_results = false;
+        assert_eq!(
+            request.validate().unwrap_err(),
+            "provider-only placement requires one transactional whole-work node"
+        );
+
+        request.require_transactional_results = true;
+        request.graph.nodes.push(PlacementGraphNode {
+            identity: "second".into(),
+            candidates: vec![candidate("cpu.second", false)],
+        });
+        assert_eq!(
+            request.validate().unwrap_err(),
+            "provider-only placement requires one transactional whole-work node"
+        );
     }
 }

@@ -38,7 +38,7 @@ mod reduction_arithmetic;
 pub use reduction::{
     execute_reduction, execute_reduction_with_shape, execute_reduction_with_shape_placed,
     execute_reduction_with_shape_placed_async, execute_reduction_with_shape_placed_async_vm,
-    TypedReductionVmOutput,
+    CpuReadbackFailure, TypedReductionVmOutput,
 };
 mod reduction_program;
 pub use reduction_program::{

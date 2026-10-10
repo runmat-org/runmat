@@ -36,6 +36,8 @@ mod timer;
 mod tcp;
 mod vm_fusion_completion;
 mod vm_fusion_host_route;
+mod vm_fusion_host_resources;
+pub use vm_fusion_host_resources::checked_single_add_min_host_scratch;
 #[cfg(test)]
 mod cancellation_tests;
 

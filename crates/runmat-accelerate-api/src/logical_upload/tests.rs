@@ -32,7 +32,10 @@ impl AccelProvider for Provider {
     fn upload_logical(&self, _: &HostLogicalTensorView) -> NumericUploadResult<GpuTensorHandle> {
         panic!("protected admission must bypass convenience override")
     }
-    fn upload_logical_raw(&self, host: &HostLogicalTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_logical_raw(
+        &self,
+        host: &HostLogicalTensorView,
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         assert!(host.data.iter().all(|&value| value == 0));
         Ok(crate::test_support::owned(
@@ -109,4 +112,39 @@ fn ordinary_numeric_result_is_not_relabelled_as_logical() {
     .unwrap_err();
     assert!(is_invalid_numeric_upload_result(&error));
     assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn default_logical_unsupported_is_certified_before_effects() {
+    struct Unavailable;
+    impl AccelProvider for Unavailable {
+        fn device_id(&self) -> u32 {
+            19
+        }
+        fn device_info(&self) -> String {
+            "unavailable logical fixture".into()
+        }
+        fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            panic!("numeric upload is unrelated")
+        }
+        fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            Box::pin(async { panic!("download is unrelated") })
+        }
+    }
+    let error = upload_logical_protecting(
+        &Unavailable,
+        &HostLogicalTensorView {
+            data: &[1],
+            shape: &[1, 1],
+        },
+        &[],
+    )
+    .expect_err("default logical raw hook is unavailable");
+    let NumericUploadError::Provider(error) = error else {
+        panic!("expected provider error");
+    };
+    assert!(
+        error.is_unsupported(),
+        "default unsupported is certified before effects"
+    );
 }

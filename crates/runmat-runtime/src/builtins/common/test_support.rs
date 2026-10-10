@@ -170,7 +170,8 @@ impl runmat_accelerate_api::AccelProvider for F32TestProvider {
     fn upload_logical_raw(
         &self,
         host: &runmat_accelerate_api::HostLogicalTensorView,
-    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<runmat_accelerate_api::GpuTensorHandle>
+    {
         self.inner.upload_logical_raw(host)
     }
 

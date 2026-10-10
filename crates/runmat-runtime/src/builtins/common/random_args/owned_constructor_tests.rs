@@ -20,10 +20,16 @@ impl AccelProvider for Provider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { anyhow::bail!("unused download") })
     }
-    fn upload_logical_raw(&self, view: &HostLogicalTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_logical_raw(
+        &self,
+        view: &HostLogicalTensorView,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         Ok(self
             .owner
-            .allocate_logical(view.data.to_vec(), view.shape.to_vec())?
+            .allocate_logical(view.data.to_vec(), view.shape.to_vec())
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })?
             .handle)
     }
 }

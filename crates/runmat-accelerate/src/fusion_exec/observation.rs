@@ -1,7 +1,9 @@
+use crate::fusion_exec::reduction::{CpuReadbackFailure, CpuReadbackPlan};
 use crate::placement::LocalPlacementFeedback;
 use runmat_accelerate_api::observation::ProviderOperationReceipt;
 use runmat_runtime::context::{RuntimeContext, VmFusionCompletionRight, VmFusionHostRoute};
 use runmat_time::{duration_ns_saturating, Instant};
+use runmat_value::Value;
 
 /// Linear selected-provider receipt held until the VM has published all
 /// ordered stores, adopted the result, and advanced beyond the fused span.
@@ -67,6 +69,8 @@ pub struct FusionCpuObservation {
 struct VmCpuCompletion {
     right: VmFusionCompletionRight,
     host_route: Option<VmFusionHostRoute>,
+    runtime: Option<RuntimeContext>,
+    readback: Option<CpuReadbackPlan>,
 }
 
 impl FusionCpuObservation {
@@ -81,10 +85,20 @@ impl FusionCpuObservation {
     /// Only the selected VM reduction can attach its one-shot installation
     /// right. Missing route proof suppresses feedback but not bytecode.
     pub fn with_vm_host_route(
+        self,
+        right: VmFusionCompletionRight,
+        runtime: Option<&RuntimeContext>,
+        bindings: Option<&[runmat_builtins::BuiltinBindingIdentity]>,
+    ) -> Self {
+        self.with_vm_host_route_readback(right, runtime, bindings, None)
+    }
+
+    pub(crate) fn with_vm_host_route_readback(
         mut self,
         right: VmFusionCompletionRight,
         runtime: Option<&RuntimeContext>,
         bindings: Option<&[runmat_builtins::BuiltinBindingIdentity]>,
+        readback: Option<CpuReadbackPlan>,
     ) -> Self {
         let host_route = self
             .feedback
@@ -94,7 +108,12 @@ impl FusionCpuObservation {
             .and_then(|runtime| {
                 bindings.and_then(|bindings| right.host_route(runtime, bindings.to_vec()))
             });
-        self.vm_completion = Some(Box::new(VmCpuCompletion { right, host_route }));
+        self.vm_completion = Some(Box::new(VmCpuCompletion {
+            right,
+            host_route,
+            runtime: readback.as_ref().and_then(|_| runtime.cloned()),
+            readback,
+        }));
         self
     }
 
@@ -104,6 +123,56 @@ impl FusionCpuObservation {
             .and_then(|vm| vm.host_route.clone())
     }
 
+    /// Revalidate the exact selected right and feedback permit before the first
+    /// readback. All stage results remain private until the VM atomically
+    /// replaces its checked operand slice.
+    pub async fn prepare_vm_host_slice(
+        &self,
+        stack: &[Value],
+    ) -> Result<Option<Vec<(usize, Value)>>, CpuReadbackFailure> {
+        let Some(vm) = self.vm_completion.as_ref() else {
+            return Ok(None);
+        };
+        let Some(plan) = vm.readback.as_ref() else {
+            return Ok(None);
+        };
+        let current = || {
+            vm.runtime.as_ref().is_some_and(|runtime| {
+                let revision = vm.right.planning_revision(runtime);
+                !runtime.is_cancelled()
+                    && vm
+                        .host_route
+                        .as_ref()
+                        .is_some_and(|route| route.current_for(runtime))
+                    && revision.is_some()
+                    && self.feedback.as_ref().is_none_or(|feedback| {
+                        feedback.is_current()
+                            && revision.as_ref() == Some(&feedback.signature.revision)
+                    })
+            })
+        };
+        if !current() {
+            return Err(CpuReadbackFailure::BeforeEffect(
+                runmat_runtime::build_runtime_error(
+                    "selected VM host route or placement permit expired before readback",
+                )
+                .with_identifier("RunMat:Placement:StaleHostReadback")
+                .build(),
+            ));
+        }
+        let replacements = plan.prepare(stack).await?;
+        if !current() {
+            return Err(CpuReadbackFailure::AfterEffect(
+                runmat_runtime::build_runtime_error(
+                    "selected VM host route or placement permit expired during readback",
+                )
+                .with_identifier("RunMat:Placement:StaleHostReadback")
+                .build(),
+            ));
+        }
+        Ok(Some(replacements))
+    }
+
     /// VM-owned FullCall host completion begins before placement planning and
     /// follows only exact normal bytecode publication.
     pub fn complete_vm(mut self, outer_started: Instant) {
@@ -111,7 +180,12 @@ impl FusionCpuObservation {
             self.complete();
             return;
         };
-        let VmCpuCompletion { right, host_route } = *vm;
+        let VmCpuCompletion {
+            right,
+            host_route,
+            runtime: _,
+            readback: _,
+        } = *vm;
         let (Some(route), Some(feedback)) = (host_route, self.feedback.take()) else {
             return;
         };

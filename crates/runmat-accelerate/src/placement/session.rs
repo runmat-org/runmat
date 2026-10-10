@@ -1293,6 +1293,35 @@ mod tests {
     }
 
     #[test]
+    fn transactional_provider_only_whole_work_needs_no_fake_host_baseline() {
+        let mut request = two_node_request("provider-only", (100_000, 1_000), (100_000, 1_000));
+        request.graph.nodes.truncate(1);
+        request.graph.edges.clear();
+        request.graph.nodes[0]
+            .candidates
+            .retain(|candidate| candidate.descriptor.kind.is_provider());
+        let selected = PlacementSession::default()
+            .plan(request.clone())
+            .expect("one executable transactional provider route");
+        assert_eq!(selected.selections.len(), 1);
+        assert!(selected.selections[0].kind.is_provider());
+        assert!(!selected.used_local_fallback);
+
+        request.resources.providers[0].lost = true;
+        let error = PlacementSession::default()
+            .plan(request.clone())
+            .expect_err("lost provider has no executable route");
+        assert_eq!(error.code, "RunMat:Placement:NoLegalCandidate");
+
+        request.resources.providers[0].lost = false;
+        request.resources.cancellation_requested = true;
+        let error = PlacementSession::default()
+            .plan(request)
+            .expect_err("cancellation cannot select an invented host route");
+        assert_eq!(error.code, "RunMat:Placement:Cancelled");
+    }
+
+    #[test]
     fn bounded_graph_planning_keeps_profitable_resident_chain() {
         let session = PlacementSession::default();
         let decision = session

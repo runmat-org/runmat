@@ -157,6 +157,7 @@ fn try_plan_physical_set<'a>(
                 presentation: runmat_execution::CandidateOutputPresentation::Direct,
                 guards: vec![],
             },
+            cpu_admission: LocalCpuAdmission::Legacy,
             physical,
             compare_profitability: true,
             runtime: Some(&runtime),

@@ -1936,6 +1936,13 @@ impl AccelProvider for WgpuProvider {
     ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ProviderEnvelopeResult> {
         Box::pin(async move { self.signal_envelope_exec(request).await })
     }
+    fn supports_signal_envelope(&self, request: &ProviderEnvelopeRequest<'_>) -> bool {
+        self.signal_envelope_supported_exec(request)
+    }
+    fn supports_signal_hilbert(&self, request: &ProviderHilbertRequest<'_>) -> bool {
+        self.signal_hilbert_supported_exec(request)
+    }
+
     fn signal_hilbert<'a>(
         &'a self,
         request: &'a ProviderHilbertRequest<'a>,
@@ -2082,6 +2089,69 @@ impl AccelProvider for WgpuProvider {
             values,
             indices: indices.expect("cummax integer scan returns indices"),
         })
+    }
+
+    fn supports_circshift(&self, handle: &GpuTensorHandle, shifts: &[isize]) -> bool {
+        if handle.allocation_lease().validate_live().is_err()
+            || runmat_accelerate_api::handle_is_logical(handle)
+            || runmat_accelerate_api::handle_transpose_info(handle).is_some()
+            || !runmat_accelerate_api::provider_for_handle(handle)
+                .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, self))
+        {
+            return false;
+        }
+        let Ok(entry) = self.get_entry_for_storage_move(handle, "circshift") else {
+            return false;
+        };
+        // The current kernel/register path produces real storage. Complex
+        // interleaved inputs need the exact class-preserving fallback.
+        if entry.storage != runmat_accelerate_api::GpuTensorStorage::Real || entry.logical {
+            return false;
+        }
+        let mut shape = if entry.shape.is_empty() {
+            vec![1]
+        } else {
+            entry.shape.clone()
+        };
+        shape.resize(shape.len().max(shifts.len()), 1);
+        if shape.len() > crate::backend::wgpu::params::CIRCSHIFT_MAX_RANK
+            || entry.len > u32::MAX as usize
+            || shape
+                .iter()
+                .any(|dimension| *dimension > u32::MAX as usize || *dimension > isize::MAX as usize)
+        {
+            return false;
+        }
+        let mut stride = 1usize;
+        for dimension in &shape {
+            if stride > u32::MAX as usize {
+                return false;
+            }
+            let Some(next) = stride.checked_mul((*dimension).max(1)) else {
+                return false;
+            };
+            stride = next;
+        }
+        shape
+            .iter()
+            .try_fold(1usize, |count, dimension| count.checked_mul(*dimension))
+            == Some(entry.len)
+            && entry
+                .len
+                .checked_mul(
+                    if entry.integer_type().is_some_and(|integer| {
+                        matches!(
+                            integer,
+                            runmat_accelerate_api::IntegerElementType::I64
+                                | runmat_accelerate_api::IntegerElementType::U64
+                        )
+                    }) {
+                        2
+                    } else {
+                        1
+                    },
+                )
+                .is_some()
     }
 
     fn circshift(&self, handle: &GpuTensorHandle, shifts: &[isize]) -> Result<GpuTensorHandle> {
@@ -2741,6 +2811,35 @@ impl AccelProvider for WgpuProvider {
         })
     }
 
+    fn supports_find(
+        &self,
+        a: &GpuTensorHandle,
+        limit: Option<usize>,
+        direction: FindDirection,
+    ) -> bool {
+        if !matches!(direction, FindDirection::First)
+            || runmat_accelerate_api::handle_precision(a)
+                != Some(runmat_accelerate_api::ProviderPrecision::F64)
+            || runmat_accelerate_api::handle_storage(a)
+                != runmat_accelerate_api::GpuTensorStorage::Real
+            || runmat_accelerate_api::handle_integer_type(a).is_some()
+            || runmat_accelerate_api::handle_is_logical(a)
+        {
+            return false;
+        }
+        let Some(total) = a
+            .shape()
+            .iter()
+            .try_fold(1usize, |acc, extent| acc.checked_mul(*extent))
+        else {
+            return false;
+        };
+        let rows = a.shape().first().copied().unwrap_or(1).max(1);
+        total <= u32::MAX as usize
+            && rows <= u32::MAX as usize
+            && limit.unwrap_or(total).min(total) <= u32::MAX as usize
+    }
+
     fn find(
         &self,
         a: &GpuTensorHandle,
@@ -3031,9 +3130,22 @@ impl AccelProvider for WgpuProvider {
     fn upload_logical_raw(
         &self,
         host: &runmat_accelerate_api::HostLogicalTensorView<'_>,
-    ) -> Result<GpuTensorHandle> {
-        let output = self.upload_logical_exec(host)?;
-        complete_observed_upload(self)?;
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        host.validate()?;
+        let output = self.upload_logical_exec(host).map_err(|error| {
+            runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+        })?;
+        if let Err(error) = complete_observed_upload(self) {
+            let primary = runmat_accelerate_api::ProviderExecutionError::from(error).after_effect();
+            let cleanup = output.release().err().into_iter().collect();
+            return Err(runmat_accelerate_api::ProviderExecutionError::from_source(
+                runmat_accelerate_api::ProviderExecutionCompletionError::new(
+                    Some(primary),
+                    cleanup,
+                ),
+            )
+            .after_effect());
+        }
         Ok(output)
     }
     fn download_numeric<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {

@@ -131,7 +131,7 @@ impl AccelProvider for CountingDownloadProvider {
     fn upload_logical_raw(
         &self,
         host: &HostLogicalTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.inner.upload_logical_raw(host)
     }
 

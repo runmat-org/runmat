@@ -37,6 +37,8 @@ pub struct ResolvedReductionProgram<'a> {
     producer_work_units: u64,
     checked_scalar: Option<ScalarProgram>,
     host_bindings: Option<Vec<runmat_builtins::BuiltinBindingIdentity>>,
+    host_producer_shapes: Option<Vec<Vec<usize>>>,
+    host_producer_operand_shapes: Option<Vec<[Vec<usize>; 2]>>,
 }
 impl<'a> ResolvedReductionProgram<'a> {
     pub fn data_inputs(&self) -> &[ReductionDataInput<'a>] {
@@ -73,6 +75,12 @@ impl<'a> ResolvedReductionProgram<'a> {
     }
     pub fn host_bindings(&self) -> Option<&[runmat_builtins::BuiltinBindingIdentity]> {
         self.host_bindings.as_deref()
+    }
+    pub fn host_producer_shapes(&self) -> Option<&[Vec<usize>]> {
+        self.host_producer_shapes.as_deref()
+    }
+    pub fn host_producer_operand_shapes(&self) -> Option<&[[Vec<usize>; 2]]> {
+        self.host_producer_operand_shapes.as_deref()
     }
 }
 
@@ -227,6 +235,55 @@ pub async fn resolve_reduction_program<'a>(
             .and_then(|elements| u64::try_from(elements).ok())
             .ok_or_else(|| anyhow::anyhow!("reduction producer cardinality overflow"))?;
     let producer_work_units = program.scalar_work_units(&mapped.producer, elements)?;
+    // These are the actual invocation's checked producer output facts, in
+    // executable operation order. Unknown extents do not qualify a resident
+    // host route. The source program's cache identity above already includes
+    // these facts; this projection is not a new layout authority.
+    let host_producer_shapes = mapped
+        .producer
+        .operations
+        .iter()
+        .map(|operation| {
+            let output = match operation {
+                crate::fusion::FusionOp::Primitive { output, .. }
+                | crate::fusion::FusionOp::Builtin { output, .. } => (*output)?,
+            };
+            program
+                .fact(output)
+                .ok()?
+                .shape
+                .known_dims()?
+                .into_iter()
+                .collect::<Option<Vec<_>>>()
+        })
+        .collect::<Option<Vec<_>>>();
+    // The ordinary Plus owner consumes two operand tensors for each producer.
+    // Retain exact source-derived shapes to account the possible COW copies
+    // while VM/private values and invocation arguments still own the payload.
+    let host_producer_operand_shapes = mapped
+        .producer
+        .operations
+        .iter()
+        .map(|operation| {
+            let inputs = match operation {
+                crate::fusion::FusionOp::Primitive { inputs, .. }
+                | crate::fusion::FusionOp::Builtin { inputs, .. } => inputs,
+            };
+            let [left, right] = inputs.as_slice() else {
+                return None;
+            };
+            let shape = |id| {
+                program
+                    .fact(id)
+                    .ok()?
+                    .shape
+                    .known_dims()?
+                    .into_iter()
+                    .collect::<Option<Vec<_>>>()
+            };
+            Some([shape(*left)?, shape(*right)?])
+        })
+        .collect::<Option<Vec<_>>>();
     Ok(Some(ResolvedReductionProgram {
         data: mapped.data,
         contract,
@@ -239,5 +296,7 @@ pub async fn resolve_reduction_program<'a>(
         producer_work_units,
         checked_scalar,
         host_bindings,
+        host_producer_shapes,
+        host_producer_operand_shapes,
     }))
 }

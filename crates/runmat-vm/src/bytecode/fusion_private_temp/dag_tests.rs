@@ -223,6 +223,19 @@ fn assert_private_dag_uses_exact_vm_stack(bytecode: &Bytecode) {
         "the first Add consumes exactly the two already-loaded operands"
     );
 
+    let leaf = selected.inputs[0];
+    let occurrences: Vec<_> = source_layout
+        .bindings
+        .iter()
+        .filter(|binding| binding.value_id == leaf)
+        .map(|binding| binding.stack_offset)
+        .collect();
+    assert_eq!(occurrences, vec![0, 1]);
+    assert!(source_layout
+        .bindings
+        .iter()
+        .all(|binding| binding.stack_offset < source_layout.required_stack_operands));
+
     // The ordinary VM has two live operands above an unrelated lower stack
     // value at the first producer PC. Gather must consume only those operands.
     let lower = Value::Num(-37.0);

@@ -6,14 +6,7 @@ use super::common::{
     value_to_complex_tensor, TransformDirection,
 };
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Value};
 
@@ -23,7 +16,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{shape::normalize_scalar_shape, tensor};
-use crate::builtins::math::fft::type_resolvers::fft_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::fft::forward")]
@@ -55,241 +47,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "fft";
-
-const FFT_WIDE_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fft-wide-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fft with host int64 or uint64 data is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FftWideIntegerDataExtension"),
-};
-
-const FFT_WIDE_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "fft-wide-integer-controls",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "fft with int64 or uint64 N or DIM controls is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FftWideIntegerControlExtension"),
-};
-
-pub const FFT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [FFT_WIDE_DATA_EXTENSION, FFT_WIDE_CONTROL_EXTENSION];
-
-const FFT_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Documented integer data enters the floating FFT domain and produces double output.",
-    }];
-
-const FFT_WIDE_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &[
-            runmat_builtins::BuiltinIntegerClass::Int64,
-            runmat_builtins::BuiltinIntegerClass::Uint64,
-        ],
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Host wide integers are independently gated and must be exactly representable as double before FFT evaluation; resident wide integers are rejected.",
-    }];
-
-const FFT_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "N",
-        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "N is parsed exactly as a nonnegative structural length; logical scalar controls are also documented.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "DIM",
-        classes: &crate::builtins::common::integer_capability::INTEGER_CLASSES_THROUGH_32_BITS,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "DIM is parsed exactly as a positive one-based dimension; logical scalar controls are also documented.",
-    },
-];
-
-const FFT_WIDE_INTEGER_CONTROL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "N or DIM",
-        classes: &[
-            runmat_builtins::BuiltinIntegerClass::Int64,
-            runmat_builtins::BuiltinIntegerClass::Uint64,
-        ],
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::AllowedExceptWith64BitInteger,
-        notes: "Wide structural controls are decoded from authoritative integer storage and independently gated.",
-    }];
-
-pub const FFT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = fft(integer_X, ...)",
-        inputs: &FFT_INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer input is converted once at the documented double FFT boundary; provider fallback restores a resident result to the input owner.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = fft(X, integer_N, integer_DIM)",
-        inputs: &FFT_INTEGER_CONTROL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Documented controls are decoded exactly in every supported integer class.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = fft(int64_or_uint64_X, ...)",
-        inputs: &FFT_WIDE_INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "RunMat-only wide data cannot silently round at the double boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Y = fft(X, int64_or_uint64_N_or_DIM)",
-        inputs: &FFT_WIDE_INTEGER_CONTROL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "RunMat-only wide controls are independently gated and parsed exactly.",
-    },
-];
-
-const FFT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Complex Fourier spectrum output.",
-}];
-
-const FFT_INPUTS_CORE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input signal/array.",
-}];
-
-const FFT_INPUTS_WITH_N: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input signal/array.",
-    },
-    BuiltinParamDescriptor {
-        name: "N",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Transform length along selected dimension.",
-    },
-];
-
-const FFT_INPUTS_WITH_N_DIM: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input signal/array.",
-    },
-    BuiltinParamDescriptor {
-        name: "N",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[]"),
-        description: "Transform length along selected dimension.",
-    },
-    BuiltinParamDescriptor {
-        name: "DIM",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("first non-singleton dimension"),
-        description: "Dimension to transform along.",
-    },
-];
-
-const FFT_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "Y = fft(X)",
-        inputs: &FFT_INPUTS_CORE,
-        outputs: &FFT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = fft(X, N)",
-        inputs: &FFT_INPUTS_WITH_N,
-        outputs: &FFT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Y = fft(X, N, DIM)",
-        inputs: &FFT_INPUTS_WITH_N_DIM,
-        outputs: &FFT_OUTPUT,
-    },
-];
-
-const FFT_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FFT.ARG_COUNT",
-    identifier: Some("RunMat:fft:ArgCount"),
-    when: "More than three input arguments are supplied.",
-    message: "fft: expected fft(X), fft(X, N), or fft(X, N, DIM)",
-};
-
-const FFT_ERROR_INVALID_LENGTH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FFT.INVALID_LENGTH",
-    identifier: Some("RunMat:fft:InvalidLength"),
-    when: "Length argument N is invalid.",
-    message: "fft: invalid length argument",
-};
-
-const FFT_ERROR_INVALID_DIMENSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FFT.INVALID_DIMENSION",
-    identifier: Some("RunMat:fft:InvalidDimension"),
-    when: "Dimension argument DIM is invalid.",
-    message: "fft: invalid dimension argument",
-};
-
-const FFT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FFT.INVALID_INPUT",
-    identifier: Some("RunMat:fft:InvalidInput"),
-    when: "Input cannot be converted to supported numeric/complex domain.",
-    message: "fft: invalid input",
-};
-
-const FFT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FFT.INTERNAL",
-    identifier: Some("RunMat:fft:Internal"),
-    when: "FFT execution or tensor shaping fails.",
-    message: "fft: internal error",
-};
-
-const FFT_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    FFT_ERROR_ARG_COUNT,
-    FFT_ERROR_INVALID_LENGTH,
-    FFT_ERROR_INVALID_DIMENSION,
-    FFT_ERROR_INVALID_INPUT,
-    FFT_ERROR_INTERNAL,
-];
-
-pub const FFT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FFT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FFT_ERRORS,
-};
 
 fn fft_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     fft_error_with_message(error.message, error)
@@ -329,13 +86,7 @@ fn fft_error_with_message(
 
 #[runtime_builtin(
     name = "fft",
-    category = "math/fft",
-    summary = "Compute discrete Fourier transforms.",
-    keywords = "fft,fourier transform,complex,gpu",
-    type_resolver(fft_type),
-    descriptor(crate::builtins::math::fft::forward::FFT_DESCRIPTOR),
-    extensions(crate::builtins::math::fft::forward::FFT_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::fft::forward::FFT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::fft::forward"
 )]
 async fn fft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -495,7 +246,6 @@ pub(crate) mod tests {
     use num_complex::Complex;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
     use runmat_value::{ComplexTensor as HostComplexTensor, IntValue, Tensor};
     use rustfft::FftPlanner;
 
@@ -531,25 +281,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn fft_type_preserves_shape() {
-        let out = fft_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(3)])
-            }
-        );
-    }
-
-    #[test]
     fn fft_descriptor_signatures_and_errors() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("fft builtin");
-        let descriptor = builtin.descriptor.expect("fft descriptor");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME).expect("fft builtin");
+        let descriptor = builtin.descriptor;
         let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
         assert!(labels.contains(&"Y = fft(X)"));
         assert!(labels.contains(&"Y = fft(X, N)"));
@@ -861,7 +596,8 @@ pub(crate) mod tests {
 
     #[test]
     fn fft_integer_contract_gates_wide_data_and_accepts_documented_logical_controls() {
-        let builtin = builtin_function_by_name("fft").expect("fft registration");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name("fft").expect("fft registration");
         assert_eq!(builtin.integer_capabilities.len(), 4);
         assert_eq!(builtin.extensions.len(), 2);
 

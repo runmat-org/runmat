@@ -120,14 +120,25 @@ async fn exercise() {
     wave.allocation_lease().validate_live().unwrap();
 
     let constant = upload(provider, &[2.5; 8], &[8, 1]);
-    let bounds = provider
-        .signal_envelope(&ProviderEnvelopeRequest {
+    let supported = ProviderEnvelopeRequest {
+        input: &constant,
+        channel_len: 8,
+        channel_count: 1,
+        output_shape: &[8, 1],
+        method: ProviderEnvelopeMethod::Analytic,
+    };
+    assert!(provider.supports_signal_envelope(&supported));
+    assert!(
+        !provider.supports_signal_envelope(&ProviderEnvelopeRequest {
             input: &constant,
             channel_len: 8,
             channel_count: 1,
             output_shape: &[8, 1],
-            method: ProviderEnvelopeMethod::Analytic,
+            method: ProviderEnvelopeMethod::Rms { window_len: 0 },
         })
+    );
+    let bounds = provider
+        .signal_envelope(&supported)
         .await
         .expect("analytic envelope on GPU");
     check(
@@ -149,6 +160,93 @@ async fn exercise() {
     assert!(!bounds.upper.shares_allocation_with(&constant));
     assert!(!bounds.lower.shares_allocation_with(&constant));
     constant.allocation_lease().validate_live().unwrap();
+
+    for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        let source = upload(provider, &[1.0, invalid, 3.0, 4.0], &[4, 1]);
+        let request = ProviderEnvelopeRequest {
+            input: &source,
+            channel_len: 4,
+            channel_count: 1,
+            output_shape: &[4, 1],
+            method: ProviderEnvelopeMethod::Rms { window_len: 2 },
+        };
+        assert!(provider.supports_signal_envelope(&request));
+        let retained = provider.allocations.retained_bytes();
+        let error = provider
+            .signal_envelope(&request)
+            .await
+            .expect_err("resident nonfinite signal must reject before bounds");
+        assert!(error.is_after_effect());
+        assert!(!error.is_unsupported());
+        assert!(matches!(
+            std::error::Error::source(&error)
+                .and_then(|source| source
+                    .downcast_ref::<runmat_accelerate_api::EnvelopeSignalDomainError>()),
+            Some(runmat_accelerate_api::EnvelopeSignalDomainError::NonFinite)
+        ));
+        assert_eq!(provider.allocations.retained_bytes(), retained);
+        source.allocation_lease().validate_live().unwrap();
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "requires actual WGPU adapter; a foreign allocation must preserve its owner error"]
+fn direct_hilbert_foreign_owner_preserves_acquisition_cause() {
+    use runmat_accelerate_api::allocation::AllocationAcquisitionError;
+    use runmat_accelerate_api::test_support::TestAllocationOwner;
+
+    let provider = pollster::block_on(owner());
+    let foreign = TestAllocationOwner::new()
+        .allocate_zeroed(vec![1, 4], NumericElementType::F32, GpuTensorStorage::Real)
+        .expect("foreign live allocation");
+    let request = ProviderHilbertRequest {
+        input: &foreign.handle,
+        length: None,
+        dim: 1,
+    };
+    assert!(!provider.supports_signal_hilbert(&request));
+    let error = pollster::block_on(provider.signal_hilbert(&request))
+        .expect_err("direct hook must authenticate its owner before shape admission");
+    assert!(!error.is_unsupported());
+    assert!(!error.is_after_effect());
+    assert!(matches!(
+        std::error::Error::source(&error)
+            .and_then(|source| source.downcast_ref::<AllocationAcquisitionError>()),
+        Some(AllocationAcquisitionError::WrongOwner)
+    ));
+    assert_eq!(foreign.probe.retirements(), 0);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "requires actual WGPU adapter; foreign envelope input must retain owner cause"]
+fn direct_envelope_foreign_owner_preserves_acquisition_cause() {
+    use runmat_accelerate_api::allocation::AllocationAcquisitionError;
+    use runmat_accelerate_api::test_support::TestAllocationOwner;
+
+    let provider = pollster::block_on(owner());
+    let foreign = TestAllocationOwner::new()
+        .allocate_zeroed(vec![4, 1], NumericElementType::F32, GpuTensorStorage::Real)
+        .expect("foreign live input");
+    let request = ProviderEnvelopeRequest {
+        input: &foreign.handle,
+        channel_len: 4,
+        channel_count: 1,
+        output_shape: &[4, 1],
+        method: ProviderEnvelopeMethod::Rms { window_len: 2 },
+    };
+    assert!(!provider.supports_signal_envelope(&request));
+    let error = pollster::block_on(provider.signal_envelope(&request))
+        .expect_err("direct hook must authenticate the allocation");
+    assert!(!error.is_unsupported());
+    assert!(!error.is_after_effect());
+    assert!(matches!(
+        std::error::Error::source(&error)
+            .and_then(|source| source.downcast_ref::<AllocationAcquisitionError>()),
+        Some(AllocationAcquisitionError::WrongOwner)
+    ));
+    assert_eq!(foreign.probe.retirements(), 0);
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]

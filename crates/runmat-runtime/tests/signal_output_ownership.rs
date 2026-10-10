@@ -148,7 +148,10 @@ fn analytic_outputs_preserve_native_class_and_explicit_or_automatic_intent() {
                         }
                     );
                     assert!(!output.shares_allocation_with(&input.handle));
-                    assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
+                    assert_eq!(
+                        provider.hooks.load(Ordering::SeqCst),
+                        usize::from(!matches!(mode, Mode::Unsupported))
+                    );
                     assert_eq!(
                         provider.downloads.load(Ordering::SeqCst),
                         usize::from(matches!(mode, Mode::Unsupported))
@@ -226,7 +229,7 @@ fn analytic_fallback_respects_typed_upload_failure_and_explicit_intent() {
                         );
                     }
                 }
-                assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
+                assert_eq!(provider.hooks.load(Ordering::SeqCst), 0);
                 assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
                 assert_eq!(provider.uploads.load(Ordering::SeqCst), 1);
                 provider.borrowed.lock().unwrap().take();
@@ -249,10 +252,12 @@ fn analytic_call_cancellation_retires_provider_temporaries_not_callers() {
         assert_eq!(provider.hooks.load(Ordering::SeqCst), 0);
         let mut future = Box::pin(runmat_runtime::call_builtin_async(name, &args));
         let waker = noop_waker();
-        assert!(future
-            .as_mut()
-            .poll(&mut Context::from_waker(&waker))
-            .is_pending());
+        assert!(
+            future
+                .as_mut()
+                .poll(&mut Context::from_waker(&waker))
+                .is_pending()
+        );
         assert!(!provider.produced.lock().unwrap().is_empty());
         drop(future);
         provider.assert_retired();

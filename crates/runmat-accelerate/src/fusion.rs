@@ -69,6 +69,10 @@ pub struct FusionGroup {
 pub struct FusionStackLayout {
     pub required_stack_operands: usize,
     pub bindings: Vec<FusionStackValueBinding>,
+    /// Only instruction-analysis Variable occurrences may authorize a
+    /// resident host readback. Ordinal stack-pattern merges never add here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compiler_variable_bindings: Vec<FusionStackValueBinding>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -633,6 +637,9 @@ fn merge_stack_layout_with_stack_pattern(
     Some(FusionStackLayout {
         required_stack_operands,
         bindings,
+        compiler_variable_bindings: existing
+            .map(|layout| layout.compiler_variable_bindings.clone())
+            .unwrap_or_default(),
     })
 }
 

@@ -995,6 +995,40 @@ fn reduce_complex_tensor(
     })
 }
 
+/// The Single real one-output host path materializes F64 input for extrema,
+/// retains a BestReal record and F64 value/index arrays per output, and may
+/// briefly retain a converted F32 result alongside them. Include the
+/// rank-sized strides, masks, and coordinates at their joint maximum. The
+/// caller accounts for the input tensor and producer outputs separately.
+pub(crate) fn checked_single_host_scratch(
+    input_elements: u64,
+    output_elements: u64,
+    rank: u64,
+) -> Option<u64> {
+    let input_copy = input_elements.checked_mul(8)?;
+    let output_record = u64::try_from(std::mem::size_of::<BestReal>())
+        .ok()?
+        .checked_add(8)?
+        .checked_add(8)?
+        .checked_add(4)?;
+    let outputs = output_elements.checked_mul(output_record)?;
+    // The real path's owned usize vectors are: source shape; resolved output
+    // shape, reduced axes, and reduction strides; local output-shape clone;
+    // input and output strides; local reduction-strides clone; coordinates;
+    // value-tensor shape; and index-tensor shape. Bound all eleven at once,
+    // plus the canonical binding's argument Tensor shape clone. Some do not
+    // overlap. The resolved and local dimension masks are two bool vectors.
+    // Empty/singleton normalization uses rank >= 2.
+    let usize_word = u64::try_from(std::mem::size_of::<usize>()).ok()?;
+    let bool_word = u64::try_from(std::mem::size_of::<bool>()).ok()?;
+    let dimensions = rank.checked_mul(
+        usize_word
+            .checked_mul(12)?
+            .checked_add(bool_word.checked_mul(2)?)?,
+    )?;
+    input_copy.checked_add(outputs)?.checked_add(dimensions)
+}
+
 #[derive(Debug, Clone)]
 struct BestReal {
     value: f64,

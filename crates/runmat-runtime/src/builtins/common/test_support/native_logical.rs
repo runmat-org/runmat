@@ -76,10 +76,14 @@ impl AccelProvider for NativeLogicalProvider {
     fn upload_logical_raw(
         &self,
         host: &HostLogicalTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         Ok(self.publish(
             self.owner
-                .allocate_logical(host.data.to_vec(), host.shape.to_vec())?,
+                .allocate_logical(host.data.to_vec(), host.shape.to_vec())
+                .map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error)
+                        .with_unproven_effects()
+                })?,
         ))
     }
     fn download_numeric<'a>(

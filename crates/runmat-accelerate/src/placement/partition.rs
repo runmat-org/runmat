@@ -59,7 +59,8 @@ pub(super) fn solve_partition(
             for (candidate_index, candidate) in node.candidates.iter().enumerate() {
                 explored = explored.saturating_add(1);
                 if explored > request.limits.max_expansions {
-                    return local_fallback(request, &retention, explored, pruned);
+                    return local_fallback(request, &retention, explored, pruned)
+                        .ok_or("bounded search has no executable host fallback");
                 }
                 let Some(candidate_ns) = candidate_total_ns(candidate, request, state) else {
                     continue;
@@ -95,7 +96,8 @@ pub(super) fn solve_partition(
             }
         }
         if expanded.is_empty() {
-            return local_fallback(request, &retention, explored, pruned);
+            return local_fallback(request, &retention, explored, pruned)
+                .ok_or("no complete placement route has admissible resource evidence");
         }
         expanded.sort_by(|left, right| compare_states(left, right, request));
         let frontier_limit = request.limits.max_frontier_states as usize;
@@ -113,8 +115,8 @@ pub(super) fn solve_partition(
         .filter(|candidate| candidate.selections != best.selections)
         .map(|candidate| (candidate.selections, candidate.total_ns))
         .collect::<Vec<_>>();
-    let local = local_fallback(request, &retention, explored, pruned)?;
-    if uses_provider(request, &best.selections) {
+    let local = local_fallback(request, &retention, explored, pruned);
+    if let Some(local) = local.filter(|_| uses_provider(request, &best.selections)) {
         let required = policy
             .required_improvement_ns(local.total_ns)
             .unwrap_or(u64::MAX);
@@ -202,7 +204,7 @@ fn local_fallback(
     retention: &RetentionSchedule,
     explored_states: u32,
     pruned_states: u32,
-) -> Result<PartitionPlan, &'static str> {
+) -> Option<PartitionPlan> {
     let mut selections = Vec::with_capacity(request.graph.nodes.len());
     let mut total_ns = 0_u64;
     let mut resource_state = SearchState {
@@ -227,19 +229,16 @@ fn local_fallback(
                         .identity
                         .cmp(&node.candidates[right.0].descriptor.identity)
                 })
-            })
-            .ok_or("placement node has no legal local fallback")?;
+            })?;
         let transition = predecessor_transition_ns(
             request,
             node_index,
             &selections,
             node.candidates[best.0].descriptor.execution_location,
-        )
-        .ok_or("local fallback transition overflow")?;
+        )?;
         total_ns = total_ns
             .checked_add(best.1)
-            .and_then(|total| total.checked_add(transition))
-            .ok_or("local fallback cost overflow")?;
+            .and_then(|total| total.checked_add(transition))?;
         selections.push(best.0);
         let (host_retained_bytes, provider_retained_bytes) = next_retained_state(
             request,
@@ -247,13 +246,12 @@ fn local_fallback(
             node_index,
             &resource_state,
             &node.candidates[best.0],
-        )
-        .ok_or("local fallback resource accounting overflow")?;
+        )?;
         resource_state.selections.push(best.0);
         resource_state.host_retained_bytes = host_retained_bytes;
         resource_state.provider_retained_bytes = provider_retained_bytes;
     }
-    Ok(PartitionPlan {
+    Some(PartitionPlan {
         selections,
         total_ns,
         explored_states,

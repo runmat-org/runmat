@@ -1,24 +1,16 @@
 //! MATLAB-compatible `ind2sub` builtin with GPU-aware semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinErrorDescriptor, IND2SUB_ERROR_INTERNAL, IND2SUB_ERROR_INVALID_INPUT,
+    IND2SUB_ERROR_PROVIDER,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, Tensor, Value};
 
 use super::common::{
-    build_strides, dims_from_tokens, fits_positive_platform_index, materialize_value, parse_dims,
-    total_elements,
+    build_strides, fits_positive_platform_index, materialize_value, parse_dims, total_elements,
+    IndexingOperation,
 };
-use crate::builtins::array::type_resolvers::size_vector_len;
-use crate::builtins::common::arg_tokens::tokens_from_context;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -53,114 +45,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Index conversion is eager and does not participate in fusion today.",
 };
 
-fn ind2sub_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    let Some(dims) = args.first() else {
-        return Type::Unknown;
-    };
-    let length = dims_from_tokens(&tokens_from_context(ctx))
-        .map(|values| values.len())
-        .or_else(|| size_vector_len(dims));
-    Type::Cell {
-        element_type: Some(Box::new(Type::tensor())),
-        length,
-    }
-}
-
 const BUILTIN_NAME: &str = "ind2sub";
-
-const IND2SUB_SIZE_CLASSES: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "size vector",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The size vector accepts single, double, and every integer class, must contain at least two positive integral elements, and is read exactly from authoritative storage.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "linear indices",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Linear indices accept single, double, and every integer class; outputs are double and preserve the index array shape.",
-    },
-];
-
-pub const IND2SUB_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[I1,...,In] = ind2sub(integer_size, integer_indices)",
-        inputs: &IND2SUB_SIZE_CLASSES,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Requested output count controls trailing-dimension collapse; indices beyond prod(sz) expand the final effective dimension. Resident inputs always produce double output and return to the exact source owner only when that owner can physically preserve binary64.",
-    }];
-
-const IND2SUB_OUTPUT_CELL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "subs",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Cell array containing one subscript output per dimension.",
-}];
-
-const IND2SUB_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "sz",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Size vector describing source array dimensions.",
-    },
-    BuiltinParamDescriptor {
-        name: "ind",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Linear indices to convert into per-dimension subscripts.",
-    },
-];
-
-const IND2SUB_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "subs = ind2sub(sz, ind)",
-    inputs: &IND2SUB_INPUTS,
-    outputs: &IND2SUB_OUTPUT_CELL,
-}];
-
-const IND2SUB_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IND2SUB.INVALID_INPUT",
-    identifier: Some("RunMat:ind2sub:InvalidInput"),
-    when: "Size vector or linear index inputs are malformed or unsupported.",
-    message: "ind2sub: invalid input arguments",
-};
-
-const IND2SUB_ERROR_PROVIDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IND2SUB.PROVIDER",
-    identifier: Some("RunMat:ind2sub:ProviderError"),
-    when: "Provider-side ind2sub execution fails or returns malformed outputs.",
-    message: "ind2sub: provider execution failed",
-};
-
-const IND2SUB_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IND2SUB.INTERNAL",
-    identifier: Some("RunMat:ind2sub:InternalError"),
-    when: "Internal tensor/materialization logic fails while building outputs.",
-    message: "ind2sub: internal error",
-};
-
-const IND2SUB_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    IND2SUB_ERROR_INVALID_INPUT,
-    IND2SUB_ERROR_PROVIDER,
-    IND2SUB_ERROR_INTERNAL,
-];
-
-pub const IND2SUB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &IND2SUB_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &IND2SUB_ERRORS,
-};
 
 fn ind2sub_error_with_message(
     message: impl Into<String>,
@@ -187,13 +72,7 @@ fn ind2sub_provider_error(message: impl Into<String>) -> RuntimeError {
 
 #[runtime_builtin(
     name = "ind2sub",
-    category = "array/indexing",
-    summary = "Convert linear indices to subscripts.",
-    keywords = "ind2sub,linear index,subscripts,column major,gpu indexing",
-    accel = "custom",
-    type_resolver(ind2sub_type),
-    descriptor(crate::builtins::array::indexing::ind2sub::IND2SUB_DESCRIPTOR),
-    integer_capabilities(crate::builtins::array::indexing::ind2sub::IND2SUB_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::indexing::ind2sub"
 )]
 async fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinResult<Value> {
@@ -202,8 +81,9 @@ async fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinR
         (_, Value::GpuTensor(handle)) => Some(handle.clone()),
         _ => None,
     };
-    let (dims_value, dims_was_gpu) = materialize_value(dims_val, "ind2sub").await?;
-    let dims = parse_dims(&dims_value, "ind2sub").await?;
+    let (dims_value, dims_was_gpu) =
+        materialize_value(dims_val, IndexingOperation::Ind2Sub).await?;
+    let dims = parse_dims(&dims_value, IndexingOperation::Ind2Sub).await?;
     if dims.len() < 2 {
         return Err(ind2sub_error(
             "Size vector must have at least two elements.",
@@ -215,14 +95,15 @@ async fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinR
         return Ok(Value::OutputList(Vec::new()));
     }
     let effective_dims = effective_output_dims(&dims, requested_outputs)?;
-    let total = total_elements(&effective_dims, "ind2sub")?;
-    let strides = build_strides(&effective_dims, "ind2sub")?;
+    let total = total_elements(&effective_dims, IndexingOperation::Ind2Sub)?;
+    let strides = build_strides(&effective_dims, IndexingOperation::Ind2Sub)?;
 
     if let Some(result) = try_gpu_ind2sub(&effective_dims, &strides, total, &indices_val).await? {
         return Ok(result);
     }
 
-    let (indices_value, indices_was_gpu) = materialize_value(indices_val, "ind2sub").await?;
+    let (indices_value, indices_was_gpu) =
+        materialize_value(indices_val, IndexingOperation::Ind2Sub).await?;
     let indices_tensor = tensor::value_into_tensor_for("ind2sub", indices_value)
         .map_err(|message| ind2sub_error(message))?;
 
@@ -532,7 +413,6 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
     fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinResult<Value> {
@@ -557,20 +437,6 @@ pub(crate) mod tests {
             }
             other => panic!("expected cell output, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn ind2sub_type_infers_cell_length() {
-        let dims = Type::Tensor {
-            shape: Some(vec![Some(1), Some(3)]),
-        };
-        assert_eq!(
-            super::ind2sub_type(&[dims, Type::Num], &ResolveContext::new(Vec::new())),
-            Type::Cell {
-                element_type: Some(Box::new(Type::tensor())),
-                length: Some(3)
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -657,6 +523,19 @@ pub(crate) mod tests {
     fn requested_outputs_collapse_trailing_dimensions_and_extend_with_singletons() {
         let dims = Value::Tensor(Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap());
         let indices = Value::Tensor(Tensor::new(vec![3.0, 11.0], vec![1, 2]).unwrap());
+        {
+            let _outputs = crate::output_count::push_output_count(Some(1));
+            let result =
+                ind2sub_builtin(dims.clone(), indices.clone()).expect("one requested output");
+            let Value::OutputList(outputs) = result else {
+                panic!("expected explicit output list");
+            };
+            assert_eq!(outputs.len(), 1);
+            assert_eq!(
+                outputs[0],
+                Value::Tensor(Tensor::new(vec![3.0, 11.0], vec![1, 2]).unwrap())
+            );
+        }
         {
             let _outputs = crate::output_count::push_output_count(Some(2));
             let result = ind2sub_builtin(dims.clone(), indices.clone()).expect("two outputs");

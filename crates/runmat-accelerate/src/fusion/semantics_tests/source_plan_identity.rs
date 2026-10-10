@@ -92,8 +92,21 @@ fn source_plan_identity_covers_stack_store_and_rejects_unsupported_constants() {
             value_id: 0,
             stack_offset: 0,
         }],
+        compiler_variable_bindings: Vec::new(),
     });
     assert_ne!(baseline, exact_source_plan_identity(&stack).unwrap());
+    let legacy = serde_json::to_value(stack.group.stack_layout.as_ref().unwrap()).unwrap();
+    assert!(legacy.get("compiler_variable_bindings").is_none());
+    let decoded: FusionStackLayout = serde_json::from_value(legacy.clone()).unwrap();
+    assert!(decoded.compiler_variable_bindings.is_empty());
+    assert_eq!(serde_json::to_value(&decoded).unwrap(), legacy);
+    let mut certified = stack.clone();
+    let layout = certified.group.stack_layout.as_mut().unwrap();
+    layout.compiler_variable_bindings = layout.bindings.clone();
+    assert_ne!(
+        exact_source_plan_identity(&stack).unwrap(),
+        exact_source_plan_identity(&certified).unwrap()
+    );
 
     let mut store = base.clone();
     store.materialized_stores.push(FusionStoreMaterialization {

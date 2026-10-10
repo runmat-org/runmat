@@ -73,7 +73,7 @@ impl AccelProvider for LogicalHookProvider {
     fn upload_logical_raw(
         &self,
         host: &runmat_accelerate_api::HostLogicalTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.inner.upload_logical_raw(host)
     }
 

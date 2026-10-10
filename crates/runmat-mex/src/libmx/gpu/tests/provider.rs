@@ -208,7 +208,7 @@ impl AccelProvider for FixtureCudaProvider {
     fn upload_logical_raw(
         &self,
         host: &HostLogicalTensorView<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         host.validate()?;
         Ok(self.insert_logical(host.data.to_vec(), host.shape.to_vec()))
     }
