@@ -7,6 +7,7 @@ use runmat_value::Value;
 use super::journal::{WorkspaceJournal, DEFAULT_HISTORY_CHANGE_LIMIT};
 use super::values::RootedWorkspaceEntries;
 use super::{BaseWorkspaceError, BaseWorkspaceProjection, WorkspaceDelta, WorkspaceRevision};
+use crate::workspace::{DetachedWorkspaceValues, WorkspaceDetachSelection};
 
 #[derive(Clone, Debug)]
 pub struct BaseWorkspaceSnapshot {
@@ -153,6 +154,49 @@ impl Default for BaseWorkspaceOwner {
 }
 
 impl BaseWorkspaceOwner {
+    /// One canonical selection-and-retirement section. The returned old
+    /// values are independently rooted before the revision is published.
+    pub fn detach_selected(
+        &self,
+        selection: &WorkspaceDetachSelection,
+    ) -> Result<DetachedWorkspaceValues, BaseWorkspaceError> {
+        let mut state = self
+            .state
+            .try_borrow_mut()
+            .map_err(|_| BaseWorkspaceError::BorrowConflict)?;
+        state.ensure_open()?;
+        let entries = selection.select(
+            state
+                .entries
+                .iter()
+                .map(|(name, entry)| (name.clone(), entry.clone_value()))
+                .collect(),
+        );
+        let detached = DetachedWorkspaceValues::new(entries)?;
+        let mut delta = WorkspaceDelta::new();
+        match selection {
+            WorkspaceDetachSelection::All => delta.clear(),
+            WorkspaceDetachSelection::Names(names) => {
+                for name in names {
+                    if state.global_bindings.contains(name) {
+                        delta.unbind_global(name.clone());
+                    } else {
+                        delta.remove(name.clone());
+                    }
+                }
+            }
+            WorkspaceDetachSelection::Except(_) => {
+                for (name, _) in detached.entries() {
+                    delta.remove(name.clone());
+                }
+            }
+        }
+        let next = state.preflight_commit(state.revision, &delta)?;
+        let base = state.revision;
+        let _commit = state.commit_preflighted(base, next, delta);
+        Ok(detached)
+    }
+
     pub fn new() -> Self {
         Self::with_history_limit(DEFAULT_HISTORY_CHANGE_LIMIT)
     }

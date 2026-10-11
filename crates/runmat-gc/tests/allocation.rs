@@ -62,8 +62,8 @@ fn test_matrix_allocation() {
         let ptr = gc_allocate(value).expect("allocation should succeed");
 
         if let Value::Tensor(ref m) = gc_clone_value(&ptr).expect("valid GC handle") {
-            assert_eq!(m.rows, 2);
-            assert_eq!(m.cols, 2);
+            assert_eq!(m.rows(), 2);
+            assert_eq!(m.cols(), 2);
             assert_eq!(m.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
         } else {
             panic!("Expected Matrix value");
@@ -136,8 +136,8 @@ fn test_large_allocation() {
         let ptr = gc_allocate(value).expect("large allocation should succeed");
 
         if let Value::Tensor(ref m) = gc_clone_value(&ptr).expect("valid GC handle") {
-            assert_eq!(m.rows, size);
-            assert_eq!(m.cols, size);
+            assert_eq!(m.rows(), size);
+            assert_eq!(m.cols(), size);
             assert_eq!(m.len(), size * size);
         } else {
             panic!("Expected Matrix value");

@@ -3,6 +3,7 @@
 
 use super::*;
 struct BrowserInner {
+    token: LocalTaskOwnerToken,
     closed: Cell<bool>,
     tasks: RefCell<HashMap<u64, Rc<TaskSlot>>>,
     next_task: Cell<u64>,
@@ -25,9 +26,14 @@ impl Drop for BrowserRecordOnDrop {
 struct BrowserPort {
     supervisor: Weak<BrowserInner>,
     owner: RuntimeContextLocalId,
+    token: LocalTaskOwnerToken,
 }
 
 impl RuntimeLocalTaskService for BrowserPort {
+    fn owner_token(&self) -> Option<LocalTaskOwnerToken> {
+        Some(self.token.clone())
+    }
+
     fn spawn_local(
         &self,
         owner_id: RuntimeContextLocalId,
@@ -88,6 +94,7 @@ pub struct BrowserLocalTaskSupervisor(Rc<BrowserInner>);
 impl BrowserLocalTaskSupervisor {
     pub fn new() -> Self {
         Self(Rc::new(BrowserInner {
+            token: LocalTaskOwnerToken::new(),
             closed: Cell::new(false),
             tasks: RefCell::new(HashMap::new()),
             next_task: Cell::new(0),
@@ -98,7 +105,12 @@ impl BrowserLocalTaskSupervisor {
         Rc::new(BrowserPort {
             supervisor: Rc::downgrade(&self.0),
             owner,
+            token: self.0.token.clone(),
         })
+    }
+
+    pub fn owner_token(&self) -> LocalTaskOwnerToken {
+        self.0.token.clone()
     }
 
     pub fn shutdown(&self) {

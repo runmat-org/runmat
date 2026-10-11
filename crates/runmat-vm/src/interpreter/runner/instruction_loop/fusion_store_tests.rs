@@ -124,10 +124,7 @@ fn second_store_failure_keeps_first_publication_and_exact_error() {
             );
             let store = |index| FusionStoreMaterialization {
                 value_id: index as u32,
-                binding: VarBinding {
-                    kind,
-                    index,
-                },
+                binding: VarBinding { kind, index },
             };
             let mut context = crate::bytecode::program::ExecutionContext {
                 runtime: runtime.clone(),

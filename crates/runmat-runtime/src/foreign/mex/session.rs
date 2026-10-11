@@ -28,6 +28,23 @@ struct InstalledMexArtifact {
     identity: String,
 }
 
+/// Read-only name selection performed by the same owner that invokes MEX.
+/// An installed artifact precedes path discovery; no binary is loaded here.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MexNameSelection {
+    Installed(PathBuf),
+    SearchPath(crate::builtins::common::path_search::FileCandidate),
+}
+
+impl MexNameSelection {
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::Installed(path) => path,
+            Self::SearchPath(candidate) => candidate.path(),
+        }
+    }
+}
+
 /// Session-scoped owner of dynamically loaded MEX modules.
 ///
 /// Core, JIT callbacks, and standalone AOT execution all use this same path so
@@ -49,6 +66,60 @@ pub struct MexRuntimeSession {
 impl MexRuntimeSession {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Adapt this executable owner to the runtime's read-only name port.
+    pub fn name_observer(self: &Rc<Self>) -> Rc<crate::user_functions::NativeNameObserver> {
+        let owner = Rc::clone(self);
+        Rc::new(move |name| {
+            let owner = Rc::clone(&owner);
+            Box::pin(async move {
+                Ok(owner
+                    .observe_name(&name)
+                    .await?
+                    .map(|selection| match selection {
+                        MexNameSelection::Installed(path) => {
+                            crate::user_functions::NativeNameFact {
+                                path,
+                                origin: None,
+                                installed: true,
+                            }
+                        }
+                        MexNameSelection::SearchPath(candidate) => {
+                            let (path, origin) = candidate.into_parts();
+                            crate::user_functions::NativeNameFact {
+                                path,
+                                origin: Some(origin),
+                                installed: false,
+                            }
+                        }
+                    }))
+            })
+        })
+    }
+
+    /// Observe the exact installed-or-current-platform path selected by
+    /// `load_and_call`, without loading, validating, or executing the module.
+    pub async fn observe_name(&self, name: &str) -> Result<Option<MexNameSelection>, String> {
+        let installed = self
+            .installed_modules
+            .borrow()
+            .get(name)
+            .map(|artifact| artifact.path.clone());
+        if let Some(path) = installed {
+            return Ok(Some(MexNameSelection::Installed(path)));
+        }
+        let Some(suffix) = runmat_mex::mex_suffix() else {
+            return Ok(None);
+        };
+        let extension = format!(".{suffix}");
+        crate::builtins::common::path_search::find_file_with_extensions_with_origin(
+            name,
+            &[extension.as_str()],
+            "MEX function resolution",
+        )
+        .await
+        .map(|candidate| candidate.map(MexNameSelection::SearchPath))
     }
 
     pub fn set_isolation_policy(&self, policy: MexIsolationPolicy) {
@@ -211,26 +282,10 @@ impl MexRuntimeSession {
             )));
         }
 
-        let installed = self
-            .installed_modules
-            .borrow()
-            .get(name)
-            .map(|artifact| artifact.path.clone());
-        let path = if let Some(path) = installed {
-            path
-        } else {
-            let extension = format!(".{}", runmat_mex::mex_suffix()?);
-            match crate::builtins::common::path_search::find_file_with_extensions(
-                name,
-                &[extension.as_str()],
-                "MEX function resolution",
-            )
-            .await
-            {
-                Ok(Some(path)) => path,
-                Ok(None) => return None,
-                Err(error) => return Some(Err(runtime_error("FunctionResolution", error))),
-            }
+        let path = match self.observe_name(name).await {
+            Ok(Some(selection)) => selection.path().to_path_buf(),
+            Ok(None) => return None,
+            Err(error) => return Some(Err(runtime_error("FunctionResolution", error))),
         };
         let canonical = runmat_filesystem::canonicalize_async(&path)
             .await
@@ -761,6 +816,33 @@ fn native_runtime_error(
 mod tests {
     use super::*;
     use crate::execution::RuntimeExecutionService;
+
+    #[test]
+    fn native_name_observation_selects_path_without_loading_module() {
+        let Some(suffix) = runmat_mex::mex_suffix() else {
+            return;
+        };
+        let temporary = tempfile::tempdir().expect("temporary MEX search root");
+        let module = temporary
+            .path()
+            .join(format!("__native_observe_fixture__.{suffix}"));
+        std::fs::write(&module, b"not a loadable MEX").expect("candidate bytes");
+        let search = Arc::new(crate::builtins::common::path_state::SearchPath::new(
+            temporary.path().to_string_lossy().into_owned(),
+        ));
+        let runtime =
+            RuntimeContext::new(Rc::new(RuntimeExecutionService::new())).with_search_path(search);
+        let _scope = crate::context::RuntimeContextGuard::enter(runtime);
+        let owner = MexRuntimeSession::new();
+        let observed =
+            futures::executor::block_on(owner.observe_name("__native_observe_fixture__"))
+                .expect("name search")
+                .expect("candidate exists");
+        assert!(matches!(observed, MexNameSelection::SearchPath(_)));
+        assert_eq!(observed.path(), module.as_path());
+        assert!(owner.native_modules.borrow().is_empty());
+        assert!(owner.installed_modules.borrow().is_empty());
+    }
 
     #[test]
     fn cancelled_invocation_never_reaches_discovery_or_native_code() {

@@ -310,6 +310,7 @@ pub fn ensure_matfile_class_registered() {
         );
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: MATFILE_CLASS.into(),
             parent: None,
             properties,

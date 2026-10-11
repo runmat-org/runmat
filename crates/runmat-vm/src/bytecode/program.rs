@@ -27,6 +27,8 @@ use super::{
 mod definition_dependencies;
 #[path = "program/function_remap.rs"]
 pub(crate) mod function_remap;
+#[path = "program/private_resolution.rs"]
+mod private_resolution;
 #[cfg(feature = "native-accel")]
 #[path = "program/function_fusion.rs"]
 mod function_fusion;
@@ -90,6 +92,83 @@ fn fresh_definition_owner() -> std::sync::Arc<runmat_value::FunctionDefinitionOw
     std::sync::Arc::new(runmat_value::FunctionDefinitionOwner::default())
 }
 
+/// Path-free logical directory name in the authenticated source map.
+#[derive(Debug, Clone, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct PrivateSourceAlias {
+    pub owner_identity: String,
+    pub relative_directory: String,
+}
+
+impl PrivateSourceAlias {
+    pub fn from_source_path(owner_identity: &str, relative_path: &str) -> Self {
+        let normalized = relative_path.replace('\\', "/");
+        let source_directory = std::path::Path::new(&normalized)
+            .parent()
+            .unwrap_or(std::path::Path::new(""));
+        let directory = if source_directory
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case("private"))
+        {
+            source_directory
+                .parent()
+                .unwrap_or(std::path::Path::new(""))
+        } else {
+            source_directory
+        };
+        Self {
+            owner_identity: owner_identity.to_owned(),
+            relative_directory: directory.to_string_lossy().into_owned(),
+        }
+    }
+}
+
+/// Private-source directory equivalence captured by the publishing owner.
+/// Portable aliases record the source graph's equivalence partition without
+/// serializing the native filesystem location.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PrivateSourceDirectory {
+    aliases: Vec<PrivateSourceAlias>,
+    #[serde(skip)]
+    host_path: Option<std::path::PathBuf>,
+}
+
+impl PrivateSourceDirectory {
+    pub fn new(host_path: std::path::PathBuf) -> Self {
+        Self {
+            aliases: Vec::new(),
+            host_path: Some(host_path),
+        }
+    }
+
+    pub fn captured(
+        host_path: Option<std::path::PathBuf>,
+        mut aliases: Vec<PrivateSourceAlias>,
+    ) -> Self {
+        aliases.sort();
+        aliases.dedup();
+        Self { aliases, host_path }
+    }
+
+    pub fn aliases(&self) -> &[PrivateSourceAlias] {
+        &self.aliases
+    }
+
+    pub fn is_known(&self) -> bool {
+        self.host_path.is_some() || !self.aliases.is_empty()
+    }
+
+    pub fn same_owner(&self, other: &Self) -> bool {
+        match (&self.host_path, &other.host_path) {
+            (Some(left), Some(right)) => left == right,
+            _ => self
+                .aliases
+                .iter()
+                .any(|alias| other.aliases.contains(alias)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionBytecode {
     pub function: FunctionId,
@@ -107,6 +186,11 @@ pub struct FunctionBytecode {
     /// Retired callable values never reconstruct it from a reused SourceId.
     #[serde(default)]
     pub source_file: Option<String>,
+    /// Source owner's captured directory identity for private-name admission.
+    /// Core captures native symlink equivalence and portable aliases at
+    /// publication; observers do not consult the filesystem.
+    #[serde(default)]
+    pub private_source_owner: Option<PrivateSourceDirectory>,
     #[serde(default)]
     pub source_role: runmat_types::FunctionSourceRole,
     /// Compiler ordinal before Core assigns a session-local function ID.
@@ -175,6 +259,7 @@ impl Default for FunctionBytecode {
             private_owner_scope: String::new(),
             source_id: None,
             source_file: None,
+            private_source_owner: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             portable_function: runmat_types::ProgramFunctionId(0),
             binding_origin: None,
@@ -1817,6 +1902,7 @@ mod function_registry_tests {
             private_owner_scope: private_owner_scope.to_string(),
             source_id: None,
             source_file: None,
+            private_source_owner: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             portable_function: runmat_types::ProgramFunctionId(0),
             binding_origin: None,
@@ -1965,6 +2051,7 @@ mod function_registry_tests {
                     access: runmat_types::MemberAccess::Public,
                 }],
                 enumerations: Vec::new(),
+                events: Vec::new(),
             },
             Instr::Add,
         ];
@@ -2007,6 +2094,7 @@ mod function_registry_tests {
                     access: runmat_types::MemberAccess::Public,
                 }],
                 enumerations: Vec::new(),
+                events: Vec::new(),
             },
             Instr::CallMethodOrMemberIndexMulti {
                 identity: runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(

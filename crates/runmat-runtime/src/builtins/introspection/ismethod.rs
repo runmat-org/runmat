@@ -213,6 +213,7 @@ mod tests {
         );
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: parent.clone().into(),
             parent: None,
             properties: HashMap::new(),
@@ -228,6 +229,7 @@ mod tests {
         );
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: child.clone().into(),
             parent: Some(parent.clone().into()),
             properties: HashMap::new(),

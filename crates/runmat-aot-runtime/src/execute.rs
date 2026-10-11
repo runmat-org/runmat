@@ -73,13 +73,16 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
         &program.source_map,
     )
     .map_err(|error| format!("standalone source binding failed: {error}"))?;
-    let local_tasks = runmat_runtime::context::RuntimeLocalTaskSupervisor::new();
+    let local_tasks = Rc::new(runmat_runtime::context::RuntimeLocalTaskSupervisor::new());
     let ports = runtime
         .service_ports()
         .clone()
         .with_local_tasks(local_tasks.submission_port(runtime.local_identity()))
         .with_call(Rc::new(runmat_runtime::context::RuntimeCallRouter));
     runtime = runtime.with_service_ports(ports);
+    let lifecycle_host =
+        runmat_runtime::context::RuntimeLifecycleHost::new(&runtime, local_tasks.clone())
+            .map_err(|error| format!("standalone cleanup lifecycle host failed: {error}"))?;
     if let Some(builtins) = crate::builtin::resolve(&program, input.builtin_resolver)? {
         let ports = runtime.service_ports().clone().with_builtin(builtins);
         runtime = runtime.with_service_ports(ports);
@@ -196,22 +199,92 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
                 )
                 .await
             };
+        // Execution results remain observable through foreign teardown and
+        // terminal rendering, so publish their roots before either can run.
+        let pending_result_roots = execution
+            .as_ref()
+            .ok()
+            .map(|value| {
+                runmat_runtime::execution::RootedValueLease::for_values(
+                    value
+                        .outputs
+                        .iter()
+                        .chain(value.expression.iter())
+                        .chain(value.captures.iter().map(|capture| &capture.value))
+                        .chain(
+                            value
+                                .workspace
+                                .iter()
+                                .flat_map(|workspace| workspace.values.values()),
+                        ),
+                )
+            })
+            .transpose()
+            .map_err(|error| format!("standalone result rooting failed: {error}"));
+        // Cleanup callbacks may still call MEX or native foreign services.
+        // Drain them before retiring those adapters, including on execution
+        // failure. Teardown itself still runs after any cleanup error.
+        let cleanup_lifecycle = match &pending_result_roots {
+            Ok(_) => match lifecycle_host.service_safepoint(&runtime) {
+                Ok(()) => lifecycle_host
+                    .drain_gracefully(&runtime)
+                    .await
+                    .map_err(|error| format!("standalone cleanup callback failed: {error}")),
+                Err(error) => Err(format!("standalone cleanup safepoint failed: {error}")),
+            },
+            Err(_) => Ok(()),
+        };
+        let mut execution = execution;
+        if cleanup_lifecycle.is_ok() && pending_result_roots.is_ok() {
+            if let Ok(value) = execution.as_mut() {
+                if let Some(expression) = value.expression.take() {
+                    crate::output::value(&expression);
+                } else {
+                    for output in value.outputs.drain(..) {
+                        crate::output::value(&output);
+                    }
+                }
+            }
+        }
+        let execution_failure = execution
+            .err()
+            .map(|error| execution_diagnostic(error, &runtime));
+        let result_root_failure = pending_result_roots.err();
+        // Retire caller-visible output ownership and admit any final callbacks
+        // before foreign adapters are closed.
+        let final_cleanup = lifecycle_host
+            .drain_gracefully(&runtime)
+            .await
+            .map_err(|error| format!("standalone final cleanup failed: {error}"));
         let native_lifecycle = native_ffi.shutdown().await;
         let mex_lifecycle = mex_guard.shutdown_gracefully().await;
-        let execution = execution.map_err(|error| execution_diagnostic(error, &runtime))?;
+        if execution_failure.is_some() {
+            if let Err(error) = &cleanup_lifecycle {
+                crate::output::error(&format!("standalone cleanup callback also failed: {error}"));
+            }
+            if let Err(error) = &native_lifecycle {
+                crate::output::error(&format!(
+                    "standalone native-library shutdown also failed: {error}"
+                ));
+            }
+            if let Err(error) = &mex_lifecycle {
+                crate::output::error(&format!("standalone MEX shutdown also failed: {error}"));
+            }
+        }
+        if let Some(error) = execution_failure {
+            return Err(error);
+        }
+        if let Some(error) = result_root_failure {
+            return Err(error);
+        }
         native_lifecycle
             .map_err(|error| format!("standalone native-library shutdown failed: {error}"))?;
         mex_lifecycle.map_err(|error| format!("standalone MEX shutdown failed: {error}"))?;
-        if let Some(expression) = execution.expression {
-            crate::output::value(&expression);
-        } else {
-            for output in execution.outputs {
-                crate::output::value(&output);
-            }
-        }
+        cleanup_lifecycle?;
+        final_cleanup?;
         Ok(())
     })));
-    local_tasks.shutdown();
+    lifecycle_host.force_close();
     result.map_err(|error| format!("standalone local task driver failed: {error}"))?
 }
 

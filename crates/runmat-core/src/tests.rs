@@ -4,6 +4,9 @@ mod portable_entrypoint;
 #[path = "tests/timers.rs"]
 mod timers;
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_resolution_events.rs"]
+mod native_resolution_events;
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_workspace_reconciliation.rs"]
 mod native_workspace_reconciliation;
 #[cfg(not(target_arch = "wasm32"))]
@@ -16858,7 +16861,7 @@ fn invoke_executable_with_console(
     invocation: ProcedureInvocation,
     control: &InvocationControl,
 ) -> (
-    runmat_value::ValueSequence,
+    runmat_runtime::execution::RootedValueSequence,
     Vec<(runmat_runtime::console::ConsoleStream, String)>,
 ) {
     {

@@ -54,19 +54,66 @@ fn validate_function_components(
     revision: &runmat_execution::ProgramRevision,
     registry: &FunctionRegistry,
 ) -> Result<(), String> {
+    let authorized = authorized_private_aliases(source_map);
     for (key, function) in &registry.functions {
         if *key != function.function {
             return Err("worker rejected function registry key/body identity mismatch".into());
         }
-        validate_function_component(source_map, revision, function)?;
+        validate_function_component_with_aliases(source_map, revision, function, &authorized)?;
+    }
+    validate_private_partitions(registry.functions.values())
+}
+
+pub(super) fn validate_private_partitions<'a>(
+    functions: impl Iterator<Item = &'a crate::FunctionBytecode>,
+) -> Result<(), String> {
+    let mut partition_by_alias = std::collections::HashMap::new();
+    let mut partition_by_source = std::collections::HashMap::new();
+    for function in functions {
+        let partition = function
+            .private_source_owner
+            .as_ref()
+            .map(|owner| owner.aliases());
+        if let Some(source) = function.source_id.and_then(BytecodeSourceRef::program) {
+            if let Some(previous) = partition_by_source.insert(source, partition) {
+                if previous != partition {
+                    return Err(
+                        "worker rejected conflicting private owner partitions for one source"
+                            .into(),
+                    );
+                }
+            }
+        }
+        if let Some(aliases) = partition {
+            for alias in aliases {
+                if let Some(previous) = partition_by_alias.insert(alias, aliases) {
+                    if previous != aliases {
+                        return Err("worker rejected overlapping private owner partitions".into());
+                    }
+                }
+            }
+        }
     }
     Ok(())
 }
 
-pub(super) fn validate_function_component(
+pub(super) fn authorized_private_aliases(
+    source_map: &ExecutableSourceMapV2,
+) -> std::collections::HashSet<crate::PrivateSourceAlias> {
+    source_map
+        .entries
+        .iter()
+        .map(|entry| {
+            crate::PrivateSourceAlias::from_source_path(&entry.owner_identity, &entry.relative_path)
+        })
+        .collect()
+}
+
+pub(super) fn validate_function_component_with_aliases(
     source_map: &ExecutableSourceMapV2,
     revision: &runmat_execution::ProgramRevision,
     function: &crate::FunctionBytecode,
+    authorized: &std::collections::HashSet<crate::PrivateSourceAlias>,
 ) -> Result<(), String> {
     let expected_origin = runmat_execution::FunctionBindingOrigin::from_revision(
         revision,
@@ -85,6 +132,29 @@ pub(super) fn validate_function_component(
         .map(|source| source.relative_path.as_str());
     if function.source_file.as_deref() != expected_file {
         return Err("worker rejected function source path outside its validated source map".into());
+    }
+    if let Some(owner) = &function.private_source_owner {
+        let aliases = owner.aliases();
+        let expected = function
+            .source_id
+            .and_then(BytecodeSourceRef::program)
+            .and_then(|ordinal| source_map.entries.get(usize::try_from(ordinal.0).ok()?))
+            .map(|entry| {
+                crate::PrivateSourceAlias::from_source_path(
+                    &entry.owner_identity,
+                    &entry.relative_path,
+                )
+            });
+        if expected
+            .as_ref()
+            .is_none_or(|expected| !aliases.contains(expected))
+            || aliases.windows(2).any(|pair| pair[0] >= pair[1])
+        {
+            return Err("worker rejected private owner outside its selected source".into());
+        }
+        if aliases.iter().any(|alias| !authorized.contains(alias)) {
+            return Err("worker rejected private owner alias outside its source map".into());
+        }
     }
     Ok(())
 }
@@ -128,11 +198,34 @@ mod tests {
             portable_function: ProgramFunctionId(2),
             source_id: Some(BytecodeSourceRef::Program(ProgramSourceId(0))),
             source_file: Some("helper.m".into()),
+            private_source_owner: Some(crate::PrivateSourceDirectory::captured(
+                None,
+                vec![crate::PrivateSourceAlias::from_source_path(
+                    "fixture", "helper.m",
+                )],
+            )),
             binding_origin: Some(origin),
             ..Default::default()
         };
         let registry = FunctionRegistry::new(HashMap::from([(FunctionId(2), body)]));
         validate_function_components(&map, &revision, &registry).expect("matched components");
+
+        let mut wrong_private_alias = registry.clone();
+        wrong_private_alias
+            .functions
+            .get_mut(&FunctionId(2))
+            .unwrap()
+            .private_source_owner = Some(crate::PrivateSourceDirectory::captured(
+            None,
+            vec![crate::PrivateSourceAlias::from_source_path(
+                "other", "helper.m",
+            )],
+        ));
+        assert!(
+            validate_function_components(&map, &revision, &wrong_private_alias)
+                .unwrap_err()
+                .contains("private owner")
+        );
 
         let mut wrong_path = registry.clone();
         wrong_path
@@ -164,5 +257,66 @@ mod tests {
         assert!(validate_function_components(&map, &revision, &wrong_key)
             .unwrap_err()
             .contains("key/body"));
+    }
+
+    #[test]
+    fn overlapping_in_map_private_aliases_are_rejected_before_source_leases() {
+        let revision = runmat_execution::ProgramRevision::new(
+            runmat_execution::Digest::sha256(b"graph"),
+            runmat_execution::Digest::sha256(b"source"),
+            runmat_execution::ProgramEnvironment {
+                semantic_schema: 1,
+                compiler_schema: 1,
+                runtime_fingerprint: runmat_execution::Digest::sha256(b"runtime"),
+                catalog_fingerprint: runmat_execution::Digest::sha256(b"catalog"),
+                compatibility_mode: runmat_execution::LanguageCompatibilityMode::RunMat,
+            },
+        )
+        .expect("revision");
+        let text = "function y = f; y = 1; end";
+        let record = |id, relative: &str| runmat_execution::ExecutableSourceRecordV2 {
+            source_id: ProgramSourceId(id),
+            owner_identity: "fixture".into(),
+            relative_path: relative.into(),
+            content_revision: runmat_execution::Digest::sha256(text.as_bytes()),
+            display_name: relative.into(),
+            text: text.into(),
+        };
+        let map = ExecutableSourceMapV2::new(vec![
+            record(0, "left/entry.m"),
+            record(1, "right/private/helper.m"),
+        ])
+        .expect("map");
+        let left = crate::PrivateSourceAlias::from_source_path("fixture", "left/entry.m");
+        let right =
+            crate::PrivateSourceAlias::from_source_path("fixture", "right/private/helper.m");
+        let body = |id, path: &str, aliases| FunctionBytecode {
+            function: FunctionId(id),
+            portable_function: ProgramFunctionId(id as u32),
+            source_id: Some(BytecodeSourceRef::Program(ProgramSourceId((id - 1) as u32))),
+            source_file: Some(path.into()),
+            binding_origin: Some(
+                runmat_execution::FunctionBindingOrigin::from_revision(
+                    &revision,
+                    ProgramFunctionId(id as u32),
+                )
+                .expect("origin"),
+            ),
+            private_source_owner: Some(crate::PrivateSourceDirectory::captured(None, aliases)),
+            ..Default::default()
+        };
+        let registry = FunctionRegistry::new(HashMap::from([
+            (
+                FunctionId(1),
+                body(1, "left/entry.m", vec![left, right.clone()]),
+            ),
+            (
+                FunctionId(2),
+                body(2, "right/private/helper.m", vec![right]),
+            ),
+        ]));
+        assert!(validate_function_components(&map, &revision, &registry)
+            .unwrap_err()
+            .contains("overlapping private owner partitions"));
     }
 }

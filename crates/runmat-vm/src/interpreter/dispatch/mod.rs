@@ -1250,17 +1250,19 @@ fn dispatch_immediate(
             is_abstract,
             properties,
             methods,
+            events,
             enumerations,
         } => {
-            handle_register_class(
-                name.clone(),
-                super_class.clone(),
-                *is_sealed,
-                *is_abstract,
-                properties.clone(),
-                methods.clone(),
-                enumerations.clone(),
-            )?;
+            handle_register_class(crate::object::class_def::ClassRegistration {
+                name: name.clone(),
+                super_class: super_class.clone(),
+                is_sealed: *is_sealed,
+                is_abstract: *is_abstract,
+                properties: properties.clone(),
+                methods: methods.clone(),
+                events: events.clone(),
+                enumerations: enumerations.clone(),
+            })?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

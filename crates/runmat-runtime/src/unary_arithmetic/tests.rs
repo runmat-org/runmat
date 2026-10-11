@@ -87,6 +87,7 @@ fn unary_object_overloads_preserve_errors_and_missing_method_fallback() {
         },
     )));
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: "UnaryFixture".into(),
         parent: None,
         properties: Default::default(),

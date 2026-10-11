@@ -21,9 +21,10 @@ use frame::{has_exact_pending_service_frame, take_service_frame, PendingServiceF
 pub(crate) use frame::{
     reconcile_workspace_frame, release_pending_workspace_service_frame,
     reserve_workspace_service_frame, workspace_frame_assign, workspace_frame_assign_from_executor,
-    workspace_frame_clear, workspace_frame_declare_global, workspace_frame_for_service,
-    workspace_frame_lookup, workspace_frame_name_is_global, workspace_frame_publishes,
-    workspace_frame_remove, workspace_frame_snapshot, WorkspaceFrameId, WorkspaceFrameLifecycle,
+    workspace_frame_clear, workspace_frame_declare_global, workspace_frame_detach_selected,
+    workspace_frame_for_service, workspace_frame_lookup, workspace_frame_name_is_global,
+    workspace_frame_publishes, workspace_frame_remove, workspace_frame_snapshot, WorkspaceFrameId,
+    WorkspaceFrameLifecycle,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -154,6 +155,12 @@ runmat_thread_local! {
     static LAST_COMPLETED_WORKSPACE_FRAMES: RefCell<HashMap<WorkspaceOwner, WorkspaceFrameId>> = RefCell::new(HashMap::new());
     static PENDING_SERVICE_FRAMES: RefCell<HashMap<WorkspaceOwner, Vec<PendingServiceFrame>>> = RefCell::new(HashMap::new());
     static NEXT_WORKSPACE_FRAME_ID: Cell<usize> = const { Cell::new(1) };
+    static DETACHING_WORKSPACE_FRAMES: RefCell<HashSet<WorkspaceFrameId>> = RefCell::new(HashSet::new());
+    static DEFERRED_WORKSPACE_FRAME_CLOSES: RefCell<Vec<(WorkspaceOwner, WorkspaceFrameId)>> = RefCell::new(Vec::new());
+}
+
+pub(crate) fn frame_is_detaching(id: WorkspaceFrameId) -> bool {
+    DETACHING_WORKSPACE_FRAMES.with(|frames| frames.borrow().contains(&id))
 }
 
 fn with_stack<R>(owner: WorkspaceOwner, f: impl FnOnce(&[WorkspaceFrame]) -> R) -> R {
@@ -191,6 +198,9 @@ fn with_active_frame_mut<R>(
         let stack = stacks.get_mut(&owner)?;
         let active = active_frame(owner).or_else(|| (stack.len() == 1).then(|| stack[0].id))?;
         let frame = stack.iter_mut().find(|frame| frame.id == active)?;
+        if frame_is_detaching(frame.id) {
+            return None;
+        }
         Some(operation(frame))
     })
 }
@@ -217,11 +227,14 @@ fn with_frame_by_id_mut<R>(
 ) -> Option<R> {
     WORKSPACE_STACKS.with(|stacks| {
         let mut stacks = stacks.borrow_mut();
-        stacks
+        let frame = stacks
             .get_mut(&owner)?
             .iter_mut()
-            .find(|frame| frame.id == id)
-            .map(operation)
+            .find(|frame| frame.id == id)?;
+        if frame_is_detaching(frame.id) {
+            return None;
+        }
+        Some(operation(frame))
     })
 }
 
@@ -310,6 +323,12 @@ pub struct WorkspaceStateGuard {
 
 impl Drop for WorkspaceStateGuard {
     fn drop(&mut self) {
+        if frame_is_detaching(self.frame) {
+            DEFERRED_WORKSPACE_FRAME_CLOSES.with(|pending| {
+                pending.borrow_mut().push((self.owner, self.frame));
+            });
+            return;
+        }
         let Some(frame) = with_owner_stack_mut(self.owner, |stack| {
             stack
                 .iter()

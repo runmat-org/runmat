@@ -1213,6 +1213,12 @@ impl RunMatSession {
                         .build(),
                 )
             })?;
+        let private_owners =
+            super::private_source_owner::CapturedPrivateSourceOwners::new(&source_table.source_map);
+        for function in bytecode.function_registry.functions.values_mut() {
+            function.private_source_owner =
+                function.source_id.and_then(|id| private_owners.get(id));
+        }
         bytecode.bound_functions = bytecode.function_registry.functions.clone();
         let source_projection = source_table
             .intern_runtime_projection(&mut self.source_pool, &self.runtime_context)

@@ -1,4 +1,5 @@
 //! MATLAB-compatible `onCleanup` handle object.
+pub(crate) mod lifecycle;
 use runmat_types::MemberAccess;
 
 use std::collections::HashMap;
@@ -73,6 +74,12 @@ const ON_CLEANUP_ERROR_GC: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "The cleanup object target cannot be allocated, rooted, or mutated.",
     message: "onCleanup: internal object storage failed",
 };
+const ON_CLEANUP_ERROR_HOST: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ONCLEANUP.LIFECYCLE_HOST_UNAVAILABLE",
+    identifier: Some("RunMat:onCleanup:LifecycleHostUnavailable"),
+    when: "No explicit session lifecycle host owns cleanup callback dispatch.",
+    message: "onCleanup: lifecycle host is unavailable",
+};
 const CANCEL_ERROR_RUNTIME_CONTEXT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.CANCEL.RUNTIME_CONTEXT",
     identifier: Some("RunMat:parallel:RuntimeContextUnavailable"),
@@ -85,15 +92,17 @@ const CANCEL_ERROR_EXECUTION_SERVICE: BuiltinErrorDescriptor = BuiltinErrorDescr
     when: "The execution service rejects cancellation of a task, future, or job.",
     message: "cancel: execution service failed",
 };
-const ON_CLEANUP_ERRORS: [BuiltinErrorDescriptor; 3] = [
+const ON_CLEANUP_ERRORS: [BuiltinErrorDescriptor; 4] = [
     ON_CLEANUP_ERROR_INVALID_CALLBACK,
     ON_CLEANUP_ERROR_INVALID_OBJECT,
     ON_CLEANUP_ERROR_GC,
+    ON_CLEANUP_ERROR_HOST,
 ];
-const CANCEL_ERRORS: [BuiltinErrorDescriptor; 5] = [
+const CANCEL_ERRORS: [BuiltinErrorDescriptor; 6] = [
     ON_CLEANUP_ERROR_INVALID_CALLBACK,
     ON_CLEANUP_ERROR_INVALID_OBJECT,
     ON_CLEANUP_ERROR_GC,
+    ON_CLEANUP_ERROR_HOST,
     CANCEL_ERROR_RUNTIME_CONTEXT,
     CANCEL_ERROR_EXECUTION_SERVICE,
 ];
@@ -166,8 +175,11 @@ pub const ON_CLEANUP_CANCEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     builtin_path = "crate::builtins::introspection::on_cleanup"
 )]
 pub(crate) async fn on_cleanup_builtin(callback: Value) -> BuiltinResult<Value> {
-    ensure_on_cleanup_class_registered();
     let callback = canonicalize_cleanup_callback(callback)?;
+    let registry = crate::context::legacy::active()
+        .and_then(|runtime| runtime.cleanup_registry())
+        .ok_or_else(|| on_cleanup_error(&ON_CLEANUP_ERROR_HOST, ON_CLEANUP_ERROR_HOST.message))?;
+    ensure_on_cleanup_class_registered();
     let mut object = ObjectInstance::new(ON_CLEANUP_CLASS.to_string());
     object
         .properties
@@ -180,7 +192,15 @@ pub(crate) async fn on_cleanup_builtin(callback: Value) -> BuiltinResult<Value> 
         Value::Bool(true),
     );
 
-    let target = runmat_gc::gc_allocate(Value::Object(object))
+    let target_root = runmat_gc::gc_allocate_rooted(Value::Object(object))
+        .map_err(|err| on_cleanup_error(&ON_CLEANUP_ERROR_GC, format!("onCleanup: {err}")))?;
+    let target = target_root.handle();
+    registry
+        .register(target, callback)
+        .map_err(|err| on_cleanup_error(&ON_CLEANUP_ERROR_GC, format!("onCleanup: {err}")))?;
+
+    target_root
+        .unroot()
         .map_err(|err| on_cleanup_error(&ON_CLEANUP_ERROR_GC, format!("onCleanup: {err}")))?;
 
     Ok(Value::HandleObject(HandleRef {
@@ -274,44 +294,24 @@ async fn on_cleanup_cancel_builtin(value: Value) -> BuiltinResult<Value> {
     Ok(Value::Num(0.0))
 }
 
-pub(crate) async fn run_cleanup_for_workspace_value(value: &Value) -> BuiltinResult<()> {
-    match value {
-        Value::HandleObject(handle) if is_on_cleanup_handle(handle) => {
-            run_on_cleanup_handle(handle).await
-        }
-        Value::Cell(cell) => {
-            for item in &cell.data {
-                Box::pin(run_cleanup_for_workspace_value(item)).await?;
-            }
-            Ok(())
-        }
-        Value::Struct(struct_value) => {
-            for item in struct_value.fields.values() {
-                Box::pin(run_cleanup_for_workspace_value(item)).await?;
-            }
-            Ok(())
-        }
-        Value::Object(object) => {
-            for item in object.properties.values() {
-                Box::pin(run_cleanup_for_workspace_value(item)).await?;
-            }
-            Ok(())
-        }
-        Value::OutputList(items) => {
-            for item in items {
-                Box::pin(run_cleanup_for_workspace_value(item)).await?;
-            }
-            Ok(())
-        }
-        _ => Ok(()),
-    }
+pub(crate) async fn run_cleanup_after_detach(
+    detached: &crate::workspace::DetachedWorkspaceValues,
+) -> BuiltinResult<()> {
+    let Some(runtime) = crate::context::legacy::active() else {
+        return Ok(());
+    };
+    let Some(registry) = runtime.cleanup_registry() else {
+        return Ok(());
+    };
+    lifecycle::dispatch::drain_eligible(&runtime, &registry, &[detached.root_registration()]).await
 }
 
-pub(crate) async fn run_cleanup_for_workspace_values(values: &[Value]) -> BuiltinResult<()> {
-    for value in values {
-        run_cleanup_for_workspace_value(value).await?;
-    }
-    Ok(())
+#[cfg(test)]
+pub(crate) async fn run_cleanup_for_workspace_value(value: &Value) -> BuiltinResult<()> {
+    let detached =
+        crate::workspace::DetachedWorkspaceValues::new(vec![("fixture".into(), value.clone())])
+            .map_err(crate::workspace::base_workspace_error_to_runtime)?;
+    run_cleanup_after_detach(&detached).await
 }
 
 fn ensure_on_cleanup_class_registered() {
@@ -344,6 +344,7 @@ fn ensure_on_cleanup_class_registered() {
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: ON_CLEANUP_CLASS.into(),
         parent: Some(runmat_types::standard::HANDLE.into()),
         properties:
@@ -381,17 +382,56 @@ async fn run_on_cleanup_value(value: &Value) -> BuiltinResult<()> {
 }
 
 async fn run_on_cleanup_handle(handle: &HandleRef) -> BuiltinResult<()> {
-    let Some(callback) = deactivate_handle_and_take_callback(handle)? else {
+    if !is_on_cleanup_handle(handle) || !crate::is_handle_valid(handle) {
         return Ok(());
-    };
-    crate::call_feval_async_with_outputs(callback, &[], 0).await?;
-    Ok(())
+    }
+    let runtime = crate::context::legacy::active()
+        .ok_or_else(|| on_cleanup_error(&ON_CLEANUP_ERROR_HOST, ON_CLEANUP_ERROR_HOST.message))?;
+    let registry = runtime
+        .cleanup_registry()
+        .ok_or_else(|| on_cleanup_error(&ON_CLEANUP_ERROR_HOST, ON_CLEANUP_ERROR_HOST.message))?;
+    let entry = registry.find(handle.target).ok_or_else(|| {
+        on_cleanup_error(
+            &ON_CLEANUP_ERROR_INVALID_OBJECT,
+            "onCleanup: object is not owned by this session",
+        )
+    })?;
+    if entry.phase() == lifecycle::registry::CleanupPhase::Active {
+        deactivate_handle(handle)?;
+        if registry.queue_explicit(&entry) {
+            lifecycle::dispatch::start_queued(&runtime, &registry, entry.clone())?;
+        }
+    }
+    if matches!(
+        entry.phase(),
+        lifecycle::registry::CleanupPhase::Queued | lifecycle::registry::CleanupPhase::Running
+    ) {
+        lifecycle::dispatch::wait_queued(&registry, &entry).await
+    } else {
+        Ok(())
+    }
 }
 
 fn cancel_on_cleanup_value(value: &Value) -> BuiltinResult<()> {
     match value {
         Value::HandleObject(handle) if is_on_cleanup_handle(handle) => {
-            let _ = deactivate_handle_and_take_callback(handle)?;
+            if !crate::is_handle_valid(handle) {
+                return Ok(());
+            }
+            let runtime = crate::context::legacy::active().ok_or_else(|| {
+                on_cleanup_error(&ON_CLEANUP_ERROR_HOST, ON_CLEANUP_ERROR_HOST.message)
+            })?;
+            let registry = runtime.cleanup_registry().ok_or_else(|| {
+                on_cleanup_error(&ON_CLEANUP_ERROR_HOST, ON_CLEANUP_ERROR_HOST.message)
+            })?;
+            let entry = registry.find(handle.target).ok_or_else(|| {
+                on_cleanup_error(
+                    &ON_CLEANUP_ERROR_INVALID_OBJECT,
+                    "onCleanup: object is not owned by this session",
+                )
+            })?;
+            deactivate_handle(handle)?;
+            registry.cancel(&entry);
             Ok(())
         }
         other => Err(on_cleanup_error(
@@ -401,29 +441,28 @@ fn cancel_on_cleanup_value(value: &Value) -> BuiltinResult<()> {
     }
 }
 
-fn deactivate_handle_and_take_callback(handle: &HandleRef) -> BuiltinResult<Option<Value>> {
+fn deactivate_handle(handle: &HandleRef) -> BuiltinResult<()> {
     if !is_on_cleanup_handle(handle) || !crate::is_handle_valid(handle) {
-        return Ok(None);
+        return Ok(());
     }
 
-    let callback = runmat_gc::gc_with_value_mut(&handle.target, |target| {
+    runmat_gc::gc_with_value_mut(&handle.target, |target| {
         let Value::Object(object) = target else {
-            return None;
+            return;
         };
         let active = matches!(
             object.properties.get(ACTIVE_PROPERTY),
             Some(Value::Bool(true))
         );
         if !active {
-            return None;
+            return;
         }
         object
             .properties
             .insert(ACTIVE_PROPERTY.to_string(), Value::Bool(false));
-        object.properties.get(CALLBACK_PROPERTY).cloned()
     })
     .map_err(|err| on_cleanup_error(&ON_CLEANUP_ERROR_GC, format!("onCleanup: {err}")))?;
-    Ok(callback)
+    Ok(())
 }
 
 fn is_on_cleanup_handle(handle: &HandleRef) -> bool {
@@ -456,8 +495,39 @@ fn cancel_error(
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    #[cfg(not(target_arch = "wasm32"))]
     use runmat_value::CellArray;
+    #[cfg(not(target_arch = "wasm32"))]
+    use std::future::Future;
+    #[cfg(not(target_arch = "wasm32"))]
+    use std::rc::Rc;
     use std::sync::Arc;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn hosted_fixture_runtime() -> (
+        crate::context::RuntimeContext,
+        Rc<crate::context::RuntimeLocalTaskSupervisor>,
+        crate::context::RuntimeLifecycleHost,
+    ) {
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let supervisor = Rc::new(crate::context::RuntimeLocalTaskSupervisor::new());
+        let ports = runtime
+            .service_ports()
+            .clone()
+            .with_local_tasks(supervisor.submission_port(runtime.local_identity()));
+        let runtime = runtime.with_service_ports(ports);
+        let host = crate::context::RuntimeLifecycleHost::new(&runtime, supervisor.clone())
+            .expect("exact lifecycle host");
+        (runtime, supervisor, host)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn drive<F: Future>(
+        supervisor: &Rc<crate::context::RuntimeLocalTaskSupervisor>,
+        future: F,
+    ) -> F::Output {
+        block_on(supervisor.drive_until(future)).expect("local task driver")
+    }
 
     fn callback_invoker(counter: Arc<Mutex<usize>>) -> Arc<crate::user_functions::FunctionInvoker> {
         Arc::new(move |_function, args, requested_outputs| {
@@ -471,11 +541,11 @@ mod tests {
         })
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn on_cleanup_accepts_function_handles_and_runs_once_on_delete() {
         let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
-        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let (runtime, supervisor, _host) = hosted_fixture_runtime();
         let _entry = runtime.enter();
         let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
         let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
@@ -488,17 +558,17 @@ mod tests {
         ))
         .expect("create cleanup");
 
-        block_on(run_on_cleanup_value(&cleanup)).expect("first cleanup");
-        block_on(run_on_cleanup_value(&cleanup)).expect("second cleanup is no-op");
+        drive(&supervisor, run_on_cleanup_value(&cleanup)).expect("first cleanup");
+        drive(&supervisor, run_on_cleanup_value(&cleanup)).expect("second cleanup is no-op");
 
         assert_eq!(*counter.lock().unwrap(), 1);
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn delete_method_invalidates_cleanup_handle() {
         let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
-        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let (runtime, supervisor, _host) = hosted_fixture_runtime();
         let _entry = runtime.enter();
         let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
         let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
@@ -514,7 +584,7 @@ mod tests {
             panic!("expected cleanup handle");
         };
 
-        block_on(on_cleanup_delete_builtin(cleanup)).expect("delete cleanup");
+        drive(&supervisor, on_cleanup_delete_builtin(cleanup)).expect("delete cleanup");
 
         assert_eq!(*counter.lock().unwrap(), 1);
         assert!(
@@ -523,11 +593,11 @@ mod tests {
         );
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn cancel_prevents_later_cleanup() {
         let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
-        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let (runtime, supervisor, _host) = hosted_fixture_runtime();
         let _entry = runtime.enter();
         let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
         let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
@@ -541,7 +611,7 @@ mod tests {
         .expect("create cleanup");
 
         cancel_on_cleanup_value(&cleanup).expect("cancel cleanup");
-        block_on(run_on_cleanup_value(&cleanup)).expect("cleanup remains no-op");
+        drive(&supervisor, run_on_cleanup_value(&cleanup)).expect("cleanup remains no-op");
 
         assert_eq!(*counter.lock().unwrap(), 0);
     }
@@ -561,11 +631,27 @@ mod tests {
         assert_eq!(err.identifier(), Some("RunMat:onCleanup:InvalidObject"));
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn valid_callback_in_bare_context_fails_before_object_admission() {
+        let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let _entry = runtime.enter();
+        let callback =
+            crate::user_functions::test_support::exact_local_handle(&runtime, "cleanup", 7);
+        let error = block_on(on_cleanup_builtin(callback)).expect_err("host is required");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:onCleanup:LifecycleHostUnavailable")
+        );
+        assert!(runtime.cleanup_registry().is_none());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn workspace_cleanup_walks_cells() {
         let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
-        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let (runtime, supervisor, _host) = hosted_fixture_runtime();
         let _entry = runtime.enter();
         let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
         let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
@@ -579,16 +665,16 @@ mod tests {
         .expect("create cleanup");
         let cell = Value::Cell(CellArray::new(vec![cleanup], 1, 1).expect("cell"));
 
-        block_on(run_cleanup_for_workspace_value(&cell)).expect("cleanup");
+        drive(&supervisor, run_cleanup_for_workspace_value(&cell)).expect("cleanup");
 
         assert_eq!(*counter.lock().unwrap(), 1);
     }
 
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn workspace_cleanup_walks_structs_objects_and_output_lists() {
         let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
-        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let (runtime, supervisor, _host) = hosted_fixture_runtime();
         let _entry = runtime.enter();
         let a = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
         let b = crate::user_functions::test_support::exact_local_binding(&runtime, 8);
@@ -625,8 +711,79 @@ mod tests {
             cleanup_c,
         ]);
 
-        block_on(run_cleanup_for_workspace_value(&composite)).expect("cleanup");
+        drive(&supervisor, run_cleanup_for_workspace_value(&composite)).expect("cleanup");
 
         assert_eq!(*counter.lock().unwrap(), 3);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn last_returned_root_retirement_wakes_idle_host_once() {
+        let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
+        let (runtime, supervisor, _host) = hosted_fixture_runtime();
+        let _entry = runtime.enter();
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
+        let counter = Arc::new(Mutex::new(0usize));
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
+            callback_invoker(Arc::clone(&counter)),
+        ));
+        let cleanup = block_on(on_cleanup_builtin(
+            crate::user_functions::test_support::exact_local_value("cleanup", binding),
+        ))
+        .expect("create cleanup");
+        let returned = crate::execution::RootedValueSequence::new(
+            runmat_value::ValueSequence::single(cleanup).expect("single cleanup"),
+        )
+        .expect("root caller-held result");
+        drive(&supervisor, async { tokio::task::yield_now().await });
+        assert_eq!(*counter.lock().unwrap(), 0, "caller still owns result");
+
+        drop(returned);
+        drive(&supervisor, async {
+            for _ in 0..16 {
+                if *counter.lock().unwrap() == 1 {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+            panic!("idle root retirement did not drive cleanup");
+        });
+        assert_eq!(*counter.lock().unwrap(), 1, "cleanup must not replay");
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test::wasm_bindgen_test(async)]
+    async fn browser_hosted_delete_drains_callback_without_inline_fallback() {
+        let _lock = ON_CLEANUP_TEST_LOCK.lock().unwrap();
+        let runtime = crate::user_functions::test_support::exact_fixture_runtime();
+        let supervisor = std::rc::Rc::new(crate::context::BrowserLocalTaskSupervisor::new());
+        let ports = runtime
+            .service_ports()
+            .clone()
+            .with_local_tasks(supervisor.submission_port(runtime.local_identity()));
+        let runtime = runtime.with_service_ports(ports);
+        let _host = crate::context::RuntimeLifecycleHost::new(&runtime, supervisor)
+            .expect("browser lifecycle host");
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 7);
+        let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
+        let counter = Arc::new(Mutex::new(0usize));
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
+            callback_invoker(Arc::clone(&counter)),
+        ));
+        runtime
+            .clone()
+            .scope(async {
+                let cleanup = on_cleanup_builtin(
+                    crate::user_functions::test_support::exact_local_value("cleanup", binding),
+                )
+                .await
+                .expect("create browser cleanup");
+                on_cleanup_delete_builtin(cleanup)
+                    .await
+                    .expect("browser delete");
+            })
+            .await;
+        assert_eq!(*counter.lock().unwrap(), 1);
     }
 }

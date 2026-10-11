@@ -248,6 +248,7 @@ pub mod standard {
     pub const STATE_SPACE: StaticClassIdentity = StaticClassIdentity::new("ss");
     pub const HANDLE: StaticClassIdentity = StaticClassIdentity::new("handle");
     pub const DYNAMIC_PROPERTIES: StaticClassIdentity = StaticClassIdentity::new("dynamicprops");
+    pub const EVENT_DATA: StaticClassIdentity = StaticClassIdentity::new("event.EventData");
     pub const FIGURE: StaticClassIdentity = StaticClassIdentity::new("matlab.ui.Figure");
     pub const AXES: StaticClassIdentity = StaticClassIdentity::new("matlab.graphics.axis.Axes");
     pub const ZOOM_CONTROL: StaticClassIdentity =

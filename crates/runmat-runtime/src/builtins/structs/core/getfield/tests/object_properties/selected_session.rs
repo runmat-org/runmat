@@ -60,6 +60,7 @@ fn public_getfield_dependent_getter_uses_selected_session() {
     let selected_scope = selected.enter();
     let class = runmat_types::ClassIdentity::from("SelectedGetfieldSession");
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: class.clone(),
         parent: None,
         properties: std::collections::HashMap::from([(

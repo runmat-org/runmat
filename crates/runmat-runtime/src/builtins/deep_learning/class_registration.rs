@@ -14,6 +14,7 @@ pub(in crate::builtins) fn ensure_dlarray_class_registered() {
         let methods =
             crate::class_registry::standard_runtime_methods(runmat_types::standard::DL_ARRAY);
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: runmat_types::standard::DL_ARRAY.owned(),
             parent: None,
             properties: HashMap::new(),
@@ -104,6 +105,7 @@ pub(in crate::builtins) fn ensure_network_class_registered(
             );
         }
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: identity.owned(),
             parent: None,
             properties,

@@ -858,6 +858,7 @@ fn compile_semantic_functions(
                 private_owner_scope: function_layout.private_owner_scope.clone(),
                 source_id,
                 source_file: None,
+                private_source_owner: None,
                 source_role: hir.function_source_role(function),
                 portable_function: runmat_types::ProgramFunctionId(
                     u32::try_from(function.id.0)

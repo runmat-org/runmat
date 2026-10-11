@@ -5,6 +5,7 @@ use std::rc::Rc;
 use runmat_value::Value;
 
 use crate::context::RuntimeWorkspaceService;
+use crate::workspace::{DetachedWorkspaceValues, WorkspaceDetachSelection};
 use crate::RuntimeError;
 
 use super::{
@@ -216,6 +217,25 @@ impl BaseWorkspaceProjectionService {
 }
 
 impl RuntimeWorkspaceService for BaseWorkspaceProjectionService {
+    fn detach_selected(
+        &self,
+        selection: &WorkspaceDetachSelection,
+    ) -> Result<DetachedWorkspaceValues, RuntimeError> {
+        self.synchronize_for_effect()?;
+        let mut state = self
+            .state
+            .try_borrow_mut()
+            .map_err(|_| base_workspace_error_to_runtime(BaseWorkspaceError::BorrowConflict))?;
+        let (detached, commit) = state
+            .projection
+            .detach_selected(selection)
+            .map_err(base_workspace_error_to_runtime)?;
+        let retired = state.published_effect.observe(commit.changes());
+        drop(state);
+        drop(retired);
+        Ok(detached)
+    }
+
     fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         let state = self.state.try_borrow().ok()?;
         for (_, value) in state.projection.iter() {

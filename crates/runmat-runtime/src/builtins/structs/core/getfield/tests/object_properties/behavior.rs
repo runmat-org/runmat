@@ -51,6 +51,7 @@ fn getfield_dependent_property_invokes_getter() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let class_name = "runmat.unittest.GetfieldDependent";
     let mut def = crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: class_name.into(),
         parent: None,
         properties: std::collections::HashMap::new(),
@@ -86,6 +87,7 @@ fn getfield_inherited_dependent_property_uses_parent_metadata() {
     let child_name = "runmat.unittest.GetfieldDependentChild";
 
     let mut parent = crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: parent_name.into(),
         parent: None,
         properties: std::collections::HashMap::new(),
@@ -106,6 +108,7 @@ fn getfield_inherited_dependent_property_uses_parent_metadata() {
     crate::class_registry::register_class(parent);
 
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: child_name.into(),
         parent: Some(parent_name.into()),
         properties: std::collections::HashMap::new(),

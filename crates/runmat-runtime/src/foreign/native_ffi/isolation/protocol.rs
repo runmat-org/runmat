@@ -215,10 +215,10 @@ impl NativeCallbackResult {
 impl NativeShutdownResult {
     fn validate(&self) -> Result<(), String> {
         validate_id(self.request_id, "request")?;
-        self.outcome
-            .as_ref()
-            .map_err(|error| error.message.clone())?;
-        Ok(())
+        match &self.outcome {
+            Ok(()) => Ok(()),
+            Err(error) => error.validate(),
+        }
     }
 }
 
@@ -364,5 +364,20 @@ mod tests {
                 serde_json::from_slice(&encoded).expect("decode output vector");
             assert_eq!(decoded, result);
         }
+    }
+
+    #[test]
+    fn shutdown_error_keeps_request_identity_and_typed_wire_cause() {
+        let result = NativeHostMessage::Shutdown(NativeShutdownResult {
+            request_id: 17,
+            outcome: Err(NativeWireError {
+                identifier: "RunMat:onCleanup:CallbackFailed".into(),
+                message: "cleanup failed".into(),
+            }),
+        });
+        result.validate().expect("valid failed shutdown envelope");
+        let encoded = serde_json::to_vec(&result).expect("encode failed shutdown");
+        let decoded: NativeHostMessage = serde_json::from_slice(&encoded).expect("decode shutdown");
+        assert_eq!(decoded, result);
     }
 }

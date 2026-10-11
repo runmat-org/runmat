@@ -14,6 +14,7 @@ pub(crate) fn ensure_indexing_context_classes_registered() {
 
 pub(super) fn register_indexing_context_class(name: runmat_types::StaticClassIdentity) {
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: name.into(),
         parent: None,
         properties: std::collections::HashMap::new(),

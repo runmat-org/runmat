@@ -16,6 +16,7 @@ use std::sync::{
 
 fn class(name: &str) -> RuntimeClass {
     let mut class = RuntimeClass {
+        events: Default::default(),
         name: name.into(),
         parent: None,
         properties: Default::default(),

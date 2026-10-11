@@ -37,6 +37,7 @@ pub fn install(
     runtime: &runmat_runtime::context::RuntimeContext,
     mex_runtime: Rc<runmat_runtime::foreign::MexRuntimeSession>,
 ) -> MexRuntimeGuard {
+    runtime.set_native_name_observer(Some(mex_runtime.name_observer()));
     let load_runtime = Rc::clone(&mex_runtime);
     let guard_runtime = Rc::clone(&mex_runtime);
     let loader: Rc<runmat_runtime::user_functions::DynamicFunctionLoader> = Rc::new(

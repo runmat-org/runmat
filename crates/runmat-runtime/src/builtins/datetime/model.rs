@@ -103,6 +103,7 @@ pub(super) fn ensure_datetime_class_registered() {
         let methods = crate::class_registry::standard_runtime_methods(DATETIME_CLASS);
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: DATETIME_CLASS.into(),
             parent: None,
             properties,
@@ -132,6 +133,7 @@ pub(super) fn ensure_calendar_duration_class_registered() {
         let methods = crate::class_registry::standard_runtime_methods(CALENDAR_DURATION_CLASS);
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: CALENDAR_DURATION_CLASS.into(),
             parent: None,
             properties,

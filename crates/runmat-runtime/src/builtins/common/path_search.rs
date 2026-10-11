@@ -386,13 +386,29 @@ pub async fn find_file_with_extensions_with_origin(
     extensions: &[&str],
     error_prefix: &str,
 ) -> Result<Option<FileCandidate>, String> {
-    let candidates = file_candidates_with_origin(name, extensions, error_prefix)?;
-    for candidate in candidates {
-        if path_is_file(&candidate.path).await {
+    for candidate in file_candidates_with_origin(name, extensions, error_prefix)? {
+        if path_is_file(candidate.path()).await {
             return Ok(Some(candidate));
         }
     }
     Ok(None)
+}
+
+/// Observe every existing candidate in the same order and with the same
+/// captured root/spelling authority used by executable source discovery.
+/// This performs no source read, compilation, module load, or invocation.
+pub async fn find_all_files_with_extensions_with_origin(
+    name: &str,
+    extensions: &[&str],
+    error_prefix: &str,
+) -> Result<Vec<FileCandidate>, String> {
+    let mut matches = Vec::new();
+    for candidate in file_candidates_with_origin(name, extensions, error_prefix)? {
+        if path_is_file(candidate.path()).await {
+            matches.push(candidate);
+        }
+    }
+    Ok(matches)
 }
 
 /// Return all existing files for a symbol given the list of candidate
@@ -402,52 +418,101 @@ pub async fn find_all_files_with_extensions(
     extensions: &[&str],
     error_prefix: &str,
 ) -> Result<Vec<PathBuf>, String> {
-    let mut matches = Vec::new();
-    let mut seen = HashSet::new();
-    for path in file_candidates(name, extensions, error_prefix)? {
-        if path_is_file(&path).await && seen.insert(path.clone()) {
-            matches.push(path);
-        }
-    }
-    Ok(matches)
+    Ok(
+        find_all_files_with_extensions_with_origin(name, extensions, error_prefix)
+            .await?
+            .into_iter()
+            .map(|candidate| candidate.path)
+            .collect(),
+    )
 }
 
 /// Return the list of candidate directories that could correspond to `name`.
 pub fn directory_candidates(name: &str, error_prefix: &str) -> Result<Vec<PathBuf>, String> {
-    if should_treat_as_path(name) {
-        let expanded = expand_user_path(name, error_prefix)?;
-        return Ok(vec![PathBuf::from(expanded)]);
+    Ok(directory_candidates_with_origin(name, error_prefix)?
+        .into_iter()
+        .map(|candidate| candidate.path)
+        .collect())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DirectoryCandidate {
+    path: PathBuf,
+    origin: FileCandidateOrigin,
+}
+
+impl DirectoryCandidate {
+    pub fn path(&self) -> &Path {
+        &self.path
     }
-    let (packages, base) = split_package_components(name);
-    let prefix = packages_to_path(&packages);
-    let mut candidates = Vec::new();
-    for dir in search_directories(error_prefix)? {
-        let mut path = dir.clone();
-        if !prefix.as_os_str().is_empty() {
-            path.push(&prefix);
-        }
-        path.push(&base);
-        push_unique(&mut candidates, path);
+
+    pub fn origin(&self) -> &FileCandidateOrigin {
+        &self.origin
     }
-    Ok(candidates)
+}
+
+pub fn directory_candidates_with_origin(
+    name: &str,
+    error_prefix: &str,
+) -> Result<Vec<DirectoryCandidate>, String> {
+    folder_candidates_with_origin(name, error_prefix, false)
 }
 
 /// Return candidate class folders (`@ClassName`) for the provided symbol.
 pub fn class_folder_candidates(name: &str, error_prefix: &str) -> Result<Vec<PathBuf>, String> {
+    Ok(class_folder_candidates_with_origin(name, error_prefix)?
+        .into_iter()
+        .map(|candidate| candidate.path)
+        .collect())
+}
+
+pub fn class_folder_candidates_with_origin(
+    name: &str,
+    error_prefix: &str,
+) -> Result<Vec<DirectoryCandidate>, String> {
+    folder_candidates_with_origin(name, error_prefix, true)
+}
+
+fn folder_candidates_with_origin(
+    name: &str,
+    error_prefix: &str,
+    class_folder: bool,
+) -> Result<Vec<DirectoryCandidate>, String> {
     if should_treat_as_path(name) {
         let expanded = expand_user_path(name, error_prefix)?;
-        return Ok(vec![PathBuf::from(expanded)]);
+        return Ok(vec![DirectoryCandidate {
+            path: PathBuf::from(expanded),
+            origin: FileCandidateOrigin::Direct {
+                spelling: PathBuf::from(name),
+            },
+        }]);
     }
-    let (packages, class_name) = split_package_components(name);
+    let (packages, base) = split_package_components(name);
     let prefix = packages_to_path(&packages);
     let mut candidates = Vec::new();
-    for dir in search_directories(error_prefix)? {
-        let mut path = dir.clone();
-        if !prefix.as_os_str().is_empty() {
-            path.push(&prefix);
+    for (index, dir) in search_directories(error_prefix)?.into_iter().enumerate() {
+        let ordinal = u32::try_from(index)
+            .map_err(|_| format!("{error_prefix}: search path has too many roots"))?;
+        let mut relative = prefix.clone();
+        relative.push(if class_folder {
+            format!("@{base}")
+        } else {
+            base.clone()
+        });
+        let path = dir.join(&relative);
+        if !candidates
+            .iter()
+            .any(|candidate: &DirectoryCandidate| candidate.path == path)
+        {
+            candidates.push(DirectoryCandidate {
+                path,
+                origin: FileCandidateOrigin::SearchRoot {
+                    ordinal,
+                    access_root: dir,
+                    relative,
+                },
+            });
         }
-        path.push(format!("@{}", class_name));
-        push_unique(&mut candidates, path);
     }
     Ok(candidates)
 }
@@ -475,10 +540,60 @@ pub async fn class_file_paths(
     keyword: &str,
     error_prefix: &str,
 ) -> Result<Vec<PathBuf>, String> {
+    Ok(
+        class_file_candidates_with_origin(name, class_extensions, keyword, error_prefix)
+            .await?
+            .into_iter()
+            .map(|candidate| candidate.path)
+            .collect(),
+    )
+}
+
+/// Class-file observation shares the ordinary candidate origin and order.
+pub async fn class_file_candidates_with_origin(
+    name: &str,
+    class_extensions: &[&str],
+    keyword: &str,
+    error_prefix: &str,
+) -> Result<Vec<FileCandidate>, String> {
+    collect_class_file_candidates_with_origin(name, class_extensions, keyword, error_prefix, true)
+        .await
+}
+
+pub async fn find_class_file_with_origin(
+    name: &str,
+    class_extensions: &[&str],
+    keyword: &str,
+    error_prefix: &str,
+) -> Result<Option<FileCandidate>, String> {
+    Ok(collect_class_file_candidates_with_origin(
+        name,
+        class_extensions,
+        keyword,
+        error_prefix,
+        false,
+    )
+    .await?
+    .into_iter()
+    .next())
+}
+
+async fn collect_class_file_candidates_with_origin(
+    name: &str,
+    class_extensions: &[&str],
+    keyword: &str,
+    error_prefix: &str,
+    all: bool,
+) -> Result<Vec<FileCandidate>, String> {
     let mut matches = Vec::new();
-    for path in find_all_files_with_extensions(name, class_extensions, error_prefix).await? {
-        if file_contains_keyword(&path, keyword).await {
-            matches.push(path);
+    for candidate in file_candidates_with_origin(name, class_extensions, error_prefix)? {
+        if path_is_file(candidate.path()).await
+            && file_contains_keyword(candidate.path(), keyword).await
+        {
+            matches.push(candidate);
+            if !all {
+                break;
+            }
         }
     }
     Ok(matches)
@@ -496,12 +611,6 @@ async fn file_contains_keyword(path: &Path, keyword: &str) -> bool {
                 .contains(&keyword.to_ascii_lowercase())
         }
         Err(_) => false,
-    }
-}
-
-fn push_unique<T: Eq + std::hash::Hash + Clone>(vec: &mut Vec<T>, value: T) {
-    if !vec.contains(&value) {
-        vec.push(value);
     }
 }
 
@@ -528,10 +637,71 @@ pub async fn path_is_directory(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        file_candidates, file_candidates_with_origin, FileCandidateOrigin, MEX_EXTENSIONS,
+        class_folder_candidates_with_origin, directory_candidates_with_origin, file_candidates,
+        file_candidates_with_origin, find_all_files_with_extensions_with_origin,
+        find_file_with_extensions_with_origin, FileCandidateOrigin, MEX_EXTENSIONS,
         PCODE_EXTENSIONS,
     };
     use std::path::PathBuf;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn existing_candidates_keep_executable_first_match_and_shadowed_root_order() {
+        let temporary = tempfile::tempdir().expect("temporary roots");
+        let first = temporary.path().join("first");
+        let second = temporary.path().join("second");
+        std::fs::create_dir_all(&first).expect("first root");
+        std::fs::create_dir_all(&second).expect("second root");
+        std::fs::write(first.join("__path_origin_fixture__.m"), b"% first").expect("first source");
+        std::fs::write(second.join("__path_origin_fixture__.m"), b"% second")
+            .expect("second source");
+        let path = format!(
+            "{}{}{}",
+            first.display(),
+            crate::builtins::common::path_state::PATH_LIST_SEPARATOR,
+            second.display()
+        );
+        let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+        .with_search_path(std::sync::Arc::new(
+            crate::builtins::common::path_state::SearchPath::new(path),
+        ));
+        let _scope = crate::context::RuntimeContextGuard::enter(runtime);
+        let all = futures::executor::block_on(find_all_files_with_extensions_with_origin(
+            "__path_origin_fixture__",
+            &[".m"],
+            "test",
+        ))
+        .expect("ordered candidates");
+        let selected = futures::executor::block_on(find_file_with_extensions_with_origin(
+            "__path_origin_fixture__",
+            &[".m"],
+            "test",
+        ))
+        .expect("first candidate")
+        .expect("source exists");
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0], selected);
+        assert!(matches!(
+            all[1].origin(),
+            FileCandidateOrigin::SearchRoot { ordinal: 2, .. }
+        ));
+        let folders = directory_candidates_with_origin("__path_origin_fixture__", "test")
+            .expect("directory facts");
+        assert!(matches!(
+            folders[1].origin(),
+            FileCandidateOrigin::SearchRoot { ordinal: 1, relative, .. }
+                if relative == &PathBuf::from("__path_origin_fixture__")
+        ));
+        let classes =
+            class_folder_candidates_with_origin("Fixture", "test").expect("class-folder facts");
+        assert!(matches!(
+            classes[2].origin(),
+            FileCandidateOrigin::SearchRoot { ordinal: 2, relative, .. }
+                if relative == &PathBuf::from("@Fixture")
+        ));
+    }
 
     #[test]
     fn explicit_files_only_match_requested_extensions() {

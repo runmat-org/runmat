@@ -239,6 +239,7 @@ fn owned_path_suffix_uses_selected_session_after_first_step() {
         })));
     let class = runmat_types::ClassIdentity::from("OwnedSuffixSession");
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: class.clone(),
         parent: None,
         properties: Default::default(),

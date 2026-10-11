@@ -81,6 +81,7 @@ pub fn semantic_definition_fingerprint(
         source_id,
         // Display provenance follows the authenticated source-map owner.
         source_file: _,
+        private_source_owner,
         source_role,
         portable_function: _,
         binding_origin: _,
@@ -128,6 +129,12 @@ pub fn semantic_definition_fingerprint(
     append!(class_method_owner);
     append!(private_owner_scope);
     append!(&semantic_source_revision(*source_id));
+    if let Some(owner) = private_source_owner {
+        // Only the path-free equivalence partition affects semantic reuse.
+        // The native host path is intentionally excluded from this identity.
+        append!("private-source-aliases-v1");
+        append!(owner.aliases());
+    }
     append!(source_role);
     append!(capabilities);
     #[cfg(feature = "native-accel")]

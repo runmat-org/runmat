@@ -22,7 +22,8 @@ use super::{
     PYTHON_HOST_SCHEMA_VERSION, PYTHON_HOST_SECRET_ENV, PYTHON_HOST_SNAPSHOT_ROOT_ENV,
 };
 use crate::context::{
-    ForeignCall, RuntimeCallRequest, RuntimeCallService, RuntimeContext, RuntimeServicePorts,
+    ForeignCall, RuntimeCallRequest, RuntimeCallService, RuntimeContext, RuntimeLifecycleHost,
+    RuntimeLocalTaskSupervisor, RuntimeServicePorts,
 };
 use crate::execution::RuntimeExecutionService;
 use crate::foreign::{
@@ -31,9 +32,9 @@ use crate::foreign::{
 use crate::RuntimeError;
 
 const CALLBACK_PREFIX: &str = "__runmat_python_isolated_callback_";
-type StdioChannel = HostChannel<std::io::Stdin, std::io::Stdout>;
+type StdioChannel = HostChannel<std::io::Stdout>;
 
-pub fn run_python_extension_host() -> Result<(), String> {
+pub async fn run_python_extension_host() -> Result<(), String> {
     let encoded_secret = std::env::var(PYTHON_HOST_SECRET_ENV)
         .map_err(|_| "Python host bootstrap secret is unavailable".to_string())?;
     std::env::remove_var(PYTHON_HOST_SECRET_ENV);
@@ -65,10 +66,17 @@ pub fn run_python_extension_host() -> Result<(), String> {
         &secret,
     )
     .map_err(|error| error.to_string())?;
-    let channel = Rc::new(RefCell::new(HostChannel {
+    let limits = session.limits;
+    let inbox = super::super::super::isolation_input::spawn_input_reader(
         reader,
+        "runmat-python-input",
+        move |reader| read_python_driver(reader, limits),
+    )?;
+    let _input_close = super::super::super::isolation_input::InputMailboxClose::new(inbox.clone());
+    let channel = Rc::new(RefCell::new(HostChannel {
+        inbox,
         writer,
-        limits: session.limits,
+        limits,
     }));
     let resources = Rc::new(RefCell::new(RemoteResources::default()));
     let callback_router = Rc::new(HostCallbackRouter {
@@ -84,22 +92,41 @@ pub fn run_python_extension_host() -> Result<(), String> {
     foreign
         .register_adapter(adapter.clone())
         .map_err(|error| error.to_string())?;
-    let context = RuntimeContext::new(Rc::new(RuntimeExecutionService::new())).with_service_ports(
+    let context = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+    let supervisor = Rc::new(RuntimeLocalTaskSupervisor::new());
+    let local_identity = context.local_identity();
+    let context = context.with_service_ports(
         RuntimeServicePorts::default()
             .with_foreign(foreign)
-            .with_call(callback_router.clone()),
+            .with_call(callback_router.clone())
+            .with_local_tasks(supervisor.submission_port(local_identity)),
     );
+    let lifecycle = RuntimeLifecycleHost::new(&context, Rc::clone(&supervisor))
+        .map_err(|error| error.to_string())?;
     ACTIVE_HOST.with(|host| {
         host.replace(Some((adapter.clone(), context.clone())));
     });
 
     let outcome = loop {
-        let message = channel.borrow_mut().read_driver()?;
+        let inbox = channel.borrow().inbox.clone();
+        let message = supervisor
+            .participate_foreground(inbox.next())
+            .await
+            .map_err(|error| error.to_string())??;
         match message {
             PythonDriverMessage::Invoke(request) => {
                 let request_id = request.request_id;
                 callback_router.active_request.set(request_id);
-                let outcome = invoke_request(&adapter, &context, request, &snapshots, &resources);
+                let outcome = invoke_request(
+                    &adapter,
+                    &context,
+                    &supervisor,
+                    &lifecycle,
+                    request,
+                    &snapshots,
+                    &resources,
+                )
+                .await;
                 callback_router.active_request.set(0);
                 channel
                     .borrow_mut()
@@ -112,12 +139,20 @@ pub fn run_python_extension_host() -> Result<(), String> {
                 request_id,
                 releases,
             } => {
+                let cleanup = supervisor
+                    .participate_foreground(lifecycle.retire_workspace_and_drain(&context))
+                    .await;
+                let outcome = match cleanup {
+                    Ok(outcome) => outcome.map_err(runtime_wire_error),
+                    Err(error) => Err(runtime_wire_error(error)),
+                };
+                lifecycle.force_close();
                 resources.borrow_mut().release(&releases);
                 channel
                     .borrow_mut()
                     .write_host(&PythonHostMessage::Shutdown(PythonShutdownResult {
                         request_id,
-                        outcome: Ok(()),
+                        outcome,
                     }))?;
                 break Ok(());
             }
@@ -132,9 +167,11 @@ pub fn run_python_extension_host() -> Result<(), String> {
     outcome
 }
 
-fn invoke_request(
+async fn invoke_request(
     adapter: &Rc<PythonAdapter>,
     context: &RuntimeContext,
+    supervisor: &Rc<RuntimeLocalTaskSupervisor>,
+    lifecycle: &RuntimeLifecycleHost,
     request: PythonInvocationRequest,
     snapshots: &SharedSnapshotStore,
     resources: &Rc<RefCell<RemoteResources>>,
@@ -145,17 +182,30 @@ fn invoke_request(
         .into_iter()
         .map(|value| decode_host_value(value, snapshots, resources))
         .collect::<Result<Vec<_>, _>>()?;
-    let value = pollster::block_on(context.scope(adapter.invoke(
-        context.clone(),
-        ForeignCall {
-            adapter: runmat_python::PYTHON_ADAPTER_ID.into(),
-            symbol: request.operation,
-            arguments,
-            requested_outputs: request.requested_outputs as usize,
-        },
-    )))
-    .map_err(runtime_wire_error)?;
-    encode_host_outputs(value, snapshots, resources)
+    let value = supervisor
+        .participate_foreground(async {
+            let value = context
+                .clone()
+                .scope(adapter.invoke(
+                    context.clone(),
+                    ForeignCall {
+                        adapter: runmat_python::PYTHON_ADAPTER_ID.into(),
+                        symbol: request.operation,
+                        arguments,
+                        requested_outputs: request.requested_outputs as usize,
+                    },
+                ))
+                .await?;
+            let value = crate::execution::RootedValueSequence::new(value)
+                .map_err(|error| error.into_runtime_error())?;
+            lifecycle.service_safepoint(context)?;
+            lifecycle.drain_gracefully(context).await?;
+            Ok(value)
+        })
+        .await
+        .map_err(runtime_wire_error)?
+        .map_err(runtime_wire_error)?;
+    value.with_owned_sequence(|value| encode_host_outputs(value, snapshots, resources))
 }
 
 fn encode_host_outputs(
@@ -323,10 +373,9 @@ impl HostCallbackRouter {
                 }))
                 .map_err(|error| wire_error("RunMat:Python:HostTransport", error))?;
             loop {
-                let message = self
-                    .channel
-                    .borrow_mut()
-                    .read_driver()
+                let inbox = self.channel.borrow().inbox.clone();
+                let message = inbox
+                    .read_blocking()
                     .map_err(|error| wire_error("RunMat:Python:HostTransport", error))?;
                 match message {
                     PythonDriverMessage::CallbackResult(result)
@@ -357,7 +406,7 @@ impl HostCallbackRouter {
                         let nested_id = nested.request_id;
                         let adapter = current_python_adapter()?;
                         let context = current_python_context()?;
-                        let outcome = invoke_request(
+                        let outcome = invoke_nested_request(
                             &adapter,
                             &context,
                             nested,
@@ -384,6 +433,35 @@ impl HostCallbackRouter {
         self.depth.set(depth - 1);
         result
     }
+}
+
+// Python callback dispatch is a synchronous foreign ABI boundary. Nested
+// driver invocations use the same ordered input mailbox while the parent
+// callback is active; RunMat callback execution belongs to the parent driver.
+fn invoke_nested_request(
+    adapter: &Rc<PythonAdapter>,
+    context: &RuntimeContext,
+    request: PythonInvocationRequest,
+    snapshots: &SharedSnapshotStore,
+    resources: &Rc<RefCell<RemoteResources>>,
+) -> Result<Vec<PythonWireValue>, PythonWireError> {
+    resources.borrow_mut().release(&request.releases);
+    let arguments = request
+        .arguments
+        .into_iter()
+        .map(|value| decode_host_value(value, snapshots, resources))
+        .collect::<Result<Vec<_>, _>>()?;
+    let value = pollster::block_on(context.scope(adapter.invoke(
+        context.clone(),
+        ForeignCall {
+            adapter: runmat_python::PYTHON_ADAPTER_ID.into(),
+            symbol: request.operation,
+            arguments,
+            requested_outputs: request.requested_outputs as usize,
+        },
+    )))
+    .map_err(runtime_wire_error)?;
+    encode_host_outputs(value, snapshots, resources)
 }
 
 thread_local! {
@@ -450,24 +528,13 @@ impl RemoteResources {
     }
 }
 
-struct HostChannel<R, W> {
-    reader: R,
+struct HostChannel<W> {
+    inbox: std::sync::Arc<super::super::super::isolation_input::InputMailbox<PythonDriverMessage>>,
     writer: W,
     limits: FrameLimits,
 }
 
-impl<R: Read, W: Write> HostChannel<R, W> {
-    fn read_driver(&mut self) -> Result<PythonDriverMessage, String> {
-        let payload = read_payload_blocking(&mut self.reader, self.limits)
-            .map_err(|error| error.to_string())?;
-        let message: PythonDriverMessage = serde_json::from_slice(&payload)
-            .map_err(|error| format!("invalid Python driver record: {error}"))?;
-        message
-            .validate()
-            .map_err(|error| format!("invalid Python driver record: {error}"))?;
-        Ok(message)
-    }
-
+impl<W: Write> HostChannel<W> {
     fn write_host(&mut self, message: &PythonHostMessage) -> Result<(), String> {
         message
             .validate()
@@ -477,6 +544,19 @@ impl<R: Read, W: Write> HostChannel<R, W> {
         write_payload_blocking(&mut self.writer, &payload, self.limits)
             .map_err(|error| error.to_string())
     }
+}
+
+fn read_python_driver(
+    reader: &mut impl Read,
+    limits: FrameLimits,
+) -> Result<PythonDriverMessage, String> {
+    let payload = read_payload_blocking(reader, limits).map_err(|error| error.to_string())?;
+    let message: PythonDriverMessage = serde_json::from_slice(&payload)
+        .map_err(|error| format!("invalid Python driver record: {error}"))?;
+    message
+        .validate()
+        .map_err(|error| format!("invalid Python driver record: {error}"))?;
+    Ok(message)
 }
 
 fn runtime_wire_error(error: RuntimeError) -> PythonWireError {

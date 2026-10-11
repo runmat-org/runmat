@@ -10,6 +10,7 @@ use super::{
     BaseWorkspaceCommit, BaseWorkspaceError, BaseWorkspaceOwner, BaseWorkspaceReconciliation,
     WorkspaceDelta, WorkspaceRevision,
 };
+use crate::workspace::{DetachedWorkspaceValues, WorkspaceDetachSelection};
 
 #[derive(Debug)]
 pub struct BaseWorkspaceProjection {
@@ -21,6 +22,59 @@ pub struct BaseWorkspaceProjection {
 }
 
 impl BaseWorkspaceProjection {
+    /// Retire a selection at the owner revision, with no failure point after
+    /// local mutation. The retired values are rooted before publication.
+    pub fn detach_selected(
+        &mut self,
+        selection: &WorkspaceDetachSelection,
+    ) -> Result<(DetachedWorkspaceValues, BaseWorkspaceCommit), BaseWorkspaceError> {
+        if self.has_pending_changes() {
+            return Err(BaseWorkspaceError::PendingChanges);
+        }
+        let detached = DetachedWorkspaceValues::new(
+            selection.select(
+                self.iter()
+                    .map(|(name, value)| (name.to_string(), value.clone()))
+                    .collect(),
+            ),
+        )?;
+        let mut delta = WorkspaceDelta::new();
+        match selection {
+            WorkspaceDetachSelection::All => delta.clear(),
+            WorkspaceDetachSelection::Names(names) => {
+                for name in names {
+                    if self.is_global(name) {
+                        delta.unbind_global(name.clone());
+                    } else {
+                        delta.remove(name.clone());
+                    }
+                }
+            }
+            WorkspaceDetachSelection::Except(_) => {
+                for (name, _) in detached.entries() {
+                    delta.remove(name.clone());
+                }
+            }
+        }
+        let owner = self.owner.upgrade().ok_or(BaseWorkspaceError::Closed)?;
+        let (commit, reconciliation) = {
+            let mut state = owner
+                .try_borrow_mut()
+                .map_err(|_| BaseWorkspaceError::BorrowConflict)?;
+            let next = state.preflight_commit(self.revision, &delta)?;
+            let commit = state.commit_preflighted(self.revision, next, delta);
+            let reconciliation = state.journal.reconcile_known(
+                self.revision,
+                state.revision,
+                &state.entries,
+                &state.global_bindings,
+            );
+            (commit, reconciliation)
+        };
+        self.apply_reconciliation(&reconciliation);
+        Ok((detached, commit))
+    }
+
     pub(super) fn new(owner: &BaseWorkspaceOwner) -> Result<Self, BaseWorkspaceError> {
         let state = owner
             .state

@@ -17,6 +17,7 @@ fn rhs_operator_callee_failures_are_not_retried_or_reordered() {
         })));
     let class = ClassIdentity::from("RhsFailureFixture");
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: class.clone(),
         parent: None,
         properties: Default::default(),
@@ -88,6 +89,7 @@ fn rhs_operator_uses_selected_session_not_unrelated_ambient_session() {
         })));
     let class = ClassIdentity::from("SelectedSessionRhs");
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: class.clone(),
         parent: None,
         properties: Default::default(),
@@ -159,6 +161,7 @@ fn dependent_property_setter_uses_selected_session_not_unrelated_ambient_session
         })));
     let class = ClassIdentity::from("SelectedSessionProperty");
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: class.clone(),
         parent: None,
         properties: std::collections::HashMap::from([(

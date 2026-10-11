@@ -17,6 +17,28 @@ pub fn exact_fixture_runtime() -> RuntimeContext {
     runtime
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub type ExactLifecycleSupervisor = crate::context::RuntimeLocalTaskSupervisor;
+#[cfg(target_arch = "wasm32")]
+pub type ExactLifecycleSupervisor = crate::context::BrowserLocalTaskSupervisor;
+
+pub fn exact_hosted_fixture_runtime() -> (
+    RuntimeContext,
+    std::rc::Rc<ExactLifecycleSupervisor>,
+    crate::context::RuntimeLifecycleHost,
+) {
+    let runtime = exact_fixture_runtime();
+    let supervisor = std::rc::Rc::new(ExactLifecycleSupervisor::new());
+    let ports = runtime
+        .service_ports()
+        .clone()
+        .with_local_tasks(supervisor.submission_port(runtime.local_identity()));
+    let runtime = runtime.with_service_ports(ports);
+    let host = crate::context::RuntimeLifecycleHost::new(&runtime, supervisor.clone())
+        .expect("exact lifecycle host");
+    (runtime, supervisor, host)
+}
+
 pub fn exact_local_binding(runtime: &RuntimeContext, function: usize) -> BoundFunctionBinding {
     let owner = Arc::new(FunctionDefinitionOwner::default());
     BoundFunctionBinding::local(

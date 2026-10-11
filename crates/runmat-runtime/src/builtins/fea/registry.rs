@@ -15,6 +15,7 @@ pub(in crate::builtins::fea) fn ensure_fea_classes_registered() {
         let workflow_methods = workflow_methods();
         for class_name in [FEA_STUDY_CLASS, FEA_SWEEP_CLASS] {
             crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+                events: Default::default(),
                 name: class_name.into(),
                 parent: None,
                 properties: HashMap::new(),
@@ -22,12 +23,14 @@ pub(in crate::builtins::fea) fn ensure_fea_classes_registered() {
             });
         }
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: FEA_RUN_RESULT_CLASS.into(),
             parent: None,
             properties: HashMap::new(),
             methods: run_result_methods(),
         });
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: FEA_RESULTS_CLASS.into(),
             parent: None,
             properties: HashMap::new(),
@@ -38,6 +41,7 @@ pub(in crate::builtins::fea) fn ensure_fea_classes_registered() {
                 continue;
             }
             crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+                events: Default::default(),
                 name: class_name.into(),
                 parent: None,
                 properties: HashMap::new(),
@@ -59,6 +63,7 @@ pub(in crate::builtins::fea) fn ensure_fea_classes_registered() {
             FEA_TRENDS_CLASS,
         ] {
             crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+                events: Default::default(),
                 name: class_name.into(),
                 parent: None,
                 properties: HashMap::new(),

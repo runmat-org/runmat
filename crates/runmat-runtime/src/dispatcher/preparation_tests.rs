@@ -132,6 +132,7 @@ fn registered_instance_method_sees_original_operand_and_skips_legacy_service() {
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: class.into(),
         parent: None,
         properties: Default::default(),

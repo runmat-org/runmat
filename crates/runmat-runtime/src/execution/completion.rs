@@ -24,6 +24,35 @@ pub struct RootedValues {
     _roots: RetainedValueRoots,
 }
 
+/// A root-only lease for values already owned by a host result carrier. It
+/// traces managed identities without cloning tensor or device payloads.
+#[derive(Clone, Debug)]
+pub struct RootedValueLease {
+    _roots: RootedValueHandles,
+}
+
+impl RootedValueLease {
+    pub fn for_values<'a>(
+        values: impl Iterator<Item = &'a Value>,
+    ) -> Result<Self, ExecutionServiceError> {
+        let roots = RootedValueHandles::for_values(values).map_err(|error| {
+            ExecutionServiceError::Infrastructure(format!(
+                "could not root pending host result: {error}"
+            ))
+        })?;
+        Ok(Self { _roots: roots })
+    }
+
+    pub fn for_sequence(value: &ValueSequence) -> Result<Self, ExecutionServiceError> {
+        let roots = RootedValueHandles::for_traced(value).map_err(|error| {
+            ExecutionServiceError::Infrastructure(format!(
+                "could not root pending host result: {error}"
+            ))
+        })?;
+        Ok(Self { _roots: roots })
+    }
+}
+
 /// Incremental owner for values decoded by a potentially allocating codec.
 /// Every value is rooted before decoding or allocating the next member.
 #[derive(Debug, Default)]
@@ -110,6 +139,41 @@ impl RootedValueSequence {
     /// out of this completion record.
     pub fn into_sequence(self) -> ValueSequence {
         self.value
+    }
+
+    /// Let a synchronous output codec consume the sequence while its exact
+    /// managed roots remain live through all codec allocations and effects.
+    pub fn with_owned_sequence<R>(self, consume: impl FnOnce(ValueSequence) -> R) -> R {
+        let Self { value, _roots } = self;
+        let result = consume(value);
+        drop(_roots);
+        result
+    }
+}
+
+impl std::ops::Deref for RootedValueSequence {
+    type Target = ValueSequence;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+impl PartialEq for RootedValueSequence {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl PartialEq<ValueSequence> for RootedValueSequence {
+    fn eq(&self, other: &ValueSequence) -> bool {
+        &self.value == other
+    }
+}
+
+impl PartialEq<RootedValueSequence> for ValueSequence {
+    fn eq(&self, other: &RootedValueSequence) -> bool {
+        self == &other.value
     }
 }
 

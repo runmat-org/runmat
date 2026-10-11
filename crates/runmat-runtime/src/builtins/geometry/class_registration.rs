@@ -4,12 +4,14 @@ pub(super) fn ensure_geometry_classes_registered() {
     static REGISTER: OnceLock<()> = OnceLock::new();
     REGISTER.get_or_init(|| {
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: GEOMETRY_ASSET_CLASS.into(),
             parent: None,
             properties: HashMap::new(),
             methods: geometry_asset_methods(),
         });
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: GEOMETRY_INSPECT_RESULT_CLASS.into(),
             parent: None,
             properties: HashMap::new(),

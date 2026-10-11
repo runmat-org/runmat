@@ -77,6 +77,36 @@ impl ExecutionSourceContext {
 pub struct ExecutionResponse {
     pub source_context: ExecutionSourceContext,
     pub result: std::result::Result<ExecutionOutcome, crate::RunError>,
+    /// The response itself owns every managed result/display/workspace handle
+    /// until the caller drops it. This is not a cloned output carrier.
+    pub(crate) _result_roots: Option<runmat_runtime::execution::RootedValueLease>,
+}
+
+impl ExecutionResponse {
+    pub(crate) fn root_result_values(
+        &mut self,
+    ) -> Result<(), runmat_runtime::execution::ExecutionServiceError> {
+        let Ok(outcome) = &self.result else {
+            return Ok(());
+        };
+        let flow: &[Value] = match &outcome.flow {
+            RuntimeFlow::NoValue | RuntimeFlow::DynamicList(_) => &[],
+            RuntimeFlow::Single(value) => std::slice::from_ref(value),
+            RuntimeFlow::OutputList(values) => values,
+        };
+        self._result_roots = Some(runmat_runtime::execution::RootedValueLease::for_values(
+            flow.iter()
+                .chain(
+                    outcome
+                        .workspace_delta
+                        .upserts
+                        .iter()
+                        .map(|item| &item.value),
+                )
+                .chain(outcome.display_events.iter().map(|item| &item.value)),
+        )?);
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]

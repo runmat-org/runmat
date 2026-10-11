@@ -5,6 +5,7 @@ use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
 
 use super::{BaseWorkspaceError, BaseWorkspaceOwner, WorkspaceDelta};
+use crate::workspace::{DetachedWorkspaceValues, WorkspaceDetachSelection};
 
 /// Runtime service port for the session-owned canonical base workspace.
 ///
@@ -52,6 +53,15 @@ impl RuntimeBaseWorkspaceService for BaseWorkspaceService {
 }
 
 impl RuntimeWorkspaceService for BaseWorkspaceService {
+    fn detach_selected(
+        &self,
+        selection: &WorkspaceDetachSelection,
+    ) -> Result<DetachedWorkspaceValues, RuntimeError> {
+        self.owner
+            .detach_selected(selection)
+            .map_err(base_workspace_error_to_runtime)
+    }
+
     fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         self.owner.visit_retained_values(visitor).ok().flatten()
     }

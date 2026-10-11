@@ -847,26 +847,38 @@ async fn run_interpreter_inner(
     let previous_semantic_resolver = user_functions::current_semantic_function_resolver();
     let registry_for_function_resolver = Arc::new(function_registry.current_view());
     let active_definition_registry = Arc::clone(&function_registry);
-    let _semantic_resolver_guard =
-        user_functions::install_semantic_function_resolver(Some(Arc::new(move |name: &str| {
+    let semantic_candidates: Arc<user_functions::SemanticNameCandidates> =
+        Arc::new(move |name: &str| {
+            let mut candidates = Vec::new();
             if let Some(active_function) = user_functions::current_active_semantic_function() {
-                if let Some(function) =
-                    active_definition_registry.get(runmat_hir::FunctionId(active_function))
+                if let Some(scoped_function) = active_definition_registry
+                    .resolve_private_name_for_caller(runmat_hir::FunctionId(active_function), name)
                 {
-                    if let Some(scoped_function) = registry_for_function_resolver
-                        .resolve_name_in_private_scope(&function.private_owner_scope, name)
-                    {
-                        return Some(scoped_function.0);
-                    }
+                    candidates.push(scoped_function.0);
                 }
             }
             if let Some(function) = registry_for_function_resolver.resolve_name(name) {
-                return Some(function.0);
+                if !candidates.contains(&function.0) {
+                    candidates.push(function.0);
+                }
             }
-            previous_semantic_resolver
+            if let Some(previous) = previous_semantic_resolver
                 .as_ref()
                 .and_then(|resolver| resolver(name))
+            {
+                if !candidates.contains(&previous) {
+                    candidates.push(previous);
+                }
+            }
+            candidates
+        });
+    let resolver_candidates = Arc::clone(&semantic_candidates);
+    let _semantic_resolver_guard =
+        user_functions::install_semantic_function_resolver(Some(Arc::new(move |name: &str| {
+            resolver_candidates(name).into_iter().next()
         })));
+    let _semantic_candidates_guard =
+        user_functions::install_semantic_name_candidates(Some(semantic_candidates));
     let registry_for_execution_source = Arc::clone(&function_registry);
     let registry_for_execution_group = Arc::clone(&function_registry);
     let registry_for_execution_owners = Arc::clone(&function_registry);

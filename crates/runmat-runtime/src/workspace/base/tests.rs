@@ -12,6 +12,43 @@ fn assigned(name: &str, value: Value) -> WorkspaceDelta {
     delta
 }
 
+#[test]
+fn exact_detach_retires_only_selected_old_binding_before_reentry() {
+    let workspace = BaseWorkspaceOwner::new();
+    workspace.apply(assigned("x", Value::Num(1.0))).unwrap();
+    workspace.apply(assigned("y", Value::Num(7.0))).unwrap();
+    let retired = workspace
+        .detach_selected(&crate::workspace::WorkspaceDetachSelection::Names(vec![
+            "x".into(),
+        ]))
+        .unwrap();
+    assert_eq!(retired.entries(), &[("x".into(), Value::Num(1.0))]);
+    assert_eq!(workspace.lookup("x").unwrap(), None);
+    workspace.apply(assigned("x", Value::Num(2.0))).unwrap();
+    assert_eq!(workspace.lookup("x").unwrap(), Some(Value::Num(2.0)));
+    assert_eq!(workspace.lookup("y").unwrap(), Some(Value::Num(7.0)));
+}
+
+#[test]
+fn exact_except_selection_preserves_names_created_after_retirement() {
+    let workspace = BaseWorkspaceOwner::new();
+    for (name, value) in [("a", 1.0), ("b", 2.0), ("c", 3.0)] {
+        workspace.apply(assigned(name, Value::Num(value))).unwrap();
+    }
+    let retired = workspace
+        .detach_selected(&crate::workspace::WorkspaceDetachSelection::Except(vec![
+            "b".into(),
+        ]))
+        .unwrap();
+    assert_eq!(retired.entries().len(), 2);
+    workspace.apply(assigned("new", Value::Num(4.0))).unwrap();
+    let snapshot = workspace.snapshot().unwrap();
+    assert_eq!(snapshot.get("b"), Some(&Value::Num(2.0)));
+    assert_eq!(snapshot.get("new"), Some(&Value::Num(4.0)));
+    assert_eq!(snapshot.get("a"), None);
+    assert_eq!(snapshot.get("c"), None);
+}
+
 fn removed(name: &str) -> WorkspaceDelta {
     WorkspaceDelta::from_changes(vec![WorkspaceChange::remove(name)])
 }
@@ -421,6 +458,13 @@ fn caller_workspace_service_does_not_gain_base_workspace_authority() {
     assert_eq!(
         error.identifier(),
         Some(crate::context::RuntimeCapabilityError::IDENTIFIER)
+    );
+    let detach =
+        crate::workspace::try_detach_selected(&crate::workspace::WorkspaceDetachSelection::All)
+            .unwrap_err();
+    assert_eq!(
+        detach.identifier(),
+        Some("RunMat:Workspace:ExactDetachUnavailable")
     );
 }
 

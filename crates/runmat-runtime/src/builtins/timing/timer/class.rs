@@ -91,6 +91,7 @@ pub(super) fn ensure_timer_class_registered() {
     }
 
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: TIMER_CLASS.into(),
         parent: Some(runmat_types::standard::HANDLE.into()),
         properties,

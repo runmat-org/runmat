@@ -121,7 +121,9 @@ fn install_input(session: &mut RunMatSession, calls: Arc<AtomicUsize>, turns: Ve
 
 fn pending_once(
     mut call: std::pin::Pin<
-        &mut impl Future<Output = Result<runmat_value::ValueSequence, crate::RunError>>,
+        &mut impl Future<
+            Output = Result<runmat_runtime::execution::RootedValueSequence, crate::RunError>,
+        >,
     >,
     calls: &AtomicUsize,
 ) {

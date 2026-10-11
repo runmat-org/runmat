@@ -588,6 +588,7 @@ fn ensure_tokenized_document_class_registered() {
             properties.insert(name.into(), property_def(name));
         }
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: TOKENIZED_DOCUMENT_CLASS.into(),
             parent: None,
             properties,
@@ -603,6 +604,7 @@ fn ensure_bag_of_words_class_registered() {
             properties.insert(name.into(), property_def(name));
         }
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: BAG_OF_WORDS_CLASS.into(),
             parent: None,
             properties,

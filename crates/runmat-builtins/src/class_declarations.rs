@@ -1,7 +1,7 @@
 use runmat_types::{
     standard, BuiltinId, CallableIdentity, ClassIdentity, ClassKind, ExternalClassDeclaration,
-    ExternalMethodDeclaration, MemberAccess, MethodAttributes, QualifiedName, StaticClassIdentity,
-    StaticMethodName, SymbolName,
+    ExternalMethodDeclaration, ExternalPropertyDeclaration, MemberAccess, MethodAttributes,
+    PropertyAttributes, QualifiedName, StaticClassIdentity, StaticMethodName, SymbolName,
 };
 
 mod arrays;
@@ -154,6 +154,7 @@ pub fn standard_class_declaration(identity: &ClassIdentity) -> Option<ExternalCl
     let (parent, kind) = if identity.is(standard::HANDLE) {
         (None, ClassKind::Handle)
     } else if identity.is(standard::DYNAMIC_PROPERTIES)
+        || identity.is(standard::EVENT_DATA)
         || identity.is(standard::METADATA_DYNAMIC_PROPERTY)
         || identity.is(standard::UNIT_TEST_CASE)
     {
@@ -171,13 +172,27 @@ pub fn standard_class_declaration(identity: &ClassIdentity) -> Option<ExternalCl
     } else {
         Vec::new()
     };
+    let properties = if identity.is(standard::EVENT_DATA) {
+        ["Source", "EventName"]
+            .into_iter()
+            .map(|name| ExternalPropertyDeclaration {
+                name: name.into(),
+                attributes: PropertyAttributes {
+                    set_access: MemberAccess::Private,
+                    ..PropertyAttributes::default()
+                },
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     Some(ExternalClassDeclaration {
         name: identity.qualified_name(),
         parent: parent.map(qualified_static),
         kind,
         is_sealed: false,
         is_abstract: false,
-        properties: Vec::new(),
+        properties,
         methods,
         array_shape: None,
     })
@@ -238,6 +253,21 @@ mod tests {
             &standard::DOUBLE.owned(),
             &standard::HANDLE.owned()
         ));
+    }
+
+    #[test]
+    fn event_data_is_a_handle_standard_class_with_private_set_metadata() {
+        let class = standard_class_declaration(&standard::EVENT_DATA.owned()).unwrap();
+        assert_eq!(
+            class.parent,
+            Some(standard::HANDLE.owned().qualified_name())
+        );
+        assert_eq!(class.kind, ClassKind::Handle);
+        assert_eq!(class.properties.len(), 2);
+        for property in class.properties {
+            assert_eq!(property.attributes.get_access, MemberAccess::Public);
+            assert_eq!(property.attributes.set_access, MemberAccess::Private);
+        }
     }
 
     #[test]

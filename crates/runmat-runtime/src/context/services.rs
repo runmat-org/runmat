@@ -126,6 +126,18 @@ pub trait RuntimeBuiltinService {
 }
 
 pub trait RuntimeWorkspaceService {
+    /// Retire selected bindings from this exact workspace before callbacks.
+    /// Legacy adapters without atomic authority fail closed.
+    fn detach_selected(
+        &self,
+        _selection: &crate::workspace::WorkspaceDetachSelection,
+    ) -> Result<crate::workspace::DetachedWorkspaceValues, RuntimeError> {
+        Err(crate::runtime_error::semantic_error(
+            "RunMat:Workspace:ExactDetachUnavailable",
+            "exact current-workspace detachment is unavailable",
+        ))
+    }
+
     fn visit_retained_values(&self, _visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         None
     }

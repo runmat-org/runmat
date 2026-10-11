@@ -98,6 +98,7 @@ mod tests {
             default_value: Some(Value::String("default".into())),
         };
         let class = RuntimeClass {
+            events: Default::default(),
             name: "RetainedRoots".into(),
             parent: None,
             properties: [(property.name.clone(), property)].into(),

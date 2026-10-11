@@ -190,6 +190,18 @@ impl RuntimeContext {
         &self.state
     }
 
+    pub(crate) fn cleanup_registry(
+        &self,
+    ) -> Option<Rc<crate::builtins::introspection::on_cleanup::lifecycle::registry::CleanupRegistry>>
+    {
+        self.state
+            .cleanup_registry
+            .try_borrow()
+            .ok()?
+            .as_ref()?
+            .upgrade()
+    }
+
     /// Read one value from this exact session's global namespace without
     /// relying on ambient runtime activation.
     pub fn session_global_value(
@@ -538,6 +550,14 @@ impl RuntimeContext {
         loader: Option<Rc<crate::user_functions::DynamicFunctionLoader>>,
     ) {
         self.state.call.borrow_mut().dynamic_loader = loader;
+    }
+
+    /// Install the native loader's read-only selection view for introspection.
+    pub fn set_native_name_observer(
+        &self,
+        observer: Option<Rc<crate::user_functions::NativeNameObserver>>,
+    ) {
+        self.state.call.borrow_mut().native_name_observer = observer;
     }
 
     /// Install the selected session's exact-definition invocation route.

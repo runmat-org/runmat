@@ -62,8 +62,7 @@ fn explicit_source_provenance_requires_one_source_per_statement() {
             .with_primary_source(ProgramSourceId(0))
             .with_top_level_sources(&sources),
     )
-    .err()
-    .expect("mismatched source provenance must fail");
+    .expect_err("mismatched source provenance must fail");
     assert!(error.to_string().contains("source provenance"));
 }
 

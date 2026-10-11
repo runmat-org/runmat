@@ -1619,6 +1619,7 @@ fn ensure_word_embedding_class_registered() {
             parent: None,
             properties,
             methods: HashMap::new(),
+            events: Default::default(),
         });
     });
 }

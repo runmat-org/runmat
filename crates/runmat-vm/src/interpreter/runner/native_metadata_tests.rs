@@ -11,6 +11,7 @@ fn native_class(name: &str, parent: Option<&str>) -> Instr {
         is_abstract: false,
         properties: Vec::new(),
         methods: Vec::new(),
+        events: Vec::new(),
         enumerations: Vec::new(),
     }
 }
@@ -21,6 +22,49 @@ fn bound_function(id: usize, instructions: Vec<Instr>) -> FunctionBytecode {
         instructions,
         ..FunctionBytecode::default()
     }
+}
+
+#[test]
+fn native_metadata_publishes_typed_events_and_rejects_conflicting_duplicate() {
+    let mut parent = native_class("VmNativeEventParent", Some("handle"));
+    let event = runmat_types::EventDeclaration {
+        name: "Changed".into(),
+        attributes: runmat_types::EventAttributes {
+            is_hidden: true,
+            listen_access: runmat_types::EventAccess::Public,
+            notify_access: runmat_types::EventAccess::Protected,
+        },
+        declared_attributes: Vec::new(),
+        span: Default::default(),
+    };
+    if let Instr::RegisterClass { events, .. } = &mut parent {
+        events.push(event.clone());
+    }
+    let child = native_class("VmNativeEventChild", Some("VmNativeEventParent"));
+    let bytecode = Bytecode::with_instructions(vec![child, parent.clone()], 0);
+    prepare_native_execution_metadata(&bytecode).expect("typed event publication");
+    let (found, owner) = runmat_runtime::class_registry::lookup_event(
+        &runmat_types::ClassIdentity::from("VmNativeEventChild"),
+        &"Changed".into(),
+    )
+    .expect("inherited event");
+    assert_eq!(
+        owner,
+        runmat_types::ClassIdentity::from("VmNativeEventParent")
+    );
+    assert_eq!(found, event);
+
+    let mut changed = parent;
+    if let Instr::RegisterClass { events, .. } = &mut changed {
+        events[0].attributes.is_hidden = false;
+    }
+    let mut duplicate = Bytecode::with_instructions(vec![changed], 0);
+    duplicate.function_registry = FunctionRegistry::new(HashMap::from([(
+        FunctionId(9),
+        bound_function(9, bytecode.instructions.clone()),
+    )]));
+    let error = prepare_native_execution_metadata(&duplicate).unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:ClassMetadataConflict"));
 }
 
 #[test]

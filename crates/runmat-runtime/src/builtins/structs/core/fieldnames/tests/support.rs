@@ -8,6 +8,7 @@ pub(super) fn register_class(
     static_properties: &[&str],
 ) {
     let mut class = crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: name.into(),
         parent: parent.map(Into::into),
         properties: HashMap::new(),

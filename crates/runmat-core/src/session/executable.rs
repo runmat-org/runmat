@@ -447,7 +447,13 @@ impl RunMatSession {
         unit: &crate::ExecutableUnit,
         invocation: crate::ProcedureInvocation,
         control: &crate::InvocationControl,
-    ) -> std::result::Result<(runmat_value::ValueSequence, crate::CoverageFragment), RunError> {
+    ) -> std::result::Result<
+        (
+            runmat_runtime::execution::RootedValueSequence,
+            crate::CoverageFragment,
+        ),
+        RunError,
+    > {
         let coverage = runmat_runtime::coverage::CoverageSession::start(&self.runtime_context);
         let value = self.invoke_executable(unit, invocation, control).await?;
         let program_revision = unit.revision().program_revision.canonical_identity();
@@ -468,18 +474,50 @@ impl RunMatSession {
         unit: &crate::ExecutableUnit,
         invocation: crate::ProcedureInvocation,
         control: &crate::InvocationControl,
-    ) -> std::result::Result<runmat_value::ValueSequence, RunError> {
+    ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RunError> {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let local_tasks = self.local_tasks.clone();
             return local_tasks
-                .participate_foreground(self.invoke_executable_inner(unit, invocation, control))
+                .participate_foreground(
+                    self.invoke_executable_with_cleanup(unit, invocation, control),
+                )
                 .await
                 .map_err(RunError::Runtime)?;
         }
         #[cfg(target_arch = "wasm32")]
-        self.invoke_executable_inner(unit, invocation, control)
+        self.invoke_executable_with_cleanup(unit, invocation, control)
             .await
+    }
+
+    async fn invoke_executable_with_cleanup(
+        &mut self,
+        unit: &crate::ExecutableUnit,
+        invocation: crate::ProcedureInvocation,
+        control: &crate::InvocationControl,
+    ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RunError> {
+        let result = self
+            .invoke_executable_inner(unit, invocation, control)
+            .await;
+        let result = result.and_then(|value| {
+            runmat_runtime::execution::RootedValueSequence::new(value)
+                .map_err(|error| RunError::Runtime(error.into_runtime_error()))
+        });
+        self.lifecycle_host
+            .service_safepoint(&self.runtime_context)
+            .map_err(RunError::Runtime)?;
+        match self
+            .lifecycle_host
+            .drain_gracefully(&self.runtime_context)
+            .await
+        {
+            Ok(()) => result,
+            Err(error) if result.is_ok() => Err(RunError::Runtime(error)),
+            Err(error) => {
+                tracing::warn!(%error, "cleanup callback failed after an invocation error");
+                result
+            }
+        }
     }
 
     async fn invoke_executable_inner(

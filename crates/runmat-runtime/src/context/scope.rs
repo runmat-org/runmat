@@ -504,6 +504,7 @@ mod tests {
     fn class_and_static_property_state_is_session_owned() {
         fn class(name: &str) -> crate::class_registry::RuntimeClass {
             crate::class_registry::RuntimeClass {
+                events: Default::default(),
                 name: name.into(),
                 parent: None,
                 properties: std::collections::HashMap::from([(

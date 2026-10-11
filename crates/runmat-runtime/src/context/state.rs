@@ -37,6 +37,15 @@ pub struct RuntimeContextState {
     /// this session's service cannot revoke their common global owner.
     pub(crate) host_effect_generation: Arc<AtomicU64>,
     pub(crate) resource_cleanup: SessionResourceCleanup,
+    /// A lifecycle host is the strong owner. Cloneable runtime contexts see
+    /// only its weak registry, so callback tasks cannot own their host.
+    pub(crate) cleanup_registry: RefCell<
+        Option<
+            std::rc::Weak<
+                crate::builtins::introspection::on_cleanup::lifecycle::registry::CleanupRegistry,
+            >,
+        >,
+    >,
     pub(crate) source: RefCell<SourceState>,
     pub(crate) call: RefCell<CallState>,
     pub(crate) workspace: RefCell<Option<crate::workspace::WorkspaceResolver>>,
@@ -76,6 +85,7 @@ impl RuntimeContextState {
             session_lease: Arc::new(()),
             host_effect_generation: Arc::new(AtomicU64::new(0)),
             resource_cleanup: SessionResourceCleanup::default(),
+            cleanup_registry: RefCell::new(None),
             source: RefCell::new(SourceState::default()),
             call: RefCell::new(CallState::default()),
             workspace: RefCell::new(None),
@@ -155,7 +165,10 @@ pub(crate) struct CallState {
     pub external_invoker: Option<std::rc::Rc<crate::user_functions::ExternalFunctionInvoker>>,
     pub lexical_invoker: Option<std::rc::Rc<crate::user_functions::LexicalFunctionInvoker>>,
     pub semantic_resolver: Option<std::sync::Arc<crate::user_functions::FunctionResolver>>,
+    pub semantic_name_candidates:
+        Option<std::sync::Arc<crate::user_functions::SemanticNameCandidates>>,
     pub dynamic_loader: Option<std::rc::Rc<crate::user_functions::DynamicFunctionLoader>>,
+    pub native_name_observer: Option<std::rc::Rc<crate::user_functions::NativeNameObserver>>,
     pub dynamic_clearer: Option<std::rc::Rc<crate::user_functions::DynamicFunctionClearer>>,
     pub dynamic_refresher: Option<std::rc::Rc<crate::user_functions::DynamicFunctionRefresher>>,
     pub source_functions: Option<std::sync::Arc<Vec<crate::user_functions::SourceFunctionInfo>>>,

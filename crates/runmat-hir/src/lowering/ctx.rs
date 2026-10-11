@@ -35,6 +35,7 @@ const IDENT_ISOLATED_LEXICAL_CAPTURE_UNSUPPORTED: &str = "RunMat:IsolatedLexical
 const IDENT_UNDEFINED_VARIABLE: &str = "RunMat:UndefinedVariable";
 const IDENT_CLASS_PROPERTY_ATTRIBUTE_CONFLICT: &str = "RunMat:ClassPropertyAttributeConflict";
 const IDENT_CLASS_METHOD_ATTRIBUTE_CONFLICT: &str = "RunMat:ClassMethodAttributeConflict";
+const IDENT_CLASS_EVENT_ATTRIBUTE_INVALID: &str = "RunMat:ClassEventAttributeInvalid";
 const IDENT_CLASS_ACCESS_VALUE_INVALID: &str = "RunMat:ClassAccessValueInvalid";
 const IDENT_CLASS_SELF_INHERITANCE_INVALID: &str = "RunMat:ClassSelfInheritanceInvalid";
 const IDENT_CLASS_MEMBER_DUPLICATE: &str = "RunMat:ClassMemberDuplicate";
@@ -1285,6 +1286,7 @@ impl LoweringCtx {
         let mut arguments = Vec::new();
         let mut property_names = HashSet::new();
         let mut method_names = HashSet::new();
+        let mut event_names = HashSet::new();
         let is_sealed = class_attributes
             .iter()
             .any(|attr| attr.name.eq_ignore_ascii_case("Sealed"));
@@ -1307,9 +1309,9 @@ impl LoweringCtx {
                             ))
                             .with_identifier(IDENT_CLASS_MEMBER_DUPLICATE));
                         }
-                        if method_names.contains(prop_name) {
+                        if method_names.contains(prop_name) || event_names.contains(prop_name) {
                             return Err(HirError::new(format!(
-                                "Name '{prop_name}' used for both property and method in class {name}"
+                                "Name '{prop_name}' conflicts with another member in class {name}"
                             ))
                             .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
                         }
@@ -1416,9 +1418,11 @@ impl LoweringCtx {
                                 ))
                                 .with_identifier(IDENT_CLASS_MEMBER_DUPLICATE));
                             }
-                            if property_names.contains(method_name) {
+                            if property_names.contains(method_name)
+                                || event_names.contains(method_name)
+                            {
                                 return Err(HirError::new(format!(
-                                    "Name '{method_name}' used for both property and method in class {name}",
+                                    "Name '{method_name}' conflicts with another member in class {name}",
                                 ))
                                 .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
                             }
@@ -1461,9 +1465,11 @@ impl LoweringCtx {
                                 ))
                                 .with_identifier(IDENT_CLASS_MEMBER_DUPLICATE));
                             }
-                            if property_names.contains(&method_name) {
+                            if property_names.contains(&method_name)
+                                || event_names.contains(&method_name)
+                            {
                                 return Err(HirError::new(format!(
-                                    "Name '{method_name}' used for both property and method in class {name}",
+                                    "Name '{method_name}' conflicts with another member in class {name}",
                                 ))
                                 .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
                             }
@@ -1482,9 +1488,16 @@ impl LoweringCtx {
                     attributes, names, ..
                 } => {
                     let declared_attributes = semantic_attributes(attributes);
-                    let mut seen = HashSet::new();
+                    let event_attributes = event_attributes(name, attributes)?;
                     for event in names {
-                        if !seen.insert(&event.name) {
+                        if event.name == name {
+                            return Err(HirError::new(format!(
+                                "event '{}' cannot have the same name as its class",
+                                event.name
+                            ))
+                            .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
+                        }
+                        if !event_names.insert(event.name.clone()) {
                             return Err(HirError::new(format!(
                                 "Duplicate event '{}' in class {name}",
                                 event.name
@@ -1502,6 +1515,7 @@ impl LoweringCtx {
                         }
                         events.push(EventDeclaration {
                             name: crate::MemberName(event.name.clone()),
+                            attributes: event_attributes.clone(),
                             declared_attributes: declared_attributes.clone(),
                             span: event.span,
                         });
@@ -1591,6 +1605,13 @@ impl LoweringCtx {
         } else {
             ClassKind::Value
         };
+
+        if !events.is_empty() && !matches!(kind, ClassKind::Handle) {
+            return Err(HirError::new(format!(
+                "class '{name}' must inherit from handle to declare events"
+            ))
+            .with_identifier(IDENT_CLASS_EVENT_ATTRIBUTE_INVALID));
+        }
 
         Ok(HirClass {
             module: self.module,
@@ -3981,6 +4002,109 @@ fn semantic_attributes(attributes: &[runmat_parser::Attr]) -> Vec<crate::Semanti
             span: attribute.span,
         })
         .collect()
+}
+
+fn event_attributes(
+    class_name: &str,
+    attrs: &[runmat_parser::Attr],
+) -> Result<crate::EventAttributes, HirError> {
+    let mut result = crate::EventAttributes::default();
+    let mut seen = HashSet::new();
+    for attr in attrs {
+        let key = attr.name.to_ascii_lowercase();
+        if !seen.insert(key.clone()) {
+            return Err(HirError::new(format!(
+                "duplicate event attribute '{}' in class '{class_name}'",
+                attr.name
+            ))
+            .with_identifier(IDENT_CLASS_EVENT_ATTRIBUTE_INVALID));
+        }
+        match key.as_str() {
+            "hidden" => {
+                result.is_hidden = match attr.value.as_deref().map(str::trim) {
+                    None | Some("true") => true,
+                    Some("false") => false,
+                    _ => {
+                        return Err(HirError::new(format!(
+                            "invalid Hidden value in class '{class_name}' events block"
+                        ))
+                        .with_identifier(IDENT_CLASS_EVENT_ATTRIBUTE_INVALID))
+                    }
+                };
+            }
+            "listenaccess" | "notifyaccess" => {
+                let raw = attr.value.as_deref().ok_or_else(|| {
+                    HirError::new(format!(
+                        "{} requires a value in class '{class_name}' events block",
+                        attr.name
+                    ))
+                    .with_identifier(IDENT_CLASS_EVENT_ATTRIBUTE_INVALID)
+                })?;
+                let access = parse_event_access_value(class_name, raw)?;
+                if key == "listenaccess" {
+                    result.listen_access = access;
+                } else {
+                    result.notify_access = access;
+                }
+            }
+            _ => {
+                return Err(HirError::new(format!(
+                    "unsupported event attribute '{}' in class '{class_name}'",
+                    attr.name
+                ))
+                .with_identifier(IDENT_CLASS_EVENT_ATTRIBUTE_INVALID))
+            }
+        }
+    }
+    Ok(result)
+}
+
+fn parse_event_access_value(class_name: &str, raw: &str) -> Result<crate::EventAccess, HirError> {
+    let invalid = || {
+        HirError::new(format!(
+            "invalid event access value '{raw}' in class '{class_name}'"
+        ))
+        .with_identifier(IDENT_CLASS_EVENT_ATTRIBUTE_INVALID)
+    };
+    let trimmed = raw.trim().trim_matches('\'');
+    if trimmed.eq_ignore_ascii_case("public") {
+        return Ok(crate::EventAccess::Public);
+    }
+    if trimmed.eq_ignore_ascii_case("private") {
+        return Ok(crate::EventAccess::Private);
+    }
+    if trimmed.eq_ignore_ascii_case("protected") {
+        return Ok(crate::EventAccess::Protected);
+    }
+    let members = if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        &trimmed[1..trimmed.len() - 1]
+    } else {
+        trimmed
+    };
+    if members.trim().is_empty() && trimmed.starts_with('{') {
+        return Ok(crate::EventAccess::Private);
+    }
+    let mut classes = Vec::new();
+    for member in members.split(',') {
+        let name = member.trim().strip_prefix('?').ok_or_else(&invalid)?;
+        if name.is_empty()
+            || !name.split('.').all(|segment| {
+                let mut chars = segment.chars();
+                chars
+                    .next()
+                    .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+                    && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
+            })
+        {
+            return Err(invalid());
+        }
+        let identity = crate::ClassIdentity::new(name).map_err(|_| invalid())?;
+        if classes.contains(&identity) {
+            return Err(invalid());
+        }
+        classes.push(identity);
+    }
+    Ok(crate::EventAccess::Classes(classes))
 }
 
 fn property_attributes(

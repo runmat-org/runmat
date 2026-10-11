@@ -112,12 +112,14 @@ fn register_test_case() {
         })
         .collect();
     crate::class_registry::register_class(RuntimeClass {
+        events: Default::default(),
         name: TEST_CASE_CLASS.into(),
         parent: Some("handle".into()),
         properties: properties(&["Name"]),
         methods,
     });
     crate::class_registry::register_class(RuntimeClass {
+        events: Default::default(),
         name: FUNCTION_TEST_CASE_CLASS.into(),
         parent: Some(TEST_CASE_CLASS.into()),
         properties: HashMap::new(),
@@ -157,6 +159,7 @@ fn register_class_with_methods(
     method_names: &[&str],
 ) {
     crate::class_registry::register_class(RuntimeClass {
+        events: Default::default(),
         name: name.into(),
         parent: parent.map(runmat_types::ClassIdentity::from),
         properties: properties(property_names),

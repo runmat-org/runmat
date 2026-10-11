@@ -681,6 +681,7 @@ fn ensure_word_encoding_class_registered() {
             properties.insert(name.into(), property_def(name));
         }
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: WORD_ENCODING_CLASS.into(),
             parent: None,
             properties,

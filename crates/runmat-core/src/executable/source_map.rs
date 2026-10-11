@@ -24,6 +24,76 @@ impl ExecutableSourceMap {
         &self.entries
     }
 
+    /// Path-free private-owner key for one authenticated source ordinal.
+    pub(crate) fn private_source_alias(
+        &self,
+        source: runmat_types::ProgramSourceId,
+    ) -> Option<runmat_vm::PrivateSourceAlias> {
+        let entry = self.entries.get(usize::try_from(source.0).ok()?)?;
+        if entry.source_id != source {
+            return None;
+        }
+        Some(runmat_vm::PrivateSourceAlias::from_source_path(
+            &entry.owner_identity,
+            &entry.relative_path,
+        ))
+    }
+
+    pub(crate) fn validate_private_source_owners(
+        &self,
+        registry: &runmat_vm::FunctionRegistry,
+    ) -> Result<(), String> {
+        let known = self
+            .entries
+            .iter()
+            .filter_map(|entry| self.private_source_alias(entry.source_id))
+            .collect::<std::collections::HashSet<_>>();
+        for body in registry.functions.values() {
+            let Some(owner) = &body.private_source_owner else {
+                continue;
+            };
+            let own = body
+                .source_id
+                .and_then(runmat_vm::BytecodeSourceRef::program)
+                .and_then(|id| self.private_source_alias(id));
+            let aliases = owner.aliases();
+            if own.as_ref().is_none_or(|own| !aliases.contains(own))
+                || aliases.iter().any(|alias| !known.contains(alias))
+                || aliases.windows(2).any(|pair| pair[0] >= pair[1])
+            {
+                return Err("function private owner aliases are outside its source map".into());
+            }
+        }
+        let mut partition_by_alias = std::collections::HashMap::new();
+        let mut partition_by_source = std::collections::HashMap::new();
+        for body in registry.functions.values() {
+            let partition = body
+                .private_source_owner
+                .as_ref()
+                .map(|owner| owner.aliases());
+            if let Some(source) = body
+                .source_id
+                .and_then(runmat_vm::BytecodeSourceRef::program)
+            {
+                if let Some(previous) = partition_by_source.insert(source, partition) {
+                    if previous != partition {
+                        return Err("one source has conflicting private owner partitions".into());
+                    }
+                }
+            }
+            if let Some(aliases) = partition {
+                for alias in aliases {
+                    if let Some(previous) = partition_by_alias.insert(alias, aliases) {
+                        if previous != aliases {
+                            return Err("private owner partitions overlap asymmetrically".into());
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn bind_runtime_sources(
         &self,
         runtime: runmat_runtime::context::RuntimeContext,

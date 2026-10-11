@@ -28,6 +28,7 @@ pub struct ClassRegistration {
     is_abstract: bool,
     properties: Vec<BytecodeClassProperty>,
     methods: Vec<BytecodeClassMethod>,
+    events: Vec<runmat_types::EventDeclaration>,
     enumerations: Vec<String>,
 }
 type MirCellSelectorCompileResult = (usize, bool);
@@ -380,6 +381,7 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
                 .iter()
                 .map(|enumeration| enumeration.name.0.clone())
                 .collect();
+            let events = class.declaration.events.clone();
             ClassRegistration {
                 name,
                 super_class,
@@ -387,6 +389,7 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
                 is_abstract: class.declaration.is_abstract,
                 properties,
                 methods,
+                events,
                 enumerations,
             }
         })
@@ -613,6 +616,7 @@ impl Compiler {
                 is_abstract: registration.is_abstract,
                 properties: registration.properties,
                 methods: registration.methods,
+                events: registration.events,
                 enumerations: registration.enumerations,
             });
         }
@@ -4744,5 +4748,24 @@ mod tests {
             .unwrap();
         assert!(terminator > 0);
         assert!(terminator <= compiler.instructions.len());
+    }
+
+    #[test]
+    fn hir_class_registration_retains_typed_event_declarations() {
+        let ast = runmat_parser::parse(
+            "classdef EventVmSource < handle\n events(NotifyAccess=protected)\n Changed\n end\nend",
+        )
+        .unwrap();
+        let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty())
+            .unwrap()
+            .assembly;
+        let registrations = hir_class_registrations(&hir);
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(registrations[0].events.len(), 1);
+        assert_eq!(registrations[0].events[0].name.0, "Changed");
+        assert_eq!(
+            registrations[0].events[0].attributes.notify_access,
+            runmat_types::EventAccess::Protected
+        );
     }
 }

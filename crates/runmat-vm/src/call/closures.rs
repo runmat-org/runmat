@@ -66,6 +66,7 @@ mod tests {
         let resolved_name = format!("{class_name}.remote_inc");
         runmat_runtime::class_registry::register_class(
             runmat_runtime::class_registry::RuntimeClass {
+                events: Default::default(),
                 name: class_name.clone(),
                 parent: None,
                 properties: HashMap::new(),
@@ -217,6 +218,7 @@ mod tests {
         );
         runmat_runtime::class_registry::register_class(
             runmat_runtime::class_registry::RuntimeClass {
+                events: Default::default(),
                 name: class_name.clone(),
                 parent: None,
                 properties: HashMap::new(),

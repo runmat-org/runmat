@@ -22,6 +22,7 @@ fn class_default_is_the_sole_owner_before_any_static_setter() {
             })),
         };
         register_class(RuntimeClass {
+            events: Default::default(),
             name: "SoleDefaultOwner".into(),
             parent: None,
             properties: [(property.name.clone(), property)].into(),

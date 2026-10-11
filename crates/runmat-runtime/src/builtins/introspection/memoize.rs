@@ -464,6 +464,7 @@ fn ensure_memoized_function_class_registered() {
     }
 
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: MEMOIZED_FUNCTION_CLASS.into(),
         parent: Some(runmat_types::standard::HANDLE.into()),
         properties,

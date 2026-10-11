@@ -161,6 +161,7 @@ pub fn ensure_tf_class_registered() {
         }
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: TF_CLASS.into(),
             parent: None,
             properties,

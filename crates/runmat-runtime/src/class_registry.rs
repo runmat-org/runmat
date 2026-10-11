@@ -13,12 +13,17 @@ use std::thread::ThreadId;
 
 use runmat_gc_api::{GcHandle, Trace, Tracer};
 use runmat_types::{
-    standard, CallableFallbackPolicy, CallableIdentity, ClassIdentity, MemberAccess, MemberName,
-    MethodName, QualifiedName, StaticClassIdentity, SymbolName,
+    standard, CallableFallbackPolicy, CallableIdentity, ClassIdentity, EventAccess,
+    EventDeclaration, MemberAccess, MemberName, MethodName, QualifiedName, StaticClassIdentity,
+    SymbolName,
 };
 use runmat_value::Value;
 
 mod retained;
+mod event_data;
+pub use event_data::{
+    default_event_data, is_event_data_value, prepare_event_data, EventDataError, PreparedEventData,
+};
 pub use retained::visit_static_property_retained_values;
 mod standard_methods;
 pub(crate) use standard_methods::standard_runtime_methods;
@@ -69,6 +74,7 @@ pub struct RuntimeClass {
     pub parent: Option<ClassIdentity>,
     pub properties: HashMap<MemberName, RuntimeProperty>,
     pub methods: HashMap<MethodName, RuntimeMethod>,
+    pub events: HashMap<MemberName, EventDeclaration>,
 }
 
 /// Session-aware registration check for lazily installed builtin classes.
@@ -221,6 +227,7 @@ fn primitive_class_registry() -> HashMap<ClassIdentity, RuntimeClass> {
         registry.insert(
             class_name.owned(),
             RuntimeClass {
+                events: Default::default(),
                 name: class_name.owned(),
                 parent: None,
                 properties: HashMap::new(),
@@ -231,12 +238,14 @@ fn primitive_class_registry() -> HashMap<ClassIdentity, RuntimeClass> {
     for (name, parent) in [
         (standard::HANDLE, None),
         (standard::DYNAMIC_PROPERTIES, Some(standard::HANDLE)),
+        (standard::EVENT_DATA, Some(standard::HANDLE)),
         (standard::METADATA_PROPERTY, None),
         (standard::METADATA_DYNAMIC_PROPERTY, Some(standard::HANDLE)),
     ] {
         registry.insert(
             name.owned(),
             RuntimeClass {
+                events: Default::default(),
                 name: name.owned(),
                 parent: parent.map(StaticClassIdentity::owned),
                 properties: HashMap::new(),
@@ -248,6 +257,7 @@ fn primitive_class_registry() -> HashMap<ClassIdentity, RuntimeClass> {
     registry.insert(
         standard::GPU_ARRAY.owned(),
         RuntimeClass {
+            events: Default::default(),
             name: standard::GPU_ARRAY.owned(),
             parent: None,
             properties: HashMap::new(),
@@ -255,6 +265,23 @@ fn primitive_class_registry() -> HashMap<ClassIdentity, RuntimeClass> {
         },
     );
     let dynamic_property_class = ClassIdentity::from("matlab.metadata.DynamicProperty");
+    if let Some(class) = registry.get_mut(&standard::EVENT_DATA.owned()) {
+        for name in ["Source", "EventName"] {
+            let member = MemberName::from(name);
+            class.properties.insert(
+                member.clone(),
+                RuntimeProperty {
+                    name: member,
+                    is_static: false,
+                    is_constant: false,
+                    is_dependent: false,
+                    get_access: MemberAccess::Public,
+                    set_access: MemberAccess::Private,
+                    default_value: None,
+                },
+            );
+        }
+    }
     if let Some(class) = registry.get_mut(&dynamic_property_class) {
         class.methods.insert(
             "delete".into(),
@@ -348,6 +375,40 @@ pub fn get_class(name: &ClassIdentity) -> Option<RuntimeClass> {
     with_state(|state| state.classes.get(name).cloned())
 }
 
+/// The registered constructor name admitted by both descriptor deferral and
+/// fallback dispatch. Filesystem class folders are not registry authority.
+pub fn registered_constructor_identity(name: &str) -> Option<ClassIdentity> {
+    let identity = ClassIdentity::new(name).ok()?;
+    with_state(|state| state.classes.contains_key(&identity)).then_some(identity)
+}
+
+#[derive(Debug, Clone)]
+pub struct RegisteredStaticMethodName {
+    pub class: ClassIdentity,
+    pub method_name: MethodName,
+    pub declaration: RuntimeMethod,
+    pub declaring_class: ClassIdentity,
+}
+
+/// Shared read-only admission for a public static method spelling.
+pub fn registered_public_static_method(name: &str) -> Option<RegisteredStaticMethodName> {
+    let (class_name, method_name) = name.rsplit_once('.')?;
+    if class_name.trim().is_empty() || method_name.trim().is_empty() {
+        return None;
+    }
+    let class = registered_constructor_identity(class_name)?;
+    let method = MethodName::from(method_name);
+    let (declaration, declaring_class) = lookup_method(&class, &method)?;
+    (declaration.is_static && declaration.access == MemberAccess::Public).then_some(
+        RegisteredStaticMethodName {
+            class,
+            method_name: method,
+            declaration,
+            declaring_class,
+        },
+    )
+}
+
 pub fn class_names() -> Vec<ClassIdentity> {
     with_state(|state| state.classes.keys().cloned().collect())
 }
@@ -421,6 +482,41 @@ pub fn lookup_method(
     method: &runmat_types::MethodName,
 ) -> Option<(RuntimeMethod, ClassIdentity)> {
     lookup_member(class_name, |class| class.methods.get(method).cloned())
+}
+
+pub fn lookup_event(
+    class_name: &ClassIdentity,
+    event: &MemberName,
+) -> Option<(EventDeclaration, ClassIdentity)> {
+    lookup_member(class_name, |class| class.events.get(event).cloned())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventAccessKind {
+    Listen,
+    Notify,
+}
+
+pub fn event_accessible_from(
+    event: &EventDeclaration,
+    declaring_class: &ClassIdentity,
+    caller_class: Option<&ClassIdentity>,
+    kind: EventAccessKind,
+) -> bool {
+    let access = match kind {
+        EventAccessKind::Listen => &event.attributes.listen_access,
+        EventAccessKind::Notify => &event.attributes.notify_access,
+    };
+    match access {
+        EventAccess::Public => true,
+        EventAccess::Private => caller_class == Some(declaring_class),
+        EventAccess::Protected => {
+            caller_class.is_some_and(|caller| is_class_or_subclass(caller, declaring_class))
+        }
+        EventAccess::Classes(classes) => {
+            caller_class.is_some_and(|caller| caller == declaring_class || classes.contains(caller))
+        }
+    }
 }
 
 pub fn lookup_bound_method(
@@ -628,6 +724,7 @@ mod tests {
 
     fn empty_class(name: ClassIdentity, parent: Option<ClassIdentity>) -> RuntimeClass {
         RuntimeClass {
+            events: Default::default(),
             name,
             parent,
             properties: HashMap::new(),
@@ -648,6 +745,87 @@ mod tests {
         };
         class.methods.insert(declaration.name.clone(), declaration);
         class
+    }
+
+    #[test]
+    fn events_inherit_and_follow_republication_without_stale_membership() {
+        let parent = unique_class_name("event_parent");
+        let child = unique_class_name("event_child");
+        let mut definition = empty_class(parent.clone(), Some(standard::HANDLE.owned()));
+        let event = EventDeclaration {
+            name: MemberName::from("Changed"),
+            attributes: runmat_types::EventAttributes {
+                is_hidden: true,
+                listen_access: EventAccess::Protected,
+                notify_access: EventAccess::Private,
+            },
+            declared_attributes: Vec::new(),
+            span: Default::default(),
+        };
+        definition.events.insert(event.name.clone(), event.clone());
+        register_class(definition);
+        register_class(empty_class(child.clone(), Some(parent.clone())));
+        let (found, owner) = lookup_event(&child, &MemberName::from("Changed")).unwrap();
+        assert_eq!(owner, parent);
+        assert_eq!(found, event);
+        assert!(lookup_event(&child, &MemberName::from("Missing")).is_none());
+        assert!(event_accessible_from(
+            &found,
+            &owner,
+            Some(&child),
+            EventAccessKind::Listen
+        ));
+        assert!(!event_accessible_from(
+            &found,
+            &owner,
+            Some(&child),
+            EventAccessKind::Notify
+        ));
+        assert!(event_accessible_from(
+            &found,
+            &owner,
+            Some(&owner),
+            EventAccessKind::Notify
+        ));
+        assert!(!event_accessible_from(
+            &found,
+            &owner,
+            None,
+            EventAccessKind::Listen
+        ));
+        let mut listed = found.clone();
+        let admitted = unique_class_name("event_friend");
+        listed.attributes.listen_access = EventAccess::Classes(vec![admitted.clone()]);
+        assert!(event_accessible_from(
+            &listed,
+            &owner,
+            Some(&admitted),
+            EventAccessKind::Listen
+        ));
+        assert!(!event_accessible_from(
+            &listed,
+            &owner,
+            Some(&child),
+            EventAccessKind::Listen
+        ));
+
+        let before = class_registry_generation();
+        register_class(empty_class(owner.clone(), Some(standard::HANDLE.owned())));
+        assert!(class_registry_generation() > before);
+        assert!(lookup_event(&child, &MemberName::from("Changed")).is_none());
+    }
+
+    #[test]
+    fn standard_event_data_exposes_private_set_source_fields() {
+        let class = get_class(&standard::EVENT_DATA.owned()).expect("standard EventData");
+        assert_eq!(class.parent, Some(standard::HANDLE.owned()));
+        for name in ["Source", "EventName"] {
+            let (property, owner) =
+                lookup_property(&standard::EVENT_DATA.owned(), &MemberName::from(name)).unwrap();
+            assert_eq!(owner, standard::EVENT_DATA.owned());
+            assert_eq!(property.get_access, MemberAccess::Public);
+            assert_eq!(property.set_access, MemberAccess::Private);
+        }
     }
 
     #[test]

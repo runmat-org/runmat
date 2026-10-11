@@ -32,6 +32,7 @@ fn strict_dot_store_updates_existing_handle_without_setfield_extension() {
                 default_value: None,
             };
             register_class(RuntimeClass {
+                events: Default::default(),
                 name: "StrictDotHandle".into(),
                 parent: None,
                 properties: [(property.name.clone(), property)].into(),

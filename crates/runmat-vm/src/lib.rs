@@ -32,9 +32,9 @@ pub use bytecode::{
     BytecodeDistributedOp, BytecodeDottedInvokeArgument, BytecodeParallelVariable,
     BytecodeParforRegion, BytecodeRegion, BytecodeRegionBoundary, BytecodeSourceRef,
     BytecodeSpmdHeader, BytecodeSpmdRegion, BytecodeSubscriptSelector, BytecodeSubscriptStep,
-    EmitLabel, FunctionBytecode, FunctionRegistry, FunctionSourceProjectionError, Instr, SpawnSite,
-    StackEffect, StatementPcProjectionError, StatementPcRange, BYTECODE_SCHEMA_VERSION,
-    FUNCTION_REGISTRY_SCHEMA_VERSION,
+    EmitLabel, FunctionBytecode, FunctionRegistry, FunctionSourceProjectionError, Instr,
+    PrivateSourceAlias, PrivateSourceDirectory, SpawnSite, StackEffect, StatementPcProjectionError,
+    StatementPcRange, BYTECODE_SCHEMA_VERSION, FUNCTION_REGISTRY_SCHEMA_VERSION,
 };
 #[cfg(feature = "native-accel")]
 pub use bytecode::{
@@ -71,6 +71,7 @@ pub use program_execution::{
 pub use program_execution::{
     encode_portable_region_sources_v1, execute_deferred_program_in_context,
     execute_program_request, execute_program_request_with_context, materialize_deferred_call,
+    runtime_failure_response,
 };
 pub use runtime::workspace::{
     take_updated_workspace_assigned_report, take_updated_workspace_state, workspace_admission,

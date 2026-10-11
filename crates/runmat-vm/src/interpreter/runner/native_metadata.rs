@@ -77,6 +77,7 @@ fn same_class_declaration(first: &Instr, second: &Instr) -> bool {
             is_abstract: first_abstract,
             properties: first_properties,
             methods: first_methods,
+            events: first_events,
             enumerations: first_enumerations,
         },
         Instr::RegisterClass {
@@ -86,6 +87,7 @@ fn same_class_declaration(first: &Instr, second: &Instr) -> bool {
             is_abstract: second_abstract,
             properties: second_properties,
             methods: second_methods,
+            events: second_events,
             enumerations: second_enumerations,
         },
     ) = (first, second)
@@ -99,6 +101,7 @@ fn same_class_declaration(first: &Instr, second: &Instr) -> bool {
         && first_enumerations == second_enumerations
         && first_properties == second_properties
         && first_methods == second_methods
+        && first_events == second_events
 }
 
 fn register_native_class_metadata(
@@ -168,18 +171,20 @@ fn register_class_instruction(instruction: &Instr) -> VmResult<()> {
         is_abstract,
         properties,
         methods,
+        events,
         enumerations,
     } = instruction
     {
-        interp_dispatch::handle_register_class(
-            name.clone(),
-            super_class.clone(),
-            *is_sealed,
-            *is_abstract,
-            properties.clone(),
-            methods.clone(),
-            enumerations.clone(),
-        )?;
+        interp_dispatch::handle_register_class(crate::object::class_def::ClassRegistration {
+            name: name.clone(),
+            super_class: super_class.clone(),
+            is_sealed: *is_sealed,
+            is_abstract: *is_abstract,
+            properties: properties.clone(),
+            methods: methods.clone(),
+            events: events.clone(),
+            enumerations: enumerations.clone(),
+        })?;
     }
     Ok(())
 }

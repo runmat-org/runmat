@@ -122,6 +122,7 @@ fn registry_capture_preserves_defaults_validation_bounds_and_class_defaults() {
             is_abstract: false,
             methods: vec![],
             enumerations: vec![],
+            events: vec![],
             properties: FLOAT_BITS
                 .iter()
                 .enumerate()

@@ -41,6 +41,7 @@ fn overloaded_reads_execute_once_for_zero_and_multiple_outputs_and_failures() {
         },
     )));
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: "CutoverSequenceRead".into(),
         parent: None,
         properties: Default::default(),

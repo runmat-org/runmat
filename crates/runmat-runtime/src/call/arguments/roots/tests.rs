@@ -155,6 +155,7 @@ fn expansion_lifecycle(completion: Completion) {
                 implicit_class_argument: None,
             };
             crate::class_registry::register_class(RuntimeClass {
+                events: Default::default(),
                 name: "ExpansionRootFixture".into(),
                 parent: None,
                 properties: Default::default(),

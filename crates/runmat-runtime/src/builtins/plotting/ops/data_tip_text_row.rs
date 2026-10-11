@@ -228,6 +228,7 @@ fn ensure_class_registered() {
         let methods: HashMap<runmat_types::MethodName, crate::class_registry::RuntimeMethod> =
             HashMap::new();
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: CLASS_IDENTITY.into(),
             parent: Some(runmat_types::standard::HANDLE.into()),
             properties,

@@ -32,6 +32,7 @@ pub(super) fn register_graph_class(name: runmat_types::StaticClassIdentity) {
         );
     }
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: name.into(),
         parent: None,
         properties,

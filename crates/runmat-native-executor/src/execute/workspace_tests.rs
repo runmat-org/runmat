@@ -3,6 +3,7 @@ use runmat_native_codegen::{
     NativeBlockId, NativeFunction, NativeFunctionAbi, NativeLocalId, NativeLocalKind,
     NativeLocalMetadata,
 };
+use runmat_runtime::workspace::WorkspaceDetachSelection;
 use runmat_types::{BindingId, ProgramFunctionId, ProgramSourceId};
 use runmat_value::{Tensor, Value};
 use std::collections::BTreeMap;
@@ -49,6 +50,28 @@ fn only_external_workspace_mutation_requests_reconciliation() {
     state.mark_reconciled();
     service.clear().unwrap();
     assert!(state.needs_reconciliation());
+}
+
+#[test]
+fn exact_native_detach_keeps_old_value_and_does_not_erase_rebinding() {
+    let (function, input) = fixture(Value::Num(1.0));
+    let state =
+        NativeWorkspaceState::new(&function, input, Default::default(), None, None).unwrap();
+    let service = state.service();
+    let old = service
+        .detach_selected(&WorkspaceDetachSelection::Names(vec!["missing".into()]))
+        .expect("detach before callback");
+    assert_eq!(old.entries(), &[("missing".into(), Value::Num(1.0))]);
+    service.assign("missing", Value::Num(2.0)).unwrap();
+    assert_eq!(
+        service.try_lookup("missing").unwrap(),
+        Some(Value::Num(2.0))
+    );
+    drop(old);
+    assert_eq!(
+        service.try_lookup("missing").unwrap(),
+        Some(Value::Num(2.0))
+    );
 }
 
 fn fixture(value: Value) -> (NativeFunction, NativeWorkspaceInput) {

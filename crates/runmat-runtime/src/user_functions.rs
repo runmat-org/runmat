@@ -36,6 +36,20 @@ pub type LexicalFunctionFuture =
 pub type LexicalFunctionInvoker =
     dyn Fn(crate::call::lexical::LexicalCall) -> LexicalFunctionFuture;
 pub type FunctionResolver = dyn Fn(&str) -> Option<usize> + Send + Sync;
+/// Ordered candidates from the same selected semantic resolver owner.
+pub type SemanticNameCandidates = dyn Fn(&str) -> Vec<usize> + Send + Sync;
+/// A read-only view of the native loader's selected name. The executable
+/// loader remains the owner of installed-module and platform-suffix policy.
+pub type NativeNameObserverFuture =
+    Pin<Box<dyn Future<Output = Result<Option<NativeNameFact>, String>>>>;
+pub type NativeNameObserver = dyn Fn(String) -> NativeNameObserverFuture;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeNameFact {
+    pub path: std::path::PathBuf,
+    pub origin: Option<crate::builtins::common::path_search::FileCandidateOrigin>,
+    pub installed: bool,
+}
 #[path = "user_functions/source_facts.rs"]
 mod source_facts;
 pub use source_facts::*;
@@ -89,6 +103,9 @@ pub type DynamicFunctionClearer = dyn Fn(
 #[path = "user_functions/call_dispatch.rs"]
 mod call_dispatch;
 pub use call_dispatch::*;
+#[path = "user_functions/name_resolution.rs"]
+mod name_resolution;
+pub use name_resolution::*;
 
 runmat_thread_local! {
     static SEMANTIC_FUNCTION_INVOKER: RefCell<Option<Rc<FunctionInvoker>>> =
@@ -100,6 +117,8 @@ runmat_thread_local! {
     static LEXICAL_FUNCTION_INVOKER: RefCell<Option<Rc<LexicalFunctionInvoker>>> =
         const { RefCell::new(None) };
     static SEMANTIC_FUNCTION_RESOLVER: RefCell<Option<Arc<FunctionResolver>>> =
+        const { RefCell::new(None) };
+    static SEMANTIC_NAME_CANDIDATES: RefCell<Option<Arc<SemanticNameCandidates>>> =
         const { RefCell::new(None) };
     static SOURCE_FUNCTION_CATALOG: RefCell<Option<Arc<Vec<SourceFunctionInfo>>>> =
         const { RefCell::new(None) };

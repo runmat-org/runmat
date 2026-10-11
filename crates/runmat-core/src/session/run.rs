@@ -58,6 +58,9 @@ fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> 
 
 impl RunMatSession {
     pub(super) fn configure_dynamic_function_services(&self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.runtime_context
+            .set_native_name_observer(Some(self.mex_runtime.name_observer()));
         let dynamic_environment = super::dynamic::DynamicFunctionEnvironment {
             compat: self.compat_mode,
             top_level_await_enabled: self.top_level_await_enabled,
@@ -266,7 +269,7 @@ impl RunMatSession {
             let mut request = Some(request);
             return match local_tasks
                 .participate_foreground(async {
-                    self.execute_request_inner(
+                    self.execute_request_with_cleanup(
                         request.take().expect("execution request polled only once"),
                     )
                     .await
@@ -282,11 +285,41 @@ impl RunMatSession {
                             .source,
                     ),
                     result: Err(RunError::Runtime(error)),
+                    _result_roots: None,
                 },
             };
         }
         #[cfg(target_arch = "wasm32")]
-        self.execute_request_inner(request).await
+        self.execute_request_with_cleanup(request).await
+    }
+
+    async fn execute_request_with_cleanup(
+        &mut self,
+        request: crate::abi::ExecutionRequest,
+    ) -> crate::abi::ExecutionResponse {
+        let mut response = self.execute_request_inner(request).await;
+        if let Err(error) = response.root_result_values() {
+            response.result = Err(RunError::Runtime(error.into_runtime_error()));
+        }
+        if let Err(error) = self.lifecycle_host.service_safepoint(&self.runtime_context) {
+            if response.result.is_ok() {
+                response.result = Err(RunError::Runtime(error));
+            } else {
+                tracing::warn!(%error, "cleanup safepoint failed after an execution error");
+            }
+        }
+        if let Err(error) = self
+            .lifecycle_host
+            .drain_gracefully(&self.runtime_context)
+            .await
+        {
+            if response.result.is_ok() {
+                response.result = Err(RunError::Runtime(error));
+            } else {
+                tracing::warn!(%error, "cleanup callback failed after an execution error");
+            }
+        }
+        response
     }
 
     async fn execute_request_inner(
@@ -300,6 +333,7 @@ impl RunMatSession {
             return crate::abi::ExecutionResponse {
                 source_context: unresolved_source_context(&source_input),
                 result: Err(error),
+                _result_roots: None,
             };
         }
         let source_resolution = match source_input_text(request.source).await {
@@ -308,6 +342,7 @@ impl RunMatSession {
                 return crate::abi::ExecutionResponse {
                     source_context: unresolved_source_context(&source_input),
                     result: Err(err),
+                    _result_roots: None,
                 };
             }
         };
@@ -350,6 +385,7 @@ impl RunMatSession {
             },
             result: result
                 .and_then(|outcome| apply_requested_output_policy(outcome, &requested_outputs)),
+            _result_roots: None,
         }
     }
 

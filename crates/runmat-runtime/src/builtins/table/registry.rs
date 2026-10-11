@@ -78,6 +78,7 @@ fn register_tabular_class(name: runmat_types::StaticClassIdentity) {
     }
 
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: name.into(),
         parent: None,
         properties,
@@ -102,6 +103,7 @@ fn register_plain_object_class(name: runmat_types::StaticClassIdentity, property
         );
     }
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: name.into(),
         parent: None,
         properties,
@@ -141,6 +143,7 @@ fn register_dictionary_class() {
         );
     }
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: DICTIONARY_CLASS.into(),
         parent: None,
         properties,

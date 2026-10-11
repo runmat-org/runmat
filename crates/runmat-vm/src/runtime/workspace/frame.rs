@@ -188,7 +188,7 @@ fn release_pending_workspace_service_frame_for_owner(owner: WorkspaceOwner, id: 
 
 fn with_frame<R>(id: WorkspaceFrameId, f: impl FnOnce(&WorkspaceFrame) -> R) -> Option<R> {
     WORKSPACE_STACKS.with(|stacks| {
-        let stacks = stacks.borrow();
+        let stacks = stacks.try_borrow().ok()?;
         stacks
             .values()
             .flat_map(|stack| stack.iter())
@@ -198,14 +198,48 @@ fn with_frame<R>(id: WorkspaceFrameId, f: impl FnOnce(&WorkspaceFrame) -> R) -> 
 }
 
 fn with_frame_mut<R>(id: WorkspaceFrameId, f: impl FnOnce(&mut WorkspaceFrame) -> R) -> Option<R> {
+    if frame_is_detaching(id) {
+        return None;
+    }
+    with_frame_mut_unlocked(id, f)
+}
+
+fn with_frame_mut_unlocked<R>(
+    id: WorkspaceFrameId,
+    f: impl FnOnce(&mut WorkspaceFrame) -> R,
+) -> Option<R> {
     WORKSPACE_STACKS.with(|stacks| {
-        let mut stacks = stacks.borrow_mut();
+        let mut stacks = stacks.try_borrow_mut().ok()?;
         stacks
             .values_mut()
             .flat_map(|stack| stack.iter_mut())
             .find(|frame| frame.id == id)
             .map(f)
     })
+}
+
+struct FrameDetachGuard(WorkspaceFrameId);
+
+impl FrameDetachGuard {
+    fn acquire(id: WorkspaceFrameId) -> Option<Self> {
+        DETACHING_WORKSPACE_FRAMES.with(|frames| frames.borrow_mut().insert(id).then_some(Self(id)))
+    }
+}
+
+impl Drop for FrameDetachGuard {
+    fn drop(&mut self) {
+        DETACHING_WORKSPACE_FRAMES.with(|frames| {
+            frames.borrow_mut().remove(&self.0);
+        });
+        let deferred = DEFERRED_WORKSPACE_FRAME_CLOSES.with(|pending| {
+            let mut pending = pending.borrow_mut();
+            let index = pending.iter().position(|(_, id)| *id == self.0)?;
+            Some(pending.remove(index))
+        });
+        if let Some((owner, frame)) = deferred {
+            drop(WorkspaceStateGuard { owner, frame });
+        }
+    }
 }
 
 pub(crate) fn workspace_frame_lookup(id: WorkspaceFrameId, name: &str) -> Option<Value> {
@@ -222,24 +256,69 @@ pub(crate) fn workspace_frame_lookup(id: WorkspaceFrameId, name: &str) -> Option
 }
 
 pub(crate) fn workspace_frame_snapshot(id: WorkspaceFrameId) -> Option<Vec<(String, Value)>> {
-    with_frame(id, |frame| {
-        let mut entries = frame
-            .state
-            .names
-            .iter()
-            .filter_map(|(name, index)| {
-                frame
-                    .state
-                    .assigned
-                    .contains(name)
-                    .then(|| frame.state.values.get(*index).cloned())
-                    .flatten()
-                    .map(|value| (name.clone(), value))
-            })
-            .collect::<Vec<_>>();
-        entries.sort_by(|left, right| left.0.cmp(&right.0));
-        entries
+    with_frame(id, snapshot_frame_entries)
+}
+
+fn snapshot_frame_entries(frame: &WorkspaceFrame) -> Vec<(String, Value)> {
+    let mut entries = frame
+        .state
+        .names
+        .iter()
+        .filter_map(|(name, index)| {
+            frame
+                .state
+                .assigned
+                .contains(name)
+                .then(|| frame.state.values.get(*index).cloned())
+                .flatten()
+                .map(|value| (name.clone(), value))
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    entries
+}
+
+/// Hold only this frame's write authority across canonical publication. The
+/// global stack borrow is released so a nested top-level VM delegate can
+/// detach its different frame; any attempted reentry into this frame fails
+/// closed rather than replacing a binding that this operation would erase.
+pub(crate) fn workspace_frame_detach_selected(
+    id: WorkspaceFrameId,
+    selection: &runmat_runtime::workspace::WorkspaceDetachSelection,
+    publish: impl FnOnce(
+        &runmat_runtime::workspace::DetachedWorkspaceValues,
+    ) -> Result<(), runmat_runtime::RuntimeError>,
+) -> Result<runmat_runtime::workspace::DetachedWorkspaceValues, runmat_runtime::RuntimeError> {
+    let unavailable = || {
+        runmat_runtime::runtime_error::semantic_error(
+            "RunMat:Workspace:FrameUnavailable",
+            "workspace frame is closed or a frame transaction is already active",
+        )
+    };
+    let _guard = FrameDetachGuard::acquire(id).ok_or_else(unavailable)?;
+    let detached = with_frame(id, |frame| {
+        runmat_runtime::workspace::DetachedWorkspaceValues::new(
+            selection.select(snapshot_frame_entries(frame)),
+        )
     })
+    .ok_or_else(unavailable)?
+    .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)?;
+    publish(&detached)?;
+    with_frame_mut_unlocked(id, |frame| match selection {
+        runmat_runtime::workspace::WorkspaceDetachSelection::All => clear_workspace_frame(frame),
+        runmat_runtime::workspace::WorkspaceDetachSelection::Names(names) => {
+            for name in names {
+                remove_workspace_name(frame, name);
+            }
+        }
+        runmat_runtime::workspace::WorkspaceDetachSelection::Except(_) => {
+            for (name, _) in detached.entries() {
+                remove_workspace_name(frame, name);
+            }
+        }
+    })
+    .ok_or_else(unavailable)?;
+    Ok(detached)
 }
 
 pub(crate) fn workspace_frame_publishes(id: WorkspaceFrameId) -> Option<bool> {

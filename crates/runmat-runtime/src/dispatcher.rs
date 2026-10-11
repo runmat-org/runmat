@@ -407,11 +407,7 @@ async fn try_call_builtin_sequence_async_impl(
             return compatibility_checked_builtin_sequence(name, args, result).map(Some);
         }
         // Fallback: treat as class constructor if class is registered.
-        if ClassIdentity::new(name)
-            .ok()
-            .and_then(|identity| crate::class_registry::get_class(&identity))
-            .is_some()
-        {
+        if crate::class_registry::registered_constructor_identity(name).is_some() {
             let result =
                 call_registered_class_constructor(name, args, output_count, context.as_ref())
                     .await?;
@@ -938,33 +934,94 @@ fn finalize_instance_method_result(
     Ok(result)
 }
 
+#[derive(Debug, Clone)]
+pub enum RegisteredStaticMethodTarget {
+    Semantic(usize),
+    Builtin(runmat_types::BuiltinId),
+}
+
+/// Observe the actual selected runtime builtin inventory without causing
+/// browser registration or dispatch. Catalog-only declarations do not win a
+/// dynamic fallback over a registered class constructor.
+pub fn observed_dispatch_builtin_name(name: &str) -> Option<runmat_types::BuiltinId> {
+    let resolved = ResolvedBuiltinName::resolve(name);
+    let name = resolved.canonical;
+    let scoped = crate::context::legacy::active()
+        .and_then(|context| context.service_ports().builtin().cloned());
+    let selected_name = scoped.map_or_else(
+        || {
+            crate::builtin::registration::registered_runtime_builtin_bindings_by_name(name)
+                .first()
+                .map(|row| row.binding().identity.builtin.name)
+                .or_else(|| {
+                    builtin_functions()
+                        .into_iter()
+                        .find(|builtin| builtin.name == name)
+                        .map(|builtin| builtin.name)
+                })
+        },
+        |service| {
+            service
+                .bindings_by_name(name)
+                .first()
+                .map(|binding| binding.identity.builtin.name)
+        },
+    );
+    selected_name.map(|selected_name| {
+        runmat_builtins::builtin_id_by_name(selected_name)
+            .unwrap_or_else(|| runmat_types::BuiltinId(selected_name.to_owned()))
+    })
+}
+
+#[derive(Debug, Clone)]
+pub struct RegisteredStaticMethodResolution {
+    pub registration: crate::class_registry::RegisteredStaticMethodName,
+    pub target: RegisteredStaticMethodTarget,
+}
+
+/// Read-only static-method body selection used by both dispatcher and name
+/// observation. Registration alone is not an executable method body.
+pub fn observe_registered_static_method(
+    qualified_name: &str,
+) -> Option<RegisteredStaticMethodResolution> {
+    let registration = crate::class_registry::registered_public_static_method(qualified_name)?;
+    let executable_semantic = crate::user_functions::current_semantic_function_invoker().is_some();
+    let select = |name: &str| {
+        if executable_semantic {
+            if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(name) {
+                return Some(RegisteredStaticMethodTarget::Semantic(function));
+            }
+        }
+        (name != qualified_name)
+            .then(|| runmat_builtins::builtin_id_by_name(name))
+            .flatten()
+            .map(RegisteredStaticMethodTarget::Builtin)
+    };
+    let target = select(&registration.declaration.function_name).or_else(|| {
+        let inherited = format!(
+            "{}.{}",
+            registration.declaring_class, registration.method_name
+        );
+        (inherited != registration.declaration.function_name)
+            .then(|| select(&inherited))
+            .flatten()
+    })?;
+    Some(RegisteredStaticMethodResolution {
+        registration,
+        target,
+    })
+}
+
 async fn try_call_registered_static_method(
     qualified_name: &str,
     args: &[Value],
     output_count: Option<usize>,
     context: Option<&crate::context::RuntimeContext>,
 ) -> Result<Option<runmat_value::ValueSequence>, RuntimeError> {
-    let Some((class_name, method_name)) = qualified_name.rsplit_once('.') else {
+    let Some(resolved) = observe_registered_static_method(qualified_name) else {
         return Ok(None);
     };
-    if class_name.trim().is_empty() || method_name.trim().is_empty() {
-        return Ok(None);
-    }
-    let Ok(class_identity) = ClassIdentity::new(class_name) else {
-        return Ok(None);
-    };
-    if crate::class_registry::get_class(&class_identity).is_none() {
-        return Ok(None);
-    }
-    let method_identity = runmat_types::MethodName::from(method_name);
-    let Some((method, owner)) =
-        crate::class_registry::lookup_method(&class_identity, &method_identity)
-    else {
-        return Ok(None);
-    };
-    if !method.is_static || method.access != runmat_types::MemberAccess::Public {
-        return Ok(None);
-    }
+    let method = resolved.registration.declaration;
     let adapted = method.implicit_class_argument.as_ref().map(|class| {
         let mut values = Vec::with_capacity(args.len() + 1);
         values.extend_from_slice(args);
@@ -972,54 +1029,22 @@ async fn try_call_registered_static_method(
         values
     });
     let args = adapted.as_deref().unwrap_or(args);
-    if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
-        &method.function_name,
-        args,
-        output_count.unwrap_or(1),
-    )
-    .await
-    {
-        return result.map(Some);
-    }
-    if runmat_builtins::builtin_name_is_known(&method.function_name)
-        && method.function_name != qualified_name
-    {
-        return call_builtin_sequence_async_impl(
-            &method.function_name,
-            args,
-            output_count,
-            context.cloned(),
-            None,
-        )
-        .await
-        .map(Some);
-    }
-    let owner_qualified = format!("{owner}.{method_name}");
-    if owner_qualified != method.function_name {
-        if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
-            &owner_qualified,
-            args,
-            output_count.unwrap_or(1),
-        )
-        .await
-        {
-            return result.map(Some);
-        }
-        if runmat_builtins::builtin_name_is_known(&owner_qualified)
-            && owner_qualified != qualified_name
-        {
-            return call_builtin_sequence_async_impl(
-                &owner_qualified,
+    match resolved.target {
+        RegisteredStaticMethodTarget::Semantic(function) => {
+            crate::user_functions::try_call_semantic_function(
+                function,
                 args,
-                output_count,
-                context.cloned(),
-                None,
+                output_count.unwrap_or(1),
             )
             .await
-            .map(Some);
+            .transpose()
+        }
+        RegisteredStaticMethodTarget::Builtin(name) => {
+            call_builtin_sequence_async_impl(&name.0, args, output_count, context.cloned(), None)
+                .await
+                .map(Some)
         }
     }
-    Ok(None)
 }
 
 async fn call_registered_class_constructor(
@@ -1034,6 +1059,13 @@ async fn call_registered_class_constructor(
             .with_identifier("RunMat:InvalidClassName")
             .build()
     })?;
+    if class_identity.is(runmat_types::standard::EVENT_DATA) && !args.is_empty() {
+        return Err(build_runtime_error(
+            "event.EventData constructor does not accept input arguments",
+        )
+        .with_identifier("RunMat:ConstructorArgumentsInvalid")
+        .build());
+    }
     let default_object = create_class_object(class_name.to_string()).await?;
     let constructor_method_name = class_name.rsplit('.').next().unwrap_or(class_name);
     let constructor_identity = runmat_types::MethodName::from(constructor_method_name);
@@ -1410,6 +1442,29 @@ mod tests {
     }
 
     static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn event_data_constructor_admits_only_zero_inputs() {
+        let rejected = block_on(super::call_registered_class_constructor(
+            "event.EventData",
+            &[Value::Num(1.0)],
+            Some(1),
+            None,
+        ))
+        .unwrap_err();
+        assert_eq!(
+            rejected.identifier(),
+            Some("RunMat:ConstructorArgumentsInvalid")
+        );
+        let instance = block_on(super::call_registered_class_constructor(
+            "event.EventData",
+            &[],
+            Some(1),
+            None,
+        ))
+        .expect("zero-input EventData");
+        assert!(crate::class_registry::is_event_data_value(&instance));
+    }
 
     #[test]
     fn instance_method_sequence_preserves_output_kind_and_cardinality() {
@@ -1876,12 +1931,14 @@ mod tests {
             },
         );
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: parent_name.clone().into(),
             parent: None,
             properties: HashMap::new(),
             methods: parent_methods,
         });
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: child_name.clone().into(),
             parent: Some(parent_name.into()),
             properties: HashMap::new(),
@@ -1914,6 +1971,7 @@ mod tests {
             },
         );
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: private_class_name.clone().into(),
             parent: None,
             properties: HashMap::new(),
@@ -1938,6 +1996,7 @@ mod tests {
             },
         );
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: public_class_name.clone().into(),
             parent: None,
             properties: HashMap::new(),
@@ -1957,6 +2016,7 @@ mod tests {
         let class_name = unique_class_name("runtime_static_dispatch");
         let fn_name = unique_class_name("runtime_static_fn");
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: class_name.clone().into(),
             parent: None,
             properties: HashMap::new(),

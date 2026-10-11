@@ -1,4 +1,4 @@
-use runmat_hir::{lower, FunctionKind, LoweringContext, MemberAccess};
+use runmat_hir::{lower, EventAccess, FunctionKind, LoweringContext, MemberAccess};
 use runmat_parser::parse;
 
 #[test]
@@ -96,4 +96,80 @@ fn classdef_protected_access_values_round_trip() {
         .find(|method| method.name.0 == "f")
         .expect("method f");
     assert_eq!(method.attributes.access, MemberAccess::Protected);
+}
+
+#[test]
+fn classdef_event_attributes_are_typed_and_handle_only() {
+    let src = "classdef E < handle\n  events(ListenAccess=protected, NotifyAccess=private, Hidden)\n    Changed\n  end\nend";
+    let ast = parse(src).unwrap();
+    let assembly = lower(&ast, &LoweringContext::empty()).unwrap().assembly;
+    let event = &assembly.classes[0].declaration.events[0];
+    assert_eq!(event.name.0, "Changed");
+    assert!(event.attributes.is_hidden);
+    assert_eq!(event.attributes.listen_access, EventAccess::Protected);
+    assert_eq!(event.attributes.notify_access, EventAccess::Private);
+
+    let value_class = parse("classdef V\n  events\n    Changed\n  end\nend").unwrap();
+    let error = lower(&value_class, &LoweringContext::empty()).unwrap_err();
+    assert_eq!(
+        error.identifier.as_deref(),
+        Some("RunMat:ClassEventAttributeInvalid")
+    );
+}
+
+#[test]
+fn classdef_event_attributes_reject_unknown_and_duplicate_forms() {
+    for source in [
+        "classdef E < handle\n events(Unsupported=true)\n Changed\n end\nend",
+        "classdef E < handle\n events(ListenAccess=public, ListenAccess=private)\n Changed\n end\nend",
+        "classdef E < handle\n events(Hidden=unknown)\n Changed\n end\nend",
+    ] {
+        let ast = parse(source).unwrap();
+        let error = lower(&ast, &LoweringContext::empty()).unwrap_err();
+        assert_eq!(error.identifier.as_deref(), Some("RunMat:ClassEventAttributeInvalid"));
+    }
+}
+
+#[test]
+fn standard_event_data_subclass_is_a_handle_class() {
+    let ast =
+        parse("classdef Payload < event.EventData\n properties\n PayloadValue\n end\nend").unwrap();
+    let assembly = lower(&ast, &LoweringContext::empty()).unwrap().assembly;
+    assert_eq!(
+        assembly.classes[0].declaration.kind,
+        runmat_hir::ClassKind::Handle
+    );
+    assert_eq!(
+        assembly.classes[0]
+            .declaration
+            .inheritance
+            .builtin_super_class
+            .as_deref(),
+        Some("event.EventData")
+    );
+}
+
+#[test]
+fn event_cannot_reuse_its_class_name() {
+    let ast = parse("classdef Same < handle\n events\n Same\n end\nend").unwrap();
+    let error = lower(&ast, &LoweringContext::empty()).unwrap_err();
+    assert_eq!(
+        error.identifier.as_deref(),
+        Some("RunMat:ClassMemberNameConflict")
+    );
+}
+
+#[test]
+fn event_access_lists_preserve_typed_class_identities() {
+    let ast = parse(
+        "classdef E < handle\n events(ListenAccess={?ClientA, ?pkg.ClientB}, NotifyAccess={})\n Changed\n end\nend",
+    )
+    .unwrap();
+    let assembly = lower(&ast, &LoweringContext::empty()).unwrap().assembly;
+    let event = &assembly.classes[0].declaration.events[0];
+    assert_eq!(
+        event.attributes.listen_access,
+        EventAccess::Classes(vec!["ClientA".into(), "pkg.ClientB".into()])
+    );
+    assert_eq!(event.attributes.notify_access, EventAccess::Private);
 }

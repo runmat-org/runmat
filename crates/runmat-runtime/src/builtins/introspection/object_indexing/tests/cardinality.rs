@@ -154,12 +154,14 @@ fn object_overload_uses_inherited_remapped_method_metadata() {
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: base.into(),
         parent: None,
         properties: HashMap::new(),
         methods,
     });
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: child.into(),
         parent: Some(base.into()),
         properties: HashMap::new(),

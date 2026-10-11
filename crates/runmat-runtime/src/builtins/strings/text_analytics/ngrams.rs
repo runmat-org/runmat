@@ -212,6 +212,7 @@ fn ensure_bag_of_ngrams_class_registered() {
             properties.insert(name.into(), property_def(name));
         }
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: BAG_OF_NGRAMS_CLASS.into(),
             parent: None,
             properties,

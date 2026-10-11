@@ -6,4 +6,4 @@ mod session;
 
 pub use isolation::*;
 pub use services::RuntimeMexHostServices;
-pub use session::MexRuntimeSession;
+pub use session::{MexNameSelection, MexRuntimeSession};

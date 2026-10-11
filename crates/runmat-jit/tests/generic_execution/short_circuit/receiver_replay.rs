@@ -82,6 +82,7 @@ fn cached_receiver_preserves_ordinal_before_later_and_deeper_suspensions() {
         implicit_class_argument: None,
     };
     runmat_runtime::class_registry::register_class(runmat_runtime::class_registry::RuntimeClass {
+        events: Default::default(),
         name: "ReceiverReplayObject".into(),
         parent: None,
         properties: Default::default(),

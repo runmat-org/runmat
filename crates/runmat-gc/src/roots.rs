@@ -13,7 +13,7 @@ use std::ptr::NonNull;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod retained;
-use retained::RegisteredRoot;
+pub(crate) use retained::RegisteredRoot;
 pub use retained::ValueRoot;
 
 /// Recursively collect immediate GC roots from an owned Value tree.
@@ -230,6 +230,20 @@ impl RootScanner {
         Some(())
     }
 
+    /// Visit one known value registration without treating another root for
+    /// the same handle as equivalent. Missing, inactive, or opaque roots make
+    /// an ownership projection incomplete.
+    pub fn visit_registered_values(
+        &self,
+        registration: RootId,
+        visitor: &mut dyn FnMut(&Value) -> Option<()>,
+    ) -> Option<()> {
+        let roots = self.roots.try_read()?;
+        let root = roots.get(&registration)?;
+        root.is_active().then_some(())?;
+        root.visit_retained_values(visitor)
+    }
+
     #[cfg(test)]
     fn retained_values(&self) -> Option<Vec<Value>> {
         self.retained_values_excluding(&[])
@@ -258,16 +272,18 @@ impl RootScanner {
 
     /// Unregister a GC root
     pub fn unregister_root(&self, root_id: RootId) -> Result<()> {
-        log::debug!("Unregistering GC root {}", root_id.0);
+        drop(self.take_root(root_id)?);
+        Ok(())
+    }
 
-        let mut roots = self.roots.write();
-        match roots.remove(&root_id) {
-            Some(_) => Ok(()),
-            None => Err(GcError::RootRegistrationFailed(format!(
-                "Root {} not found",
-                root_id.0
-            ))),
-        }
+    pub(crate) fn take_root(&self, root_id: RootId) -> Result<RegisteredRoot> {
+        log::debug!("Unregistering GC root {}", root_id.0);
+        let removed = {
+            let mut roots = self.roots.write();
+            roots.remove(&root_id)
+        };
+        removed
+            .ok_or_else(|| GcError::RootRegistrationFailed(format!("Root {} not found", root_id.0)))
     }
 
     /// Scan all roots and return reachable objects
@@ -387,6 +403,51 @@ impl Default for RootScanner {
 mod tests {
     use super::*;
     use runmat_value::{Closure, HandleRef, Listener, ObjectInstance, StructValue};
+
+    #[test]
+    fn unregister_drops_root_after_scanner_and_admission_guards() {
+        use std::sync::{atomic::AtomicBool, Arc};
+
+        struct Reentrant {
+            completed: Arc<AtomicBool>,
+        }
+        impl GcRoot for Reentrant {
+            fn scan(&self) -> Vec<GcHandle> {
+                Vec::new()
+            }
+            fn description(&self) -> String {
+                "reentrant root".into()
+            }
+        }
+        impl Drop for Reentrant {
+            fn drop(&mut self) {
+                let admission_free = crate::ROOT_ADMISSION.try_write().is_some();
+                let scanner_free =
+                    crate::ROOT_SCANNER.with(|scanner| scanner.roots.try_write().is_some());
+                // Fail the witness rather than hanging if either lock is held.
+                if !(admission_free && scanner_free) {
+                    return;
+                }
+                let id =
+                    crate::gc_register_root(Box::new(GlobalRoot::new(Vec::new(), "nested".into())))
+                        .expect("nested registration from root destructor");
+                crate::gc_unregister_root(id).expect("nested root unregister");
+                self.completed.store(true, Ordering::SeqCst);
+            }
+        }
+        crate::gc_test_context(|| {
+            let completed = Arc::new(AtomicBool::new(false));
+            let id = crate::gc_register_root(Box::new(Reentrant {
+                completed: Arc::clone(&completed),
+            }))
+            .expect("outer root registration");
+            crate::gc_unregister_root(id).expect("outer root unregister");
+            assert!(
+                completed.load(Ordering::SeqCst),
+                "root destruction must permit registration reentry"
+            );
+        });
+    }
 
     fn ptr_addr(ptr: GcHandle) -> usize {
         ptr.addr()

@@ -127,6 +127,10 @@ impl RunMatSession {
             )
         };
         let runtime_context = runtime_context.with_service_ports(runtime_services);
+        let lifecycle_host = runmat_runtime::context::RuntimeLifecycleHost::new(
+            &runtime_context,
+            local_tasks.clone(),
+        )?;
         super::source_evaluation::install_bound_invoker(&runtime_context, &source_evaluator);
         let session = Self {
             verbose,
@@ -162,6 +166,7 @@ impl RunMatSession {
             runtime_context,
             graphics_callbacks: None,
             local_tasks,
+            lifecycle_host,
             placement_session: placement,
             is_executing: false,
             async_input_handler: None,

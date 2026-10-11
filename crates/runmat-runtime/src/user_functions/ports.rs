@@ -25,6 +25,11 @@ pub struct FunctionResolverGuard {
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
+pub struct SemanticNameCandidatesGuard {
+    previous: Option<Arc<SemanticNameCandidates>>,
+    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
+}
+
 pub struct SourceFunctionCatalogGuard {
     previous: Option<Arc<Vec<SourceFunctionInfo>>>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
@@ -100,6 +105,17 @@ impl Drop for FunctionResolverGuard {
             SEMANTIC_FUNCTION_RESOLVER.with(|slot| {
                 *slot.borrow_mut() = previous;
             });
+        }
+    }
+}
+
+impl Drop for SemanticNameCandidatesGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        if let Some(state) = &self.state {
+            state.call.borrow_mut().semantic_name_candidates = previous;
+        } else {
+            SEMANTIC_NAME_CANDIDATES.with(|slot| *slot.borrow_mut() = previous);
         }
     }
 }
@@ -277,6 +293,27 @@ pub fn install_semantic_function_resolver(
     }
 }
 
+pub fn install_semantic_name_candidates(
+    observer: Option<Arc<SemanticNameCandidates>>,
+) -> SemanticNameCandidatesGuard {
+    if let Some(state) = active_state() {
+        let previous = std::mem::replace(
+            &mut state.call.borrow_mut().semantic_name_candidates,
+            observer,
+        );
+        return SemanticNameCandidatesGuard {
+            previous,
+            state: Some(state),
+        };
+    }
+    let previous =
+        SEMANTIC_NAME_CANDIDATES.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), observer));
+    SemanticNameCandidatesGuard {
+        previous,
+        state: None,
+    }
+}
+
 pub fn install_source_function_catalog(
     catalog: Option<Arc<Vec<SourceFunctionInfo>>>,
 ) -> SourceFunctionCatalogGuard {
@@ -362,6 +399,13 @@ pub fn current_semantic_function_resolver() -> Option<Arc<FunctionResolver>> {
     SEMANTIC_FUNCTION_RESOLVER.with(|slot| slot.borrow().clone())
 }
 
+pub fn current_semantic_name_candidates() -> Option<Arc<SemanticNameCandidates>> {
+    if let Some(state) = active_state() {
+        return state.call.borrow().semantic_name_candidates.clone();
+    }
+    SEMANTIC_NAME_CANDIDATES.with(|slot| slot.borrow().clone())
+}
+
 pub fn current_active_semantic_function() -> Option<usize> {
     if let Some(state) = active_state() {
         return state.call.borrow().active_functions.last().copied();
@@ -382,6 +426,7 @@ pub fn inherit_legacy_call_environment(context: &crate::context::RuntimeContext)
     call.external_invoker = EXTERNAL_FUNCTION_INVOKER.with(|slot| slot.borrow().clone());
     call.lexical_invoker = LEXICAL_FUNCTION_INVOKER.with(|slot| slot.borrow().clone());
     call.semantic_resolver = SEMANTIC_FUNCTION_RESOLVER.with(|slot| slot.borrow().clone());
+    call.semantic_name_candidates = SEMANTIC_NAME_CANDIDATES.with(|slot| slot.borrow().clone());
     call.source_functions = SOURCE_FUNCTION_CATALOG.with(|slot| slot.borrow().clone());
     call.execution_source_resolver = EXECUTION_SOURCE_RESOLVER.with(|slot| slot.borrow().clone());
     call.active_functions = ACTIVE_SEMANTIC_FUNCTION_STACK.with(|slot| slot.borrow().clone());

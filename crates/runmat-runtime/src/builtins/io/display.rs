@@ -326,6 +326,7 @@ mod tests {
     fn display_dispatches_custom_object_display_method() {
         let class_name = "DisplayHookObject".to_string();
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: class_name.clone().into(),
             parent: None,
             properties: HashMap::new(),
@@ -375,6 +376,7 @@ mod tests {
     fn display_falls_back_to_overloaded_disp_method() {
         let class_name = "DispFallbackObject".to_string();
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: class_name.clone().into(),
             parent: None,
             properties: HashMap::new(),
@@ -423,6 +425,7 @@ mod tests {
         let parent_class_name = "DisplayHookParent".to_string();
         let child_class_name = "DisplayHookChild".to_string();
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: parent_class_name.clone().into(),
             parent: None,
             properties: HashMap::new(),
@@ -440,6 +443,7 @@ mod tests {
             )]),
         });
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: child_class_name.clone().into(),
             parent: Some(parent_class_name.into()),
             properties: HashMap::new(),

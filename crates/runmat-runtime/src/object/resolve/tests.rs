@@ -80,12 +80,14 @@ fn load_static_member_resolves_inherited_static_property_value() {
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: parent_name.clone(),
         parent: None,
         properties: parent_properties,
         methods: HashMap::new(),
     });
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: child_name.clone(),
         parent: Some(parent_name.clone()),
         properties: HashMap::new(),
@@ -117,12 +119,14 @@ fn store_member_updates_inherited_static_property_owner_slot() {
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: parent_name.clone(),
         parent: None,
         properties: parent_properties,
         methods: HashMap::new(),
     });
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: child_name.clone(),
         parent: Some(parent_name.clone()),
         properties: HashMap::new(),
@@ -164,12 +168,14 @@ fn load_static_member_resolves_inherited_static_method() {
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: parent_name.clone(),
         parent: None,
         properties: HashMap::new(),
         methods: parent_methods,
     });
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: child_name.clone(),
         parent: Some(parent_name.clone()),
         properties: HashMap::new(),
@@ -203,12 +209,14 @@ fn load_member_uses_inherited_subsref_for_missing_property() {
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: parent_name.clone(),
         parent: None,
         properties: HashMap::new(),
         methods: parent_methods,
     });
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: child_name.clone(),
         parent: Some(parent_name),
         properties: HashMap::new(),
@@ -240,12 +248,14 @@ fn store_member_uses_inherited_subsasgn_for_missing_property() {
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: parent_name.clone(),
         parent: None,
         properties: HashMap::new(),
         methods: parent_methods,
     });
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: child_name.clone(),
         parent: Some(parent_name),
         properties: HashMap::new(),

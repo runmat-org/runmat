@@ -152,6 +152,7 @@ fn ensure_decomposition_class_registered() {
         }
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: CLASS_IDENTITY.into(),
             parent: None,
             properties,

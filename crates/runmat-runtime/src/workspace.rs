@@ -2,6 +2,7 @@ use runmat_value::Value;
 
 mod base;
 mod checked;
+mod detach;
 pub mod session;
 pub mod bindings;
 
@@ -13,9 +14,10 @@ pub use base::{
     WorkspaceChangeKind, WorkspaceDelta, WorkspaceRevision,
 };
 pub use checked::{
-    base_workspace_owner, begin_base_workspace_projection, try_assign, try_clear, try_global_names,
-    try_lookup, try_remove, try_snapshot,
+    base_workspace_owner, begin_base_workspace_projection, try_assign, try_clear,
+    try_detach_selected, try_global_names, try_lookup, try_remove, try_snapshot,
 };
+pub use detach::{DetachedWorkspaceValues, WorkspaceDetachSelection};
 
 #[cfg(test)]
 use once_cell::sync::Lazy;

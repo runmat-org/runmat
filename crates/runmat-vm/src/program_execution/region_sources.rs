@@ -66,6 +66,7 @@ pub fn encode_portable_region_sources_v1(
     portable
         .validate_portable_source_origins()
         .map_err(str::to_string)?;
+    let authorized = super::unit_sources::authorized_private_aliases(source_map);
     for (key, body) in portable
         .bound_functions
         .iter()
@@ -74,8 +75,19 @@ pub fn encode_portable_region_sources_v1(
         if *key != body.function {
             return Err("portable region function key/body identity mismatch".into());
         }
-        super::unit_sources::validate_function_component(source_map, revision, body)?;
+        super::unit_sources::validate_function_component_with_aliases(
+            source_map,
+            revision,
+            body,
+            &authorized,
+        )?;
     }
+    super::unit_sources::validate_private_partitions(
+        portable
+            .bound_functions
+            .values()
+            .chain(portable.function_registry.functions.values()),
+    )?;
     let script =
         crate::encode_interpreter_script_v2(portable).map_err(|error| error.to_string())?;
     InterpreterRegionSourcesV1::new(revision.clone(), source_map.clone(), script)
@@ -114,6 +126,7 @@ pub(super) fn bind(
     {
         return Err("worker rejected region source ordinal outside its map".into());
     }
+    let authorized = super::unit_sources::authorized_private_aliases(payload.source_map());
     for (key, body) in bytecode
         .bound_functions
         .iter()
@@ -122,12 +135,19 @@ pub(super) fn bind(
         if *key != body.function {
             return Err("worker rejected region function key/body identity mismatch".into());
         }
-        super::unit_sources::validate_function_component(
+        super::unit_sources::validate_function_component_with_aliases(
             payload.source_map(),
             expected_revision,
             body,
+            &authorized,
         )?;
     }
+    super::unit_sources::validate_private_partitions(
+        bytecode
+            .bound_functions
+            .values()
+            .chain(bytecode.function_registry.functions.values()),
+    )?;
     let runtime =
         runmat_runtime::source_context::bind_portable_source_map_v2(runtime, payload.source_map())
             .map_err(|error| error.to_string())?;

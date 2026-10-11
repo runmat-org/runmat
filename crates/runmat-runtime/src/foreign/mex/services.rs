@@ -610,6 +610,7 @@ mod tests {
         pollster::block_on(runtime.scope(async {
             crate::compatibility::set_runmat_extensions_enabled(false);
             let mut class = crate::class_registry::RuntimeClass {
+                events: Default::default(),
                 name: "FixtureHandle".into(),
                 parent: None,
                 properties: Default::default(),

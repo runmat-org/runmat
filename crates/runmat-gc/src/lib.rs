@@ -5,7 +5,7 @@ use runmat_time::Instant;
 use runmat_value::Value;
 use std::cell::Cell;
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::ThreadId;
 use thiserror::Error;
@@ -17,6 +17,10 @@ pub mod config;
 pub use runmat_gc_api::{GcHandle, GcRoot, RootId, RootInfo, RootScannerStats, Trace, Tracer};
 pub mod generations;
 pub mod roots;
+mod reachability;
+pub use reachability::{gc_with_registered_root_reachability, RegisteredRootReachability};
+mod root_retirement;
+pub use root_retirement::{RootRetirement, RootRetirementObserver};
 mod retirement;
 pub mod stats;
 
@@ -33,6 +37,11 @@ static EXTERNAL_ROOT_PROVIDERS: once_cell::sync::Lazy<
     RwLock<HashMap<&'static str, ExternalRootProvider>>,
 > = once_cell::sync::Lazy::new(|| RwLock::new(HashMap::new()));
 
+/// Root publication and collection admission cannot cross a last-owner
+/// inspection. The inspection callback may only update a pre-rooted lifecycle
+/// state; it must not register roots or execute user code under this guard.
+static ROOT_ADMISSION: RwLock<()> = RwLock::new(());
+
 /// Register a runtime-owned root source without making the collector depend on
 /// that runtime domain. Re-registering the same stable name replaces it.
 pub fn register_external_root_provider(
@@ -40,6 +49,7 @@ pub fn register_external_root_provider(
     roots: fn() -> Vec<GcHandle>,
     roots_on_other_threads: fn() -> bool,
 ) {
+    let _admission = ROOT_ADMISSION.write();
     EXTERNAL_ROOT_PROVIDERS.write().insert(
         name,
         ExternalRootProvider {
@@ -171,6 +181,10 @@ pub struct GarbageCollector {
     /// Collection state
     collection_in_progress: AtomicBool,
 
+    /// Monotonic proof that a successful collection has inspected the heap.
+    /// It never wraps: collection fails closed before exhaustion.
+    collection_epoch: AtomicU64,
+
     /// Active allocations whose just-created handles have not been returned or rooted.
     allocation_in_progress: AtomicUsize,
 
@@ -300,6 +314,7 @@ impl GarbageCollector {
             collector: Mutex::new(collector),
             root_ptrs: Mutex::new(HashMap::new()),
             collection_in_progress: AtomicBool::new(false),
+            collection_epoch: AtomicU64::new(0),
             allocation_in_progress: AtomicUsize::new(0),
             active_value_borrows: AtomicUsize::new(0),
             active_value_mut_borrow: AtomicBool::new(false),
@@ -510,6 +525,12 @@ impl GarbageCollector {
             return Ok(0);
         }
         let collection_guard = CollectionInProgressGuard::new(&self.collection_in_progress);
+        if self.collection_epoch.load(Ordering::Acquire) == u64::MAX {
+            return Err(GcError::CollectionFailed(
+                "GC collection generation exhausted".into(),
+            ));
+        }
+        let admission = ROOT_ADMISSION.write();
         if self.allocation_in_progress.load(Ordering::Acquire) != 0 {
             return Ok(0);
         }
@@ -551,9 +572,11 @@ impl GarbageCollector {
 
         // Clear dirty cards; keep remembered set for next minor cycle
         WRITE_BARRIERS.clear_after_minor_gc();
+        self.collection_epoch.fetch_add(1, Ordering::AcqRel);
         // Retiring an owning payload may invoke a provider callback that
         // allocates. Heap bookkeeping is complete; do not hold its entry gate.
         drop(collection_guard);
+        drop(admission);
         drop(retired);
 
         let duration = start_time.elapsed();
@@ -584,6 +607,12 @@ impl GarbageCollector {
             return Ok(0);
         }
         let collection_guard = CollectionInProgressGuard::new(&self.collection_in_progress);
+        if self.collection_epoch.load(Ordering::Acquire) == u64::MAX {
+            return Err(GcError::CollectionFailed(
+                "GC collection generation exhausted".into(),
+            ));
+        }
+        let admission = ROOT_ADMISSION.write();
         if self.allocation_in_progress.load(Ordering::Acquire) != 0 {
             return Ok(0);
         }
@@ -621,7 +650,9 @@ impl GarbageCollector {
         allocator.clear_promotion_state();
         drop(collector);
         drop(allocator);
+        self.collection_epoch.fetch_add(1, Ordering::AcqRel);
         drop(collection_guard);
+        drop(admission);
         drop(retired);
 
         let duration = start_time.elapsed();
@@ -635,6 +666,7 @@ impl GarbageCollector {
 
     /// Add a root to protect an object from collection
     pub fn add_root(&self, root: GcHandle) -> Result<()> {
+        let _admission = ROOT_ADMISSION.write();
         let mut roots = self.root_ptrs.lock();
         *roots.entry(root).or_insert(0) += 1;
         Ok(())
@@ -642,16 +674,20 @@ impl GarbageCollector {
 
     /// Remove a root
     pub fn remove_root(&self, root: GcHandle) -> Result<()> {
-        let mut roots = self.root_ptrs.lock();
-        match roots.get_mut(&root) {
-            Some(count) if *count > 1 => {
-                *count -= 1;
+        {
+            let _admission = ROOT_ADMISSION.write();
+            let mut roots = self.root_ptrs.lock();
+            match roots.get_mut(&root) {
+                Some(count) if *count > 1 => {
+                    *count -= 1;
+                }
+                Some(_) => {
+                    roots.remove(&root);
+                }
+                None => {}
             }
-            Some(_) => {
-                roots.remove(&root);
-            }
-            None => {}
         }
+        root_retirement::notify(RootRetirement::Explicit(root));
         Ok(())
     }
 
@@ -897,6 +933,13 @@ pub fn gc_stats() -> GcStats {
     GC.stats()
 }
 
+/// Successful heap collections only; skipped/reentrant collection attempts
+/// leave this generation unchanged. Consumers may recheck retired identities
+/// after it advances, but it is not evidence that a specific handle died.
+pub fn gc_collection_epoch() -> u64 {
+    GC.collection_epoch.load(Ordering::Acquire)
+}
+
 pub fn gc_configure(config: GcConfig) -> Result<()> {
     GC.configure(config)
 }
@@ -907,6 +950,7 @@ pub fn gc_get_config() -> GcConfig {
 
 /// Register a root source in the current thread-local root scanner.
 pub fn gc_register_root(root: Box<dyn GcRoot>) -> Result<RootId> {
+    let _admission = ROOT_ADMISSION.write();
     register_active_root_thread();
     match ROOT_SCANNER.with(|scanner| scanner.register_root(root)) {
         Ok(root_id) => Ok(root_id),
@@ -918,20 +962,66 @@ pub fn gc_register_root(root: Box<dyn GcRoot>) -> Result<RootId> {
 }
 
 pub fn gc_unregister_root(root_id: RootId) -> Result<()> {
-    ROOT_SCANNER.with(|scanner| scanner.unregister_root(root_id))?;
-    unregister_active_root_thread();
+    let removed = {
+        let _admission = ROOT_ADMISSION.write();
+        let removed = ROOT_SCANNER.with(|scanner| scanner.take_root(root_id))?;
+        unregister_active_root_thread();
+        removed
+    };
+    // Root-owned resources may reenter GC during destruction.
+    drop(removed);
+    root_retirement::notify(RootRetirement::Registration(root_id));
     Ok(())
 }
 
 /// Register a value-visible root under the same lifetime and removal authority
 /// as all other GC roots.
 pub fn gc_register_value_root(root: Box<dyn ValueRoot>) -> Result<RootId> {
+    let _admission = ROOT_ADMISSION.write();
     register_active_root_thread();
     match ROOT_SCANNER.with(|scanner| scanner.register_value_root(root)) {
         Ok(root_id) => Ok(root_id),
         Err(error) => {
             unregister_active_root_thread();
             Err(error)
+        }
+    }
+}
+
+/// Own one value-visible root registration, rather than a handle identity.
+/// The registration ID may be excluded from a last-owner inspection while an
+/// independently registered root for the same handle remains visible.
+#[derive(Debug)]
+pub struct ValueRootRegistration {
+    id: Option<RootId>,
+    // RootScanner is thread-local: this token must be removed on its owner thread.
+    _same_thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+impl ValueRootRegistration {
+    pub fn new(root: Box<dyn ValueRoot>) -> Result<Self> {
+        Ok(Self {
+            id: Some(gc_register_value_root(root)?),
+            _same_thread: std::marker::PhantomData,
+        })
+    }
+
+    pub fn id(&self) -> RootId {
+        self.id.expect("value root registration already removed")
+    }
+
+    pub fn unregister(mut self) -> Result<()> {
+        let id = self.id.expect("value root registration already removed");
+        gc_unregister_root(id)?;
+        self.id = None;
+        Ok(())
+    }
+}
+
+impl Drop for ValueRootRegistration {
+    fn drop(&mut self) {
+        if let Some(id) = self.id.take() {
+            let _ = gc_unregister_root(id);
         }
     }
 }
@@ -957,6 +1047,52 @@ pub fn gc_visit_retained_values(
         gc_with_value(&handle, &mut *visitor).ok()??;
     }
     Some(())
+}
+
+/// Trace the complete GC handle graph from registered value roots, counted
+/// explicit roots, and installed external root providers. Exclusions are root
+/// *registration IDs*, never handle identities: an independent alias of the
+/// same target still makes it reachable. `None` means inspection was
+/// incomplete and a caller must retain/retry rather than finalize early.
+pub fn gc_is_reachable_excluding(target: GcHandle, excluded: &[RootId]) -> Option<bool> {
+    gc_with_reachability_excluding(target, excluded, |result| result)
+}
+
+/// Hold root-publication admission through the caller's already-prepared
+/// Active-to-Queued decision. The closure must not allocate a new GC root,
+/// perform user code, or await; it may only update pre-rooted state.
+pub fn gc_with_reachability_excluding<R>(
+    target: GcHandle,
+    excluded: &[RootId],
+    decide: impl FnOnce(Option<bool>) -> R,
+) -> R {
+    let _admission = ROOT_ADMISSION.read();
+    decide(reachability_snapshot_excluding(target, excluded))
+}
+
+fn reachability_snapshot_excluding(target: GcHandle, excluded: &[RootId]) -> Option<bool> {
+    use std::collections::HashSet;
+
+    if GC.collection_in_progress.load(Ordering::Acquire) {
+        return None;
+    }
+    let mut pending = external_roots();
+    pending.extend(GC.root_ptrs.try_lock()?.keys().copied());
+    gc_visit_retained_values(excluded, &mut |value| {
+        pending.extend(gc_handles_in_value(value));
+        Some(())
+    })?;
+    let mut visited = HashSet::new();
+    while let Some(handle) = pending.pop() {
+        if handle == target {
+            return Some(true);
+        }
+        if visited.insert(handle) {
+            let children = gc_with_value(&handle, gc_handles_in_value).ok()?;
+            pending.extend(children);
+        }
+    }
+    Some(false)
 }
 
 #[cfg(test)]
@@ -1124,6 +1260,22 @@ where
     let _ = gc_reset_for_test();
 
     result
+}
+
+#[cfg(test)]
+#[test]
+fn collection_epoch_advances_only_after_completed_collection() {
+    gc_test_context(|| {
+        let rooted = gc_allocate_rooted(Value::Num(1.0)).expect("root fixture");
+        let before = gc_collection_epoch();
+        gc_with_value(&rooted.handle(), |_| {
+            assert_eq!(gc_collect_major().expect("deferred borrow collection"), 0);
+            assert_eq!(gc_collection_epoch(), before);
+        })
+        .expect("guarded fixture borrow");
+        gc_collect_major().expect("completed collection");
+        assert_eq!(gc_collection_epoch(), before + 1);
+    });
 }
 
 #[cfg(test)]

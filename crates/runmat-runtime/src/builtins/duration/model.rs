@@ -19,6 +19,7 @@ pub(super) fn ensure_duration_class_registered() {
         let methods = crate::class_registry::standard_runtime_methods(DURATION_CLASS);
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: DURATION_CLASS.into(),
             parent: None,
             properties,

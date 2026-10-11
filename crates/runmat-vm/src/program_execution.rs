@@ -211,7 +211,52 @@ fn captured_program_revision(program: &[u8]) -> ProgramRevision {
 }
 
 pub async fn execute_program_request(request: ProgramExecutionRequest) -> ProgramExecutionResponse {
-    execute_program_request_in_context(request, None).await
+    // A worker request is an execution host, not a bare RuntimeContext
+    // embedding. Keep the non-cloneable lifecycle owner outside the context
+    // and drive its existing local-task supervisor through completion.
+    let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ));
+    #[cfg(not(target_arch = "wasm32"))]
+    let supervisor = std::rc::Rc::new(runmat_runtime::context::RuntimeLocalTaskSupervisor::new());
+    #[cfg(target_arch = "wasm32")]
+    let supervisor = std::rc::Rc::new(runmat_runtime::context::BrowserLocalTaskSupervisor::new());
+    let ports = runtime
+        .service_ports()
+        .clone()
+        .with_local_tasks(supervisor.submission_port(runtime.local_identity()));
+    let runtime = runtime.with_service_ports(ports);
+    let host =
+        match runmat_runtime::context::RuntimeLifecycleHost::new(&runtime, supervisor.clone()) {
+            Ok(host) => host,
+            Err(error) => return runtime_failure_response(error, &runtime),
+        };
+    let complete = async {
+        let result = execute_program_request_in_context(request, Some(runtime.clone())).await;
+        match host.retire_workspace_and_drain(&runtime).await {
+            Ok(()) => result,
+            Err(error)
+                if matches!(
+                    &result,
+                    ProgramExecutionResponse::Failure { .. }
+                        | ProgramExecutionResponse::RuntimeFailure { .. }
+                ) =>
+            {
+                tracing::warn!(%error, "cleanup callback failed after worker execution error");
+                result
+            }
+            Err(error) => runtime_failure_response(error, &runtime),
+        }
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let result = match supervisor.participate_foreground(complete).await {
+        Ok(result) => result,
+        Err(error) => runtime_failure_response(error, &runtime),
+    };
+    #[cfg(target_arch = "wasm32")]
+    let result = complete.await;
+    host.force_close();
+    result
 }
 
 pub async fn execute_program_request_with_context(
@@ -855,7 +900,7 @@ async fn execute_unit_script(
     }
 }
 
-fn runtime_failure_response(
+pub fn runtime_failure_response(
     error: runmat_runtime::RuntimeError,
     runtime: &runmat_runtime::context::RuntimeContext,
 ) -> ProgramExecutionResponse {

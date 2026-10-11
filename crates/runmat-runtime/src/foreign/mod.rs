@@ -4,6 +4,8 @@ mod error;
 mod extension;
 mod handle;
 #[cfg(not(target_arch = "wasm32"))]
+mod isolation_input;
+#[cfg(not(target_arch = "wasm32"))]
 mod java;
 mod manifest;
 #[cfg(not(target_arch = "wasm32"))]
@@ -46,8 +48,8 @@ pub async fn run_extension_host() -> Result<(), String> {
         .ok()
         .as_deref()
     {
-        Some(native_ffi::NATIVE_FFI_HOST_KIND) => native_ffi::run_native_ffi_extension_host(),
-        Some(python::PYTHON_HOST_KIND) => python::run_python_extension_host(),
+        Some(native_ffi::NATIVE_FFI_HOST_KIND) => native_ffi::run_native_ffi_extension_host().await,
+        Some(python::PYTHON_HOST_KIND) => python::run_python_extension_host().await,
         Some(kind) => Err(format!("unknown extension host kind `{kind}`")),
         None => mex::run_mex_extension_host().await,
     }

@@ -500,6 +500,7 @@ pub(crate) mod tests {
         // Register a class that derives from handle and ensure inheritance is respected.
         let class_name = "pkg.TestHandle";
         let def = crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: class_name.into(),
             parent: Some("handle".into()),
             properties: HashMap::new(),
@@ -520,12 +521,14 @@ pub(crate) mod tests {
         let class_b = unique_class_name("runmat.unittest.CycleB");
 
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: class_a.clone().into(),
             parent: Some(class_b.clone().into()),
             properties: HashMap::new(),
             methods: HashMap::new(),
         });
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: class_b.clone().into(),
             parent: Some(class_a.clone().into()),
             properties: HashMap::new(),

@@ -24,6 +24,21 @@ pub use browser::BrowserLocalTaskSupervisor;
 
 pub type RuntimeLocalTaskFuture = Pin<Box<dyn Future<Output = ()> + 'static>>;
 
+/// Opaque identity shared by one host supervisor and only its submission
+/// ports; context clones cannot manufacture ownership of a foreign driver.
+#[derive(Clone)]
+pub struct LocalTaskOwnerToken(Rc<()>);
+
+impl LocalTaskOwnerToken {
+    fn new() -> Self {
+        Self(Rc::new(()))
+    }
+
+    pub(crate) fn same(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
 mod lease;
 mod slot;
 #[cfg(target_arch = "wasm32")]
@@ -67,6 +82,12 @@ impl LocalTaskFailure {
 }
 
 pub trait RuntimeLocalTaskService {
+    /// Existing embedding ports remain source-compatible but cannot claim
+    /// canonical lifecycle-host ownership without an exact supervisor token.
+    fn owner_token(&self) -> Option<LocalTaskOwnerToken> {
+        None
+    }
+
     fn spawn_local(
         &self,
         owner: RuntimeContextLocalId,

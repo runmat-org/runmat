@@ -516,6 +516,8 @@ pub enum Instr {
         is_abstract: bool,
         properties: Vec<BytecodeClassProperty>,
         methods: Vec<BytecodeClassMethod>,
+        #[serde(default)]
+        events: Vec<runmat_types::EventDeclaration>,
         enumerations: Vec<String>,
     },
 

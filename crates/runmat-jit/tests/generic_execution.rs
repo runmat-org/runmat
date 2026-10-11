@@ -808,6 +808,7 @@ fn suspending_subscript_prefix_is_prepared_once_before_end_and_suffix() {
         Arc::new(|name| (name == "suspending_prefix_subsref").then_some(9)),
     ));
     runmat_runtime::class_registry::register_class(runmat_runtime::class_registry::RuntimeClass {
+        events: Default::default(),
         name: "SuspendingPrefixObject".into(),
         parent: None,
         properties: std::collections::HashMap::new(),
@@ -891,6 +892,7 @@ fn suspending_object_end_and_final_path_do_not_replay_prior_stages() {
         implicit_class_argument: None,
     };
     runmat_runtime::class_registry::register_class(runmat_runtime::class_registry::RuntimeClass {
+        events: Default::default(),
         name: "StagedPathObject".into(),
         parent: None,
         properties: std::collections::HashMap::new(),
@@ -1032,6 +1034,7 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
     let runtime = runtime_context();
     let activation = runtime.enter();
     runmat_runtime::class_registry::register_class(runmat_runtime::class_registry::RuntimeClass {
+        events: Default::default(),
         name: "NativeParent".into(),
         parent: None,
         properties: std::collections::HashMap::new(),
@@ -1051,6 +1054,7 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
         .collect(),
     });
     runmat_runtime::class_registry::register_class(runmat_runtime::class_registry::RuntimeClass {
+        events: Default::default(),
         name: "NativeChild".into(),
         parent: Some("NativeParent".into()),
         properties: std::collections::HashMap::new(),
@@ -1085,12 +1089,14 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
     let runtime = runtime_context();
     let activation = runtime.enter();
     runmat_runtime::class_registry::register_class(runmat_runtime::class_registry::RuntimeClass {
+        events: Default::default(),
         name: "NativeParent".into(),
         parent: None,
         properties: std::collections::HashMap::new(),
         methods: std::collections::HashMap::new(),
     });
     runmat_runtime::class_registry::register_class(runmat_runtime::class_registry::RuntimeClass {
+        events: Default::default(),
         name: "NativeChild".into(),
         parent: Some("NativeParent".into()),
         properties: std::collections::HashMap::new(),

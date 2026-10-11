@@ -5,6 +5,7 @@ use super::*;
 fn setfield_assigns_object_property() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let mut class_def = crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: "Simple".into(),
         parent: None,
         properties: Default::default(),
@@ -43,6 +44,7 @@ fn setfield_assigns_object_property() {
 fn setfield_errors_on_static_property_assignment() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let mut class_def = crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: "StaticSetfield".into(),
         parent: None,
         properties: Default::default(),
@@ -84,6 +86,7 @@ fn setfield_rejects_inherited_static_property_assignment() {
     let child_name = "runmat.unittest.StaticSetfieldChild";
 
     let mut parent = crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: parent_name.into(),
         parent: None,
         properties: Default::default(),
@@ -103,6 +106,7 @@ fn setfield_rejects_inherited_static_property_assignment() {
     );
     crate::class_registry::register_class(parent);
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: child_name.into(),
         parent: Some(parent_name.into()),
         properties: Default::default(),

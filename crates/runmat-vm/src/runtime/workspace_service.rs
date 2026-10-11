@@ -2,6 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use runmat_runtime::context::RuntimeWorkspaceService;
+use runmat_runtime::workspace::{DetachedWorkspaceValues, WorkspaceDetachSelection};
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
@@ -9,9 +10,10 @@ use super::workspace::workspace_frame_for_service;
 use super::workspace::{
     reconcile_workspace_frame, release_pending_workspace_service_frame,
     reserve_workspace_service_frame, workspace_frame_assign, workspace_frame_assign_from_executor,
-    workspace_frame_clear, workspace_frame_declare_global, workspace_frame_lookup,
-    workspace_frame_name_is_global, workspace_frame_publishes, workspace_frame_remove,
-    workspace_frame_snapshot, PendingWorkspaceAdmission, WorkspaceFrameId, WorkspaceFrameLifecycle,
+    workspace_frame_clear, workspace_frame_declare_global, workspace_frame_detach_selected,
+    workspace_frame_lookup, workspace_frame_name_is_global, workspace_frame_publishes,
+    workspace_frame_remove, workspace_frame_snapshot, PendingWorkspaceAdmission, WorkspaceFrameId,
+    WorkspaceFrameLifecycle,
 };
 
 /// Exact current-frame service installed around one interpreter invocation.
@@ -114,6 +116,36 @@ impl Drop for VmWorkspaceService {
 }
 
 impl RuntimeWorkspaceService for VmWorkspaceService {
+    fn detach_selected(
+        &self,
+        selection: &WorkspaceDetachSelection,
+    ) -> Result<DetachedWorkspaceValues, RuntimeError> {
+        self.ensure_frame_active()?;
+        self.ensure_effect_authority()?;
+        let delegate = self.should_publish().then(|| self.delegate()).flatten();
+        workspace_frame_detach_selected(self.frame, selection, |detached| {
+            let _retired_delegate = if let Some(delegate) = delegate {
+                let delegated = match selection {
+                    WorkspaceDetachSelection::All => WorkspaceDetachSelection::All,
+                    WorkspaceDetachSelection::Names(names) => {
+                        WorkspaceDetachSelection::Names(names.clone())
+                    }
+                    WorkspaceDetachSelection::Except(_) => WorkspaceDetachSelection::Names(
+                        detached
+                            .entries()
+                            .iter()
+                            .map(|(name, _)| name.clone())
+                            .collect(),
+                    ),
+                };
+                Some(delegate.detach_selected(&delegated)?)
+            } else {
+                None
+            };
+            Ok(())
+        })
+    }
+
     fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         if self.is_pending() {
             return self
@@ -194,6 +226,12 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
 
     fn ensure_effect_authority(&self) -> Result<(), RuntimeError> {
         self.ensure_frame_active()?;
+        if super::workspace::frame_is_detaching(self.frame) {
+            return Err(frame_error(
+                "RunMat:Workspace:FrameUnavailable",
+                "workspace frame has an active detach transaction",
+            ));
+        }
         if let Some(delegate) = self.delegate() {
             delegate.ensure_effect_authority()?;
             if self.should_publish() {
@@ -219,6 +257,12 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
 
     fn ensure_mutation_authority(&self) -> Result<(), RuntimeError> {
         self.ensure_frame_active()?;
+        if super::workspace::frame_is_detaching(self.frame) {
+            return Err(frame_error(
+                "RunMat:Workspace:FrameUnavailable",
+                "workspace frame has an active detach transaction",
+            ));
+        }
         if let Some(delegate) = self.delegate() {
             delegate.ensure_mutation_authority()?;
         }
@@ -602,6 +646,129 @@ mod tests {
             assert_eq!(service.lookup("x"), Some(Value::Num(3.0)));
             assert_eq!(delegate.snapshots.get(), 2);
             drop(guard);
+        }));
+    }
+
+    #[test]
+    fn exact_detach_rejects_synchronous_rebind_during_publication() {
+        let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+        let base = runmat_runtime::workspace::BaseWorkspaceService::new(owner);
+        base.assign("x", Value::Num(1.0)).unwrap();
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let ports = runtime
+            .service_ports()
+            .clone()
+            .with_workspace(Rc::new(base.clone()));
+        let runtime = runtime.with_service_ports(ports);
+        let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
+        futures::executor::block_on(workspace_scope(runtime, &service, async {
+            let mut values = vec![Value::Num(1.0)];
+            let guard = super::super::workspace::set_workspace_state(
+                HashMap::from([("x".to_string(), 0)]),
+                HashSet::from(["x".to_string()]),
+                &mut values,
+                FrameGlobalBindings::default(),
+            );
+            let detached = workspace_frame_detach_selected(
+                service.frame,
+                &WorkspaceDetachSelection::Names(vec!["x".into()]),
+                |_| {
+                    assert!(
+                        workspace_frame_assign(service.frame, "x", Value::Num(2.0)).is_err(),
+                        "publication cannot synchronously rebind the guarded frame"
+                    );
+                    assert!(
+                        service.assign("x", Value::Num(2.0)).is_err(),
+                        "service admission must fail before delegated publication"
+                    );
+                    assert_eq!(base.lookup("x"), Some(Value::Num(1.0)));
+                    Ok(())
+                },
+            )
+            .expect("exact transaction");
+            assert_eq!(detached.entries(), &[("x".into(), Value::Num(1.0))]);
+            service.assign("x", Value::Num(3.0)).unwrap();
+            assert_eq!(service.try_lookup("x").unwrap(), Some(Value::Num(3.0)));
+            drop(guard);
+        }));
+    }
+
+    #[test]
+    fn nested_top_level_vm_detach_publishes_through_both_exact_frames() {
+        let owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+        let base = runmat_runtime::workspace::BaseWorkspaceService::new(owner);
+        base.assign("x", Value::Num(1.0)).unwrap();
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let ports = runtime
+            .service_ports()
+            .clone()
+            .with_workspace(Rc::new(base.clone()));
+        let (outer_runtime, outer) =
+            VmWorkspaceService::prepare(runtime.with_service_ports(ports), None);
+        futures::executor::block_on(workspace_scope(outer_runtime.clone(), &outer, async {
+            let mut outer_values = vec![Value::Num(1.0)];
+            let outer_guard = super::super::workspace::set_workspace_state(
+                HashMap::from([("x".to_string(), 0)]),
+                HashSet::from(["x".to_string()]),
+                &mut outer_values,
+                FrameGlobalBindings::default(),
+            );
+            let (inner_runtime, inner) = VmWorkspaceService::prepare(outer_runtime, None);
+            workspace_scope(inner_runtime, &inner, async {
+                let mut inner_values = vec![Value::Num(1.0)];
+                let inner_guard = super::super::workspace::set_workspace_state(
+                    HashMap::from([("x".to_string(), 0)]),
+                    HashSet::from(["x".to_string()]),
+                    &mut inner_values,
+                    FrameGlobalBindings::default(),
+                );
+                let detached = inner
+                    .detach_selected(&WorkspaceDetachSelection::Names(vec!["x".into()]))
+                    .expect("nested exact publication");
+                assert_eq!(detached.entries(), &[("x".into(), Value::Num(1.0))]);
+                assert_eq!(inner.lookup("x"), None);
+                assert_eq!(outer.lookup("x"), None);
+                assert_eq!(base.lookup("x"), None);
+                drop(inner_guard);
+            })
+            .await;
+            drop(outer_guard);
+        }));
+    }
+
+    #[test]
+    fn workspace_guard_drop_during_publication_defers_exact_frame_retirement() {
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
+        futures::executor::block_on(workspace_scope(runtime, &service, async {
+            let mut values = vec![Value::Num(1.0)];
+            let mut guard = Some(super::super::workspace::set_transient_workspace_state(
+                HashMap::from([("x".to_string(), 0)]),
+                HashSet::from(["x".to_string()]),
+                &mut values,
+                FrameGlobalBindings::default(),
+            ));
+            let detached = workspace_frame_detach_selected(
+                service.frame,
+                &WorkspaceDetachSelection::All,
+                |_| {
+                    drop(guard.take());
+                    assert_eq!(service.lookup("x"), Some(Value::Num(1.0)));
+                    Ok(())
+                },
+            )
+            .expect("frame stays published through exact detach commit");
+            assert_eq!(detached.entries(), &[("x".into(), Value::Num(1.0))]);
+            assert!(
+                service.try_lookup("x").is_err(),
+                "deferred close runs after commit"
+            );
         }));
     }
 

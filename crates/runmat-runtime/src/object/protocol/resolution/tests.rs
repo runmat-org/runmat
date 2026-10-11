@@ -31,6 +31,7 @@ fn register(
     methods: impl IntoIterator<Item = RuntimeMethod>,
 ) {
     crate::class_registry::register_class(RuntimeClass {
+        events: Default::default(),
         name,
         parent,
         properties: HashMap::new(),

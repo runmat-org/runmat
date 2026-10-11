@@ -2,13 +2,17 @@ use std::sync::Arc;
 
 use runmat_runtime::{build_runtime_error, RuntimeError};
 
-use super::super::{DynamicFunctionCacheEntry, DynamicFunctionDependency};
+use super::super::{
+    private_source_owner::CapturedPrivateSourceOwners, DynamicFunctionCacheEntry,
+    DynamicFunctionDependency,
+};
 
 pub(super) fn attach_dynamic_function_origins(
     bytecode: &mut runmat_vm::Bytecode,
     revision: &runmat_execution::ProgramRevision,
     source_map: &crate::ExecutableSourceMap,
 ) -> Result<(), runmat_execution::ContractError> {
+    let private_owners = CapturedPrivateSourceOwners::new(source_map);
     for function in bytecode.function_registry.functions.values_mut() {
         let origin = match function.binding_origin {
             Some(origin) => origin,
@@ -27,6 +31,7 @@ pub(super) fn attach_dynamic_function_origins(
                 .and_then(|index| source_map.entries().get(index))
                 .and_then(|entry| entry.full_path.clone())
         });
+        function.private_source_owner = function.source_id.and_then(|id| private_owners.get(id));
     }
     bytecode.bound_functions = bytecode.function_registry.functions.clone();
     Ok(())

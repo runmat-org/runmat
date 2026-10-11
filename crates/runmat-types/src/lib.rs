@@ -20,9 +20,9 @@ pub use contract::*;
 pub use convolution::ConvolutionMode;
 pub use declaration::{
     ClassArrayPayload, ClassArrayShape, ClassDeclaration, ClassKind, EnumerationDeclaration,
-    EventDeclaration, ExternalClassDeclaration, ExternalMethodDeclaration,
-    ExternalPropertyDeclaration, FunctionArgDefaultValue, FunctionArgDim,
-    FunctionArgRangeInclusivity, FunctionArgSizeSpec, FunctionArgValidationLiteral,
+    EventAccess, EventAttributes, EventDeclaration, ExternalClassDeclaration,
+    ExternalMethodDeclaration, ExternalPropertyDeclaration, FunctionArgDefaultValue,
+    FunctionArgDim, FunctionArgRangeInclusivity, FunctionArgSizeSpec, FunctionArgValidationLiteral,
     FunctionArgValidator, InheritanceDeclaration, MemberAccess, MethodAttributes,
     MethodDeclaration, PropertyAttributes, PropertyDeclaration, SemanticAttribute,
 };

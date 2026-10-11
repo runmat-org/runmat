@@ -204,7 +204,28 @@ async fn execute_portable_request(
     } else {
         runtime
     };
-    let response = runmat_vm::execute_program_request_with_context(request, runtime).await;
+    let driver = session.local_task_driver();
+    let mut response = match driver
+        .participate_foreground(runmat_vm::execute_program_request_with_context(
+            request,
+            runtime.clone(),
+        ))
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => runmat_vm::runtime_failure_response(error, &runtime),
+    };
+    if let Err(error) = session.close_gracefully().await {
+        if matches!(
+            &response,
+            ProgramExecutionResponse::Failure { .. }
+                | ProgramExecutionResponse::RuntimeFailure { .. }
+        ) {
+            eprintln!("cleanup callback failed after worker execution error: {error}");
+        } else {
+            response = runmat_vm::runtime_failure_response(error, &runtime);
+        }
+    }
     if let Err(error) = session.shutdown_foreign_runtime().await {
         return ProgramExecutionResponse::Failure {
             message: format!("worker could not shut down foreign execution session: {error}"),

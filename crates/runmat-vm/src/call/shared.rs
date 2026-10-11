@@ -228,6 +228,7 @@ mod tests {
         );
         runmat_runtime::class_registry::register_class(
             runmat_runtime::class_registry::RuntimeClass {
+                events: Default::default(),
                 name: parent_name.clone(),
                 parent: None,
                 properties: HashMap::new(),
@@ -236,6 +237,7 @@ mod tests {
         );
         runmat_runtime::class_registry::register_class(
             runmat_runtime::class_registry::RuntimeClass {
+                events: Default::default(),
                 name: child_name.clone(),
                 parent: Some(parent_name),
                 properties: HashMap::new(),
@@ -276,6 +278,7 @@ mod tests {
         );
         runmat_runtime::class_registry::register_class(
             runmat_runtime::class_registry::RuntimeClass {
+                events: Default::default(),
                 name: parent_name.clone(),
                 parent: None,
                 properties: HashMap::new(),
@@ -284,6 +287,7 @@ mod tests {
         );
         runmat_runtime::class_registry::register_class(
             runmat_runtime::class_registry::RuntimeClass {
+                events: Default::default(),
                 name: child_name.clone(),
                 parent: Some(parent_name),
                 properties: HashMap::new(),

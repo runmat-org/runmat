@@ -53,18 +53,21 @@ fn register_hierarchy(label: &str) -> (String, String, String) {
     let child = unique_class_name(&format!("{label}Child"));
 
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: grand.clone().into(),
         parent: None,
         properties: HashMap::new(),
         methods: HashMap::from([("root".into(), method("root"))]),
     });
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: parent.clone().into(),
         parent: Some(grand.clone().into()),
         properties: HashMap::new(),
         methods: HashMap::from([("mid".into(), method("mid"))]),
     });
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: child.clone().into(),
         parent: Some(parent.clone().into()),
         properties: HashMap::new(),

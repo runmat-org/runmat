@@ -884,6 +884,7 @@ fn retained_execution_stack_does_not_borrow_published_method_targets() {
             access: runmat_types::MemberAccess::Public,
         }],
         enumerations: Vec::new(),
+        events: Vec::new(),
     }];
     registry.insert_replacing_name(published_registration);
     registry.insert_replacing_name(function(2, "Example.pure", 7));

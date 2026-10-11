@@ -106,8 +106,26 @@ pub struct ExternalMethodDeclaration {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventDeclaration {
     pub name: MemberName,
+    #[serde(default)]
+    pub attributes: EventAttributes,
     pub declared_attributes: Vec<SemanticAttribute>,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct EventAttributes {
+    pub is_hidden: bool,
+    pub listen_access: EventAccess,
+    pub notify_access: EventAccess,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum EventAccess {
+    #[default]
+    Public,
+    Private,
+    Protected,
+    Classes(Vec<ClassIdentity>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -19,15 +19,18 @@ use super::{
     NATIVE_FFI_HOST_PROTOCOL, NATIVE_FFI_HOST_SCHEMA_VERSION, NATIVE_FFI_HOST_SECRET_ENV,
     NATIVE_FFI_HOST_SNAPSHOT_ROOT_ENV,
 };
-use crate::context::{ForeignCall, RuntimeContext};
+use crate::context::{
+    ForeignCall, RuntimeContext, RuntimeLifecycleHost, RuntimeLocalTaskSupervisor,
+    RuntimeServicePorts,
+};
 use crate::execution::RuntimeExecutionService;
 use crate::foreign::{
     ForeignAdapter, ForeignHandleRegistry, NativeFfiAdapter, NativeFfiCallbackRouter,
 };
 
-type StdioChannel = HostChannel<std::io::Stdin, std::io::Stdout>;
+type StdioChannel = HostChannel<std::io::Stdout>;
 
-pub fn run_native_ffi_extension_host() -> Result<(), String> {
+pub async fn run_native_ffi_extension_host() -> Result<(), String> {
     let encoded_secret = std::env::var(NATIVE_FFI_HOST_SECRET_ENV)
         .map_err(|_| "native-library host bootstrap secret is unavailable".to_string())?;
     std::env::remove_var(NATIVE_FFI_HOST_SECRET_ENV);
@@ -53,10 +56,17 @@ pub fn run_native_ffi_extension_host() -> Result<(), String> {
         &secret,
     )
     .map_err(|error| error.to_string())?;
-    let channel = Rc::new(RefCell::new(HostChannel {
+    let limits = session.limits;
+    let inbox = super::super::super::isolation_input::spawn_input_reader(
         reader,
+        "runmat-native-ffi-input",
+        move |reader| read_native_driver(reader, limits),
+    )?;
+    let _input_close = super::super::super::isolation_input::InputMailboxClose::new(inbox.clone());
+    let channel = Rc::new(RefCell::new(HostChannel {
+        inbox,
         writer,
-        limits: session.limits,
+        limits,
     }));
     let callback_router = Rc::new(IsolatedCallbackRouter {
         channel: Rc::clone(&channel),
@@ -76,15 +86,35 @@ pub fn run_native_ffi_extension_host() -> Result<(), String> {
     )
     .map_err(|error| error.to_string())?;
     let context = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+    let supervisor = Rc::new(RuntimeLocalTaskSupervisor::new());
+    let local_identity = context.local_identity();
+    let context = context.with_service_ports(
+        RuntimeServicePorts::default().with_local_tasks(supervisor.submission_port(local_identity)),
+    );
+    let lifecycle = RuntimeLifecycleHost::new(&context, Rc::clone(&supervisor))
+        .map_err(|error| error.to_string())?;
     let mut resources = RemoteResources::default();
 
     loop {
-        let message = channel.borrow_mut().read_driver()?;
+        let inbox = channel.borrow().inbox.clone();
+        let message = supervisor
+            .participate_foreground(inbox.next())
+            .await
+            .map_err(|error| error.to_string())??;
         match message {
             NativeDriverMessage::Invoke(request) => {
                 let request_id = request.request_id;
                 callback_router.active_request.set(request_id);
-                let outcome = invoke(&adapter, &context, request, &snapshots, &mut resources);
+                let outcome = invoke(
+                    &adapter,
+                    &context,
+                    &supervisor,
+                    &lifecycle,
+                    request,
+                    &snapshots,
+                    &mut resources,
+                )
+                .await;
                 callback_router.active_request.set(0);
                 channel
                     .borrow_mut()
@@ -97,12 +127,20 @@ pub fn run_native_ffi_extension_host() -> Result<(), String> {
                 request_id,
                 releases,
             } => {
+                let cleanup = supervisor
+                    .participate_foreground(lifecycle.retire_workspace_and_drain(&context))
+                    .await;
+                let outcome = match cleanup {
+                    Ok(outcome) => outcome.map_err(runtime_wire_error),
+                    Err(error) => Err(runtime_wire_error(error)),
+                };
+                lifecycle.force_close();
                 resources.release(&releases);
                 channel
                     .borrow_mut()
                     .write_host(&NativeHostMessage::Shutdown(NativeShutdownResult {
                         request_id,
-                        outcome: Ok(()),
+                        outcome,
                     }))?;
                 return Ok(());
             }
@@ -113,9 +151,11 @@ pub fn run_native_ffi_extension_host() -> Result<(), String> {
     }
 }
 
-fn invoke(
+async fn invoke(
     adapter: &Rc<NativeFfiAdapter>,
     context: &RuntimeContext,
+    supervisor: &Rc<RuntimeLocalTaskSupervisor>,
+    lifecycle: &RuntimeLifecycleHost,
     request: NativeInvocationRequest,
     snapshots: &SharedSnapshotStore,
     resources: &mut RemoteResources,
@@ -126,17 +166,30 @@ fn invoke(
         .into_iter()
         .map(|value| decode_host_value(value, snapshots, resources))
         .collect::<Result<Vec<_>, _>>()?;
-    let value = pollster::block_on(context.scope(adapter.invoke(
-        context.clone(),
-        ForeignCall {
-            adapter: runmat_native_ffi::NATIVE_FFI_ADAPTER_ID.into(),
-            symbol: request.operation,
-            arguments,
-            requested_outputs: request.requested_outputs as usize,
-        },
-    )))
-    .map_err(runtime_wire_error)?;
-    encode_host_outputs(value, snapshots, resources)
+    let value = supervisor
+        .participate_foreground(async {
+            let value = context
+                .clone()
+                .scope(adapter.invoke(
+                    context.clone(),
+                    ForeignCall {
+                        adapter: runmat_native_ffi::NATIVE_FFI_ADAPTER_ID.into(),
+                        symbol: request.operation,
+                        arguments,
+                        requested_outputs: request.requested_outputs as usize,
+                    },
+                ))
+                .await?;
+            let value = crate::execution::RootedValueSequence::new(value)
+                .map_err(|error| error.into_runtime_error())?;
+            lifecycle.service_safepoint(context)?;
+            lifecycle.drain_gracefully(context).await?;
+            Ok(value)
+        })
+        .await
+        .map_err(runtime_wire_error)?
+        .map_err(runtime_wire_error)?;
+    value.with_owned_sequence(|value| encode_host_outputs(value, snapshots, resources))
 }
 
 fn encode_host_outputs(
@@ -251,24 +304,13 @@ impl RemoteResources {
     }
 }
 
-struct HostChannel<R, W> {
-    reader: R,
+struct HostChannel<W> {
+    inbox: std::sync::Arc<super::super::super::isolation_input::InputMailbox<NativeDriverMessage>>,
     writer: W,
     limits: FrameLimits,
 }
 
-impl<R: Read, W: Write> HostChannel<R, W> {
-    fn read_driver(&mut self) -> Result<NativeDriverMessage, String> {
-        let payload = read_payload_blocking(&mut self.reader, self.limits)
-            .map_err(|error| error.to_string())?;
-        let message: NativeDriverMessage = serde_json::from_slice(&payload)
-            .map_err(|error| format!("invalid native-library driver record: {error}"))?;
-        message
-            .validate()
-            .map_err(|error| format!("invalid native-library driver record: {error}"))?;
-        Ok(message)
-    }
-
+impl<W: Write> HostChannel<W> {
     fn write_host(&mut self, message: &NativeHostMessage) -> Result<(), String> {
         message
             .validate()
@@ -278,6 +320,19 @@ impl<R: Read, W: Write> HostChannel<R, W> {
         write_payload_blocking(&mut self.writer, &payload, self.limits)
             .map_err(|error| error.to_string())
     }
+}
+
+fn read_native_driver(
+    reader: &mut impl Read,
+    limits: FrameLimits,
+) -> Result<NativeDriverMessage, String> {
+    let payload = read_payload_blocking(reader, limits).map_err(|error| error.to_string())?;
+    let message: NativeDriverMessage = serde_json::from_slice(&payload)
+        .map_err(|error| format!("invalid native-library driver record: {error}"))?;
+    message
+        .validate()
+        .map_err(|error| format!("invalid native-library driver record: {error}"))?;
+    Ok(message)
 }
 
 struct IsolatedCallbackRouter {
@@ -308,14 +363,16 @@ impl NativeFfiCallbackRouter for IsolatedCallbackRouter {
                 .map(|value| encode_portable(value, &self.snapshots).map(NativeWireValue::Portable))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|error| error.message)?;
-            let mut channel = self.channel.borrow_mut();
-            channel.write_host(&NativeHostMessage::Callback(NativeCallbackRequest {
-                request_id,
-                callback_id,
-                depth,
-                arguments,
-            }))?;
-            let response = channel.read_driver()?;
+            self.channel
+                .borrow_mut()
+                .write_host(&NativeHostMessage::Callback(NativeCallbackRequest {
+                    request_id,
+                    callback_id,
+                    depth,
+                    arguments,
+                }))?;
+            let inbox = self.channel.borrow().inbox.clone();
+            let response = inbox.read_blocking()?;
             let NativeDriverMessage::CallbackResult(response) = response else {
                 return Err("native host expected a callback result".into());
             };

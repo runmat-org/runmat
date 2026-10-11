@@ -357,12 +357,14 @@ fn exist_method_uses_registered_class_metadata_including_inheritance() {
         },
     );
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: parent_name.clone().into(),
         parent: None,
         properties: HashMap::new(),
         methods: parent_methods,
     });
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: child_name.clone().into(),
         parent: Some(parent_name.clone().into()),
         properties: HashMap::new(),

@@ -109,6 +109,7 @@ fn ensure_ss_class_registered() {
         let methods: HashMap<runmat_types::MethodName, crate::class_registry::RuntimeMethod> =
             HashMap::new();
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
             name: SS_CLASS.into(),
             parent: None,
             properties,

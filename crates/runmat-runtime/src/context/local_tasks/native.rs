@@ -4,6 +4,7 @@ use tokio::task::LocalSet;
 
 struct SupervisorInner {
     id: SupervisorId,
+    token: LocalTaskOwnerToken,
     local: RefCell<Option<Rc<LocalSet>>>,
     closed: Cell<bool>,
     driving: Cell<bool>,
@@ -30,9 +31,14 @@ impl Drop for NativeCompletionOnDrop {
 struct SubmissionPort {
     supervisor: Weak<SupervisorInner>,
     owner: RuntimeContextLocalId,
+    token: LocalTaskOwnerToken,
 }
 
 impl RuntimeLocalTaskService for SubmissionPort {
+    fn owner_token(&self) -> Option<LocalTaskOwnerToken> {
+        Some(self.token.clone())
+    }
+
     fn spawn_local(
         &self,
         owner_id: RuntimeContextLocalId,
@@ -106,6 +112,7 @@ impl RuntimeLocalTaskSupervisor {
     pub fn new() -> Self {
         Self(Rc::new(SupervisorInner {
             id: SupervisorId::new(),
+            token: LocalTaskOwnerToken::new(),
             local: RefCell::new(Some(Rc::new(LocalSet::new()))),
             closed: Cell::new(false),
             driving: Cell::new(false),
@@ -118,7 +125,12 @@ impl RuntimeLocalTaskSupervisor {
         Rc::new(SubmissionPort {
             supervisor: Rc::downgrade(&self.0),
             owner,
+            token: self.0.token.clone(),
         })
+    }
+
+    pub fn owner_token(&self) -> LocalTaskOwnerToken {
+        self.0.token.clone()
     }
 
     #[cfg(test)]

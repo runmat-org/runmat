@@ -2,7 +2,21 @@ use runmat_value::Value;
 
 use super::{
     base, resolver_storage, with_context_resolver, BaseWorkspaceOwner, BaseWorkspaceProjection,
+    DetachedWorkspaceValues, WorkspaceDetachSelection,
 };
+
+/// Exact current-service retirement. The legacy resolver has no binding
+/// identity, so it cannot authorize a callback-bearing clear operation.
+pub fn try_detach_selected(
+    selection: &WorkspaceDetachSelection,
+) -> Result<DetachedWorkspaceValues, crate::RuntimeError> {
+    let context = crate::context::legacy::active().ok_or_else(workspace_capability_error)?;
+    let service = context
+        .service_ports()
+        .workspace()
+        .ok_or_else(workspace_capability_error)?;
+    service.detach_selected(selection)
+}
 
 /// Checked lookup for code that must distinguish an empty workspace from an
 /// unavailable or closed workspace authority. An installed service is the

@@ -203,6 +203,8 @@ impl ExecutableUnit {
         use runmat_execution::{ExecutableComponentKind as Kind, ExecutableComponentPayload};
 
         self.source_map().validate_content_revisions()?;
+        self.source_map()
+            .validate_private_source_owners(self.functions())?;
 
         let source_map = PortableSourceMap {
             entries: self

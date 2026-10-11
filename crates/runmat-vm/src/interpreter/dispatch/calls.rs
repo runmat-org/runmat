@@ -677,43 +677,26 @@ pub fn handle_load_static_property(
 }
 
 pub fn handle_register_class(
-    name: runmat_types::ClassIdentity,
-    super_class: Option<runmat_types::ClassIdentity>,
-    is_sealed: bool,
-    is_abstract: bool,
-    properties: Vec<crate::bytecode::instr::BytecodeClassProperty>,
-    methods: Vec<crate::bytecode::instr::BytecodeClassMethod>,
-    enumerations: Vec<String>,
+    registration: obj_class_def::ClassRegistration<crate::bytecode::instr::BytecodeClassProperty>,
 ) -> Result<MethodHandling, RuntimeError> {
-    let properties = properties
-        .into_iter()
-        .map(|property| {
-            let default_value = property.default_literal.map(|literal| match literal {
-                PropertyDefaultLiteral::Num(value) => Value::Num(value),
-                PropertyDefaultLiteral::Int(value) => Value::Int(value),
-                PropertyDefaultLiteral::Bool(value) => Value::Bool(value),
-                PropertyDefaultLiteral::String(value) => Value::String(value),
-            });
-            crate::object::class_def::RuntimeClassPropertyRegistration {
-                name: property.name,
-                is_static: property.is_static,
-                is_constant: property.is_constant,
-                is_dependent: property.is_dependent,
-                default_value,
-                get_access: property.get_access,
-                set_access: property.set_access,
-            }
-        })
-        .collect();
-    obj_class_def::register_class(
-        name,
-        super_class,
-        is_sealed,
-        is_abstract,
-        properties,
-        methods,
-        enumerations,
-    )?;
+    let registration = registration.map_properties(|property| {
+        let default_value = property.default_literal.map(|literal| match literal {
+            PropertyDefaultLiteral::Num(value) => Value::Num(value),
+            PropertyDefaultLiteral::Int(value) => Value::Int(value),
+            PropertyDefaultLiteral::Bool(value) => Value::Bool(value),
+            PropertyDefaultLiteral::String(value) => Value::String(value),
+        });
+        crate::object::class_def::RuntimeClassPropertyRegistration {
+            name: property.name,
+            is_static: property.is_static,
+            is_constant: property.is_constant,
+            is_dependent: property.is_dependent,
+            default_value,
+            get_access: property.get_access,
+            set_access: property.set_access,
+        }
+    });
+    obj_class_def::register_class(registration)?;
     Ok(MethodHandling::Completed)
 }
 

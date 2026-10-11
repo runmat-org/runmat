@@ -6,9 +6,9 @@ use std::rc::Rc;
 
 use runmat_accelerate::fusion::{FusionOp, FusionPlan, FusionStoreMaterialization};
 use runmat_accelerate::graph::{AccelGraph, VarBinding, VarKind};
-use runmat_accelerate::{FusionPlanRef, prepare_fusion_plan};
+use runmat_accelerate::{prepare_fusion_plan, FusionPlanRef};
 
-use crate::accel::graph::{AccelStore, build_accel_graph_with_stores};
+use crate::accel::graph::{build_accel_graph_with_stores, AccelStore};
 use crate::accel::stack_layout::annotate_fusion_groups_with_stack_layout;
 use crate::bytecode::Instr;
 

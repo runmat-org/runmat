@@ -5,6 +5,7 @@
 //! migrated through [`legacy`] and must not become new semantic dependencies.
 
 mod capability;
+mod cleanup_lifecycle;
 mod callable_artifacts;
 mod graphics_presentation;
 mod graphics_callbacks;
@@ -52,6 +53,7 @@ pub use callable_artifacts::{
 };
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use catch::{ActiveCatchFuture, ActiveCatchGuard, UnboxedActiveCatchFuture};
+pub use cleanup_lifecycle::RuntimeLifecycleHost;
 pub use graphics_callbacks::{
     GraphicsCallbackDisposition, GraphicsCallbackHandler, GraphicsCallbackHostEvent,
     GraphicsCallbackHostFailure, GraphicsCallbackHostTicket, GraphicsCallbackIngress,
@@ -72,7 +74,8 @@ pub use local_tasks::BrowserLocalTaskSupervisor;
 #[cfg(not(target_arch = "wasm32"))]
 pub use local_tasks::RuntimeLocalTaskSupervisor;
 pub use local_tasks::{
-    RuntimeLocalTaskFuture, RuntimeLocalTaskLease, RuntimeLocalTaskOutcome, RuntimeLocalTaskService,
+    LocalTaskOwnerToken, RuntimeLocalTaskFuture, RuntimeLocalTaskLease, RuntimeLocalTaskOutcome,
+    RuntimeLocalTaskService,
 };
 pub use managed_observations::{ManagedObservationLease, ManagedObservationPool};
 #[cfg(target_arch = "wasm32")]

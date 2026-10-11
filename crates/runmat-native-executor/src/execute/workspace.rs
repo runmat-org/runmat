@@ -9,6 +9,7 @@ use runmat_mir::{MirLocalId, MirStmtKind};
 use runmat_native_codegen::NativeInstruction;
 use runmat_runtime::context::RuntimeWorkspaceService;
 use runmat_runtime::workspace::bindings::FrameGlobalBindings;
+use runmat_runtime::workspace::{DetachedWorkspaceValues, WorkspaceDetachSelection};
 use runmat_types::BindingId;
 use runmat_value::Value;
 
@@ -378,6 +379,73 @@ impl NativeWorkspaceService {
 }
 
 impl RuntimeWorkspaceService for NativeWorkspaceService {
+    fn detach_selected(
+        &self,
+        selection: &WorkspaceDetachSelection,
+    ) -> Result<DetachedWorkspaceValues, runmat_runtime::RuntimeError> {
+        self.ensure_effect_authority()?;
+        let frame = self.frame()?;
+        let mut values = frame
+            .values
+            .try_borrow_mut()
+            .map_err(workspace_borrow_error)?;
+        let detached = DetachedWorkspaceValues::new(
+            selection.select(
+                values
+                    .iter()
+                    .map(|(name, entry)| (name.clone(), entry.value.clone()))
+                    .collect(),
+            ),
+        )
+        .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)?;
+        // The frame borrow prevents a reentrant writer between the canonical
+        // publication and the local retirement. No await or user callback is
+        // permitted until both owners have released these exact bindings.
+        let _retired_canonical = if self.publish {
+            if let Some(canonical) = self.canonical() {
+                let delegated = match selection {
+                    WorkspaceDetachSelection::All => WorkspaceDetachSelection::All,
+                    WorkspaceDetachSelection::Names(names) => {
+                        WorkspaceDetachSelection::Names(names.clone())
+                    }
+                    WorkspaceDetachSelection::Except(_) => WorkspaceDetachSelection::Names(
+                        detached
+                            .entries()
+                            .iter()
+                            .map(|(name, _)| name.clone())
+                            .collect(),
+                    ),
+                };
+                Some(canonical.detach_selected(&delegated)?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        match selection {
+            WorkspaceDetachSelection::All => {
+                values.clear();
+                self.global_aliases.unbind_all();
+            }
+            WorkspaceDetachSelection::Names(names) => {
+                for name in names {
+                    values.remove(name);
+                    self.global_aliases.unbind_name(name);
+                }
+            }
+            WorkspaceDetachSelection::Except(_) => {
+                for (name, _) in detached.entries() {
+                    values.remove(name);
+                    self.global_aliases.unbind_name(name);
+                }
+            }
+        }
+        drop(values);
+        frame.externally_mutated.set(true);
+        Ok(detached)
+    }
+
     fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         let frame = self.frame.upgrade()?;
         frame.active.get().then_some(())?;

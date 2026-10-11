@@ -260,7 +260,7 @@ fn selected_jit_result(
     procedure: &str,
     path: &str,
     outputs: usize,
-) -> runmat_value::ValueSequence {
+) -> runmat_runtime::execution::RootedValueSequence {
     // The counter changes only in invoke_tiered_procedure's Some(published)
     // branch. Isolating one preferred function per invocation proves that the
     // result being checked came from its selected native entry, not another

@@ -34,6 +34,7 @@ fn pending_public_getfield_restores_enclosing_session_and_drops_getter() {
     let selected_setup_scope = selected.enter();
     let class = runmat_types::ClassIdentity::from("PendingSelectedGetfieldSession");
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+        events: Default::default(),
         name: class.clone(),
         parent: None,
         properties: std::collections::HashMap::from([(
