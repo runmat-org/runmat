@@ -14,31 +14,96 @@ impl FunctionRegistry {
     ) -> Option<FunctionId> {
         let body = self.get(caller)?;
         if !body.private_owner_scope.is_empty() {
+            if name.contains('.') {
+                return None;
+            }
+            if self.static_overlay.is_some() {
+                let scoped_name = format!("{}.__private__.{name}", body.private_owner_scope);
+                let owners = self.definition_dependency_owners(caller)?;
+                return unique_private_candidate(
+                    &scoped_name,
+                    "",
+                    body.private_source_owner.as_ref(),
+                    private_owner_directory(body)?,
+                    owners.iter().filter_map(|(id, _)| self.get(*id)),
+                );
+            }
             let selected = self.resolve_name_in_private_scope(&body.private_owner_scope, name)?;
             return self.get_current(selected).map(|_| selected);
         }
         if name.contains('.') {
             return None;
         }
-        let caller_file = Path::new(body.source_file.as_deref()?);
-        let caller_directory = caller_file.parent()?;
-        let lexical_owner = if caller_directory
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.eq_ignore_ascii_case("private"))
-        {
-            caller_directory.parent()?
-        } else {
-            caller_directory
-        };
+        let lexical_owner = private_owner_directory(body)?;
         let synthetic_name = format!("__private__.{name}");
-        unique_private_candidate(
-            &synthetic_name,
-            name,
-            body.private_source_owner.as_ref(),
-            lexical_owner,
-            self.functions.values(),
-        )
+        if self.static_overlay.is_some() {
+            // An imported dynamic callable is retained-only. Its selected
+            // private dependencies are the exact leased bodies in this view,
+            // never arbitrary retired definitions or published replacements.
+            let owners = self.definition_dependency_owners(caller)?;
+            unique_private_candidate(
+                &synthetic_name,
+                name,
+                body.private_source_owner.as_ref(),
+                lexical_owner,
+                owners.iter().filter_map(|(id, _)| self.get(*id)),
+            )
+        } else {
+            unique_private_candidate(
+                &synthetic_name,
+                name,
+                body.private_source_owner.as_ref(),
+                lexical_owner,
+                self.functions.values(),
+            )
+        }
+    }
+
+    /// Exact leased authority for a private *name* selection. Generic numeric
+    /// semantic calls must not use this binding: they remain current-published.
+    pub fn scoped_private_binding_for_caller(
+        &self,
+        caller: FunctionId,
+        name: &str,
+    ) -> Option<runmat_value::BoundFunctionBinding> {
+        self.static_overlay.as_ref()?;
+        let selected = self.resolve_private_name_for_caller(caller, name)?;
+        self.static_binding(selected)
+    }
+
+    /// One canonical private selection for execution and observation. A
+    /// published private function keeps its current numeric route; a retained
+    /// body carries the exact lease already selected by this registry view.
+    pub fn scoped_private_name_target_for_caller(
+        &self,
+        caller: FunctionId,
+        name: &str,
+    ) -> Option<runmat_runtime::user_functions::ScopedSemanticNameTarget> {
+        let selected = self.resolve_private_name_for_caller(caller, name)?;
+        if self.static_overlay.is_some() {
+            self.static_binding(selected)
+                .map(runmat_runtime::user_functions::ScopedSemanticNameTarget::Retained)
+        } else {
+            Some(
+                runmat_runtime::user_functions::ScopedSemanticNameTarget::Published(
+                    runmat_types::FunctionId(selected.0),
+                ),
+            )
+        }
+    }
+}
+
+fn private_owner_directory(body: &super::FunctionBytecode) -> Option<&Path> {
+    let source = Path::new(body.source_file.as_deref()?);
+    let directory = source.parent()?;
+    if directory
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("private"))
+    {
+        directory.parent()
+    } else {
+        Some(directory)
     }
 }
 
@@ -50,7 +115,8 @@ fn unique_private_candidate<'a>(
     candidates: impl Iterator<Item = &'a super::FunctionBytecode>,
 ) -> Option<FunctionId> {
     let mut matches = candidates.filter(|candidate| {
-        (candidate.display_name == synthetic_name || candidate.display_name == name)
+        (candidate.display_name == synthetic_name
+            || (!name.is_empty() && candidate.display_name == name))
             && candidate.source_file.as_deref().is_some_and(|source| {
                 let path = Path::new(source);
                 let Some(private_directory) = path.parent() else {
@@ -199,9 +265,24 @@ mod tests {
         );
         assert_eq!(
             retained.resolve_private_name_for_caller(FunctionId(1), "helper"),
-            Some(FunctionId(3)),
-            "the old caller uses its captured directory but observes current published callees"
+            Some(FunctionId(2)),
+            "the old caller selects its exact leased private companion, not a later publication"
         );
+        let private_binding = retained
+            .scoped_private_binding_for_caller(FunctionId(1), "helper")
+            .expect("the selected private name carries its leased graph");
+        assert_eq!(private_binding.function, 2);
+        assert!(private_binding
+            .authority
+            .local_lease(2)
+            .expect("selected private lease")
+            .matches(&retained.get(FunctionId(2)).unwrap().definition_owner));
+        assert!(!private_binding.authority.local_lease(2).unwrap().matches(
+            &retained
+                .get_current(FunctionId(2))
+                .unwrap()
+                .definition_owner
+        ));
         assert_eq!(
             retained
                 .current_view()
@@ -230,6 +311,44 @@ mod tests {
             registry.resolve_private_name_for_caller(FunctionId(1), "helper"),
             Some(FunctionId(2)),
             "observation uses publication-time owner identity, not the access-path spelling"
+        );
+    }
+
+    #[test]
+    fn retained_qualified_private_name_rejects_other_source_owner() {
+        let root = std::env::temp_dir().join("runmat-private-qualified-owner-fixture");
+        let mut caller = body(1, "C.entry", Some(&root.join("left/entry.m")));
+        caller.private_owner_scope = "C".into();
+        caller.private_source_owner = Some(PrivateSourceDirectory::new(root.join("left")));
+        caller.instructions = vec![Instr::CallSemanticFunctionMulti(FunctionId(2), 0, 1)];
+        let mut foreign = body(
+            2,
+            "C.__private__.helper",
+            Some(&root.join("right/private/helper.m")),
+        );
+        foreign.private_source_owner = Some(PrivateSourceDirectory::new(root.join("right")));
+        let registry = FunctionRegistry::new(HashMap::from([
+            (FunctionId(1), caller),
+            (FunctionId(2), foreign),
+        ]));
+        let owners = registry
+            .definition_dependency_owners(FunctionId(1))
+            .unwrap();
+        let issuer = std::sync::Arc::new(());
+        let authority = runmat_value::BoundFunctionAuthority::local(
+            std::sync::Arc::downgrade(&issuer),
+            runmat_value::FunctionDefinitionOwner::issue(&owners[0].1, owners[0].0 .0),
+            owners[1..]
+                .iter()
+                .map(|(id, owner)| runmat_value::FunctionDefinitionOwner::issue(owner, id.0))
+                .collect(),
+            runmat_value::LocalExport::Ephemeral,
+        );
+        let retained = registry.owned_view(FunctionId(1), &authority).unwrap();
+        assert_eq!(
+            retained.resolve_private_name_for_caller(FunctionId(1), "helper"),
+            None,
+            "matching qualified display text cannot cross captured source owners"
         );
     }
 

@@ -234,26 +234,61 @@ impl ProgramInvocationGuards {
 
         let previous_resolver =
             runmat_runtime::user_functions::current_semantic_function_resolver();
+        let previous_candidates =
+            runmat_runtime::user_functions::current_semantic_name_candidates();
         let resolver_program = Arc::new(program.clone());
+        let source_facts = Arc::new(
+            functions
+                .iter()
+                .map(|info| (info.function, info.clone()))
+                .collect::<std::collections::HashMap<_, _>>(),
+        );
         let candidates: Arc<runmat_runtime::user_functions::SemanticNameCandidates> =
             Arc::new(move |name| {
                 let mut candidates = Vec::new();
                 if let Some(function) = resolver_program.resolve_name(name) {
-                    candidates.push(function.0 as usize);
+                    let function = function.0 as usize;
+                    candidates.push(runmat_runtime::user_functions::SemanticNameCandidate {
+                        function,
+                        source: source_facts.get(&function).cloned(),
+                        definition_owner: None,
+                    });
+                }
+                if let Some(previous) = &previous_candidates {
+                    for candidate in previous(name) {
+                        if !candidates
+                            .iter()
+                            .any(|existing| existing.same_definition(&candidate))
+                        {
+                            candidates.push(candidate);
+                        }
+                    }
                 }
                 if let Some(previous) = previous_resolver
                     .as_ref()
                     .and_then(|resolver| resolver(name))
                 {
-                    if !candidates.contains(&previous) {
-                        candidates.push(previous);
+                    if !candidates
+                        .iter()
+                        .any(|candidate| candidate.function == previous)
+                    {
+                        candidates.push(runmat_runtime::user_functions::SemanticNameCandidate {
+                            function: previous,
+                            source: None,
+                            definition_owner: None,
+                        });
                     }
                 }
                 candidates
             });
         let resolver_candidates = Arc::clone(&candidates);
         let resolver = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
-            Arc::new(move |name| resolver_candidates(name).into_iter().next()),
+            Arc::new(move |name| {
+                resolver_candidates(name)
+                    .into_iter()
+                    .next()
+                    .map(|candidate| candidate.function)
+            }),
         ));
         let name_candidates =
             runmat_runtime::user_functions::install_semantic_name_candidates(Some(candidates));

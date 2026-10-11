@@ -107,7 +107,8 @@ fn dynamic_cache_hit_preserves_private_companion_source_attribution() {
             .any(|frame| frame.contains("private/secret.m")),
         "private source must own the failure: {first:?}"
     );
-    let (admitted, unit_bytes, entrypoint_origin) = {
+    let expected_private_path = temporary.path().join("private/secret.m");
+    let (admitted, unit_bytes, entrypoint_origin, private_fullpath) = {
         let cache = session.dynamic_function_cache.snapshot();
         assert_eq!(cache.len(), 1, "the entry was dynamically resolved");
         let entry = cache.values().next().expect("resolved helper");
@@ -115,10 +116,37 @@ fn dynamic_cache_hit_preserves_private_companion_source_attribution() {
             entry.admitted.envelope().manifest.identity.entrypoint,
             "helper"
         );
+        let private_record = entry.source_records.iter().find(|record| {
+            record
+                .fullpath_name
+                .as_deref()
+                .is_some_and(|path| std::path::Path::new(path) == expected_private_path.as_path())
+        });
+        assert!(
+            private_record.is_some(),
+            "expected captured private source {expected_private_path:?}, records: {:?}",
+            entry
+                .source_records
+                .iter()
+                .map(|record| (&record.name, &record.fullpath_name))
+                .collect::<Vec<_>>()
+        );
+        let private_fullpath = private_record
+            .and_then(|record| record.fullpath_name.as_deref())
+            .expect("captured private source spelling")
+            .to_string();
+        assert!(
+            !entry
+                .unit_bytes
+                .windows(private_fullpath.len())
+                .any(|window| window == private_fullpath.as_bytes()),
+            "host display path must not enter the portable envelope"
+        );
         (
             Rc::clone(&entry.admitted),
             Arc::clone(&entry.unit_bytes),
             entry.entrypoint_origin,
+            private_fullpath,
         )
     };
 
@@ -137,7 +165,33 @@ fn dynamic_cache_hit_preserves_private_companion_source_attribution() {
         Arc::ptr_eq(&entry.unit_bytes, &unit_bytes),
         "canonical envelope cache hit"
     );
+    assert!(entry
+        .source_records
+        .iter()
+        .any(|record| { record.fullpath_name.as_deref() == Some(private_fullpath.as_str()) }));
     drop(cache);
+
+    let cached = session.dynamic_function_cache.snapshot();
+    let (path, function) = cached
+        .iter()
+        .next()
+        .map(|(path, entry)| (path.clone(), entry.binding.function))
+        .expect("cached product");
+    drop(cached);
+    session.dynamic_function_cache.replace_binding(
+        &path,
+        runmat_value::BoundFunctionBinding::unavailable(function),
+    );
+    let rebound = execute_helper(&mut session);
+    assert_eq!(rebound.callstack, first.callstack);
+    let rebound_cache = session.dynamic_function_cache.snapshot();
+    let rebound_entry = rebound_cache.values().next().expect("rebound product");
+    assert!(Rc::ptr_eq(&rebound_entry.admitted, &admitted));
+    assert!(rebound_entry
+        .source_records
+        .iter()
+        .any(|record| { record.fullpath_name.as_deref() == Some(private_fullpath.as_str()) }));
+    drop(rebound_cache);
 
     std::fs::write(
         temporary.path().join("private/secret.m"),

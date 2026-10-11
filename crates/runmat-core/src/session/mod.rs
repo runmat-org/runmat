@@ -267,6 +267,7 @@ struct DynamicFunctionCacheEntry {
     selection: DynamicFunctionCacheSelection,
     unit_bytes: Arc<[u8]>,
     admitted: Rc<runmat_vm::AdmittedExecutableUnit>,
+    source_records: Arc<[runmat_runtime::source_context::ProgramSourceRecord]>,
     entrypoint_origin: runmat_execution::FunctionBindingOrigin,
     binding: runmat_value::BoundFunctionBinding,
     dependencies: Arc<[DynamicFunctionDependency]>,

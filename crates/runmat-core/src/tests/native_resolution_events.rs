@@ -137,6 +137,11 @@ fn which_tracks_executable_source_private_scope_and_later_path_revision() {
         "function y = observed_private_value()\n y = 33;\nend\n",
     )
     .expect("private companion");
+    std::fs::write(
+        first_root.join("observed_private_probe.m"),
+        "function [located, value] = observed_private_probe()\n located = which('observed_private_value');\n value = feval('observed_private_value');\nend\n",
+    )
+    .expect("observation-only private caller");
     let _cwd = push_cwd(temporary.path());
     let _path = push_path_state("");
     let mut session = RunMatSession::with_options(false, false).expect("session");
@@ -147,6 +152,7 @@ fn which_tracks_executable_source_private_scope_and_later_path_revision() {
             "first_location = which('observed_path_value'); ",
             "first_value = observed_path_value(); ",
             "[private_value, private_location] = observed_private_entry(); ",
+            "[private_probe_location, private_probe_value] = observed_private_probe(); ",
             "session_variable = 7; variable_location = which('session_variable');"
         ),
     )
@@ -173,6 +179,16 @@ fn which_tracks_executable_source_private_scope_and_later_path_revision() {
             .expect("canonical private source")
             .to_string_lossy()
     );
+    assert_eq!(
+        text_value(&first, "private_probe_location"),
+        text_value(&first, "private_location"),
+        "a private source remains observable without a static call edge"
+    );
+    assert!(outcome_has_named_upsert(
+        &first,
+        "private_probe_value",
+        &runmat_value::Value::Num(33.0)
+    ));
     assert_eq!(
         text_value(&first, "variable_location"),
         "'session_variable' is a variable."

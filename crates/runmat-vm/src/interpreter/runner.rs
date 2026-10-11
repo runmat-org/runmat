@@ -845,8 +845,35 @@ async fn run_interpreter_inner(
         }),
     );
     let previous_semantic_resolver = user_functions::current_semantic_function_resolver();
+    let previous_semantic_candidates = user_functions::current_semantic_name_candidates();
     let registry_for_function_resolver = Arc::new(function_registry.current_view());
     let active_definition_registry = Arc::clone(&function_registry);
+    let registry_for_scoped_names = Arc::clone(&function_registry);
+    let _scoped_name_target_guard =
+        user_functions::install_scoped_name_target_resolver(Some(Arc::new(move |name: &str| {
+            user_functions::current_active_semantic_function().and_then(|caller| {
+                registry_for_scoped_names
+                    .scoped_private_name_target_for_caller(runmat_hir::FunctionId(caller), name)
+            })
+        })));
+    let current_name_facts = Arc::new(
+        registry_for_function_resolver.semantic_name_candidate_facts_in(
+            &context.runtime,
+            registry_for_function_resolver.functions.keys().copied(),
+        ),
+    );
+    let retained_name_facts = Arc::new(
+        function_registry.semantic_name_candidate_facts_in(
+            &context.runtime,
+            user_functions::current_active_semantic_function()
+                .and_then(|caller| {
+                    function_registry.definition_dependency_owners(runmat_hir::FunctionId(caller))
+                })
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(id, _)| id),
+        ),
+    );
     let semantic_candidates: Arc<user_functions::SemanticNameCandidates> =
         Arc::new(move |name: &str| {
             let mut candidates = Vec::new();
@@ -854,20 +881,47 @@ async fn run_interpreter_inner(
                 if let Some(scoped_function) = active_definition_registry
                     .resolve_private_name_for_caller(runmat_hir::FunctionId(active_function), name)
                 {
-                    candidates.push(scoped_function.0);
+                    if let Some(candidate) = retained_name_facts
+                        .get(&scoped_function)
+                        .or_else(|| current_name_facts.get(&scoped_function))
+                    {
+                        candidates.push(candidate.clone());
+                    }
                 }
             }
             if let Some(function) = registry_for_function_resolver.resolve_name(name) {
-                if !candidates.contains(&function.0) {
-                    candidates.push(function.0);
+                if let Some(candidate) = current_name_facts.get(&function) {
+                    if !candidates
+                        .iter()
+                        .any(|existing| existing.same_definition(candidate))
+                    {
+                        candidates.push(candidate.clone());
+                    }
+                }
+            }
+            if let Some(previous) = &previous_semantic_candidates {
+                for candidate in previous(name) {
+                    if !candidates
+                        .iter()
+                        .any(|existing| existing.same_definition(&candidate))
+                    {
+                        candidates.push(candidate);
+                    }
                 }
             }
             if let Some(previous) = previous_semantic_resolver
                 .as_ref()
                 .and_then(|resolver| resolver(name))
             {
-                if !candidates.contains(&previous) {
-                    candidates.push(previous);
+                if !candidates
+                    .iter()
+                    .any(|candidate| candidate.function == previous)
+                {
+                    candidates.push(user_functions::SemanticNameCandidate {
+                        function: previous,
+                        source: None,
+                        definition_owner: None,
+                    });
                 }
             }
             candidates
@@ -875,7 +929,10 @@ async fn run_interpreter_inner(
     let resolver_candidates = Arc::clone(&semantic_candidates);
     let _semantic_resolver_guard =
         user_functions::install_semantic_function_resolver(Some(Arc::new(move |name: &str| {
-            resolver_candidates(name).into_iter().next()
+            resolver_candidates(name)
+                .into_iter()
+                .next()
+                .map(|candidate| candidate.function)
         })));
     let _semantic_candidates_guard =
         user_functions::install_semantic_name_candidates(Some(semantic_candidates));
@@ -1333,6 +1390,10 @@ mod process_dispatch_tests;
 #[cfg(test)]
 #[path = "runner/persistent_resume_tests.rs"]
 mod persistent_resume_tests;
+
+#[cfg(test)]
+#[path = "runner/private_name_execution_tests.rs"]
+mod private_name_execution_tests;
 
 #[cfg(test)]
 mod tests {

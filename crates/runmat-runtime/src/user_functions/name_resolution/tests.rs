@@ -1,6 +1,108 @@
 use super::*;
 use std::{collections::HashMap, path::PathBuf, rc::Rc, sync::Arc};
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn dynamic_observation_places_only_scoped_private_semantic_before_native() {
+    crate::builtins::wasm_registry::register_all();
+    let runtime = crate::context::RuntimeContext::new(Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    runtime.set_native_name_observer(Some(Rc::new(|_| {
+        Box::pin(async {
+            Ok(Some(NativeNameFact {
+                path: PathBuf::from("selected.mexa64"),
+                origin: None,
+                installed: true,
+            }))
+        })
+    })));
+    let _entry = runtime.enter();
+    let _resolver =
+        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+            matches!(name, "private_name" | "public_name").then_some(17)
+        })));
+    let _invoker =
+        crate::user_functions::install_semantic_function_invoker(Some(Arc::new(|_, _, _| {
+            panic!("observation must not invoke a candidate")
+        })));
+    let _scoped =
+        crate::user_functions::install_scoped_name_target_resolver(Some(Arc::new(|name| {
+            (name == "private_name").then_some(
+                crate::user_functions::ScopedSemanticNameTarget::Published(
+                    runmat_types::FunctionId(17),
+                ),
+            )
+        })));
+    let retired_owner = Arc::new(runmat_value::FunctionDefinitionOwner::default());
+    let published_owner = Arc::new(runmat_value::FunctionDefinitionOwner::default());
+    let _candidates =
+        crate::user_functions::install_semantic_name_candidates(Some(Arc::new(move |name| {
+            let fact = |path: &str, owner: Arc<runmat_value::FunctionDefinitionOwner>| {
+                crate::user_functions::SemanticNameCandidate {
+                    function: 17,
+                    source: Some(SourceFunctionInfo {
+                        source_id: runmat_types::SourceId(1),
+                        name: name.into(),
+                        function: 17,
+                        role: runmat_types::FunctionSourceRole::Primary,
+                        binding_origin: None,
+                        source_file: Some(path.into()),
+                        definition_owners: None,
+                    }),
+                    definition_owner: Some(owner),
+                }
+            };
+            match name {
+                "private_name" => vec![
+                    fact("/old/private/private_name.m", Arc::clone(&retired_owner)),
+                    fact("/current/private_name.m", Arc::clone(&published_owner)),
+                ],
+                "public_name" => vec![fact("/current/public_name.m", Arc::clone(&published_owner))],
+                _ => Vec::new(),
+            }
+        })));
+    let query = RuntimeNameQuery {
+        route: RuntimeNameRoute::DynamicCall,
+        filter: RuntimeNameFilter::Any,
+        all: true,
+    };
+    let private = futures::executor::block_on(observe_runtime_name("private_name", query))
+        .expect("private observation");
+    assert!(matches!(
+        private.selected(),
+        Some(RuntimeNameCandidate::Semantic { function: 17, .. })
+    ));
+    assert!(matches!(
+        private.shadowed().first(),
+        Some(RuntimeNameCandidate::Native(_))
+    ));
+    let semantic_paths = private
+        .candidates
+        .iter()
+        .filter_map(|candidate| match candidate {
+            RuntimeNameCandidate::Semantic { source, .. } => {
+                source.as_ref().and_then(|info| info.source_file.clone())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        semantic_paths,
+        vec!["/old/private/private_name.m", "/current/private_name.m"]
+    );
+    assert!(matches!(
+        private.candidates.get(2),
+        Some(RuntimeNameCandidate::Semantic { .. })
+    ));
+    let public = futures::executor::block_on(observe_runtime_name("public_name", query))
+        .expect("public observation");
+    assert!(matches!(
+        public.selected(),
+        Some(RuntimeNameCandidate::Native(_))
+    ));
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn registered_constructor_precedes_native_and_source_but_builtin_collision_wins() {
@@ -182,7 +284,14 @@ fn semantic_candidates_keep_selected_and_shadowed_order() {
     let _observer =
         crate::user_functions::install_semantic_name_candidates(Some(Arc::new(|name| {
             if name == "sin" {
-                vec![10, 11]
+                [10, 11]
+                    .into_iter()
+                    .map(|function| crate::user_functions::SemanticNameCandidate {
+                        function,
+                        source: None,
+                        definition_owner: None,
+                    })
+                    .collect()
             } else {
                 Vec::new()
             }
@@ -217,7 +326,14 @@ fn resolver_without_invoker_never_selects_semantic_candidate() {
     let _observer =
         crate::user_functions::install_semantic_name_candidates(Some(Arc::new(|name| {
             if name == "sin" {
-                vec![10, 11]
+                [10, 11]
+                    .into_iter()
+                    .map(|function| crate::user_functions::SemanticNameCandidate {
+                        function,
+                        source: None,
+                        definition_owner: None,
+                    })
+                    .collect()
             } else {
                 Vec::new()
             }

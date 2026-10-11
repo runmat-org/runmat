@@ -131,16 +131,16 @@ async fn invoke_closure(
             function: function.to_string(),
         });
     }
-    if let Some(function) =
-        user_functions::resolve_semantic_function_by_name(&closure.function_name)
+    if let Some(result) = user_functions::try_call_semantic_function_by_name(
+        &closure.function_name,
+        &merged,
+        requested_outputs,
+    )
+    .await
     {
-        let request =
-            user_functions::CallableRequest::semantic(function, merged.clone(), requested_outputs);
-        if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
-            return result
-                .map(crate::call::arguments::project_legacy_builtin_value_abi)
-                .map_err(CallableCallError::Runtime);
-        }
+        return result
+            .map(crate::call::arguments::project_legacy_builtin_value_abi)
+            .map_err(CallableCallError::Runtime);
     }
     invoke_builtin_dispatch(context, &closure.function_name, &merged, requested_outputs).await
 }

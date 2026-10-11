@@ -209,20 +209,17 @@ pub(crate) async fn invoke(
 
             let mut args = c.captures.clone();
             args.extend(rest);
-            if let Some(function) =
-                crate::user_functions::resolve_semantic_function_by_name(&c.function_name)
-            {
-                let request = crate::user_functions::CallableRequest::semantic(
-                    function,
-                    args.clone(),
+            if let Some(result) = crate::callsite::with_function_input_callsite(
+                input_callsite.clone(),
+                crate::user_functions::try_call_semantic_function_by_name(
+                    &c.function_name,
+                    &args,
                     requested_outputs,
-                )
-                .with_function_input_callsite(input_callsite.clone());
-                if let Some(result) =
-                    crate::user_functions::try_call_semantic_descriptor(request).await
-                {
-                    return result;
-                }
+                ),
+            )
+            .await
+            {
+                return result;
             }
             call_by_name(
                 runtime,

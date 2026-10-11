@@ -140,7 +140,29 @@ pub async fn try_call_semantic_function_by_name(
     requested_outputs: usize,
 ) -> Option<Result<ValueSequence, RuntimeError>> {
     let function = resolve_semantic_function_by_name(name)?;
-    try_call_semantic_function(function, args, requested_outputs).await
+    try_call_selected_semantic_name(name, function, args, requested_outputs).await
+}
+
+async fn try_call_selected_semantic_name(
+    name: &str,
+    function: usize,
+    args: &[Value],
+    requested_outputs: usize,
+) -> Option<Result<ValueSequence, RuntimeError>> {
+    match selected_scoped_name_target(name, function) {
+        Some(ScopedSemanticNameTarget::Retained(binding)) => {
+            try_call_bound_function(binding, args, requested_outputs).await
+        }
+        Some(ScopedSemanticNameTarget::Published(_)) | None => {
+            try_call_semantic_function(function, args, requested_outputs).await
+        }
+    }
+}
+
+fn selected_scoped_name_target(name: &str, function: usize) -> Option<ScopedSemanticNameTarget> {
+    current_scoped_name_target_resolver()
+        .and_then(|resolver| resolver(name))
+        .filter(|target| target.function().0 == function)
 }
 
 pub fn resolve_semantic_function_by_name(name: &str) -> Option<usize> {
@@ -279,6 +301,30 @@ pub async fn try_call_semantic_descriptor(
             | CallableIdentity::Imported(_)
             | CallableIdentity::ExternalName(_)
     ) {
+        // A private source selected by the active caller is already an exact
+        // semantic target. Public names retain the loader's MEX-first order.
+        if let Some(target) = resolve_semantic_function_by_name(&name)
+            .and_then(|function| selected_scoped_name_target(&name, function))
+        {
+            let selected = async {
+                match target {
+                    ScopedSemanticNameTarget::Published(function) => {
+                        try_call_semantic_function(function.0, &args, requested_outputs).await
+                    }
+                    ScopedSemanticNameTarget::Retained(binding) => {
+                        try_call_bound_function(binding, &args, requested_outputs).await
+                    }
+                }
+            };
+            if let Some(result) = crate::callsite::with_function_input_callsite(
+                function_input_callsite.clone(),
+                selected,
+            )
+            .await
+            {
+                return Some(result);
+            }
+        }
         if let Some(result) = try_load_and_call_dynamic_function(
             name.clone(),
             args.clone(),
@@ -294,7 +340,7 @@ pub async fn try_call_semantic_descriptor(
     if let Some(function) = resolve_semantic_function_by_name(&name) {
         if let Some(result) = crate::callsite::with_function_input_callsite(
             function_input_callsite.clone(),
-            try_call_semantic_function(function, &args, requested_outputs),
+            try_call_selected_semantic_name(&name, function, &args, requested_outputs),
         )
         .await
         {

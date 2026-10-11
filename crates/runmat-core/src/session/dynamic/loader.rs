@@ -138,7 +138,7 @@ pub(in crate::session) async fn load_dynamic_function(
                         .admitted
                         .as_ref()
                         .clone()
-                        .bind_runtime_sources(runtime)
+                        .bind_runtime_sources_with_records(runtime, entry.source_records.to_vec())
                         .map_err(|error| {
                             build_runtime_error(error.to_string())
                                 .with_identifier("RunMat:ExecutableSourceIdentity")
@@ -313,6 +313,10 @@ pub(in crate::session) async fn load_dynamic_function(
                     })?;
                 let dependencies = super::dynamic_product_dependencies(&companion.observed_sources);
                 let source_map = source_table.source_map;
+                let source_records =
+                    Arc::<[runmat_runtime::source_context::ProgramSourceRecord]>::from(
+                        source_map.runtime_records(),
+                    );
                 super::attach_dynamic_function_origins(
                     &mut bytecode,
                     &revision.program_revision,
@@ -392,7 +396,7 @@ pub(in crate::session) async fn load_dynamic_function(
                 let bound = admitted
                     .as_ref()
                     .clone()
-                    .bind_runtime_sources(runtime)
+                    .bind_runtime_sources_with_records(runtime, source_records.to_vec())
                     .map_err(|error| {
                         build_runtime_error(error.to_string())
                             .with_identifier("RunMat:ExecutableSourceIdentity")
@@ -421,6 +425,7 @@ pub(in crate::session) async fn load_dynamic_function(
                         },
                         unit_bytes: Arc::clone(&unit_bytes),
                         admitted: Rc::clone(&admitted),
+                        source_records,
                         entrypoint_origin,
                         binding: binding.clone(),
                         dependencies,

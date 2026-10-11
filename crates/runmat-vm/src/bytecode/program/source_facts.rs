@@ -1,9 +1,33 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use super::{FunctionBytecode, FunctionRegistry};
 use runmat_hir::FunctionId;
 
 impl FunctionRegistry {
+    /// Capture exact selected-definition name facts while source authority is
+    /// installed. The callback later reads only these facts and never
+    /// reconstructs a reused numeric ID's path from a newer publication.
+    pub fn semantic_name_candidate_facts_in(
+        &self,
+        runtime: &runmat_runtime::context::RuntimeContext,
+        functions: impl IntoIterator<Item = FunctionId>,
+    ) -> HashMap<FunctionId, runmat_runtime::user_functions::SemanticNameCandidate> {
+        functions
+            .into_iter()
+            .filter_map(|id| {
+                let body = self.get(id)?;
+                Some((
+                    id,
+                    runmat_runtime::user_functions::SemanticNameCandidate {
+                        function: id.0,
+                        source: self.execution_source_fact_in(runtime, id),
+                        definition_owner: Some(Arc::clone(&body.definition_owner)),
+                    },
+                ))
+            })
+            .collect()
+    }
+
     /// Facts from the selected executable body, never from a same-numbered
     /// later publication. The dependency graph is issued on demand only when
     /// a callable value is created.
@@ -82,13 +106,17 @@ fn source_fact(
     body: &FunctionBytecode,
     definition_owners: Option<runmat_runtime::user_functions::DefinitionOwnerGraph>,
 ) -> Option<runmat_runtime::user_functions::SourceFunctionInfo> {
+    let source_id = body.source_id?.resolve_in(runtime)?;
+    let source_file = runmat_runtime::source_context::source_info_in_context(runtime, source_id)
+        .and_then(|source| source.fullpath_name.map(|path| path.to_string()))
+        .or_else(|| body.source_file.clone());
     Some(runmat_runtime::user_functions::SourceFunctionInfo {
-        source_id: body.source_id?.resolve_in(runtime)?,
+        source_id,
         name: body.display_name.clone(),
         function: body.function.0,
         role: body.source_role,
         binding_origin: body.binding_origin,
-        source_file: body.source_file.clone(),
+        source_file,
         definition_owners,
     })
 }

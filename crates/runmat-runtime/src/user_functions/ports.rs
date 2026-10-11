@@ -25,6 +25,11 @@ pub struct FunctionResolverGuard {
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
 }
 
+pub struct ScopedNameTargetResolverGuard {
+    previous: Option<Arc<ScopedNameTargetResolver>>,
+    state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
+}
+
 pub struct SemanticNameCandidatesGuard {
     previous: Option<Arc<SemanticNameCandidates>>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
@@ -105,6 +110,17 @@ impl Drop for FunctionResolverGuard {
             SEMANTIC_FUNCTION_RESOLVER.with(|slot| {
                 *slot.borrow_mut() = previous;
             });
+        }
+    }
+}
+
+impl Drop for ScopedNameTargetResolverGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        if let Some(state) = &self.state {
+            state.call.borrow_mut().scoped_name_target_resolver = previous;
+        } else {
+            SCOPED_NAME_TARGET_RESOLVER.with(|slot| *slot.borrow_mut() = previous);
         }
     }
 }
@@ -293,6 +309,27 @@ pub fn install_semantic_function_resolver(
     }
 }
 
+pub fn install_scoped_name_target_resolver(
+    resolver: Option<Arc<ScopedNameTargetResolver>>,
+) -> ScopedNameTargetResolverGuard {
+    if let Some(state) = active_state() {
+        let previous = std::mem::replace(
+            &mut state.call.borrow_mut().scoped_name_target_resolver,
+            resolver,
+        );
+        return ScopedNameTargetResolverGuard {
+            previous,
+            state: Some(state),
+        };
+    }
+    let previous = SCOPED_NAME_TARGET_RESOLVER
+        .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), resolver));
+    ScopedNameTargetResolverGuard {
+        previous,
+        state: None,
+    }
+}
+
 pub fn install_semantic_name_candidates(
     observer: Option<Arc<SemanticNameCandidates>>,
 ) -> SemanticNameCandidatesGuard {
@@ -397,6 +434,13 @@ pub fn current_semantic_function_resolver() -> Option<Arc<FunctionResolver>> {
         return state.call.borrow().semantic_resolver.clone();
     }
     SEMANTIC_FUNCTION_RESOLVER.with(|slot| slot.borrow().clone())
+}
+
+pub fn current_scoped_name_target_resolver() -> Option<Arc<ScopedNameTargetResolver>> {
+    if let Some(state) = active_state() {
+        return state.call.borrow().scoped_name_target_resolver.clone();
+    }
+    SCOPED_NAME_TARGET_RESOLVER.with(|slot| slot.borrow().clone())
 }
 
 pub fn current_semantic_name_candidates() -> Option<Arc<SemanticNameCandidates>> {

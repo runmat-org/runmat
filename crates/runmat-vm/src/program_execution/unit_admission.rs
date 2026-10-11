@@ -64,8 +64,27 @@ impl AdmittedExecutableUnit {
     }
 
     pub fn bind_runtime_sources(
+        self,
+        runtime: runmat_runtime::context::RuntimeContext,
+    ) -> Result<RuntimeBoundExecutableUnit, ExecutableUnitAdmissionError> {
+        self.bind_runtime_sources_with_optional_records(runtime, None)
+    }
+
+    /// Bind an admitted portable unit to the originating host's captured
+    /// source records in one issuance. Records are checked against the
+    /// authenticated portable map; host display paths do not enter its hash.
+    pub fn bind_runtime_sources_with_records(
+        self,
+        runtime: runmat_runtime::context::RuntimeContext,
+        records: Vec<runmat_runtime::source_context::ProgramSourceRecord>,
+    ) -> Result<RuntimeBoundExecutableUnit, ExecutableUnitAdmissionError> {
+        self.bind_runtime_sources_with_optional_records(runtime, Some(records))
+    }
+
+    fn bind_runtime_sources_with_optional_records(
         mut self,
         runtime: runmat_runtime::context::RuntimeContext,
+        records: Option<Vec<runmat_runtime::source_context::ProgramSourceRecord>>,
     ) -> Result<RuntimeBoundExecutableUnit, ExecutableUnitAdmissionError> {
         let runtime = super::unit_sources::bind_unit_sources(
             &self.envelope,
@@ -73,6 +92,7 @@ impl AdmittedExecutableUnit {
             &mut self.bytecode,
             &mut self.registry,
             runtime,
+            records,
         )
         .map_err(ExecutableUnitAdmissionError::SourceBinding)?;
         self.bytecode.layout = Some(self.layout.clone());

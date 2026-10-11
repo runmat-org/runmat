@@ -1,5 +1,5 @@
 use super::*;
-use crate::{BytecodeSourceRef, Instr};
+use crate::{BytecodeSourceRef, Instr, PrivateSourceAlias, PrivateSourceDirectory};
 use runmat_execution::{Digest, FunctionBindingOrigin};
 use runmat_types::{FunctionSourceRole, ProgramFunctionId, ProgramSourceId};
 
@@ -133,6 +133,191 @@ fn overlapping_originating_ids_are_fresh_and_retained_only() {
         .registry()
         .functions_for_source_ref(body.source_id.expect("source"))
         .is_empty());
+}
+
+#[test]
+fn retained_private_companion_is_leased_without_a_static_call_edge() {
+    let runtime = runtime();
+    let caller_source = runmat_runtime::source_context::lease_source_context_in_context(
+        &runtime,
+        "entry.m",
+        None,
+        "function p = entry; p = which('helper'); end",
+    )
+    .expect("caller source");
+    let helper_source = runmat_runtime::source_context::lease_source_context_in_context(
+        &runtime,
+        "private/helper.m",
+        None,
+        "function y = helper; y = 7; end",
+    )
+    .expect("private source");
+    let alias = PrivateSourceAlias {
+        owner_identity: "fixture-program".into(),
+        relative_directory: "source".into(),
+    };
+    let owner = PrivateSourceDirectory::captured(None, vec![alias]);
+    let caller = FunctionBytecode {
+        function: FunctionId(1),
+        display_name: "entry".into(),
+        source_id: Some(BytecodeSourceRef::Runtime(caller_source.source_ref())),
+        source_file: Some("source/entry.m".into()),
+        private_source_owner: Some(owner.clone()),
+        source_role: FunctionSourceRole::Primary,
+        portable_function: ProgramFunctionId(1),
+        binding_origin: Some(origin(b"private-only", 1)),
+        ..Default::default()
+    };
+    let helper = FunctionBytecode {
+        function: FunctionId(2),
+        display_name: "__private__.helper".into(),
+        source_id: Some(BytecodeSourceRef::Runtime(helper_source.source_ref())),
+        source_file: Some("source/private/helper.m".into()),
+        private_source_owner: Some(owner.clone()),
+        source_role: FunctionSourceRole::Primary,
+        portable_function: ProgramFunctionId(2),
+        binding_origin: Some(origin(b"private-only", 2)),
+        ..Default::default()
+    };
+    let mut bodies = HashMap::from([(FunctionId(1), caller), (FunctionId(2), helper)]);
+    let mut _sibling_leases = Vec::new();
+    for id in 3..=10 {
+        let name = format!("helper{id}");
+        let file = format!("source/private/{name}.m");
+        let lease = runmat_runtime::source_context::lease_source_context_in_context(
+            &runtime,
+            file.as_str(),
+            None,
+            "fixture",
+        )
+        .expect("private sibling source");
+        bodies.insert(
+            FunctionId(id),
+            FunctionBytecode {
+                function: FunctionId(id),
+                display_name: format!("__private__.{name}"),
+                source_id: Some(BytecodeSourceRef::Runtime(lease.source_ref())),
+                source_file: Some(file),
+                private_source_owner: Some(owner.clone()),
+                source_role: FunctionSourceRole::Primary,
+                portable_function: ProgramFunctionId(id as u32),
+                binding_origin: Some(origin(b"private-only", id)),
+                ..Default::default()
+            },
+        );
+        _sibling_leases.push(lease);
+    }
+    let registry = FunctionRegistry::new(bodies);
+    let unit = RuntimeBoundExecutableUnit::for_test(registry, runtime.clone());
+    let prepared = prepare_retained_callable_units(
+        &runtime,
+        &FunctionRegistry::default(),
+        vec![unit],
+        limits(),
+    )
+    .expect("retained private graph");
+    let caller_fact = prepared
+        .exact_origin_facts()
+        .iter()
+        .find(|fact| fact.binding_origin == Some(origin(b"private-only", 1)))
+        .expect("caller origin");
+    let helper_fact = prepared
+        .exact_origin_facts()
+        .iter()
+        .find(|fact| fact.binding_origin == Some(origin(b"private-only", 2)))
+        .expect("helper origin");
+    let graph = caller_fact
+        .definition_owners
+        .as_ref()
+        .expect("source graph");
+    assert!(graph.iter().any(|(id, _)| *id == helper_fact.function));
+    assert!(std::sync::Arc::ptr_eq(
+        graph,
+        helper_fact
+            .definition_owners
+            .as_ref()
+            .expect("shared partition graph")
+    ));
+    assert_eq!(graph.len(), 10);
+    for sibling in prepared.exact_origin_facts().iter() {
+        assert!(std::sync::Arc::ptr_eq(
+            graph,
+            sibling
+                .definition_owners
+                .as_ref()
+                .expect("shared sibling graph")
+        ));
+    }
+    assert!(prepared.registry().resolve_name("helper").is_none());
+}
+
+#[test]
+fn retained_static_edge_expands_observation_only_private_scope_in_another_partition() {
+    let runtime = runtime();
+    let mut _leases = Vec::new();
+    let mut bodies = HashMap::new();
+    for (id, name, file, owner_name) in [
+        (1, "entry", "a/entry.m", "a"),
+        (2, "other", "b/other.m", "b"),
+        (3, "__private__.helper", "b/private/helper.m", "b"),
+    ] {
+        let lease = runmat_runtime::source_context::lease_source_context_in_context(
+            &runtime, file, None, "fixture",
+        )
+        .expect("source");
+        let owner = PrivateSourceDirectory::captured(
+            None,
+            vec![PrivateSourceAlias {
+                owner_identity: "transitive-program".into(),
+                relative_directory: owner_name.into(),
+            }],
+        );
+        bodies.insert(
+            FunctionId(id),
+            FunctionBytecode {
+                function: FunctionId(id),
+                display_name: name.into(),
+                source_id: Some(BytecodeSourceRef::Runtime(lease.source_ref())),
+                source_file: Some(file.into()),
+                private_source_owner: Some(owner),
+                source_role: FunctionSourceRole::Primary,
+                portable_function: ProgramFunctionId(id as u32),
+                binding_origin: Some(origin(b"transitive-program", id)),
+                instructions: if id == 1 {
+                    vec![Instr::CallSemanticFunctionMulti(FunctionId(2), 0, 1)]
+                } else {
+                    Vec::new()
+                },
+                ..Default::default()
+            },
+        );
+        _leases.push(lease);
+    }
+    let unit = RuntimeBoundExecutableUnit::for_test(FunctionRegistry::new(bodies), runtime.clone());
+    let prepared = prepare_retained_callable_units(
+        &runtime,
+        &FunctionRegistry::default(),
+        vec![unit],
+        limits(),
+    )
+    .expect("cross-partition retained graph");
+    let entry = prepared
+        .exact_origin_facts()
+        .iter()
+        .find(|fact| fact.binding_origin == Some(origin(b"transitive-program", 1)))
+        .expect("entry");
+    let private = prepared
+        .exact_origin_facts()
+        .iter()
+        .find(|fact| fact.binding_origin == Some(origin(b"transitive-program", 3)))
+        .expect("private companion");
+    assert!(entry
+        .definition_owners
+        .as_ref()
+        .unwrap()
+        .iter()
+        .any(|(id, _)| *id == private.function));
+    assert!(prepared.registry().resolve_name("helper").is_none());
 }
 
 #[test]

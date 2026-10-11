@@ -219,6 +219,8 @@ async fn search_matches(name: &str, options: &WhichOptions) -> BuiltinResult<Vec
     })?;
     let mut results = Vec::new();
     let mut seen = HashSet::new();
+    let mut seen_semantic_owners = HashSet::new();
+    let mut seen_semantic_origins = HashSet::new();
     for candidate in &resolution.candidates {
         let admitted = match candidate {
             RuntimeNameCandidate::WorkspaceVariable => {
@@ -288,7 +290,23 @@ async fn search_matches(name: &str, options: &WhichOptions) -> BuiltinResult<Vec
             }
             RuntimeNameCandidate::Directory(folder) => canonical_path(folder.path()).await,
         };
-        if !seen.insert(text.clone()) {
+        // Identical display paths do not make two executable definitions the
+        // same candidate: a retained body and its replacement can share the
+        // path while carrying different exact definition authority.
+        let distinct_semantic_definition = match candidate {
+            RuntimeNameCandidate::Semantic {
+                definition_owner: Some(owner),
+                ..
+            } => seen_semantic_owners.insert(std::sync::Arc::as_ptr(owner)),
+            RuntimeNameCandidate::Semantic {
+                source: Some(source),
+                ..
+            } => source
+                .binding_origin
+                .is_some_and(|origin| seen_semantic_origins.insert(origin)),
+            _ => false,
+        };
+        if !seen.insert(text.clone()) && !distinct_semantic_definition {
             continue;
         }
         results.push(text);

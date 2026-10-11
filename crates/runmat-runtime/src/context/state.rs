@@ -165,6 +165,8 @@ pub(crate) struct CallState {
     pub external_invoker: Option<std::rc::Rc<crate::user_functions::ExternalFunctionInvoker>>,
     pub lexical_invoker: Option<std::rc::Rc<crate::user_functions::LexicalFunctionInvoker>>,
     pub semantic_resolver: Option<std::sync::Arc<crate::user_functions::FunctionResolver>>,
+    pub scoped_name_target_resolver:
+        Option<std::sync::Arc<crate::user_functions::ScopedNameTargetResolver>>,
     pub semantic_name_candidates:
         Option<std::sync::Arc<crate::user_functions::SemanticNameCandidates>>,
     pub dynamic_loader: Option<std::rc::Rc<crate::user_functions::DynamicFunctionLoader>>,

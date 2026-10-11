@@ -36,8 +36,57 @@ pub type LexicalFunctionFuture =
 pub type LexicalFunctionInvoker =
     dyn Fn(crate::call::lexical::LexicalCall) -> LexicalFunctionFuture;
 pub type FunctionResolver = dyn Fn(&str) -> Option<usize> + Send + Sync;
-/// Ordered candidates from the same selected semantic resolver owner.
-pub type SemanticNameCandidates = dyn Fn(&str) -> Vec<usize> + Send + Sync;
+/// The active source owner's private-name target. A current publication needs
+/// no lease; a retained selection carries its exact definition authority.
+/// Numeric calls and public names do not use this route.
+#[derive(Clone, Debug)]
+pub enum ScopedSemanticNameTarget {
+    Published(runmat_types::FunctionId),
+    Retained(runmat_value::BoundFunctionBinding),
+}
+
+impl ScopedSemanticNameTarget {
+    pub fn function(&self) -> runmat_types::FunctionId {
+        match self {
+            Self::Published(function) => *function,
+            Self::Retained(binding) => runmat_types::FunctionId(binding.function),
+        }
+    }
+}
+
+pub type ScopedNameTargetResolver = dyn Fn(&str) -> Option<ScopedSemanticNameTarget> + Send + Sync;
+/// Ordered definition facts from the selected semantic resolver owner. A
+/// retained private body and a current publication may reuse a numeric ID;
+/// observation must not collapse those distinct definition owners.
+#[derive(Clone, Debug)]
+pub struct SemanticNameCandidate {
+    pub function: usize,
+    pub source: Option<SourceFunctionInfo>,
+    pub definition_owner: Option<Arc<runmat_value::FunctionDefinitionOwner>>,
+}
+
+impl SemanticNameCandidate {
+    pub fn same_definition(&self, other: &Self) -> bool {
+        match (&self.definition_owner, &other.definition_owner) {
+            (Some(left), Some(right)) => Arc::ptr_eq(left, right),
+            (None, None) => match (
+                self.source
+                    .as_ref()
+                    .and_then(|source| source.binding_origin),
+                other
+                    .source
+                    .as_ref()
+                    .and_then(|source| source.binding_origin),
+            ) {
+                (Some(left), Some(right)) => left == right,
+                _ => self.function == other.function,
+            },
+            _ => false,
+        }
+    }
+}
+
+pub type SemanticNameCandidates = dyn Fn(&str) -> Vec<SemanticNameCandidate> + Send + Sync;
 /// A read-only view of the native loader's selected name. The executable
 /// loader remains the owner of installed-module and platform-suffix policy.
 pub type NativeNameObserverFuture =
@@ -117,6 +166,8 @@ runmat_thread_local! {
     static LEXICAL_FUNCTION_INVOKER: RefCell<Option<Rc<LexicalFunctionInvoker>>> =
         const { RefCell::new(None) };
     static SEMANTIC_FUNCTION_RESOLVER: RefCell<Option<Arc<FunctionResolver>>> =
+        const { RefCell::new(None) };
+    static SCOPED_NAME_TARGET_RESOLVER: RefCell<Option<Arc<ScopedNameTargetResolver>>> =
         const { RefCell::new(None) };
     static SEMANTIC_NAME_CANDIDATES: RefCell<Option<Arc<SemanticNameCandidates>>> =
         const { RefCell::new(None) };

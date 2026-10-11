@@ -15,7 +15,8 @@ use crate::builtins::common::path_search::{
     GENERAL_FILE_EXTENSIONS,
 };
 use crate::user_functions::{
-    current_semantic_name_candidates, resolve_semantic_function_by_name, source_function_for,
+    current_scoped_name_target_resolver, current_semantic_name_candidates,
+    resolve_semantic_function_by_name, source_function_for, SemanticNameCandidate,
 };
 
 use super::{NativeNameFact, SourceFunctionInfo};
@@ -53,8 +54,9 @@ impl From<String> for RuntimeNameResolutionError {
     }
 }
 
-/// The direct dynamic-name route probes native modules before the semantic
-/// registry. Named `feval` resolves semantic functions and builtins first.
+/// The direct dynamic-name route probes native modules before public semantic
+/// names; the active caller's exact private selection precedes native modules.
+/// Named `feval` resolves semantic functions and builtins first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeNameRoute {
     DynamicCall,
@@ -88,6 +90,7 @@ pub enum RuntimeNameCandidate {
     Semantic {
         function: usize,
         source: Option<SourceFunctionInfo>,
+        definition_owner: Option<std::sync::Arc<runmat_value::FunctionDefinitionOwner>>,
     },
     Builtin(runmat_types::BuiltinId),
     Source(FileCandidate),
@@ -200,6 +203,17 @@ pub async fn observe_runtime_name(
             if !query.all {
                 return finish(candidates);
             }
+        }
+    }
+    if query.route == RuntimeNameRoute::DynamicCall
+        && matches!(
+            query.filter,
+            RuntimeNameFilter::Any | RuntimeNameFilter::File
+        )
+    {
+        append_scoped_private_semantic(name, query.filter, &mut candidates);
+        if !query.all && !candidates.is_empty() {
+            return finish(candidates);
         }
     }
     if matches!(
@@ -367,13 +381,34 @@ fn append_semantic(
         && crate::user_functions::current_semantic_function_invoker().is_some()
     {
         let selected = resolve_semantic_function_by_name(name);
-        let ordered = current_semantic_name_candidates()
+        let mut ordered = current_semantic_name_candidates()
             .map(|observer| observer(name))
             .unwrap_or_default();
-        let mut ordered = selected.into_iter().chain(ordered).collect::<Vec<_>>();
-        ordered.dedup();
-        for function in ordered {
-            let source = source_function_for(function);
+        if let Some(function) = selected {
+            if ordered
+                .first()
+                .is_none_or(|candidate| candidate.function != function)
+            {
+                ordered.insert(
+                    0,
+                    SemanticNameCandidate {
+                        function,
+                        source: source_function_for(function),
+                        definition_owner: None,
+                    },
+                );
+            }
+        }
+        for offered in ordered {
+            if candidates
+                .iter()
+                .any(|candidate| same_semantic_definition(candidate, &offered))
+            {
+                continue;
+            }
+            let source = offered
+                .source
+                .or_else(|| source_function_for(offered.function));
             if filter == RuntimeNameFilter::File
                 && source
                     .as_ref()
@@ -382,8 +417,84 @@ fn append_semantic(
             {
                 continue;
             }
-            candidates.push(RuntimeNameCandidate::Semantic { function, source });
+            candidates.push(RuntimeNameCandidate::Semantic {
+                function: offered.function,
+                source,
+                definition_owner: offered.definition_owner,
+            });
         }
+    }
+}
+
+fn append_scoped_private_semantic(
+    name: &str,
+    filter: RuntimeNameFilter,
+    candidates: &mut Vec<RuntimeNameCandidate>,
+) {
+    if crate::user_functions::current_semantic_function_invoker().is_none() {
+        return;
+    }
+    let Some(function) = resolve_semantic_function_by_name(name) else {
+        return;
+    };
+    let Some(target) = current_scoped_name_target_resolver().and_then(|resolver| resolver(name))
+    else {
+        return;
+    };
+    if target.function().0 != function {
+        return;
+    }
+    let offered = current_semantic_name_candidates()
+        .map(|observer| observer(name))
+        .and_then(|ordered| {
+            ordered
+                .into_iter()
+                .find(|candidate| candidate.function == function)
+        });
+    let source = offered
+        .as_ref()
+        .and_then(|candidate| candidate.source.clone())
+        .or_else(|| source_function_for(function));
+    if filter == RuntimeNameFilter::File
+        && source
+            .as_ref()
+            .and_then(|info| info.source_file.as_ref())
+            .is_none()
+    {
+        return;
+    }
+    candidates.push(RuntimeNameCandidate::Semantic {
+        function,
+        source,
+        definition_owner: offered.and_then(|candidate| candidate.definition_owner),
+    });
+}
+
+fn same_semantic_definition(
+    candidate: &RuntimeNameCandidate,
+    offered: &SemanticNameCandidate,
+) -> bool {
+    let RuntimeNameCandidate::Semantic {
+        function,
+        source,
+        definition_owner,
+    } = candidate
+    else {
+        return false;
+    };
+    match (definition_owner, &offered.definition_owner) {
+        (Some(left), Some(right)) => std::sync::Arc::ptr_eq(left, right),
+        (None, None) => match (
+            source.as_ref().and_then(|source| source.binding_origin),
+            offered
+                .source
+                .as_ref()
+                .and_then(|source| source.binding_origin),
+        ) {
+            (Some(left), Some(right)) => left == right,
+            _ => *function == offered.function,
+        },
+        _ => false,
     }
 }
 

@@ -10,6 +10,7 @@ pub(super) fn bind_unit_sources(
     bytecode: &mut Bytecode,
     registry: &mut FunctionRegistry,
     runtime: runmat_runtime::context::RuntimeContext,
+    records: Option<Vec<runmat_runtime::source_context::ProgramSourceRecord>>,
 ) -> Result<runmat_runtime::context::RuntimeContext, String> {
     bytecode
         .validate_portable_source_origins()
@@ -32,8 +33,13 @@ pub(super) fn bind_unit_sources(
         return Err("worker rejected executable source ordinal outside its source map".into());
     }
     validate_function_components(source_map, &envelope.manifest.identity.program, registry)?;
-    let runtime = runmat_runtime::source_context::bind_portable_source_map_v2(runtime, source_map)
-        .map_err(|error| format!("worker cannot bind executable source map: {error}"))?;
+    let runtime = match records {
+        Some(records) => runmat_runtime::source_context::bind_portable_source_map_v2_with_records(
+            runtime, source_map, records,
+        ),
+        None => runmat_runtime::source_context::bind_portable_source_map_v2(runtime, source_map),
+    }
+    .map_err(|error| format!("worker cannot bind executable source map: {error}"))?;
     let project = |source: BytecodeSourceRef| {
         source
             .program()

@@ -21,6 +21,9 @@ pub use types::{
 };
 #[path = "retained_artifacts/work_limits.rs"]
 mod work_limits;
+#[path = "retained_artifacts/private_companions.rs"]
+mod private_companions;
+use private_companions::PrivateCompanionGraphs;
 
 /// Prepare imported executable definitions as retained-only bodies. The
 /// destination registry is cloned and changed only after every unit, origin,
@@ -59,8 +62,9 @@ pub fn prepare_retained_callable_units(
     let mut allocator = DestinationFunctionIds::new(destination);
     let mut origin_destinations = HashMap::<FunctionBindingOrigin, (FunctionId, String)>::new();
     let mut imported = HashMap::<FunctionId, FunctionBytecode>::new();
+    let mut imported_unit = HashMap::<FunctionId, usize>::new();
 
-    for unit in &units {
+    for (unit_index, unit) in units.iter().enumerate() {
         let fingerprints = fingerprints::normalized(unit.registry())?;
         let mut source_ids = unit
             .registry()
@@ -117,13 +121,14 @@ pub fn prepare_retained_callable_units(
             let mut body = body.clone();
             function_remap::remap_closed_function(&mut body, &remap);
             imported.insert(destination_id, body);
+            imported_unit.insert(destination_id, unit_index);
         }
     }
 
     // Build complete owner graphs in a private registry. It is never exposed
-    // for name or source lookup; it exists only to reuse the canonical static
-    // dependency census against the fully remapped graph.
+    // for name or source lookup; it exists only to retain the admitted graph.
     let graph_registry = FunctionRegistry::new(imported.clone());
+    let mut companion_graphs = PrivateCompanionGraphs::new(&graph_registry, &imported_unit);
     let mut destination_ids = imported.keys().copied().collect::<Vec<_>>();
     destination_ids.sort_by_key(|function| function.0);
     let mut origin_facts = Vec::with_capacity(destination_ids.len());
@@ -136,10 +141,7 @@ pub fn prepare_retained_callable_units(
         let definition_owners = match owner_graphs.get(&source) {
             Some(owners) => Arc::clone(owners),
             None => {
-                let owners = graph_registry
-                    .definition_dependency_owners(*destination_id)
-                    .ok_or(RetainedCallableStageError::IncompleteDefinitionGraph)?;
-                let owners = owners_graph(&owners);
+                let owners = companion_graphs.graph_for(*destination_id)?;
                 owner_graphs.insert(source, Arc::clone(&owners));
                 owners
             }
@@ -153,7 +155,12 @@ pub fn prepare_retained_callable_units(
             function: destination_id.0,
             role: body.source_role,
             binding_origin: body.binding_origin,
-            source_file: body.source_file.clone(),
+            source_file: runmat_runtime::source_context::source_info_in_context(
+                destination_runtime,
+                source_id,
+            )
+            .and_then(|source| source.fullpath_name.map(|path| path.to_string()))
+            .or_else(|| body.source_file.clone()),
             definition_owners: Some(definition_owners),
         });
     }

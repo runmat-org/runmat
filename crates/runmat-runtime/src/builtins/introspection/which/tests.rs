@@ -262,6 +262,55 @@ fn which_all_returns_cell_array() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn which_all_keeps_distinct_definitions_at_the_same_display_path() {
+    let (_guard, _lock) = test_guard();
+    let _resolver =
+        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+            (name == "reused_definition").then_some(17)
+        })));
+    let _invoker =
+        crate::user_functions::install_semantic_function_invoker(Some(Arc::new(|_, _, _| {
+            panic!("which must not invoke either definition")
+        })));
+    let first = Arc::new(runmat_value::FunctionDefinitionOwner::default());
+    let second = Arc::new(runmat_value::FunctionDefinitionOwner::default());
+    let _candidates =
+        crate::user_functions::install_semantic_name_candidates(Some(Arc::new(move |name| {
+            if name != "reused_definition" {
+                return Vec::new();
+            }
+            [Arc::clone(&first), Arc::clone(&second)]
+                .into_iter()
+                .map(|owner| crate::user_functions::SemanticNameCandidate {
+                    function: 17,
+                    source: Some(crate::user_functions::SourceFunctionInfo {
+                        source_id: runmat_types::SourceId(1),
+                        name: name.into(),
+                        function: 17,
+                        role: runmat_types::FunctionSourceRole::Primary,
+                        binding_origin: None,
+                        source_file: Some("same/display/path.m".into()),
+                        definition_owners: None,
+                    }),
+                    definition_owner: Some(owner),
+                })
+                .collect()
+        })));
+    let results = block_on(search_matches(
+        "reused_definition",
+        &WhichOptions {
+            all: true,
+            mode: WhichMode::Any,
+        },
+    ))
+    .expect("all definitions");
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0], results[1]);
+    assert!(results[0].ends_with("same/display/path.m"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn which_not_found_message() {
     let (_guard, _lock) = test_guard();
     let value = which_builtin(vec![Value::from("definitely_missing")]).expect("which");
