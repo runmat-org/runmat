@@ -12,26 +12,6 @@ pub fn which_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Union(vec![Type::String, Type::cell_of(Type::String)])
 }
 
-pub fn who_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::cell_of(Type::String)
-}
-
-pub fn whos_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Struct {
-        known_fields: Some(vec![
-            "name".to_string(),
-            "size".to_string(),
-            "bytes".to_string(),
-            "class".to_string(),
-            "global".to_string(),
-            "sparse".to_string(),
-            "complex".to_string(),
-            "nesting".to_string(),
-            "persistent".to_string(),
-        ]),
-    }
-}
-
 pub fn clearvars_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Tensor {
         shape: Some(vec![Some(0), Some(0)]),
@@ -63,34 +43,6 @@ mod tests {
         assert_eq!(
             which_type(&[], &ResolveContext::new(Vec::new())),
             Type::Union(vec![Type::String, Type::cell_of(Type::String)])
-        );
-    }
-
-    #[test]
-    fn who_type_reports_cell_of_strings() {
-        assert_eq!(
-            who_type(&[], &ResolveContext::new(Vec::new())),
-            Type::cell_of(Type::String)
-        );
-    }
-
-    #[test]
-    fn whos_type_reports_structure_array() {
-        assert_eq!(
-            whos_type(&[], &ResolveContext::new(Vec::new())),
-            Type::Struct {
-                known_fields: Some(vec![
-                    "name".to_string(),
-                    "size".to_string(),
-                    "bytes".to_string(),
-                    "class".to_string(),
-                    "global".to_string(),
-                    "sparse".to_string(),
-                    "complex".to_string(),
-                    "nesting".to_string(),
-                    "persistent".to_string(),
-                ])
-            }
         );
     }
 

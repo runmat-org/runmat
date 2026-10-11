@@ -1,54 +1,6 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::MFILENAME_ERROR_TOO_MANY_INPUTS;
 use runmat_value::Value;
 use std::path::Path;
-
-const MFILENAME_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "name",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Current file name.",
-}];
-
-const MFILENAME_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "option",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: None,
-    description: "`fullpath` for full source path or `class` for current method class.",
-}];
-
-const MFILENAME_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "name = mfilename()",
-        inputs: &[],
-        outputs: &MFILENAME_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "name = mfilename(option)",
-        inputs: &MFILENAME_INPUTS,
-        outputs: &MFILENAME_OUTPUT,
-    },
-];
-
-pub const MFILENAME_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MFILENAME.TOO_MANY_INPUTS",
-    identifier: Some("RunMat:TooManyInputs"),
-    when: "More than one option argument is provided.",
-    message: "mfilename: too many input arguments",
-};
-
-pub const MFILENAME_ERRORS: [BuiltinErrorDescriptor; 1] = [MFILENAME_ERROR_TOO_MANY_INPUTS];
-
-pub const MFILENAME_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MFILENAME_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &MFILENAME_ERRORS,
-};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MfilenameMode {
@@ -145,9 +97,7 @@ pub(crate) fn dispatch_mfilename(args: Vec<Value>) -> crate::BuiltinResult<Value
 
 #[runmat_macros::runtime_builtin(
     name = "mfilename",
-    category = "introspection",
-    summary = "Return the filename of the currently running source.",
-    descriptor(self::MFILENAME_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::mfilename"
 )]
 pub fn mfilename_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -177,6 +127,29 @@ mod tests {
         let value = dispatch_mfilename(vec![Value::String("fullpath".to_string())])
             .expect("mfilename fullpath succeeds");
         assert_eq!(value, Value::String("/tmp/demo_file".to_string()));
+    }
+
+    #[test]
+    fn mfilename_class_and_unknown_options_preserve_existing_modes() {
+        let _guard = crate::source_context::replace_current_source_context(
+            Some("/project/probe.m"),
+            Some("name = mfilename();"),
+        );
+        assert_eq!(
+            dispatch_mfilename(vec![Value::from("class")]).expect("class mode"),
+            Value::String(String::new()),
+        );
+        assert_eq!(
+            dispatch_mfilename(vec![Value::from("unsupported")]).expect("default mode"),
+            Value::String("probe".into()),
+        );
+        assert_eq!(
+            dispatch_mfilename(vec![Value::Num(7.0)]).expect("non-text default mode"),
+            Value::String("probe".into()),
+        );
+        let error = dispatch_mfilename(vec![Value::from("class"), Value::from("fullpath")])
+            .expect_err("two options");
+        assert_eq!(error.identifier(), Some("RunMat:TooManyInputs"));
     }
 
     #[test]

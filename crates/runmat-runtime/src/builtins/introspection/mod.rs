@@ -49,5 +49,7 @@ pub mod which;
 pub mod who;
 pub mod whos;
 pub(crate) mod class_identity;
+mod workspace_query;
+mod workspace_metadata;
 
 pub use self::public_api::{CLASS_DESCRIPTOR, CLASS_INTEGER_CAPABILITIES};

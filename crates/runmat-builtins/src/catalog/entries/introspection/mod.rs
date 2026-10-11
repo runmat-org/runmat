@@ -21,6 +21,10 @@ mod isstring;
 mod underlying_type;
 mod is_underlying_type;
 mod isvalid;
+mod mfilename;
+mod who;
+mod whos;
+mod workspace_query;
 
 pub use self::arity_check::*;
 pub use self::class_query::*;
@@ -35,12 +39,15 @@ pub use self::isobject::*;
 pub use self::isstring::*;
 pub use self::isvalid::*;
 pub use self::localfunctions::*;
+pub use self::mfilename::*;
 pub use self::num_arguments_from_subscript::*;
 pub use self::set_p::*;
 pub use self::subsasgn::*;
 pub use self::subsref::*;
 pub use self::superclasses::*;
 pub use self::underlying_type::*;
+pub use self::who::*;
+pub use self::whos::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(arity_check::ENTRIES.iter().copied());
@@ -62,4 +69,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(underlying_type::ENTRIES.iter().copied());
     values.extend(is_underlying_type::ENTRIES.iter().copied());
     values.extend(isvalid::ENTRIES.iter().copied());
+    values.extend(mfilename::ENTRIES.iter().copied());
+    values.extend(who::ENTRIES.iter().copied());
+    values.extend(whos::ENTRIES.iter().copied());
 }

@@ -1,229 +1,41 @@
 //! MATLAB-compatible `whos` builtin for RunMat.
 
-use std::collections::HashSet;
-use std::path::PathBuf;
-
-use glob::Pattern;
-use regex::Regex;
-use runmat_accelerate_api::handle_is_logical;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
 use runmat_macros::runtime_builtin;
-use runmat_value::{StructArray, StructValue, Value};
+use runmat_value::{StructArray, Value};
+use std::collections::HashSet;
 
-use crate::builtins::common::shape::value_dimensions;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+#[cfg(test)]
+use crate::builtins::introspection::workspace_metadata::value_memory_bytes;
+use crate::builtins::introspection::workspace_metadata::WhosRecord;
+use crate::builtins::introspection::workspace_query::{
+    parse_request, WorkspaceQueryOwner, WorkspaceQuerySource,
 };
-use crate::builtins::introspection::class_identity::class_name_for_value;
-use crate::builtins::introspection::type_resolvers::whos_type;
 use crate::builtins::io::mat::load::read_mat_file_for_builtin;
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::whos")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "whos",
-    op_kind: GpuOpKind::Custom("introspection"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Host-only builtin. Arguments are gathered from the GPU if necessary; gpuArray metadata is derived from provider precision without launching kernels.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::whos")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "whos",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Introspection builtin; not eligible for fusion. Registration is for diagnostics only.",
-};
-
-const WHOS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "vars",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Structure array describing matching variables.",
-}];
-
-const WHOS_SIG_NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-
-const WHOS_SIG_SELECTOR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "selector",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Name filters, wildcard patterns, or options.",
-}];
-
-const WHOS_SIG_FILE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "file_kw",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"-file\""),
-        description: "File mode option.",
-    },
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "MAT-file path.",
-    },
-];
-
-const WHOS_SIG_REGEXP_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "regexp_kw",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"-regexp\""),
-        description: "Regexp mode option.",
-    },
-    BuiltinParamDescriptor {
-        name: "pattern",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Regular-expression patterns.",
-    },
-];
-
-const WHOS_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "vars = whos()",
-        inputs: &WHOS_SIG_NO_INPUTS,
-        outputs: &WHOS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "vars = whos(selector, ...)",
-        inputs: &WHOS_SIG_SELECTOR_INPUTS,
-        outputs: &WHOS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "vars = whos(\"-file\", filename, selector, ...)",
-        inputs: &WHOS_SIG_FILE_INPUTS,
-        outputs: &WHOS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "vars = whos(\"-regexp\", pattern, ...)",
-        inputs: &WHOS_SIG_REGEXP_INPUTS,
-        outputs: &WHOS_OUTPUT,
-    },
-];
-
-const WHOS_ERRORS: [BuiltinErrorDescriptor; 10] = [
-    BuiltinErrorDescriptor {
-        code: "RM.WHOS.FILE_REQUIRES_FILENAME",
-        identifier: None,
-        when: "The '-file' option is provided without a filename.",
-        message: "whos: '-file' requires a filename",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHOS.FILE_DUPLICATE",
-        identifier: None,
-        when: "The '-file' option is provided more than once.",
-        message: "whos: '-file' may only be specified once",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHOS.REGEXP_REQUIRES_PATTERN",
-        identifier: None,
-        when: "The '-regexp' option is provided without patterns.",
-        message: "whos: '-regexp' requires at least one pattern",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHOS.REGEXP_EMPTY_PATTERN",
-        identifier: None,
-        when: "The '-regexp' option receives only empty patterns.",
-        message: "whos: '-regexp' requires non-empty pattern strings",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHOS.REGEXP_INVALID",
-        identifier: None,
-        when: "A regexp pattern fails to compile.",
-        message: "whos: invalid regular expression",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHOS.OPTION_UNSUPPORTED",
-        identifier: None,
-        when: "An unsupported option token is provided.",
-        message: "whos: unsupported option",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHOS.FILENAME_ARG_TYPE",
-        identifier: None,
-        when: "Filename argument is not a char row or string scalar.",
-        message: "whos: filename must be a character vector or string scalar",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHOS.SELECTOR_CELL_MEMBER_TYPE",
-        identifier: None,
-        when: "A selector cell contains a non-string-like element.",
-        message: "whos: selection cells must contain string or character scalars",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHOS.SELECTOR_ARG_TYPE",
-        identifier: None,
-        when: "Selector argument is not a char array/string/string array/cell thereof.",
-        message: "whos: selections must be character vectors, string scalars, string arrays, or cell arrays of those types",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHOS.PATTERN_INVALID",
-        identifier: None,
-        when: "Wildcard selector pattern fails to parse.",
-        message: "whos: invalid pattern",
-    },
-];
-
-pub const WHOS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &WHOS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &WHOS_ERRORS,
-};
+#[cfg(test)]
+use crate::BuiltinResult;
+use crate::{build_runtime_error, RuntimeError};
 
 #[runtime_builtin(
     name = "whos",
-    category = "introspection",
-    summary = "List workspace or MAT-file variables with metadata.",
-    keywords = "whos,workspace variables,memory usage,struct array",
-    accel = "cpu",
-    type_resolver(whos_type),
-    descriptor(crate::builtins::introspection::whos::WHOS_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::whos"
 )]
 async fn whos_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let mut gathered = Vec::with_capacity(args.len());
-    for arg in args {
-        gathered.push(gather_if_needed_async(&arg).await.map_err(whos_flow)?);
-    }
-    let request = parse_request(&gathered).await?;
+    let request = parse_request(&args, WorkspaceQueryOwner::Whos)?;
 
     let mut entries = match &request.source {
-        WhosSource::Workspace => crate::workspace::try_snapshot()
+        WorkspaceQuerySource::Workspace => crate::workspace::try_snapshot()
             .map_err(whos_flow)?
             .unwrap_or_default(),
-        WhosSource::File(path) => read_mat_file_for_builtin(path, "whos").await?,
+        WorkspaceQuerySource::File(path) => read_mat_file_for_builtin(path, "whos").await?,
     };
 
-    if matches!(request.source, WhosSource::File(_)) {
+    if matches!(request.source, WorkspaceQuerySource::File(_)) {
         entries.sort_by(|a, b| a.0.cmp(&b.0));
     }
 
-    let global_names: HashSet<String> = if matches!(request.source, WhosSource::Workspace) {
+    let global_names: HashSet<String> = if matches!(request.source, WorkspaceQuerySource::Workspace)
+    {
         crate::workspace::try_global_names()
             .map_err(whos_flow)?
             .into_iter()
@@ -234,7 +46,7 @@ async fn whos_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
     let mut records = Vec::new();
     for (name, value) in entries {
-        if !matches_filters(&name, &request.selectors, &request.regex_patterns) {
+        if !request.matches(&name) {
             continue;
         }
         let is_global = global_names.contains(&name);
@@ -245,7 +57,7 @@ async fn whos_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         records.push(record);
     }
 
-    records.sort_by(|a, b| a.name.cmp(&b.name));
+    records.sort_by(|a, b| a.name().cmp(b.name()));
 
     let mut values = Vec::with_capacity(records.len());
     for record in records {
@@ -273,501 +85,10 @@ async fn whos_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     .map_err(|error| build_runtime_error(error).with_builtin("whos").build())
 }
 
-#[derive(Debug)]
-struct WhosRecord {
-    name: String,
-    size: runmat_value::Tensor,
-    bytes: usize,
-    class_name: String,
-    is_global: bool,
-    is_sparse: bool,
-    is_complex: bool,
-    nesting: String,
-    persistent: bool,
-}
-
-impl WhosRecord {
-    async fn from_value(name: String, value: &Value, is_global: bool) -> BuiltinResult<Self> {
-        let dims = value_dimensions(value).await?;
-        let size_tensor = dims_to_tensor(&dims)?;
-        let mut seen = HashSet::new();
-        let bytes = value_memory_bytes(value, &mut seen)?;
-        let class_name = class_name_for_value(value);
-        let is_complex = matches!(value, Value::Complex(_, _) | Value::ComplexTensor(_));
-        Ok(Self {
-            name,
-            size: size_tensor,
-            bytes,
-            class_name,
-            is_global,
-            is_sparse: matches!(value, Value::SparseTensor(_)),
-            is_complex,
-            nesting: String::new(),
-            persistent: false,
-        })
-    }
-
-    fn into_value(self) -> BuiltinResult<Value> {
-        let mut st = StructValue::new();
-        st.fields
-            .insert("name".to_string(), Value::String(self.name));
-        st.fields
-            .insert("size".to_string(), Value::Tensor(self.size));
-        st.fields
-            .insert("bytes".to_string(), Value::Num(self.bytes as f64));
-        st.fields
-            .insert("class".to_string(), Value::String(self.class_name));
-        st.fields
-            .insert("global".to_string(), Value::Bool(self.is_global));
-        st.fields
-            .insert("sparse".to_string(), Value::Bool(self.is_sparse));
-        st.fields
-            .insert("complex".to_string(), Value::Bool(self.is_complex));
-        st.fields
-            .insert("nesting".to_string(), Value::String(self.nesting));
-        st.fields
-            .insert("persistent".to_string(), Value::Bool(self.persistent));
-        Ok(Value::Struct(st))
-    }
-}
-
-async fn parse_request(values: &[Value]) -> BuiltinResult<WhosRequest> {
-    let mut idx = 0usize;
-    let mut path_value: Option<Value> = None;
-    let mut names: Vec<String> = Vec::new();
-    let mut regex_patterns = Vec::new();
-    let mut only_global = false;
-
-    while idx < values.len() {
-        if let Some(token) = option_token(&values[idx])? {
-            match token.as_str() {
-                "-file" => {
-                    idx += 1;
-                    if idx >= values.len() {
-                        return Err(whos_error("whos: '-file' requires a filename"));
-                    }
-                    if path_value.is_some() {
-                        return Err(whos_error("whos: '-file' may only be specified once"));
-                    }
-                    path_value = Some(values[idx].clone());
-                    idx += 1;
-                    continue;
-                }
-                "-regexp" => {
-                    idx += 1;
-                    if idx >= values.len() {
-                        return Err(whos_error("whos: '-regexp' requires at least one pattern"));
-                    }
-                    while idx < values.len() {
-                        if option_token(&values[idx])?.is_some() {
-                            break;
-                        }
-                        let candidates = extract_name_list(&values[idx]).await?;
-                        if candidates.is_empty() {
-                            return Err(whos_error(
-                                "whos: '-regexp' requires non-empty pattern strings",
-                            ));
-                        }
-                        for pattern in candidates {
-                            let regex = Regex::new(&pattern).map_err(|err| {
-                                build_runtime_error(format!(
-                                    "whos: invalid regular expression '{pattern}': {err}"
-                                ))
-                                .with_builtin("whos")
-                                .with_source(err)
-                                .build()
-                            })?;
-                            regex_patterns.push(regex);
-                        }
-                        idx += 1;
-                    }
-                    continue;
-                }
-                other => {
-                    return Err(whos_error(format!("whos: unsupported option '{other}'")));
-                }
-            }
-        }
-
-        let extracted = extract_name_list(&values[idx]).await?;
-        if extracted.is_empty() {
-            idx += 1;
-            continue;
-        }
-        if extracted.len() == 1
-            && extracted[0].eq_ignore_ascii_case("global")
-            && names.is_empty()
-            && regex_patterns.is_empty()
-            && path_value.is_none()
-        {
-            only_global = true;
-        } else {
-            names.extend(extracted);
-        }
-        idx += 1;
-    }
-
-    let source = if let Some(path_value) = path_value {
-        let path = parse_file_path(&path_value)?;
-        WhosSource::File(path)
-    } else {
-        WhosSource::Workspace
-    };
-
-    let selectors = build_selectors(&names)?;
-
-    Ok(WhosRequest {
-        source,
-        selectors,
-        regex_patterns,
-        only_global,
-    })
-}
-
-#[derive(Debug)]
-struct WhosRequest {
-    source: WhosSource,
-    selectors: Vec<NameSelector>,
-    regex_patterns: Vec<Regex>,
-    only_global: bool,
-}
-
-#[derive(Debug)]
-enum WhosSource {
-    Workspace,
-    File(PathBuf),
-}
-
-#[derive(Debug)]
-enum NameSelector {
-    Exact(String),
-    Wildcard(Pattern),
-}
-
-fn whos_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("whos").build()
-}
-
 fn whos_flow(mut err: RuntimeError) -> RuntimeError {
     err.context = err.context.with_builtin("whos");
     err
 }
-
-fn matches_filters(name: &str, selectors: &[NameSelector], regex_patterns: &[Regex]) -> bool {
-    if selectors.is_empty() && regex_patterns.is_empty() {
-        return true;
-    }
-    if selectors.iter().any(|selector| match selector {
-        NameSelector::Exact(expected) => name == expected,
-        NameSelector::Wildcard(pattern) => pattern.matches(name),
-    }) {
-        return true;
-    }
-    regex_patterns.iter().any(|regex| regex.is_match(name))
-}
-
-fn build_selectors(names: &[String]) -> BuiltinResult<Vec<NameSelector>> {
-    let mut selectors = Vec::with_capacity(names.len());
-    for name in names {
-        if contains_wildcards(name) {
-            let pattern = Pattern::new(name).map_err(|err| {
-                build_runtime_error(format!("whos: invalid pattern '{name}': {err}"))
-                    .with_builtin("whos")
-                    .with_source(err)
-                    .build()
-            })?;
-            selectors.push(NameSelector::Wildcard(pattern));
-        } else {
-            selectors.push(NameSelector::Exact(name.clone()));
-        }
-    }
-    Ok(selectors)
-}
-
-fn contains_wildcards(text: &str) -> bool {
-    text.chars().any(|ch| matches!(ch, '*' | '?' | '['))
-}
-
-fn parse_file_path(value: &Value) -> BuiltinResult<PathBuf> {
-    let text = value_to_string_scalar(value)
-        .ok_or_else(|| whos_error("whos: filename must be a character vector or string scalar"))?;
-    let mut path = PathBuf::from(text);
-    if path.extension().is_none() {
-        path.set_extension("mat");
-    }
-    Ok(path)
-}
-
-fn option_token(value: &Value) -> BuiltinResult<Option<String>> {
-    if let Some(token) = value_to_string_scalar(value) {
-        if token.starts_with('-') {
-            return Ok(Some(token.to_ascii_lowercase()));
-        }
-    }
-    Ok(None)
-}
-
-#[async_recursion::async_recursion(?Send)]
-async fn extract_name_list(value: &Value) -> BuiltinResult<Vec<String>> {
-    match value {
-        Value::String(s) => Ok(vec![s.clone()]),
-        Value::CharArray(ca) => Ok(char_array_rows_as_strings(ca)),
-        Value::StringArray(sa) => Ok(sa.data.clone()),
-        Value::Cell(ca) => {
-            let mut names = Vec::with_capacity(ca.data.len());
-            for handle in &ca.data {
-                let inner = handle;
-                if let Some(text) = value_to_string_scalar(inner) {
-                    names.push(text);
-                    continue;
-                }
-                let gathered = gather_if_needed_async(inner).await.map_err(whos_flow)?;
-                if let Some(text) = value_to_string_scalar(&gathered) {
-                    names.push(text);
-                } else {
-                    return Err(whos_error(
-                        "whos: selection cells must contain string or character scalars",
-                    ));
-                }
-            }
-            Ok(names)
-        }
-        Value::GpuTensor(_) => {
-            let gathered = gather_if_needed_async(value).await.map_err(whos_flow)?;
-            extract_name_list(&gathered).await
-        }
-        _ => Err(whos_error(
-            "whos: selections must be character vectors, string scalars, string arrays, or cell arrays of those types",
-        )),
-    }
-}
-
-fn value_to_string_scalar(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => char_array_rows_as_strings(ca).into_iter().next(),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        _ => None,
-    }
-}
-
-fn char_array_rows_as_strings(ca: &runmat_value::CharArray) -> Vec<String> {
-    let mut rows = Vec::with_capacity(ca.rows);
-    for r in 0..ca.rows {
-        let mut row = String::with_capacity(ca.cols);
-        for c in 0..ca.cols {
-            let idx = r * ca.cols + c;
-            row.push(ca.data[idx]);
-        }
-        rows.push(row.trim_end_matches([' ', '\0']).to_string());
-    }
-    rows
-}
-
-fn dims_to_tensor(dims: &[usize]) -> BuiltinResult<runmat_value::Tensor> {
-    let mut normalized = dims.to_vec();
-    if normalized.is_empty() {
-        normalized = vec![1, 1];
-    }
-    let data: Vec<f64> = normalized.iter().map(|dim| *dim as f64).collect();
-    runmat_value::Tensor::new(data, vec![1, normalized.len()]).map_err(|err| {
-        build_runtime_error(format!("whos: failed to materialize size vector: {err}"))
-            .with_builtin("whos")
-            .build()
-    })
-}
-
-fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult<usize> {
-    let bytes = match value {
-        Value::Num(_) => 8,
-        Value::Int(i) => match i {
-            runmat_value::IntValue::I8(_) | runmat_value::IntValue::U8(_) => 1,
-            runmat_value::IntValue::I16(_) | runmat_value::IntValue::U16(_) => 2,
-            runmat_value::IntValue::I32(_) | runmat_value::IntValue::U32(_) => 4,
-            runmat_value::IntValue::I64(_) | runmat_value::IntValue::U64(_) => 8,
-        },
-        Value::Bool(_) => 1,
-        Value::LogicalArray(la) => la.data.len(),
-        Value::CharArray(ca) => ca.data.len().saturating_mul(2),
-        Value::String(s) => s.encode_utf16().count().saturating_mul(2),
-        Value::StringArray(sa) => sa
-            .data
-            .iter()
-            .map(|s| s.encode_utf16().count().saturating_mul(2))
-            .sum(),
-        Value::Symbolic(expr) => expr.to_string().encode_utf16().count().saturating_mul(2),
-        Value::SymbolicArray(array) => array
-            .data
-            .iter()
-            .map(|expr| expr.to_string().encode_utf16().count().saturating_mul(2))
-            .sum(),
-        // `whos` reports the authoritative MATLAB array payload size, not any
-        // transitional compatibility representation.
-        Value::Tensor(t) => t.len().saturating_mul(t.numeric_dtype().byte_size()),
-        Value::SparseTensor(t) => {
-            let value_bytes = t.nnz().saturating_mul(t.value_byte_size());
-            value_bytes
-                .saturating_add(
-                    t.row_indices
-                        .len()
-                        .saturating_mul(std::mem::size_of::<usize>()),
-                )
-                .saturating_add(
-                    t.col_ptrs
-                        .len()
-                        .saturating_mul(std::mem::size_of::<usize>()),
-                )
-        }
-        Value::Complex(_, _) => 16,
-        Value::ComplexTensor(t) => t
-            .len()
-            .saturating_mul(t.numeric_dtype().byte_size())
-            .saturating_mul(2),
-        Value::Cell(ca) => {
-            let mut total = 0usize;
-            for handle in &ca.data {
-                let ptr = handle as *const Value as usize;
-                if seen.insert(ptr) {
-                    let value = handle;
-                    total = total.saturating_add(value_memory_bytes(value, seen)?);
-                }
-            }
-            total
-        }
-        Value::Struct(st) => {
-            let mut total = 0usize;
-            for value in st.fields.values() {
-                total = total.saturating_add(value_memory_bytes(value, seen)?);
-            }
-            total
-        }
-        Value::StructArray(array) => {
-            let mut total = 0usize;
-            let mut error = None;
-            array.for_each_value(|value| {
-                if error.is_none() {
-                    match value_memory_bytes(value, seen) {
-                        Ok(bytes) => total = total.saturating_add(bytes),
-                        Err(err) => error = Some(err),
-                    }
-                }
-            });
-            if let Some(error) = error {
-                return Err(error);
-            }
-            total
-        }
-        Value::GpuTensor(handle) => {
-            let elem_size = if handle_is_logical(handle) {
-                1
-            } else {
-                let lanes = if handle.physical().storage()
-                    == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-                {
-                    2
-                } else {
-                    1
-                };
-                handle.physical().element_type().element_size() * lanes
-            };
-            let count = handle
-                .shape()
-                .iter()
-                .fold(1usize, |acc, dim| acc.saturating_mul(*dim));
-            count.saturating_mul(elem_size)
-        }
-        Value::Object(obj) => {
-            let mut total = 0usize;
-            for value in obj.properties.values() {
-                total = total.saturating_add(value_memory_bytes(value, seen)?);
-            }
-            total
-        }
-        Value::ObjectArray(array) => {
-            let mut total = 0usize;
-            for value in array.data() {
-                total = total.saturating_add(value_memory_bytes(value, seen)?);
-            }
-            total
-        }
-        Value::HandleObject(handle) => {
-            let ptr = runmat_gc::gc_handle_addr(&handle.target);
-            if seen.insert(ptr) {
-                runmat_gc::gc_with_value(&handle.target, |inner| value_memory_bytes(inner, seen))
-                    .map_err(|err| {
-                        whos_error(format!("whos: invalid handle object target: {err}"))
-                    })??
-            } else {
-                0
-            }
-        }
-        Value::Listener(listener) => {
-            let mut total = 0usize;
-            let target_ptr = runmat_gc::gc_handle_addr(&listener.target);
-            if seen.insert(target_ptr) {
-                total = total.saturating_add(
-                    runmat_gc::gc_with_value(&listener.target, |value| {
-                        value_memory_bytes(value, seen)
-                    })
-                    .map_err(|err| whos_error(format!("whos: invalid listener target: {err}")))??,
-                );
-            }
-            let callback_ptr = runmat_gc::gc_handle_addr(&listener.callback);
-            if seen.insert(callback_ptr) {
-                total = total.saturating_add(
-                    runmat_gc::gc_with_value(&listener.callback, |value| {
-                        value_memory_bytes(value, seen)
-                    })
-                    .map_err(|err| {
-                        whos_error(format!("whos: invalid listener callback: {err}"))
-                    })??,
-                );
-            }
-            total
-        }
-        Value::Closure(closure) => {
-            let mut total = 0usize;
-            for value in closure.captures.iter() {
-                total = total.saturating_add(value_memory_bytes(value, seen)?);
-            }
-            total
-        }
-        Value::FunctionHandle(_)
-        | Value::ExternalFunctionHandle(_)
-        | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. } => 0,
-        Value::ClassRef(name) => name.display_name().len().saturating_mul(2),
-        Value::MException(exc) => {
-            let base = exc
-                .message
-                .len()
-                .saturating_mul(2)
-                .saturating_add(exc.identifier.len().saturating_mul(2));
-            exc.stack.iter().fold(base, |acc, frame| {
-                acc.saturating_add(frame.len().saturating_mul(2))
-            })
-        }
-        Value::OutputList(values) => {
-            let mut total = 0usize;
-            for value in values {
-                total = total.saturating_add(value_memory_bytes(value, seen)?);
-            }
-            total
-        }
-        Value::Future(_)
-        | Value::Task(_)
-        | Value::Pool(_)
-        | Value::Job(_)
-        | Value::Distributed(_)
-        | Value::Composite(_) => 0,
-        Value::Foreign(reference) => std::mem::size_of_val(reference)
-            .saturating_add(reference.host_identity.len())
-            .saturating_add(reference.type_identity.family.len())
-            .saturating_add(reference.type_identity.name.len()),
-    };
-    Ok(bytes)
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1053,6 +374,20 @@ pub(crate) mod tests {
             message.contains("whos: selections must"),
             "unexpected error: {message}"
         );
+    }
+
+    #[test]
+    fn whos_rejects_resident_numeric_selector_with_owning_error() {
+        let _guard = workspace_guard();
+        ensure_test_resolver();
+        set_workspace(&[], &[]);
+        test_support::with_test_provider(|_| {
+            let resident = block_on(crate::call_builtin_async("gpuArray", &[Value::Num(7.0)]))
+                .expect("resident scalar");
+            let error = whos_builtin(vec![resident]).expect_err("selector is not text");
+            assert_eq!(error.context.builtin.as_deref(), Some("whos"));
+            assert!(error.message().contains("whos: selections must"));
+        });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
