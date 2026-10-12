@@ -223,7 +223,7 @@ impl RunObjectEncryption {
     }
 }
 
-fn derive(
+pub(super) fn derive(
     run_key: &RunKeyMaterial,
     salt: &[u8],
     context: &EncryptionContext,

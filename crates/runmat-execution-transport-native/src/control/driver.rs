@@ -1,6 +1,9 @@
 use async_trait::async_trait;
 use base64::Engine as _;
+use futures_util::StreamExt as _;
 use runmat_server_client::public_api::{self, types};
+use sha2::{Digest as _, Sha256};
+use tokio::io::AsyncWriteExt as _;
 
 use super::driver_contract::{
     CheckpointDisposition, DriverArtifactDownload, DriverArtifactKind, DriverAuthority,
@@ -28,6 +31,86 @@ impl HttpDriverControlPlane {
             http: reqwest::Client::new(),
         })
     }
+}
+
+/// A clone-cheap HTTP client for signed artifact URLs passed through an
+/// authenticated driver-to-worker route. It carries no Server control-plane
+/// credential and shares the exact streamed verifier with the driver.
+#[derive(Clone, Default)]
+pub struct SignedArtifactDownloader {
+    http: reqwest::Client,
+}
+
+impl SignedArtifactDownloader {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub async fn download_to(
+        &self,
+        artifact: &DriverArtifactDownload,
+        writer: &mut (dyn tokio::io::AsyncWrite + Send + Unpin),
+        maximum_ciphertext_bytes: u64,
+    ) -> TransportResult<()> {
+        download_signed_artifact_to(&self.http, artifact, writer, maximum_ciphertext_bytes).await
+    }
+}
+
+/// Stream a server-signed ciphertext object into caller-owned private staging.
+/// Partial output is never published by this helper.
+async fn download_signed_artifact_to(
+    http: &reqwest::Client,
+    artifact: &DriverArtifactDownload,
+    writer: &mut (dyn tokio::io::AsyncWrite + Send + Unpin),
+    maximum_ciphertext_bytes: u64,
+) -> TransportResult<()> {
+    if artifact.method != "GET"
+        || artifact.ciphertext_size_bytes == 0
+        || artifact.ciphertext_size_bytes > maximum_ciphertext_bytes
+    {
+        return Err(TransportError::Integrity);
+    }
+    let mut request = http.get(&artifact.url);
+    for (name, value) in &artifact.headers {
+        request = request.header(name, value);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|error| TransportError::Unavailable(error.to_string()))?;
+    if !response.status().is_success() {
+        return Err(TransportError::Unavailable(format!(
+            "artifact download returned {}",
+            response.status()
+        )));
+    }
+    let mut stream = response.bytes_stream();
+    let mut hasher = Sha256::new();
+    let mut received = 0_u64;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| TransportError::Unavailable(error.to_string()))?;
+        received = received
+            .checked_add(chunk.len() as u64)
+            .ok_or(TransportError::Overflow)?;
+        if received > artifact.ciphertext_size_bytes {
+            return Err(TransportError::Integrity);
+        }
+        hasher.update(&chunk);
+        writer
+            .write_all(&chunk)
+            .await
+            .map_err(|error| TransportError::Unavailable(error.to_string()))?;
+    }
+    if received != artifact.ciphertext_size_bytes
+        || format!("sha256:{:x}", hasher.finalize()) != artifact.ciphertext_digest
+    {
+        return Err(TransportError::Integrity);
+    }
+    writer
+        .flush()
+        .await
+        .map_err(|error| TransportError::Unavailable(error.to_string()))?;
+    Ok(())
 }
 
 #[async_trait]
@@ -150,6 +233,15 @@ impl DriverControlPlane for HttpDriverControlPlane {
             &bytes,
         )?;
         Ok(bytes)
+    }
+
+    async fn download_to(
+        &self,
+        artifact: &DriverArtifactDownload,
+        writer: &mut (dyn tokio::io::AsyncWrite + Send + Unpin),
+        maximum_ciphertext_bytes: u64,
+    ) -> TransportResult<()> {
+        download_signed_artifact_to(&self.http, artifact, writer, maximum_ciphertext_bytes).await
     }
 
     async fn store_artifact(
@@ -336,5 +428,141 @@ fn map_error<E: std::fmt::Debug>(error: public_api::Error<E>) -> TransportError 
         TransportError::StaleAuthority
     } else {
         TransportError::Unavailable(error.to_string())
+    }
+}
+
+#[cfg(test)]
+mod streamed_download_tests {
+    use std::time::Duration;
+
+    use sha2::{Digest as _, Sha256};
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    use tokio::net::TcpListener;
+
+    use super::{DriverArtifactDownload, SignedArtifactDownloader};
+    use crate::TransportError;
+
+    fn descriptor(url: String, size: u64, digest: &str) -> DriverArtifactDownload {
+        DriverArtifactDownload {
+            artifact_id: "signed-object".into(),
+            kind: "program".into(),
+            ciphertext_digest: digest.into(),
+            ciphertext_size_bytes: size,
+            media_type: "application/octet-stream".into(),
+            method: "GET".into(),
+            url,
+            headers: Default::default(),
+        }
+    }
+
+    async fn serve_once(listener: TcpListener, body: &'static [u8]) {
+        let (mut stream, _) = listener.accept().await.expect("loopback request");
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 1024];
+        while !request.ends_with(b"\r\n\r\n") {
+            let count = stream.read(&mut buffer).await.expect("request read");
+            assert!(count > 0 && request.len() + count < 16 * 1024);
+            request.extend_from_slice(&buffer[..count]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        assert!(request.starts_with(b"GET "));
+        stream
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                )
+                .as_bytes(),
+            )
+            .await
+            .expect("response header");
+        stream.write_all(body).await.expect("response body");
+        stream.shutdown().await.expect("response close");
+    }
+
+    #[tokio::test]
+    async fn signed_stream_checks_exact_size_and_digest_before_caller_publication() {
+        let cases: [(&str, &'static [u8], u64, bool); 4] = [
+            ("valid", b"sealed", 6, true),
+            ("truncated", b"seal", 6, false),
+            ("overrun", b"sealed!", 6, false),
+            ("wrong_digest", b"sealed", 6, false),
+        ];
+        for (name, body, declared_size, succeeds) in cases {
+            let listener = TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("loopback listener");
+            let url = format!("http://{}/signed", listener.local_addr().expect("address"));
+            let mut server = tokio::spawn(serve_once(listener, body));
+            let digest = if name == "wrong_digest" {
+                format!("sha256:{:x}", Sha256::digest(b"different"))
+            } else {
+                format!("sha256:{:x}", Sha256::digest(b"sealed"))
+            };
+            let artifact = descriptor(url, declared_size, &digest);
+            let (mut writer, mut reader) = tokio::io::duplex(128);
+            let result = match tokio::time::timeout(
+                Duration::from_secs(5),
+                SignedArtifactDownloader::new().download_to(&artifact, &mut writer, 32),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => {
+                    server.abort();
+                    let _ = server.await;
+                    panic!("{name}: signed download timed out");
+                }
+            };
+            drop(writer);
+            match tokio::time::timeout(Duration::from_secs(5), &mut server).await {
+                Ok(result) => result.expect("loopback server task"),
+                Err(_) => {
+                    server.abort();
+                    let _ = server.await;
+                    panic!("{name}: loopback server did not retire");
+                }
+            }
+            let mut staged = Vec::new();
+            tokio::time::timeout(Duration::from_secs(5), reader.read_to_end(&mut staged))
+                .await
+                .expect("staged read timeout")
+                .expect("staged bytes");
+            if succeeds {
+                assert_eq!(result, Ok(()), "{name}");
+                assert_eq!(staged, body, "{name}");
+            } else {
+                assert_eq!(result, Err(TransportError::Integrity), "{name}");
+                if name == "overrun" {
+                    assert!(
+                        staged.len() <= declared_size as usize,
+                        "overrun must not write bytes past the declared bound"
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn signed_stream_rejects_bound_before_any_http_request() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("loopback listener");
+        let url = format!("http://{}/signed", listener.local_addr().expect("address"));
+        let artifact = descriptor(url, 7, &format!("sha256:{:x}", Sha256::digest(b"sealed")));
+        let (mut writer, _reader) = tokio::io::duplex(128);
+        assert_eq!(
+            SignedArtifactDownloader::new()
+                .download_to(&artifact, &mut writer, 6)
+                .await,
+            Err(TransportError::Integrity)
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), listener.accept())
+                .await
+                .is_err()
+        );
     }
 }

@@ -34,7 +34,8 @@ impl DriverAuthority {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DriverArtifactDownload {
     pub artifact_id: String,
     pub kind: String,
@@ -125,6 +126,20 @@ pub trait DriverControlPlane: Send + Sync {
         source_sequence: u64,
     ) -> TransportResult<bool>;
     async fn download(&self, artifact: &DriverArtifactDownload) -> TransportResult<Vec<u8>>;
+    /// Stream a bounded Graph Program chunk into caller-owned private staging.
+    /// The destination is not admitted until the exact ciphertext size/digest
+    /// have been verified. Direct artifacts continue to use `download`.
+    async fn download_to(
+        &self,
+        artifact: &DriverArtifactDownload,
+        writer: &mut (dyn tokio::io::AsyncWrite + Send + Unpin),
+        maximum_ciphertext_bytes: u64,
+    ) -> TransportResult<()> {
+        let _ = (artifact, writer, maximum_ciphertext_bytes);
+        Err(TransportError::Unavailable(
+            "streamed Graph Program download is unavailable".into(),
+        ))
+    }
     async fn store_artifact(
         &self,
         authority: &DriverAuthority,
