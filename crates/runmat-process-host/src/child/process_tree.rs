@@ -7,7 +7,7 @@ pub(super) struct ProcessContainment;
 
 #[cfg(windows)]
 pub(super) struct ProcessContainment {
-    _job: std::os::windows::io::OwnedHandle,
+    job: std::os::windows::io::OwnedHandle,
 }
 
 #[cfg(unix)]
@@ -94,13 +94,30 @@ pub(super) fn contain(
     if assigned == 0 {
         return Err(std::io::Error::last_os_error());
     }
-    Ok(Some(ProcessContainment { _job: job }))
+    Ok(Some(ProcessContainment { job }))
 }
 
-pub(super) async fn terminate(child: &mut Child, process_id: Option<u32>) -> std::io::Result<()> {
+pub(super) async fn terminate(
+    child: &mut Child,
+    process_id: Option<u32>,
+    containment: Option<&ProcessContainment>,
+) -> std::io::Result<()> {
+    #[cfg(any(unix, windows))]
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    #[cfg(not(windows))]
+    let _ = containment;
+    #[cfg(not(any(unix, windows)))]
+    let _ = process_id;
+
     #[cfg(unix)]
-    if let Some(process_id) = process_id {
-        let group = i32::try_from(process_id).unwrap_or(i32::MAX);
+    {
+        let process_id = process_id.ok_or_else(|| {
+            std::io::Error::other("owned process tree has no process-group identity")
+        })?;
+        let group = i32::try_from(process_id)
+            .ok()
+            .filter(|group| *group > 0)
+            .ok_or_else(|| std::io::Error::other("invalid owned process-group identity"))?;
         let result = unsafe { libc::kill(-group, libc::SIGKILL) };
         if result != 0 {
             let error = std::io::Error::last_os_error();
@@ -108,27 +125,106 @@ pub(super) async fn terminate(child: &mut Child, process_id: Option<u32>) -> std
                 return Err(error);
             }
         }
-        let _ = child.wait().await?;
-        return Ok(());
-    }
-
-    #[cfg(windows)]
-    if let Some(process_id) = process_id {
-        let process_id = process_id.to_string();
-        let status = Command::new("taskkill")
-            .args(["/PID", &process_id, "/T", "/F"])
-            .status()
-            .await?;
-        if status.success() {
-            let _ = child.wait().await?;
-            return Ok(());
+        let _ = tokio::time::timeout_at(deadline, child.wait())
+            .await
+            .map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "owned process-group leader did not retire",
+                )
+            })??;
+        // Reaping the group leader alone does not prove that its descendants
+        // have released private artifacts. ESRCH is the kernel's proof that
+        // no process remains in this owned process group. Bound the wait so
+        // unreaped descendants fail closed instead of hanging retirement.
+        loop {
+            if unsafe { libc::kill(-group, 0) } != 0 {
+                let error = std::io::Error::last_os_error();
+                if error.raw_os_error() == Some(libc::ESRCH) {
+                    return Ok(());
+                }
+                return Err(error);
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(std::io::Error::other(
+                    "owned process group still has processes after termination",
+                ));
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     }
 
-    match child.kill().await {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => Ok(()),
-        Err(error) => Err(error),
+    #[cfg(windows)]
+    {
+        let _ = process_id;
+        let job = containment.ok_or_else(|| {
+            std::io::Error::other("owned process tree has no JobObject containment")
+        })?;
+        job.terminate(deadline).await?;
+        let _ = tokio::time::timeout_at(deadline, child.wait())
+            .await
+            .map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "owned JobObject leader did not retire",
+                )
+            })??;
+        return Ok(());
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = child;
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "owned process-tree retirement is unsupported on this platform",
+        ))
+    }
+}
+
+#[cfg(windows)]
+impl ProcessContainment {
+    async fn terminate(&self, deadline: tokio::time::Instant) -> std::io::Result<()> {
+        use std::mem::size_of;
+        use std::os::windows::io::AsRawHandle as _;
+
+        use windows_sys::Win32::System::JobObjects::{
+            JobObjectBasicAccountingInformation, QueryInformationJobObject, TerminateJobObject,
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+        };
+
+        let handle = self.job.as_raw_handle() as _;
+        if unsafe { TerminateJobObject(handle, 1) } == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // The root may have exited before this call. Query the owned job,
+        // rather than treating a missing root PID as proof that its children
+        // have stopped using selected private artifact paths.
+        loop {
+            let mut accounting: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION =
+                unsafe { std::mem::zeroed() };
+            let inspected = unsafe {
+                QueryInformationJobObject(
+                    handle,
+                    JobObjectBasicAccountingInformation,
+                    &mut accounting as *mut _ as *mut _,
+                    size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                    std::ptr::null_mut(),
+                )
+            };
+            if inspected == 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if accounting.ActiveProcesses == 0 {
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(std::io::Error::other(
+                    "owned JobObject still has active processes after termination",
+                ));
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
     }
 }
 
@@ -154,10 +250,12 @@ pub async fn terminate_id(process_id: u32) -> std::io::Result<()> {
             .args(["/PID", &process_id.to_string(), "/T", "/F"])
             .status()
             .await?;
-        if status.success() || !is_alive(process_id) {
+        if status.success() {
             Ok(())
         } else {
-            Err(std::io::Error::other("taskkill rejected process tree"))
+            Err(std::io::Error::other(format!(
+                "taskkill /T /F for process {process_id} failed with {status}"
+            )))
         }
     }
 

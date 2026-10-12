@@ -95,7 +95,12 @@ impl ChildProcess {
     }
 
     pub async fn terminate_tree(&mut self) -> ProcessHostResult<()> {
-        super::process_tree::terminate(&mut self.child, self.process_id).await?;
+        super::process_tree::terminate(
+            &mut self.child,
+            self.process_id,
+            self._containment.as_ref(),
+        )
+        .await?;
         Ok(())
     }
 }
