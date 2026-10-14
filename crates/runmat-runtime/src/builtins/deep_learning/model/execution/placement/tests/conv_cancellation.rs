@@ -127,16 +127,17 @@ fn public_selected_convolution_cancellation_produces_no_failure_feedback() {
         vec![],
     ))
     .unwrap();
-    let Value::Object(network) = block_on(dlnetwork_builtin(vec![Value::Cell(
+    let network_owner = block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input_layer, conv], 2, 1).unwrap(),
     )]))
-    .unwrap() else {
+    .unwrap();
+    let Value::Object(network) = network_owner.value() else {
         panic!("dlnetwork constructor must return an object")
     };
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 4.0], vec![1, 1, 2]).unwrap());
     let error = block_on(execute_network(NetworkExecutionRequest {
         runtime: Some(&runtime),
-        network: &network,
+        network,
         input: &input,
         caller: NetworkCaller::Forward,
         output_layout: NetworkOutputLayout::Preserve,
