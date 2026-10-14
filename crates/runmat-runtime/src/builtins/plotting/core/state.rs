@@ -2168,15 +2168,41 @@ pub fn set_axis_limits(x: Option<(f64, f64)>, y: Option<(f64, f64)>) {
     notify_figure_updates(updates);
 }
 
-/// Read current axes limits without creating a default Figure before the
-/// caller performs its mutation. A vacant Figure starts in auto mode.
-pub(crate) fn axis_limits_before_mutation() -> AxisLimitSnapshot {
-    let reg = registry();
-    reg.figures
-        .get(&reg.current)
-        .and_then(|state| state.figure.axes_metadata(state.active_axes))
-        .map(|metadata| (metadata.x_limits, metadata.y_limits))
-        .unwrap_or((None, None))
+/// Preserve the other axis while selecting and changing the current axis in
+/// one registry transaction. A vacant Figure starts with both axes in auto mode.
+fn set_current_axis_manual_limits(axis: LinkAxesAxis, limits: Option<(f64, f64)>) {
+    let updates = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let (axes, x, y) = reg
+            .figures
+            .get(&handle)
+            .map(|state| {
+                let metadata = state.figure.axes_metadata(state.active_axes);
+                (
+                    state.active_axes,
+                    metadata.and_then(|meta| meta.x_limits),
+                    metadata.and_then(|meta| meta.y_limits),
+                )
+            })
+            .unwrap_or((0, None, None));
+        let (x, y) = match axis {
+            LinkAxesAxis::X => (limits, y),
+            LinkAxesAxis::Y => (x, limits),
+        };
+        get_state_mut(&mut reg, handle);
+        set_axes_limits_with_links(&mut reg, handle, axes, x, y)
+            .expect("active axes target should be valid")
+    };
+    notify_figure_updates(updates);
+}
+
+pub(crate) fn set_current_x_limits(limits: Option<(f64, f64)>) {
+    set_current_axis_manual_limits(LinkAxesAxis::X, limits);
+}
+
+pub(crate) fn set_current_y_limits(limits: Option<(f64, f64)>) {
+    set_current_axis_manual_limits(LinkAxesAxis::Y, limits);
 }
 
 /// Update an admitted axes target without making it the current axes.

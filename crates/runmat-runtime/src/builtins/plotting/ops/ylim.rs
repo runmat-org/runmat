@@ -15,8 +15,8 @@ use super::op_common::limits::{
     set_limit_method, LimitCommand,
 };
 use super::state::{
-    axes_metadata_snapshot, axis_display_bounds_snapshot_for_axes, axis_limits_before_mutation,
-    set_axis_limits, set_axis_manual_limits_for_axes,
+    axes_metadata_snapshot, axis_display_bounds_snapshot_for_axes, set_axis_manual_limits_for_axes,
+    set_current_y_limits,
 };
 use crate::builtins::plotting::type_resolvers::get_type;
 use runmat_plot::plots::figure::AxisLimitAxis;
@@ -155,8 +155,7 @@ pub fn ylim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
                 set_axis_manual_limits_for_axes(handle, index, metadata.x_limits, limits)
                     .map_err(|err| limit_state_error("ylim", err))?;
             } else {
-                let (x, _) = axis_limits_before_mutation();
-                set_axis_limits(x, limits);
+                set_current_y_limits(limits);
             }
             Ok(limit_value(limits))
         }
