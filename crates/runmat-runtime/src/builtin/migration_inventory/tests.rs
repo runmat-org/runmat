@@ -249,6 +249,11 @@ fn provider_spec_ownership_distinguishes_exact_identities_from_legacy_keys() {
 #[test]
 fn legacy_provider_owner_records_exact_compiled_identity_membership() {
     let inventory = migration_inventory();
+    assert!(
+        !inventory.snapshot.observed.gpu_specs.is_empty()
+            || !inventory.snapshot.observed.fusion_specs.is_empty(),
+        "compiled provider specification inventory must not be empty"
+    );
     let callables = runmat_builtins::builtin_catalog_entries()
         .iter()
         .map(|entry| entry.identity.name)
@@ -297,7 +302,21 @@ fn legacy_provider_owner_records_exact_compiled_identity_membership() {
         )
         .collect::<Vec<_>>();
     expected.sort_unstable();
-    assert!(!expected.is_empty());
+    if expected.is_empty() {
+        let exact_owner = |key: &str, owner: &super::SpecOwnerRecord| {
+            let super::SpecOwnerRecord::ExactBuiltin { identity } = owner else {
+                panic!("complete provider-spec cutover must have only exact owners");
+            };
+            assert_eq!(identity.name, key);
+            assert!(callables.contains(identity.name));
+        };
+        for spec in &inventory.snapshot.observed.gpu_specs {
+            exact_owner(spec.key, &spec.owner);
+        }
+        for spec in &inventory.snapshot.observed.fusion_specs {
+            exact_owner(spec.key, &spec.owner);
+        }
+    }
 
     let mut observed = inventory
         .snapshot
