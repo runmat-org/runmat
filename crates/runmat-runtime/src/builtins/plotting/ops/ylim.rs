@@ -15,7 +15,8 @@ use super::op_common::limits::{
     set_limit_method, LimitCommand,
 };
 use super::state::{
-    axes_metadata_snapshot, axis_display_bounds_snapshot_for_axes, set_axis_manual_limits_for_axes,
+    axes_metadata_snapshot, axis_display_bounds_snapshot_for_axes, axis_limits_before_mutation,
+    set_axis_limits, set_axis_manual_limits_for_axes,
 };
 use crate::builtins::plotting::type_resolvers::get_type;
 use runmat_plot::plots::figure::AxisLimitAxis;
@@ -109,14 +110,15 @@ pub const YLIM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 )]
 pub fn ylim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let call = prepare_limit_call("ylim", &args, false)?;
-    let (handle, index) = selected_limit_axes(call.target);
     match call.command {
         LimitCommand::Query => {
+            let (handle, index) = selected_limit_axes(call.target);
             let bounds = axis_display_bounds_snapshot_for_axes(handle, index)
                 .map_err(|err| limit_state_error("ylim", err))?;
             Ok(limit_value(bounds.map(|bounds| (bounds.2, bounds.3))))
         }
         LimitCommand::QueryMode => {
+            let (handle, index) = selected_limit_axes(call.target);
             let metadata = axes_metadata_snapshot(handle, index)
                 .map_err(|err| limit_state_error("ylim", err))?;
             Ok(Value::String(
@@ -133,6 +135,7 @@ pub fn ylim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             set_limit_method("ylim", AxisLimitAxis::Y, method, call.target)
         }
         LimitCommand::Freeze => {
+            let (handle, index) = selected_limit_axes(call.target);
             let metadata = axes_metadata_snapshot(handle, index)
                 .map_err(|err| limit_state_error("ylim", err))?;
             let bounds = axis_display_bounds_snapshot_for_axes(handle, index)
@@ -146,10 +149,15 @@ pub fn ylim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             Ok(limit_value(Some(limits)))
         }
         LimitCommand::Set(limits) => {
-            let metadata = axes_metadata_snapshot(handle, index)
-                .map_err(|err| limit_state_error("ylim", err))?;
-            set_axis_manual_limits_for_axes(handle, index, metadata.x_limits, limits)
-                .map_err(|err| limit_state_error("ylim", err))?;
+            if let Some((handle, index)) = call.target {
+                let metadata = axes_metadata_snapshot(handle, index)
+                    .map_err(|err| limit_state_error("ylim", err))?;
+                set_axis_manual_limits_for_axes(handle, index, metadata.x_limits, limits)
+                    .map_err(|err| limit_state_error("ylim", err))?;
+            } else {
+                let (x, _) = axis_limits_before_mutation();
+                set_axis_limits(x, limits);
+            }
             Ok(limit_value(limits))
         }
     }

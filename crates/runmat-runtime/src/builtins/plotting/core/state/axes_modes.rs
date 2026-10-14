@@ -163,6 +163,13 @@ pub fn set_y_direction_for_axes(
 pub fn lock_axes_limits(handle: FigureHandle, axes_index: usize) -> Result<(), FigureError> {
     let updates = {
         let mut reg = registry();
+        if !reg.figures.contains_key(&handle) {
+            if handle != reg.current || axes_index != 0 {
+                return Err(FigureError::InvalidHandle(handle.as_u32()));
+            }
+            // Only the final setter materializes implicit default axes.
+            get_state_mut(&mut reg, handle);
+        }
         let state = existing_axes_state_mut(&mut reg, handle, axes_index)?;
         let has_z = state.figure.axes_has_3d_content(axes_index)
             || state
