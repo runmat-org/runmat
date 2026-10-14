@@ -215,10 +215,12 @@ fn singleton_container_arrays_do_not_inherit_receiver_alias_or_view() {
 
 #[test]
 fn canonical_documentation_retains_legacy_reference_inventory() {
-    let legacy: serde_json::Value = serde_json::from_str(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../docs/builtins/reference/ctranspose.json"
-    )))
+    // Immutable test input conserved from 52863699e3's retired sidecar,
+    // SHA-256 c4d33e2c326c506ff4325004f68c46039fbf90736db1889b35911604fa3d33d0.
+    // Catalog documentation remains the sole production authoring source.
+    let legacy: serde_json::Value = serde_json::from_str(include_str!(
+        "tests/fixtures/ctranspose_52863699e3.json"
+    ))
     .expect("legacy ctranspose reference JSON");
     let documentation = &CTRANSPOSE_CATALOG_ENTRY.documentation;
     assert_eq!(

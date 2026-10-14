@@ -7,7 +7,10 @@ use runmat_builtins::SETFIELD_ERROR_OBJECT_PROPERTY;
 use runmat_types::MemberAccess;
 use runmat_value::{ObjectInstance, Value};
 
-pub(super) async fn read_property(obj: &ObjectInstance, name: &str) -> BuiltinResult<RootedValue> {
+pub(in super::super) async fn read_property(
+    obj: &ObjectInstance,
+    name: &str,
+) -> BuiltinResult<RootedValue> {
     if let Some(projection) = crate::class_registry::checked_receiver_projection(obj)? {
         if let Some((prop, owner)) = projection.receiver_property(&obj.class_name, &name.into()) {
             if prop.is_static {

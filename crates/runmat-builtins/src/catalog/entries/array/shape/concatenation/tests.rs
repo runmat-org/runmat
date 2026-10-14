@@ -144,19 +144,17 @@ fn mismatched_dimensions_diagnose_but_neutral_empty_and_device_remain_dynamic() 
 
 #[test]
 fn canonical_documentation_retains_legacy_reference_inventory() {
+    // Immutable test inputs conserved from 52863699e3's retired authoring sidecars:
+    // horzcat SHA-256 4a9ef9103a0a6cde4291c120511f25e57a5b635b76f6fd587c92e9eda6937718;
+    // vertcat SHA-256 bea6bf5075a99f98e640194cca8b3ab4461f9d7d0797e542af0b6df5538f8237.
+    // Catalog documentation remains the sole production authoring source.
     for (reference, entry) in [
         (
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../docs/builtins/reference/horzcat.json"
-            )),
+            include_str!("tests/fixtures/horzcat_52863699e3.json"),
             &HORZCAT_CATALOG_ENTRY,
         ),
         (
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../docs/builtins/reference/vertcat.json"
-            )),
+            include_str!("tests/fixtures/vertcat_52863699e3.json"),
             &VERTCAT_CATALOG_ENTRY,
         ),
     ] {
