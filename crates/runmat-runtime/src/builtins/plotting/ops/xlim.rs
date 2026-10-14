@@ -15,8 +15,8 @@ use super::op_common::limits::{
     set_limit_method, LimitCommand,
 };
 use super::state::{
-    axes_metadata_snapshot, axis_display_bounds_snapshot_for_axes, set_axis_manual_limits_for_axes,
-    set_current_x_limits,
+    axes_metadata_snapshot, axis_display_bounds_snapshot_for_axes,
+    axis_displayed_limits_snapshot_for_axes, set_axis_manual_limits_for_axes, set_current_x_limits,
 };
 use crate::builtins::plotting::type_resolvers::get_type;
 use runmat_plot::plots::figure::AxisLimitAxis;
@@ -124,9 +124,9 @@ pub fn xlim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     match call.command {
         LimitCommand::Query => {
             let (handle, index) = selected_limit_axes(call.target);
-            let bounds = axis_display_bounds_snapshot_for_axes(handle, index)
+            let limits = axis_displayed_limits_snapshot_for_axes(handle, index, AxisLimitAxis::X)
                 .map_err(|err| limit_state_error("xlim", err))?;
-            Ok(limit_value(bounds.map(|bounds| (bounds.0, bounds.1))))
+            Ok(limit_value(limits))
         }
         LimitCommand::QueryMode => {
             let (handle, index) = selected_limit_axes(call.target);
